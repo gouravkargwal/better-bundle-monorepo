@@ -1,0 +1,7 @@
+venv
+node_modules
+__pycache__
+local.env
+.doppler-pids
+.DS_Store
+.shopify

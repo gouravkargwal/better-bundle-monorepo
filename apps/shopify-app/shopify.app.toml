@@ -1,0 +1,37 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "87c44f5966daa80691a480bcd03c225c"
+name = "better-bundle"
+application_url = "https://gateway-universities-relations-papua.trycloudflare.com"
+embedded = true
+handle = "better-bundle-1"
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+# Temporarily commented out until app is approved for protected customer data
+#  [[webhooks.subscriptions]]
+#  topics = [ "orders/create" ]
+#  uri = "/webhooks/orders/create"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,read_products,write_orders"
+
+[auth]
+redirect_urls = ["https://gateway-universities-relations-papua.trycloudflare.com/auth/callback", "https://gateway-universities-relations-papua.trycloudflare.com/auth/shopify/callback", "https://gateway-universities-relations-papua.trycloudflare.com/api/auth/callback"]
+
+[pos]
+embedded = false

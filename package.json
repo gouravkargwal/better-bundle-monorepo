@@ -1,0 +1,13 @@
+{
+  "name": "bundle-app-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo for the Shopify Bundle Recommendation App",
+  "scripts": {
+    "dev": "pnpm --filter shopify-app dev",
+    "build": "pnpm build --filter \"./apps/**\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

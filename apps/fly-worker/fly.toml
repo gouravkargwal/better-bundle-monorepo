@@ -1,0 +1,42 @@
+# fly.toml app configuration file generated for fly-worker on 2024-01-01T00:00:00Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+
+app = "better-bundle-worker"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "3001"
+  NODE_ENV = "production"
+  WORKER_PORT = "3001"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[machine]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[metrics]
+  port = 9091
+  path = "/metrics"

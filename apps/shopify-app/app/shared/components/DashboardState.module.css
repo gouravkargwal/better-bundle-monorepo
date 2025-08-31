@@ -1,0 +1,46 @@
+/* Skeleton loading animations */
+.skeletonPulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.progressContainer {
+  position: relative;
+  overflow: hidden;
+}
+
+.progressBar {
+  transition: width 0.3s ease-in-out;
+}
+
+.statusMessage {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.analysisCard {
+  transition: all 0.3s ease-in-out;
+}
+
+.analysisCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
