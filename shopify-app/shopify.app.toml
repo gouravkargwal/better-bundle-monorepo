@@ -2,19 +2,15 @@
 
 name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://betterbundle.vercel.app"
+application_url = "https://gdp-buffer-stood-raises.trycloudflare.com"
 embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,read_products,write_orders,write_app_events"
+scopes = "write_products,read_products,write_orders"
 
 [auth]
-redirect_urls = [
-  "https://betterbundle.vercel.app/auth/callback",
-  "https://betterbundle.vercel.app/auth/shopify/callback",
-  "https://betterbundle.vercel.app/api/auth/callback"
-]
+redirect_urls = ["https://gdp-buffer-stood-raises.trycloudflare.com/auth/callback", "https://gdp-buffer-stood-raises.trycloudflare.com/auth/shopify/callback", "https://gdp-buffer-stood-raises.trycloudflare.com/api/auth/callback"]
 
 [webhooks]
 api_version = "2024-01"

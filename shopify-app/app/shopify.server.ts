@@ -11,7 +11,6 @@ const shopify = shopifyApp({
     "write_products",
     "read_products",
     "write_orders",
-    "write_app_events",
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "https://betterbundle.vercel.app",
   authPathPrefix: "/auth",

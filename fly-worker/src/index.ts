@@ -8,7 +8,8 @@ import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import path from "path";
 import { ErrorHandler } from "./utils/error-handler";
-import { ShopifyNotificationService } from "./utils/shopify-notification";
+import { SendPulseEmailService } from "./utils/sendpulse-email";
+
 const envPath = path.join(__dirname, "../../local.env");
 dotenv.config({ path: envPath });
 
@@ -455,13 +456,21 @@ mlProcessingQueue.process("process-ml-analysis", async (job) => {
       await updateJobStatus(jobId, "completed", 100);
       console.log(`✅ ML job completed: ${jobId}`);
 
-      // Send success notification using Shopify App Events API
-      await ShopifyNotificationService.sendAnalysisCompleteNotification(
-        shop.shopDomain,
-        shop.accessToken,
-        jobId,
-        true
-      );
+      // Send success email notification
+      try {
+        const emailService = SendPulseEmailService.getInstance();
+        await emailService.sendAnalysisCompleteNotification(
+          "admin@example.com", // TODO: Get actual user email from shop data
+          shop.shopDomain,
+          true
+        );
+        console.log(`📧 Success email sent for job: ${jobId}`);
+      } catch (emailError) {
+        console.warn(
+          `⚠️ Failed to send success email for job ${jobId}:`,
+          emailError.message
+        );
+      }
     } else {
       throw new Error(response.data.error || "ML API returned failure");
     }
@@ -469,14 +478,22 @@ mlProcessingQueue.process("process-ml-analysis", async (job) => {
     console.error(`❌ ML job failed: ${jobId}`, error);
     await updateJobStatus(jobId, "failed", 0, error.message);
 
-    // Send failure notification using Shopify App Events API
-    await ShopifyNotificationService.sendAnalysisCompleteNotification(
-      shop.shopDomain,
-      shop.accessToken,
-      jobId,
-      false,
-      error.message
-    );
+    // Send failure email notification
+    try {
+      const emailService = SendPulseEmailService.getInstance();
+      await emailService.sendAnalysisCompleteNotification(
+        "admin@example.com", // TODO: Get actual user email from shop data
+        shop.shopDomain,
+        false,
+        error.message
+      );
+      console.log(`📧 Failure email sent for job: ${jobId}`);
+    } catch (emailError) {
+      console.warn(
+        `⚠️ Failed to send failure email for job ${jobId}:`,
+        emailError.message
+      );
+    }
 
     throw error;
   }
@@ -505,12 +522,20 @@ analysisQueue.process("process-analysis", async (job) => {
   try {
     console.log(`📊 Processing analysis job: ${jobId} for shop: ${shopId}`);
 
-    // Send analysis started notification using Shopify App Events API
-    await ShopifyNotificationService.sendAnalysisStartedNotification(
-      shop.shopDomain,
-      shop.accessToken,
-      jobId
-    );
+    // Send analysis started email notification
+    try {
+      const emailService = SendPulseEmailService.getInstance();
+      await emailService.sendAnalysisStartedNotification(
+        "admin@example.com", // TODO: Get actual user email from shop data
+        shop.shopDomain
+      );
+      console.log(`📧 Analysis started email sent for job: ${jobId}`);
+    } catch (emailError) {
+      console.warn(
+        `⚠️ Failed to send analysis started email for job ${jobId}:`,
+        emailError.message
+      );
+    }
 
     await updateJobStatus(jobId, "processing", 30);
 
@@ -526,16 +551,6 @@ analysisQueue.process("process-analysis", async (job) => {
   } catch (error) {
     console.error(`❌ Analysis job failed: ${jobId}`, error);
     await updateJobStatus(jobId, "failed", 0, error.message);
-
-    // Send failure notification using Shopify App Events API
-    await ShopifyNotificationService.sendAnalysisCompleteNotification(
-      shop.shopDomain,
-      shop.accessToken,
-      jobId,
-      false,
-      error.message
-    );
-
     throw error;
   }
 });
