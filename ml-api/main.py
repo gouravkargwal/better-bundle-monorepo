@@ -9,8 +9,13 @@ from dotenv import load_dotenv
 from database import prisma, connect, disconnect
 
 # Load environment variables from local.env
-env_path = Path(__file__).parent.parent.parent / "local.env"
+env_path = Path(__file__).parent.parent / "local.env"
 load_dotenv(env_path)
+
+# Debug: Print environment path and check if file exists
+print(f"🔧 Loading environment from: {env_path}")
+print(f"📁 Environment file exists: {env_path.exists()}")
+print(f"🔑 DATABASE_URL set: {'DATABASE_URL' in os.environ}")
 
 # Import from our modular cosine_similarity package
 from cosine_similarity import (
@@ -190,20 +195,18 @@ async def analyze_bundles_from_db(shop_id: str):
         logger.info(f"Starting bundle analysis for shop {shop_id} from database")
 
         # Get shop data
-        shop = await prisma.shop.find_unique(
-            where={"shopId": shop_id}, select={"id": True}
-        )
+        shop = await prisma.shop.find_unique(where={"shopId": shop_id})
 
         if not shop:
             raise HTTPException(status_code=404, detail="Shop not found")
 
         # Get products from database
         products_db = await prisma.productdata.find_many(
-            where={"shopId": shop["id"], "isActive": True}
+            where={"shopId": shop.id, "isActive": True}
         )
 
         # Get orders from database
-        orders_db = await prisma.orderdata.find_many(where={"shopId": shop["id"]})
+        orders_db = await prisma.orderdata.find_many(where={"shopId": shop.id})
 
         logger.info(
             f"Found {len(products_db)} products and {len(orders_db)} orders in database"
@@ -243,14 +246,14 @@ async def analyze_bundles_from_db(shop_id: str):
         # Save results to database
         if analysis_results["bundles"]:
             # Clear existing results
-            await prisma.bundleanalysisresult.delete_many(where={"shopId": shop["id"]})
+            await prisma.bundleanalysisresult.delete_many(where={"shopId": shop.id})
 
             # Save new results
             bundle_data = []
             for bundle in analysis_results["bundles"]:
                 bundle_data.append(
                     {
-                        "shopId": shop["id"],
+                        "shopId": shop.id,
                         "productIds": bundle["product_ids"],
                         "bundleSize": len(bundle["product_ids"]),
                         "coPurchaseCount": bundle["co_purchase_count"],

@@ -24,9 +24,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shopId = session.shop;
 
+  // Get shop from database first
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: shopId },
+    select: { id: true },
+  });
+
+  if (!shop) {
+    return json({
+      widgetEvents: [],
+      metrics: {
+        totalViews: 0,
+        totalClicks: 0,
+        totalAddToCart: 0,
+        totalPurchases: 0,
+        clickThroughRate: 0,
+        conversionRate: 0,
+        addToCartRate: 0,
+      },
+      bundlePerformance: {},
+    });
+  }
+
   // Get widget event data
   const widgetEvents = await prisma.widgetEvent.findMany({
-    where: { shopId },
+    where: { shopId: shop.id },
     orderBy: { timestamp: "desc" },
     take: 1000,
   });

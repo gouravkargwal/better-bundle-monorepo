@@ -53,7 +53,6 @@ model Shop {
   widgetEvents    WidgetEvent[]
   widgetConfig    WidgetConfiguration?
   analysisJobs    AnalysisJob[]
-  notifications   Notification[]
   analysisConfig  ShopAnalysisConfig?
   heuristicDecisions HeuristicDecision[]
   incrementalLogs IncrementalAnalysisLog[]
@@ -208,25 +207,6 @@ model AnalysisJob {
   @@index([shopId, status])
   @@index([shopId, createdAt])
   @@index([status, createdAt])
-}
-
-// In-app notifications
-model Notification {
-  id        String   @id @default(cuid())
-  shopId    String
-  type      String   // analysis_complete, analysis_failed, etc.
-  title     String
-  message   String
-  metadata  Json?    // Additional data as JSON
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  
-  // Relationships
-  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  
-  @@index([shopId, isRead])
-  @@index([shopId, createdAt])
-  @@index([type, createdAt])
 }
 
 // Shop-specific analysis configuration

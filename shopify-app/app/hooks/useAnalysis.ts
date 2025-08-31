@@ -78,12 +78,110 @@ export function useAnalysis(initialJob?: {
     }
   }, [analysisFetcher.state, analysisFetcher.data, startAnalysis]);
 
+  // Poll for job status when we have a jobId
+  // Strategy: Poll every 15 seconds with 30-minute maximum to prevent infinite polling
+  useEffect(() => {
+    if (!jobId) return;
+
+    const pollStatus = () => {
+      statusFetcher.load(`/api/analysis/status?jobId=${jobId}`);
+    };
+
+    // Poll immediately
+    pollStatus();
+
+    // Set up polling interval - 15 seconds is a good balance between responsiveness and server load
+    // But stop polling if authentication fails
+    const interval = setInterval(() => {
+      // Only poll if the previous request was successful or hasn't been made yet
+      if (!statusFetcher.data || statusFetcher.data.success !== false) {
+        pollStatus();
+      }
+    }, 15000); // Poll every 15 seconds
+
+    // Stop polling after 30 minutes to prevent infinite polling
+    const maxDuration = setTimeout(
+      () => {
+        console.log("⏰ Stopping job status polling after 30 minutes");
+        clearInterval(interval);
+        // Set error state if still loading
+        if (state === "loading") {
+          setState("error");
+          setHasStartedAnalysis(false);
+          setError({
+            title: "Analysis Timeout",
+            description:
+              "The analysis is taking longer than expected. Please try again.",
+            action: {
+              content: "Try Again",
+              onAction: startAnalysis,
+            },
+            recommendations: [
+              "The analysis may be processing a large amount of data",
+              "Try again in a few minutes",
+              "Contact support if the issue persists",
+            ],
+          });
+        }
+      },
+      30 * 60 * 1000,
+    ); // 30 minutes
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(maxDuration);
+    };
+  }, [jobId, statusFetcher, state, startAnalysis]);
+
+  // Handle status updates
+  useEffect(() => {
+    if (statusFetcher.state === "idle" && statusFetcher.data) {
+      console.log("📊 Status update:", statusFetcher.data);
+
+      if (statusFetcher.data.success && statusFetcher.data.job) {
+        const job = statusFetcher.data.job;
+        setJobStatus(job);
+        setProgress(job.progress || 0);
+
+        if (job.status === "completed") {
+          setState("success");
+          setHasStartedAnalysis(false);
+          setJobId(null); // Clear jobId to stop polling
+          console.log("✅ Analysis completed successfully");
+        } else if (job.status === "failed") {
+          setState("error");
+          setHasStartedAnalysis(false);
+          setJobId(null); // Clear jobId to stop polling
+          setError({
+            title: "Analysis Failed",
+            description: job.error || "The analysis failed during processing",
+            action: {
+              content: "Try Again",
+              onAction: startAnalysis,
+            },
+            recommendations: [
+              "Check your store has sufficient data (orders and products)",
+              "Ensure your store is accessible",
+              "Try again in a few minutes",
+              "Contact support if the issue persists",
+            ],
+          });
+          console.log("❌ Analysis failed:", job.error);
+        } else if (job.status === "processing") {
+          setState("loading");
+          console.log("🔄 Analysis in progress:", job.progress + "%");
+        }
+      }
+    }
+  }, [statusFetcher.state, statusFetcher.data, startAnalysis]);
+
   const handleRetry = useCallback(() => {
     setState("idle");
     setError(null);
     setHasStartedAnalysis(false);
-    setJobId(null);
+    setJobId(null); // This will stop polling
     setJobStatus(null);
+    setProgress(0);
   }, []);
 
   return {

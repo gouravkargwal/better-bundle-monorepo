@@ -6,13 +6,25 @@ import { prisma } from "../core/database/prisma.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { session } = await authenticate.admin(request);
+    
+    if (!session?.shop) {
+      console.error("❌ No shop in session");
+      return json(
+        {
+          success: false,
+          error: "Authentication failed - no shop in session",
+        },
+        { status: 401 }
+      );
+    }
+    
     const shopId = session.shop;
     const url = new URL(request.url);
     const jobId = url.searchParams.get("jobId");
 
     // Get shop from database
     const shop = await prisma.shop.findUnique({
-      where: { shopId },
+      where: { shopDomain: shopId },
       select: { id: true },
     });
 
@@ -45,6 +57,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           completedAt: true,
         },
       });
+
+      console.log(
+        `🔍 Job status lookup for jobId: ${jobId}, shopId: ${shop.id}`,
+      );
+      console.log(`📊 Found job status:`, jobStatus);
 
       if (!jobStatus) {
         return json(
@@ -87,7 +104,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   } catch (error) {
     console.error("Error getting analysis status:", error);
-
+    
+    // Check if it's an authentication error
+    if (error instanceof Error && error.message.includes("authentication")) {
+      return json(
+        {
+          success: false,
+          error: "Authentication failed",
+        },
+        { status: 401 },
+      );
+    }
+    
     return json(
       {
         success: false,

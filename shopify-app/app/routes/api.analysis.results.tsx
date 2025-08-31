@@ -12,7 +12,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // First, find the internal shop ID and currency info
     const shop = await prisma.shop.findUnique({
-      where: { shopId: shopDomain },
+      where: { shopDomain },
       select: {
         id: true,
         lastAnalysisAt: true,

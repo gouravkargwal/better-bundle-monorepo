@@ -6,8 +6,12 @@ import Redis from "ioredis";
 import axios from "axios";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
-// Load environment variables
-dotenv.config({ path: "env/local.env" });
+import path from "path";
+import { ErrorHandler } from "./utils/error-handler";
+import { ShopifyNotificationService } from "./utils/shopify-notification";
+const envPath = path.join(__dirname, "../../local.env");
+dotenv.config({ path: envPath });
+
 const prisma = new PrismaClient();
 const app = express();
 
@@ -44,16 +48,32 @@ async function updateJobStatus(
     // Use the global environment variable
     const shopifyAppUrl =
       process.env.SHOPIFY_APP_URL ||
-      "https://gateway-universities-relations-papua.trycloudflare.com";
+      "https://hottest-falls-adjusted-launched.trycloudflare.com";
 
-    await axios.post(`${shopifyAppUrl}/api/analysis/update-status`, {
-      jobId,
-      status,
-      progress,
-      error,
-    });
+    console.log(`📤 Updating job status: ${jobId} -> ${status} (${progress}%)`);
+
+    await axios.post(
+      `${shopifyAppUrl}/api/analysis/update-status`,
+      {
+        jobId,
+        status,
+        progress,
+        error,
+      },
+      {
+        timeout: 10000, // 10 second timeout
+      }
+    );
+
+    console.log(`✅ Job status updated successfully: ${jobId} -> ${status}`);
   } catch (error) {
-    console.error(`Failed to update job status for ${jobId}:`, error);
+    console.error(`❌ Failed to update job status for ${jobId}:`, {
+      message: error.message,
+      code: error.code,
+      hostname: error.hostname,
+      url: error.config?.url,
+    });
+    throw error; // Re-throw so the caller can handle it
   }
 }
 
@@ -64,14 +84,38 @@ async function collectAndSaveShopData(
   accessToken: string
 ) {
   try {
-    // Calculate date 30 days ago
+    // Ensure shop exists in database
+    let shop = await prisma.shop.findUnique({
+      where: { shopId },
+    });
+
+    if (!shop) {
+      console.log(`🏪 Creating shop record for: ${shopId}`);
+      shop = await prisma.shop.create({
+        data: {
+          shopId,
+          shopDomain,
+          accessToken,
+          planType: "Free",
+          isActive: true,
+        },
+      });
+    }
+
+    // Use the shop's database ID for foreign key relationships
+    const shopDbId = shop.id;
+    console.log(
+      `🏪 Using shop database ID: ${shopDbId} for data relationships`
+    );
+
+    // Calculate date 90 days ago
     const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 90);
     const sinceDate = thirtyDaysAgo.toISOString().split("T")[0]; // Format: YYYY-MM-DD
 
-    console.log(`📅 Collecting data since: ${sinceDate} (30 days ago)`);
+    console.log(`📅 Collecting data since: ${sinceDate} (90 days ago)`);
 
-    // Collect orders from last 30 days
+    // Collect orders from last 90 days
     const ordersResponse = await axios.get(
       `https://${shopDomain}/admin/api/2024-01/orders.json?status=any&created_at_min=${sinceDate}`,
       {
@@ -102,15 +146,15 @@ async function collectAndSaveShopData(
 
     // Clear existing data for this shop
     await prisma.orderData.deleteMany({
-      where: { shopId },
+      where: { shopId: shopDbId },
     });
     await prisma.productData.deleteMany({
-      where: { shopId },
+      where: { shopId: shopDbId },
     });
 
     // Save products to database
     const productData = products.map((product: any) => ({
-      shopId,
+      shopId: shopDbId,
       productId: product.id.toString(),
       title: product.title,
       handle: product.handle,
@@ -131,7 +175,7 @@ async function collectAndSaveShopData(
 
     // Save orders to database
     const orderData = orders.map((order: any) => ({
-      shopId,
+      shopId: shopDbId,
       orderId: order.id.toString(),
       customerId: order.customer?.id?.toString() || null,
       totalAmount: parseFloat(order.total_price || "0"),
@@ -159,8 +203,11 @@ async function collectAndSaveShopData(
       products,
     };
   } catch (error) {
-    console.error("Error collecting and saving data from Shopify:", error);
-    throw error;
+    const userFriendlyError = ErrorHandler.toUserFriendlyError(error, {
+      operation: "collectAndSaveShopData",
+      shopId,
+    });
+    throw new Error(userFriendlyError);
   }
 }
 
@@ -171,11 +218,38 @@ async function collectIncrementalShopData(
   accessToken: string
 ) {
   try {
-    // Get the last analysis timestamp from database
-    const shop = await prisma.shop.findUnique({
+    // Ensure shop exists in database
+    let shop = await prisma.shop.findUnique({
       where: { shopId },
-      select: { lastAnalysisAt: true },
+      select: { id: true, lastAnalysisAt: true },
     });
+
+    if (!shop) {
+      console.log(`🏪 Creating shop record for: ${shopId}`);
+      const newShop = await prisma.shop.create({
+        data: {
+          shopId,
+          shopDomain,
+          accessToken,
+          planType: "Free",
+          isActive: true,
+        },
+      });
+      shop = await prisma.shop.findUnique({
+        where: { shopId },
+        select: { id: true, lastAnalysisAt: true },
+      });
+    }
+
+    if (!shop) {
+      throw new Error("Failed to create or find shop record");
+    }
+
+    // Use the shop's database ID for foreign key relationships
+    const shopDbId = shop.id;
+    console.log(
+      `🏪 Using shop database ID: ${shopDbId} for incremental data relationships`
+    );
 
     let sinceDate: string;
     if (shop?.lastAnalysisAt) {
@@ -185,12 +259,12 @@ async function collectIncrementalShopData(
         `📅 Collecting incremental data since: ${sinceDate} (last analysis)`
       );
     } else {
-      // Fallback to 30 days ago if no last analysis
+      // Fallback to 90 days ago if no last analysis
       const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 90);
       sinceDate = thirtyDaysAgo.toISOString().split("T")[0];
       console.log(
-        `📅 Collecting incremental data since: ${sinceDate} (30 days ago - fallback)`
+        `📅 Collecting incremental data since: ${sinceDate} (90 days ago - fallback)`
       );
     }
 
@@ -226,7 +300,7 @@ async function collectIncrementalShopData(
     // Save new orders to database (don't clear existing ones)
     if (newOrders.length > 0) {
       const orderData = newOrders.map((order: any) => ({
-        shopId,
+        shopId: shopDbId,
         orderId: order.id.toString(),
         customerId: order.customer?.id?.toString() || null,
         totalAmount: parseFloat(order.total_price || "0"),
@@ -253,7 +327,7 @@ async function collectIncrementalShopData(
         await prisma.productData.upsert({
           where: {
             shopId_productId: {
-              shopId,
+              shopId: shopDbId,
               productId: product.id.toString(),
             },
           },
@@ -272,7 +346,7 @@ async function collectIncrementalShopData(
             updatedAt: new Date(),
           },
           create: {
-            shopId,
+            shopId: shopDbId,
             productId: product.id.toString(),
             title: product.title,
             handle: product.handle,
@@ -299,8 +373,11 @@ async function collectIncrementalShopData(
       products: updatedProducts,
     };
   } catch (error) {
-    console.error("Error collecting incremental data from Shopify:", error);
-    throw error;
+    const userFriendlyError = ErrorHandler.toUserFriendlyError(error, {
+      operation: "collectIncrementalShopData",
+      shopId,
+    });
+    throw new Error(userFriendlyError);
   }
 }
 
@@ -343,152 +420,123 @@ app.post("/api/queue", async (req, res) => {
   }
 });
 
-// Process analysis jobs
-analysisQueue.process("analyze-shop", async (job) => {
-  const { jobId, shopId, shopDomain, accessToken } = job.data;
-
-  try {
-    // Check if this is first run by looking for existing data
-    const existingData = await prisma.orderData.findFirst({
-      where: { shopId },
-      select: { id: true },
-    });
-
-    // Check if there's a recent failed job for this shop
-    const recentFailedJob = await prisma.analysisJob.findFirst({
-      where: {
-        shopId,
-        status: "failed",
-        createdAt: {
-          gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const isFirstRun = !existingData;
-    const isRetryAfterFailure = !!recentFailedJob;
-
-    console.log(
-      `🔍 Processing analysis job: ${jobId} for shop: ${shopId} (${
-        isFirstRun ? "first run" : "incremental"
-      }${isRetryAfterFailure ? " - retry after failure" : ""})`
-    );
-
-    // Update job status to processing
-    await updateJobStatus(jobId, "processing", 10);
-
-    if (isFirstRun) {
-      // First run: Collect all data from Shopify
-      console.log(`📥 Collecting all data from Shopify for shop: ${shopId}`);
-      const shopData = await collectAndSaveShopData(
-        shopId,
-        shopDomain,
-        accessToken
-      );
-    } else if (isRetryAfterFailure) {
-      // Retry after failure: Skip data collection, data already exists
-      console.log(
-        `📥 Skipping data collection for retry - data already exists for shop: ${shopId}`
-      );
-    } else {
-      // Subsequent run: Collect only new data (incremental)
-      console.log(
-        `📥 Collecting incremental data from Shopify for shop: ${shopId}`
-      );
-      const shopData = await collectIncrementalShopData(
-        shopId,
-        shopDomain,
-        accessToken
-      );
-    }
-
-    await updateJobStatus(jobId, "processing", 50);
-
-    // Queue ML processing job with shop ID (data is now in database)
-    await mlProcessingQueue.add("process-ml-analysis", {
-      jobId,
-      shopId,
-      shopDomain,
-      accessToken,
-    });
-
-    console.log(`✅ Analysis job ${jobId} queued for ML processing`);
-  } catch (error) {
-    console.error(`❌ Error processing analysis job ${jobId}:`, error);
-    await updateJobStatus(jobId, "failed", 0, error.message);
-  }
-});
-
 // Process ML jobs
 mlProcessingQueue.process("process-ml-analysis", async (job) => {
   const { jobId, shopId } = job.data;
-  const shopifyAppUrl = process.env.SHOPIFY_APP_URL || "http://localhost:3000";
+
+  // Get shop details from database
+  let shop;
+  try {
+    shop = await prisma.shop.findUnique({
+      where: { shopId },
+      select: { shopDomain: true, accessToken: true },
+    });
+
+    if (!shop) {
+      throw new Error(`Shop not found: ${shopId}`);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to get shop details for ${shopId}:`, error);
+    throw error;
+  }
 
   try {
     console.log(`🤖 Processing ML job: ${jobId} for shop: ${shopId}`);
 
     await updateJobStatus(jobId, "processing", 70);
 
-    // Call ML API with shop ID (data is in database)
-    const mlApiUrl = process.env.RAILWAY_ML_API_URL || "http://localhost:8000";
-    const mlResponse = await axios.post(
-      `${mlApiUrl}/api/bundle-analysis/${shopId}`,
-      {},
-      {
-        timeout: 300000, // 5 minutes timeout
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-
-    const mlResult = mlResponse.data;
-
-    await updateJobStatus(jobId, "processing", 90);
-
-    // Call Shopify app to update results
-    await axios.post(`${shopifyAppUrl}/api/analysis/complete`, {
-      jobId,
-      shopId,
-      results: mlResult,
+    // Call ML API
+    const mlApiUrl = process.env.ML_API_URL || "http://localhost:8000";
+    const response = await axios.post(`${mlApiUrl}/analyze`, {
+      shop_id: shopId,
     });
 
-    // Send push notification for successful completion
-    try {
-      await axios.post(`${shopifyAppUrl}/api/notifications/send`, {
-        shopId,
+    if (response.data.success) {
+      await updateJobStatus(jobId, "completed", 100);
+      console.log(`✅ ML job completed: ${jobId}`);
+
+      // Send success notification using Shopify App Events API
+      await ShopifyNotificationService.sendAnalysisCompleteNotification(
+        shop.shopDomain,
+        shop.accessToken,
         jobId,
-        success: true,
-      });
-      console.log(`🔔 Notification sent for successful analysis: ${jobId}`);
-    } catch (notificationError) {
-      console.warn(
-        `⚠️ Failed to send notification for job ${jobId}:`,
-        notificationError.message
+        true
       );
+    } else {
+      throw new Error(response.data.error || "ML API returned failure");
     }
-
-    await updateJobStatus(jobId, "completed", 100);
-
-    console.log(`✅ ML job ${jobId} completed successfully`);
   } catch (error) {
-    console.error(`❌ Error processing ML job ${jobId}:`, error);
-
+    console.error(`❌ ML job failed: ${jobId}`, error);
     await updateJobStatus(jobId, "failed", 0, error.message);
 
-    // Send push notification for failure
-    try {
-      await axios.post(`${shopifyAppUrl}/api/notifications/send`, {
-        shopId,
-        jobId,
-        success: false,
-      });
-      console.log(`🔔 Notification sent for failed analysis: ${jobId}`);
-    } catch (notificationError) {
-      console.warn(
-        `⚠️ Failed to send notification for job ${jobId}:`,
-        notificationError.message
-      );
+    // Send failure notification using Shopify App Events API
+    await ShopifyNotificationService.sendAnalysisCompleteNotification(
+      shop.shopDomain,
+      shop.accessToken,
+      jobId,
+      false,
+      error.message
+    );
+
+    throw error;
+  }
+});
+
+// Process analysis jobs
+analysisQueue.process("process-analysis", async (job) => {
+  const { jobId, shopId } = job.data;
+
+  // Get shop details from database
+  let shop;
+  try {
+    shop = await prisma.shop.findUnique({
+      where: { shopId },
+      select: { shopDomain: true, accessToken: true },
+    });
+
+    if (!shop) {
+      throw new Error(`Shop not found: ${shopId}`);
     }
+  } catch (error) {
+    console.error(`❌ Failed to get shop details for ${shopId}:`, error);
+    throw error;
+  }
+
+  try {
+    console.log(`📊 Processing analysis job: ${jobId} for shop: ${shopId}`);
+
+    // Send analysis started notification using Shopify App Events API
+    await ShopifyNotificationService.sendAnalysisStartedNotification(
+      shop.shopDomain,
+      shop.accessToken,
+      jobId
+    );
+
+    await updateJobStatus(jobId, "processing", 30);
+
+    // Collect shop data
+    await collectAndSaveShopData(shopId, shop.shopDomain, shop.accessToken);
+
+    await updateJobStatus(jobId, "processing", 60);
+
+    // Add ML job to queue
+    await mlProcessingQueue.add("process-ml-analysis", { jobId, shopId });
+
+    console.log(`✅ Analysis job queued ML processing: ${jobId}`);
+  } catch (error) {
+    console.error(`❌ Analysis job failed: ${jobId}`, error);
+    await updateJobStatus(jobId, "failed", 0, error.message);
+
+    // Send failure notification using Shopify App Events API
+    await ShopifyNotificationService.sendAnalysisCompleteNotification(
+      shop.shopDomain,
+      shop.accessToken,
+      jobId,
+      false,
+      error.message
+    );
+
+    throw error;
   }
 });
 

@@ -23,9 +23,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shopId = session.shop;
 
+  // Get shop from database first
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: shopId },
+    select: { id: true },
+  });
+
+  if (!shop) {
+    return json({
+      trackedSales: [],
+      summary: {
+        totalRevenue: 0,
+        totalCommission: 0,
+        pendingCommission: 0,
+        totalSales: 0,
+      },
+    });
+  }
+
   // Get commission data
   const trackedSales = await prisma.trackedSale.findMany({
-    where: { shopId },
+    where: { shopId: shop.id },
     orderBy: { createdAt: "desc" },
     take: 100,
   });

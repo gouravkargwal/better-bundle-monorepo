@@ -11,7 +11,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Check for existing analysis jobs
   const shop = await prisma.shop.findUnique({
-    where: { shopId: session.shop },
+    where: { shopDomain: session.shop },
     select: { id: true },
   });
 

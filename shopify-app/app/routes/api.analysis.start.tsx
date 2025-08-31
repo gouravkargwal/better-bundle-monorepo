@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import axios from "axios";
 import { prisma } from "../core/database/prisma.server";
+import { ShopifyNotificationService } from "../core/notifications/shopify-notification.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
@@ -10,7 +11,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Ensure shop exists in database
     let shop = await prisma.shop.findUnique({
-      where: { shopId },
+      where: { shopDomain: shopId },
     });
 
     if (!shop) {
@@ -75,6 +76,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { status: 500 },
       );
     }
+
+
 
     // Return 202 Accepted with job information
     return Response.json(

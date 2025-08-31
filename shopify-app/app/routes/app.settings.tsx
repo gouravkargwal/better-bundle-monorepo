@@ -25,7 +25,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get shop settings
   const shop = await prisma.shop.findUnique({
-    where: { shopId },
+    where: { shopDomain: shopId },
     select: { planType: true, lastAnalysisAt: true },
   });
 

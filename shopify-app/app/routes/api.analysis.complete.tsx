@@ -16,24 +16,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Update shop's last analysis timestamp
-    await prisma.shop.update({
-      where: { shopId },
-      data: {
-        lastAnalysisAt: new Date(),
-      },
+    // Get shop from database first
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain: shopId },
+      select: { id: true },
     });
 
+    if (shop) {
+      // Update shop's last analysis timestamp
+      await prisma.shop.update({
+        where: { id: shop.id },
+        data: {
+          lastAnalysisAt: new Date(),
+        },
+      });
+    }
+
     // Store bundle analysis results
-    if (results.bundles && results.bundles.length > 0) {
+    if (results.bundles && results.bundles.length > 0 && shop) {
       // Clear existing results
       await prisma.bundleAnalysisResult.deleteMany({
-        where: { shopId },
+        where: { shopId: shop.id },
       });
 
       // Store new results
       const bundleData = results.bundles.map((bundle: any) => ({
-        shopId,
+        shopId: shop.id,
         productIds: bundle.product_ids,
         bundleSize: bundle.product_ids.length,
         coPurchaseCount: bundle.co_purchase_count,
