@@ -10,8 +10,18 @@ import path from "path";
 import { ErrorHandler } from "./utils/error-handler";
 import { SendPulseEmailService } from "./utils/sendpulse-email";
 
+// Load environment variables from the global local.env file
 const envPath = path.join(__dirname, "../../local.env");
+console.log(`🔧 Loading environment from: ${envPath}`);
 dotenv.config({ path: envPath });
+
+// Log key environment variables for debugging
+console.log(`🔧 Environment check:`, {
+  DATABASE_URL: process.env.DATABASE_URL ? "✅ Set" : "❌ Missing",
+  REDIS_HOST: process.env.REDIS_HOST || "localhost",
+  SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL || "Not set",
+  ML_API_URL: process.env.ML_API_URL || "Not set",
+});
 
 const prisma = new PrismaClient();
 const app = express();
@@ -423,21 +433,21 @@ app.post("/api/queue", async (req, res) => {
 
 // Process ML jobs
 mlProcessingQueue.process("process-ml-analysis", async (job) => {
-  const { jobId, shopId } = job.data;
+  const { jobId, shopId, shopDomain } = job.data;
 
   // Get shop details from database
   let shop;
   try {
     shop = await prisma.shop.findUnique({
-      where: { shopId },
+      where: { shopDomain },
       select: { shopDomain: true, accessToken: true },
     });
 
     if (!shop) {
-      throw new Error(`Shop not found: ${shopId}`);
+      throw new Error(`Shop not found: ${shopDomain}`);
     }
   } catch (error) {
-    console.error(`❌ Failed to get shop details for ${shopId}:`, error);
+    console.error(`❌ Failed to get shop details for ${shopDomain}:`, error);
     throw error;
   }
 
@@ -521,6 +531,10 @@ analysisQueue.process("process-analysis", async (job) => {
 
   try {
     console.log(`📊 Processing analysis job: ${jobId} for shop: ${shopId}`);
+    console.log(`🏪 Shop details:`, {
+      shopDomain: shop.shopDomain,
+      hasAccessToken: !!shop.accessToken,
+    });
 
     // Send analysis started email notification
     try {
@@ -537,13 +551,18 @@ analysisQueue.process("process-analysis", async (job) => {
       );
     }
 
+    console.log(`🔄 Updating job status to processing (30%)...`);
     await updateJobStatus(jobId, "processing", 30);
 
+    console.log(`📊 Starting data collection for shop: ${shop.shopDomain}...`);
     // Collect shop data
     await collectAndSaveShopData(shopId, shop.shopDomain, shop.accessToken);
+    console.log(`✅ Data collection completed for job: ${jobId}`);
 
+    console.log(`🔄 Updating job status to processing (60%)...`);
     await updateJobStatus(jobId, "processing", 60);
 
+    console.log(`🤖 Adding ML job to queue...`);
     // Add ML job to queue
     await mlProcessingQueue.add("process-ml-analysis", { jobId, shopId });
 

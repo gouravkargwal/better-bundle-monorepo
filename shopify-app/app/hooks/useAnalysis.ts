@@ -79,9 +79,14 @@ export function useAnalysis(initialJob?: {
   }, [analysisFetcher.state, analysisFetcher.data, startAnalysis]);
 
   // Poll for job status when we have a jobId
-  // Strategy: Poll every 15 seconds with 30-minute maximum to prevent infinite polling
+  // Strategy: Poll every 15 seconds with better error handling and timeout logic
   useEffect(() => {
     if (!jobId) return;
+
+    let pollCount = 0;
+    const maxPolls = 120; // Stop after 30 minutes (120 * 15 seconds)
+    let stuckInQueuedCount = 0;
+    const maxStuckInQueued = 20; // Stop if stuck in queued for 5 minutes (20 * 15 seconds)
 
     const pollStatus = () => {
       statusFetcher.load(`/api/analysis/status?jobId=${jobId}`);
@@ -90,21 +95,14 @@ export function useAnalysis(initialJob?: {
     // Poll immediately
     pollStatus();
 
-    // Set up polling interval - 15 seconds is a good balance between responsiveness and server load
-    // But stop polling if authentication fails
+    // Set up polling interval
     const interval = setInterval(() => {
-      // Only poll if the previous request was successful or hasn't been made yet
-      if (!statusFetcher.data || statusFetcher.data.success !== false) {
-        pollStatus();
-      }
-    }, 15000); // Poll every 15 seconds
+      pollCount++;
 
-    // Stop polling after 30 minutes to prevent infinite polling
-    const maxDuration = setTimeout(
-      () => {
+      // Stop polling if we've hit the maximum number of polls
+      if (pollCount >= maxPolls) {
         console.log("⏰ Stopping job status polling after 30 minutes");
         clearInterval(interval);
-        // Set error state if still loading
         if (state === "loading") {
           setState("error");
           setHasStartedAnalysis(false);
@@ -112,10 +110,7 @@ export function useAnalysis(initialJob?: {
             title: "Analysis Timeout",
             description:
               "The analysis is taking longer than expected. Please try again.",
-            action: {
-              content: "Try Again",
-              onAction: startAnalysis,
-            },
+            action: { content: "Try Again", onAction: startAnalysis },
             recommendations: [
               "The analysis may be processing a large amount of data",
               "Try again in a few minutes",
@@ -123,13 +118,62 @@ export function useAnalysis(initialJob?: {
             ],
           });
         }
-      },
-      30 * 60 * 1000,
-    ); // 30 minutes
+        return;
+      }
+
+      // Check if job is stuck in queued status
+      if (statusFetcher.data?.job?.status === "queued") {
+        stuckInQueuedCount++;
+        if (stuckInQueuedCount >= maxStuckInQueued) {
+          console.log(
+            "⚠️ Job stuck in queued status for too long, stopping polling",
+          );
+          clearInterval(interval);
+          setState("error");
+          setHasStartedAnalysis(false);
+          setError({
+            title: "Analysis Stuck",
+            description:
+              "The analysis job is stuck in queue. This might be due to a system issue.",
+            action: { content: "Try Again", onAction: startAnalysis },
+            recommendations: [
+              "The worker might be down or overloaded",
+              "Try again in a few minutes",
+              "Contact support if the issue persists",
+            ],
+          });
+          return;
+        }
+      } else {
+        // Reset stuck counter if job is not in queued status
+        stuckInQueuedCount = 0;
+      }
+
+      // Only poll if the previous request was successful or hasn't been made yet
+      if (!statusFetcher.data || statusFetcher.data.success !== false) {
+        pollStatus();
+      } else {
+        // If we get authentication errors, stop polling
+        console.log("🔐 Authentication error detected, stopping polling");
+        clearInterval(interval);
+        setState("error");
+        setHasStartedAnalysis(false);
+        setError({
+          title: "Authentication Error",
+          description:
+            "Unable to check analysis status due to authentication issues.",
+          action: { content: "Try Again", onAction: startAnalysis },
+          recommendations: [
+            "Try refreshing the page",
+            "Check if your session is still valid",
+            "Contact support if the issue persists",
+          ],
+        });
+      }
+    }, 15000); // Poll every 15 seconds
 
     return () => {
       clearInterval(interval);
-      clearTimeout(maxDuration);
     };
   }, [jobId, statusFetcher, state, startAnalysis]);
 
