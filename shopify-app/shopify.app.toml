@@ -2,15 +2,15 @@
 
 name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://velocity-published-aviation-root.trycloudflare.com"
+application_url = "https://theme-officials-hour-aims.trycloudflare.com"
 embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,read_products,write_orders"
+scopes = "write_products,read_products,read_orders,write_orders"
 
 [auth]
-redirect_urls = ["https://velocity-published-aviation-root.trycloudflare.com/auth/callback", "https://velocity-published-aviation-root.trycloudflare.com/auth/shopify/callback", "https://velocity-published-aviation-root.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://theme-officials-hour-aims.trycloudflare.com/auth/callback", "https://theme-officials-hour-aims.trycloudflare.com/auth/shopify/callback", "https://theme-officials-hour-aims.trycloudflare.com/api/auth/callback"]
 
 [webhooks]
 api_version = "2024-01"

@@ -3,22 +3,29 @@ import { LATEST_API_VERSION } from "@shopify/shopify-api";
 import { prisma } from "./core/database/prisma.server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 
+// Hardcoded scopes to ensure they're always correct
+const scopes = [
+  "write_products",
+  "read_products",
+  "read_orders",
+  "write_orders",
+];
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY || "87c44f5966daa80691a480bcd03c225c",
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "your_api_secret_here",
   apiVersion: LATEST_API_VERSION,
-  scopes: process.env.SCOPES?.split(",") || [
-    "write_products",
-    "read_products",
-    "write_orders",
-  ],
+  scopes: scopes,
   appUrl: process.env.SHOPIFY_APP_URL || "https://betterbundle.vercel.app",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
   isEmbeddedApp: true,
-  // Enable offline access tokens (they never expire)
   useOnlineTokens: false,
+  future: {
+    unstable_newEmbeddedAuthStrategy: true,
+    removeRest: true,
+  },
 });
 
 export default shopify;

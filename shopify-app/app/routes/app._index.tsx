@@ -38,8 +38,8 @@ export default function Index() {
   const { state, progress, error, startAnalysis, handleRetry, isSubmitting } =
     useAnalysis(loaderData?.activeJob);
 
-  // If there's an active job from the loader, show loading state
-  const currentState = loaderData?.activeJob ? "loading" : state;
+  // If there's an active job from the loader, show queued state
+  const currentState = loaderData?.activeJob ? "queued" : state;
   const currentProgress = loaderData?.activeJob?.progress || progress;
   const currentJobId = loaderData?.activeJob?.jobId || null;
 

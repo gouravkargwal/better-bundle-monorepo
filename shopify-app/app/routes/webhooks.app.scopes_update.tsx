@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import { prisma } from "../core/database/prisma.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { payload, session, topic, shop } = await authenticate.webhook(request);
@@ -7,14 +8,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const current = payload.current as string[];
   if (session) {
-    await db.session.update({
+    // Convert array to comma-separated string to match the expected format
+    const scopeString = current.join(',');
+    console.log(`🔄 Updating session scopes for ${shop}: ${scopeString}`);
+    
+    await prisma.session.update({
       where: {
         id: session.id,
       },
       data: {
-        scope: current.toString(),
+        scope: scopeString,
       },
     });
+    
+    console.log(`✅ Session scopes updated successfully`);
   }
   return new Response();
 };

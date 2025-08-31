@@ -5,3 +5,4 @@ local.env
 .doppler-pids
 .DS_Store
 .shopify
+.env

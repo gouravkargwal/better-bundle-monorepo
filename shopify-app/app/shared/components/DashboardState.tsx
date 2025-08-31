@@ -14,6 +14,7 @@ import {
   SkeletonBodyText,
   SkeletonDisplayText,
   SkeletonThumbnail,
+  Spinner,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import type { AnalysisState, ErrorState } from "../../types";
@@ -37,42 +38,43 @@ export function DashboardState({
   onStartAnalysis,
   onRetry,
 }: DashboardStateProps) {
+  console.log("🎨 DashboardState render:", {
+    state,
+    hasError: !!error,
+    errorTitle: error?.title,
+    errorDescription: error?.description,
+    progress,
+    jobId,
+    isSubmitting,
+  });
+
   if (state === "idle") {
     return (
       <Page>
-        <TitleBar title="BetterBundle - Smart Bundle Analysis" />
+        <TitleBar title="BetterBundle - Bundle Analysis" />
         <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="500" align="center">
-                <Box padding="500">
-                  <Text variant="headingLg" as="h2">
-                    🚀 Discover Bundle Opportunities
-                  </Text>
-                </Box>
-                <BlockStack gap="300" align="center">
-                  <Text
-                    variant="bodyMd"
-                    as="p"
-                    tone="subdued"
-                    alignment="center"
-                  >
-                    Let us analyze your store's order data to find products that
-                    customers love buying together. This can help increase your
-                    sales and customer satisfaction!
-                  </Text>
-                  <Button
-                    variant="primary"
-                    size="large"
-                    onClick={onStartAnalysis}
-                    loading={isSubmitting}
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting
-                      ? "🚀 Starting..."
-                      : "🎯 Start Smart Analysis"}
-                  </Button>
-                </BlockStack>
+                <Text as="h1" variant="headingLg">
+                  🎯 Bundle Analysis
+                </Text>
+                <Text as="p" variant="bodyMd">
+                  Analyze your store's data to discover optimal product bundles
+                  and increase your average order value.
+                </Text>
+                <Button
+                  variant="primary"
+                  size="large"
+                  onClick={() => {
+                    console.log("🔘 Button clicked!", { isSubmitting, state });
+                    onStartAnalysis();
+                  }}
+                  disabled={isSubmitting}
+                  loading={isSubmitting}
+                >
+                  {isSubmitting ? "Starting..." : "🚀 Start Analysis"}
+                </Button>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -81,170 +83,135 @@ export function DashboardState({
     );
   }
 
-  if (state === "loading" || state === "checking") {
+  if (state === "queued") {
     return (
       <Page>
-        <TitleBar title="BetterBundle - Analyzing Your Store" />
+        <TitleBar title="BetterBundle - Analysis in Progress" />
         <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="500" align="center">
+                <Text as="h2" variant="headingMd">
+                  🚀 Analysis in Progress
+                </Text>
+                <Text as="p" variant="bodyMd">
+                  We're analyzing your store data to discover optimal product
+                  bundles.
+                </Text>
+
+                {/* Skeleton content to show what's being analyzed */}
                 <BlockStack gap="400" align="center">
-                  {/* Header with clear analysis info */}
-                  <BlockStack gap="300" align="center">
-                    <Text variant="headingLg" as="h1" alignment="center">
-                      {state === "checking" && "🚀 Starting Your Analysis"}
-                      {state === "loading" && "🔍 Analyzing Your Store"}
-                    </Text>
-                    <Text
-                      variant="bodyMd"
-                      as="p"
-                      tone="subdued"
-                      alignment="center"
-                    >
-                      We're analyzing your store data to discover bundle
-                      opportunities that can boost your sales and customer
-                      satisfaction.
-                    </Text>
-                  </BlockStack>
+                  <Text variant="headingSm" as="h3" alignment="center">
+                    🔍 What we're analyzing:
+                  </Text>
 
-                  {/* Status section */}
-                  <BlockStack gap="400" align="center">
-                    <Text
-                      variant="bodyMd"
-                      as="p"
-                      tone="subdued"
-                      alignment="center"
-                    >
-                      {state === "checking" && "⏳ Preparing analysis..."}
-                      {state === "loading" &&
-                        "🚀 Analysis is running in the background. You'll be notified when it's complete!"}
-                    </Text>
-                  </BlockStack>
+                  <Layout>
+                    <Layout.Section>
+                      <Card padding="400">
+                        <BlockStack gap="400" align="center">
+                          <SkeletonThumbnail size="medium" />
+                          <SkeletonBodyText lines={2} />
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            📦 Order Data
+                          </Text>
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            Analyzing customer purchase patterns
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
 
-                  {/* Skeleton content to show what's being analyzed */}
-                  <BlockStack gap="400" align="center">
-                    <Text variant="headingSm" as="h3" alignment="center">
-                      🔍 What we're analyzing:
-                    </Text>
+                    <Layout.Section>
+                      <Card padding="400">
+                        <BlockStack gap="400" align="center">
+                          <SkeletonThumbnail size="medium" />
+                          <SkeletonBodyText lines={2} />
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            🛍️ Product Data
+                          </Text>
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            Processing product relationships
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
 
-                    <Layout>
-                      <Layout.Section>
-                        <Card padding="400">
-                          <BlockStack gap="400" align="center">
-                            <SkeletonThumbnail size="medium" />
-                            <SkeletonBodyText lines={2} />
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              📦 Order Data
-                            </Text>
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              Analyzing customer purchase patterns
-                            </Text>
-                          </BlockStack>
-                        </Card>
-                      </Layout.Section>
+                    <Layout.Section>
+                      <Card padding="400">
+                        <BlockStack gap="400" align="center">
+                          <SkeletonThumbnail size="medium" />
+                          <SkeletonBodyText lines={2} />
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            🧠 ML Analysis
+                          </Text>
+                          <Text
+                            variant="bodySm"
+                            as="p"
+                            tone="subdued"
+                            alignment="center"
+                          >
+                            Finding optimal bundle combinations
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
+                  </Layout>
+                </BlockStack>
 
-                      <Layout.Section>
-                        <Card padding="400">
-                          <BlockStack gap="400" align="center">
-                            <SkeletonThumbnail size="medium" />
-                            <SkeletonBodyText lines={2} />
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              🛍️ Product Data
-                            </Text>
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              Processing product relationships
-                            </Text>
-                          </BlockStack>
-                        </Card>
-                      </Layout.Section>
-
-                      <Layout.Section>
-                        <Card padding="400">
-                          <BlockStack gap="400" align="center">
-                            <SkeletonThumbnail size="medium" />
-                            <SkeletonBodyText lines={2} />
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              🧠 ML Analysis
-                            </Text>
-                            <Text
-                              variant="bodySm"
-                              as="p"
-                              tone="subdued"
-                              alignment="center"
-                            >
-                              Finding optimal bundle combinations
-                            </Text>
-                          </BlockStack>
-                        </Card>
-                      </Layout.Section>
-                    </Layout>
-                  </BlockStack>
-
-                  {/* Estimated time and job info */}
-                  <BlockStack gap="200" align="center">
+                {/* Estimated time and job info */}
+                <BlockStack gap="200" align="center">
+                  <Text
+                    variant="bodySm"
+                    as="p"
+                    tone="subdued"
+                    alignment="center"
+                  >
+                    ⏱️ Estimated time: 2-5 minutes
+                  </Text>
+                  <Text
+                    variant="bodySm"
+                    as="p"
+                    tone="subdued"
+                    alignment="center"
+                  >
+                    🔔 You'll receive a notification when the analysis is
+                    complete
+                  </Text>
+                  {jobId && (
                     <Text
                       variant="bodySm"
                       as="p"
                       tone="subdued"
                       alignment="center"
                     >
-                      ⏱️ Estimated time: 2-5 minutes
+                      🔍 Job ID: {jobId.substring(0, 8)}...
                     </Text>
-                    <Text
-                      variant="bodySm"
-                      as="p"
-                      tone="subdued"
-                      alignment="center"
-                    >
-                      🔔 You'll receive a notification when the analysis is
-                      complete
-                    </Text>
-                    <Text
-                      variant="bodySm"
-                      as="p"
-                      tone="subdued"
-                      alignment="center"
-                    >
-                      💡 This is a one-time analysis. Future updates will be
-                      faster!
-                    </Text>
-                    {jobId && (
-                      <Text
-                        variant="bodySm"
-                        as="p"
-                        tone="subdued"
-                        alignment="center"
-                      >
-                        🔍 Job ID: {jobId.substring(0, 8)}...
-                      </Text>
-                    )}
-                  </BlockStack>
+                  )}
                 </BlockStack>
               </BlockStack>
             </Card>
@@ -255,6 +222,7 @@ export function DashboardState({
   }
 
   if (state === "error" && error) {
+    console.log("🎨 Rendering error state:", error);
     return (
       <Page>
         <TitleBar title="BetterBundle - Analysis Error" />

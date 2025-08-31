@@ -1,11 +1,5 @@
 // Core application types
-export type AnalysisState =
-  | "idle"
-  | "loading"
-  | "success"
-  | "error"
-  | "no-data"
-  | "checking";
+export type AnalysisState = "idle" | "success" | "error" | "no-data" | "queued";
 export type AnalysisError =
   | "no-orders"
   | "insufficient-data"
