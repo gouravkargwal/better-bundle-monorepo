@@ -1,0 +1,11 @@
+[database]
+type = "postgres"
+dsn = "{{ env \"DATABASE_DSN\" }}"
+
+[cache]
+type = "redis"
+endpoint = "{{ env \"REDIS_ENDPOINT\" }}"
+password = "{{ env \"REDIS_PASSWORD\" }}"
+
+[server]
+http_port = 8088
