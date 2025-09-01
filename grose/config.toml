@@ -1,0 +1,11 @@
+[database]
+type = "postgres"
+dsn = "{{ env \"DATABASE_DSN\" }}"  # Neon Postgres connection string
+
+[cache]
+type = "redis"
+endpoint = "{{ env \"REDIS_ENDPOINT\" }}"  # Upstash Redis URL
+password = "{{ env \"REDIS_PASSWORD\" }}"  # Upstash Redis password (if any)
+
+[server]
+http_port = 8088
