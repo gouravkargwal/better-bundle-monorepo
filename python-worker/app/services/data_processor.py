@@ -4,7 +4,7 @@ Data processing service that orchestrates data collection and ML training events
 
 import asyncio
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -25,7 +25,7 @@ class DataJobRequest(BaseModel):
     shop_domain: str
     access_token: str
     job_type: str = "complete"  # complete or incremental
-    days_back: int = None
+    days_back: Optional[int] = None
 
 
 class DataJobResult(BaseModel):
@@ -72,6 +72,11 @@ class DataProcessor:
         try:
             # Step 1: Update job status to processing
             await self._update_job_status(request.job_id, "processing", 10)
+
+            # Update shop onboarding status to indicate analysis is in progress
+            await self._update_shop_onboarding_status(
+                request.shop_id, "analysis_running"
+            )
 
             # Step 2: Collect and save data
             collection_config = DataCollectionConfig(
@@ -248,6 +253,12 @@ class DataProcessor:
                 customers_count=collection_result.customers_count,
             )
 
+            # Update shop onboarding status to indicate analysis is complete
+            # Gorse training has finished, user can proceed to widget setup
+            await self._update_shop_onboarding_status(
+                request.shop_id, "analysis_complete_no_widget"
+            )
+
             return DataJobResult(
                 job_id=request.job_id,
                 shop_id=request.shop_id,
@@ -275,6 +286,9 @@ class DataProcessor:
 
             # Update job status to failed
             await self._update_job_status(request.job_id, "failed", 0, str(e))
+
+            # Update shop onboarding status to indicate analysis failed
+            await self._update_shop_onboarding_status(request.shop_id, "new_user")
 
             # Publish failure notification
             try:
@@ -338,6 +352,35 @@ class DataProcessor:
             )
             # Don't raise - status update failures shouldn't stop the main process
 
+    async def _update_shop_onboarding_status(self, shop_id: str, status: str) -> None:
+        """Update shop onboarding status in database"""
+        try:
+            db = (
+                await self.data_collection_service.db
+                or await self.data_collection_service.initialize()
+            )
+
+            await db.shop.update(
+                where={"id": shop_id}, data={"onboardingStatus": status}
+            )
+
+            logger.info(
+                "Shop onboarding status updated",
+                shop_id=shop_id,
+                status=status,
+            )
+
+        except Exception as e:
+            log_error(
+                e,
+                {
+                    "operation": "update_shop_onboarding_status",
+                    "shop_id": shop_id,
+                    "status": status,
+                },
+            )
+            # Don't raise - status update failures shouldn't stop the main process
+
     async def consume_data_jobs(self):
         """
         Consumer loop for processing data jobs from Redis Streams
@@ -364,18 +407,62 @@ class DataProcessor:
 
                 for event in events:
                     try:
-                        # Process the data job
+                        # Process the data job - handle both camelCase and snake_case field names
+                        job_id = event.get("job_id") or event.get("jobId")
+                        shop_id = event.get("shop_id") or event.get("shopId")
+                        shop_domain = event.get("shop_domain") or event.get(
+                            "shopDomain"
+                        )
+                        access_token = event.get("access_token") or event.get(
+                            "accessToken"
+                        )
+                        job_type = event.get("job_type") or event.get(
+                            "jobType", "complete"
+                        )
+                        # Handle days_back field - only convert to int if it exists and is not None
+                        days_back_raw = event.get("days_back") or event.get("daysBack")
+                        days_back = (
+                            int(days_back_raw) if days_back_raw is not None else None
+                        )
+
+                        # Log the field mapping for debugging
+                        logger.info(
+                            "Field mapping for data job",
+                            original_event=event,
+                            mapped_fields={
+                                "job_id": job_id,
+                                "shop_id": shop_id,
+                                "shop_domain": shop_domain,
+                                "job_type": job_type,
+                                "days_back": days_back,
+                            },
+                        )
+
+                        # Validate required fields
+                        if not all([job_id, shop_id, shop_domain, access_token]):
+                            missing_fields = []
+                            if not job_id:
+                                missing_fields.append("job_id")
+                            if not shop_id:
+                                missing_fields.append("shop_id")
+                            if not shop_domain:
+                                missing_fields.append("shop_domain")
+                            if not access_token:
+                                missing_fields.append("access_token")
+
+                            error_msg = (
+                                f"Missing required fields: {', '.join(missing_fields)}"
+                            )
+                            logger.error(error_msg, event=event)
+                            raise ValueError(error_msg)
+
                         request = DataJobRequest(
-                            job_id=event["job_id"],
-                            shop_id=event["shop_id"],
-                            shop_domain=event["shop_domain"],
-                            access_token=event["access_token"],
-                            job_type=event.get("job_type", "complete"),
-                            days_back=(
-                                int(event["days_back"])
-                                if event.get("days_back")
-                                else None
-                            ),
+                            job_id=job_id,
+                            shop_id=shop_id,
+                            shop_domain=shop_domain,
+                            access_token=access_token,
+                            job_type=job_type,
+                            days_back=days_back,
                         )
 
                         logger.info(

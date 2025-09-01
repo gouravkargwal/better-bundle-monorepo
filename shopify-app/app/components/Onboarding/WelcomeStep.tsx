@@ -4,9 +4,13 @@ import PricingPlan from "../Billing/PricingPlan";
 
 interface WelcomeStepProps {
   onStartAnalysis: () => void;
+  isLoading?: boolean;
 }
 
-export default function WelcomeStep({ onStartAnalysis }: WelcomeStepProps) {
+export default function WelcomeStep({
+  onStartAnalysis,
+  isLoading,
+}: WelcomeStepProps) {
   return (
     <BlockStack gap="500" align="center">
       <Text as="h2" variant="headingLg">
@@ -22,7 +26,13 @@ export default function WelcomeStep({ onStartAnalysis }: WelcomeStepProps) {
       <PricingPlan showDetails={true} compact={false} />
 
       <InlineStack gap="300">
-        <Button variant="primary" size="large" onClick={onStartAnalysis}>
+        <Button
+          variant="primary"
+          size="large"
+          onClick={onStartAnalysis}
+          loading={isLoading}
+          disabled={isLoading}
+        >
           🚀 Let's Get Started
         </Button>
         <Link to="/app/billing">

@@ -8,6 +8,7 @@ import {
 } from "@remix-run/react";
 import type { LoaderFunctionArgs, HeadersFunction } from "@remix-run/node";
 import { useOnboardingStateMachine } from "../hooks/useOnboardingStateMachine";
+import { useAnalysis } from "../hooks/useAnalysis";
 import WelcomeStep from "app/components/Onboarding/WelcomeStep";
 import AnalysisStep from "app/components/Onboarding/AnalysisStep";
 import WidgetSetupStep from "app/components/Onboarding/WidgetSetupStep";
@@ -52,8 +53,10 @@ export default function StepPage() {
   const navigate = useNavigate();
   const { session, shopId } = useOutletContext<AppContext>();
 
-  // Use the state machine
-  const { isClient } = useOnboardingStateMachine();
+  // Use the state machine and analysis hook
+  const { isClient, startAnalysis: startOnboarding } =
+    useOnboardingStateMachine();
+  const { startAnalysis, isLoading } = useAnalysis();
 
   console.log("🔍 [STEP_ROUTE] Component rendered with session:", session);
   console.log("🔍 [STEP_ROUTE] Shop ID from context:", shopId);
@@ -85,10 +88,30 @@ export default function StepPage() {
     // Render the appropriate step content based on currentStep
     switch (stepId) {
       case "welcome":
-        return <WelcomeStep onStartAnalysis={() => {}} />;
+        return (
+          <WelcomeStep
+            onStartAnalysis={() => {
+              if (shopId) {
+                // Start the onboarding state machine
+                startOnboarding(shopId);
+                // Start the actual analysis via Redis events
+                startAnalysis();
+                // Navigate to analysis step
+                navigate("/app/step/analysis");
+              }
+            }}
+            isLoading={isLoading}
+          />
+        );
 
       case "analysis":
-        return <AnalysisStep onSetupWidget={() => {}} />;
+        return (
+          <AnalysisStep
+            onSetupWidget={() => {
+              navigate("/app/step/widget-setup");
+            }}
+          />
+        );
 
       case "widget-setup":
         return <WidgetSetupStep />;

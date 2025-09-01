@@ -63,6 +63,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           progress: 5, // Indicate job has been queued
         },
       });
+
+      // Update shop onboarding status to indicate analysis is running
+      // This provides immediate UI feedback, worker will update it further
+      await prisma.shop.update({
+        where: { id: shop.id },
+        data: {
+          onboardingStatus: "analysis_running",
+          lastAnalysisAt: new Date(),
+        },
+      });
     } catch (error) {
       console.error("Error publishing job to Redis Streams:", error);
 
