@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.redis_client import streams_manager
 from app.services.data_collection import DataCollectionService, DataCollectionConfig
 from app.services.scheduler_service import scheduler_service
+from app.services.gorse_service import gorse_service
 from app.core.logging import get_logger, log_error, log_performance, log_stream_event
 
 logger = get_logger(__name__)
@@ -134,6 +135,44 @@ class DataProcessor:
                     shop_id=request.shop_id,
                     features_event_id=features_event_id,
                 )
+
+                # Step 5.5: Send data to Gorse for automatic training (if enabled)
+                if settings.ENABLE_GORSE_SYNC:
+                    try:
+                        await gorse_service.initialize()
+                        gorse_result = await gorse_service.train_model_for_shop(
+                            shop_id=request.shop_id, shop_domain=request.shop_domain
+                        )
+
+                        if gorse_result["success"]:
+                            logger.info(
+                                "Data sent to Gorse successfully",
+                                job_id=request.job_id,
+                                shop_id=request.shop_id,
+                                gorse_result=gorse_result,
+                            )
+                        else:
+                            logger.warning(
+                                "Gorse training failed",
+                                job_id=request.job_id,
+                                shop_id=request.shop_id,
+                                error=gorse_result.get("error"),
+                            )
+                    except Exception as gorse_error:
+                        log_error(
+                            gorse_error,
+                            {
+                                "operation": "gorse_training",
+                                "job_id": request.job_id,
+                                "shop_id": request.shop_id,
+                            },
+                        )
+                        logger.warning(
+                            "Failed to send data to Gorse, but continuing with ML training event",
+                            job_id=request.job_id,
+                            shop_id=request.shop_id,
+                            error=str(gorse_error),
+                        )
 
                 # Step 6: Publish ML training event (decoupled, still triggered here)
                 ml_event_id = await self.streams_manager.publish_ml_training_event(

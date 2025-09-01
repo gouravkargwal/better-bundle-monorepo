@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.database import get_database, close_database
 from app.core.redis_client import get_redis_client, close_redis_client
-from app.api.v1 import data_jobs, health, scheduler
+from app.api.v1 import data_jobs, health, scheduler, gorse
 
 
 # Setup structured logging
@@ -78,6 +78,12 @@ app.include_router(
     scheduler.router,
     prefix="/api/v1/scheduler",
     tags=["scheduler"],
+)
+
+app.include_router(
+    gorse.router,
+    prefix="/api/v1/gorse",
+    tags=["gorse"],
 )
 
 

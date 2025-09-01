@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     FEATURES_COMPUTED_STREAM: str = Field(
         default="betterbundle:features-computed", env="FEATURES_COMPUTED_STREAM"
     )
+    ML_TRAINING_COMPLETE_STREAM: str = Field(
+        default="betterbundle:ml-training-complete", env="ML_TRAINING_COMPLETE_STREAM"
+    )
 
     # Consumer Group Names
     DATA_PROCESSOR_GROUP: str = Field(
@@ -98,13 +101,22 @@ class Settings(BaseSettings):
 
     # Gorse Integration (optional)
     ENABLE_GORSE_SYNC: bool = Field(default=False, env="ENABLE_GORSE_SYNC")
-    GORSE_BASE_URL: str = Field(default="", env="GORSE_BASE_URL")
+    GORSE_BASE_URL: str = Field(default="http://localhost:8088", env="GORSE_BASE_URL")
     GORSE_API_KEY: str = Field(default="", env="GORSE_API_KEY")
+    GORSE_MASTER_KEY: str = Field(default="", env="GORSE_MASTER_KEY")
+
+    # Training Configuration
+    MIN_ORDERS_FOR_TRAINING: int = Field(default=50, env="MIN_ORDERS_FOR_TRAINING")
+    MIN_PRODUCTS_FOR_TRAINING: int = Field(default=20, env="MIN_PRODUCTS_FOR_TRAINING")
+    MAX_RECOMMENDATIONS: int = Field(default=10, env="MAX_RECOMMENDATIONS")
+    MIN_CONFIDENCE_THRESHOLD: float = Field(default=0.3, env="MIN_CONFIDENCE_THRESHOLD")
 
     # SendPulse Email Configuration
     SENDPULSE_USER_ID: str = os.getenv("SENDPULSE_USER_ID", "")
     SENDPULSE_SECRET: str = os.getenv("SENDPULSE_SECRET", "")
-    SENDPULSE_SENDER_EMAIL: str = os.getenv("SENDPULSE_SENDER_EMAIL", "noreply@betterbundle.com")
+    SENDPULSE_SENDER_EMAIL: str = os.getenv(
+        "SENDPULSE_SENDER_EMAIL", "noreply@betterbundle.com"
+    )
     SENDPULSE_SENDER_NAME: str = os.getenv("SENDPULSE_SENDER_NAME", "BetterBundle")
 
     class Config:
