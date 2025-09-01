@@ -1,6 +1,16 @@
 import { useState } from "react";
-import { Page, Layout, Card, BlockStack, Text, Tabs } from "@shopify/polaris";
+import {
+  Page,
+  Layout,
+  Card,
+  BlockStack,
+  Text,
+  Tabs,
+  Button,
+  InlineStack,
+} from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
+import { Link } from "@remix-run/react";
 
 export function Dashboard() {
   const [selectedTab, setSelectedTab] = useState(0);
@@ -45,6 +55,11 @@ export function Dashboard() {
               We analyze your customer behavior to suggest products that sell
               better together.
             </Text>
+            <InlineStack gap="300">
+              <Link to="/app/billing">
+                <Button variant="secondary">💳 Manage Billing & Plans</Button>
+              </Link>
+            </InlineStack>
           </BlockStack>
         </Card>
       </Layout.Section>

@@ -11,9 +11,20 @@ import AnalysisStep from "app/components/Onboarding/AnalysisStep";
 import WidgetSetupStep from "app/components/Onboarding/WidgetSetupStep";
 import DashboardStep from "app/components/Onboarding/DashboardStep";
 
+// Define the step data types
+type StepData =
+  | { type: "welcome" }
+  | { type: "analysis"; activeJob: any }
+  | { type: "widget-setup"; completedJob: any }
+  | { type: "dashboard"; bundleRecommendations: any[]; metrics: any };
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const { stepId } = params;
+
+  if (!stepId) {
+    throw new Response("Step ID is required", { status: 400 });
+  }
 
   // Get the shop
   let shop = await prisma.shop.findUnique({
@@ -52,7 +63,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return { currentStep, shopId: shop.id };
 };
 
-async function getStepData(shopId: string, stepId: string) {
+async function getStepData(shopId: string, stepId: string): Promise<StepData> {
   switch (stepId) {
     case "welcome":
       return { type: "welcome" };
@@ -68,7 +79,7 @@ async function getStepData(shopId: string, stepId: string) {
       const completedJob = await prisma.analysisJob.findFirst({
         where: { shopId, status: "completed" },
       });
-      return { type: "widget_setup", completedJob };
+      return { type: "widget-setup", completedJob };
 
     case "dashboard":
       const [bundleRecommendations, orderData, productData] = await Promise.all(
@@ -134,7 +145,7 @@ export default function StepPage() {
 
   const renderStep = () => {
     // Render the appropriate step content based on currentStep
-    switch (currentStep) {
+    switch (currentStep.type) {
       case "welcome":
         return <WelcomeStep onStartAnalysis={() => {}} />;
 
@@ -166,7 +177,7 @@ export default function StepPage() {
 
   return (
     <Page>
-      <TitleBar title={`BetterBundle - Step ${currentStep}`} />
+      <TitleBar title={`BetterBundle - Step ${currentStep.type}`} />
       <Layout>
         <Layout.Section>
           <Card>{renderStep()}</Card>

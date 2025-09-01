@@ -1,4 +1,5 @@
-import { BlockStack, Text, Button } from "@shopify/polaris";
+import { BlockStack, Text, Button, InlineStack } from "@shopify/polaris";
+import { Link } from "@remix-run/react";
 import PricingPlan from "../Billing/PricingPlan";
 
 interface WelcomeStepProps {
@@ -20,9 +21,17 @@ export default function WelcomeStep({ onStartAnalysis }: WelcomeStepProps) {
       {/* Use the proper PricingPlan component */}
       <PricingPlan showDetails={true} compact={false} />
 
-      <Button variant="primary" size="large" onClick={onStartAnalysis}>
-        🚀 Let's Get Started
-      </Button>
+      <InlineStack gap="300">
+        <Button variant="primary" size="large" onClick={onStartAnalysis}>
+          🚀 Let's Get Started
+        </Button>
+        <Link to="/app/billing">
+          <Button variant="outline" size="large">
+            💳 View Billing Details
+          </Button>
+        </Link>
+      </InlineStack>
+
       <Text as="p" variant="bodySm" tone="subdued" alignment="center">
         We'll analyze your store data and set up your widget in just a few
         minutes.

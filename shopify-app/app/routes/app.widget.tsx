@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { prisma } from "../core/database/prisma.server";
 import { useLoaderData } from "@remix-run/react";
@@ -38,6 +39,48 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.error("Failed to create shop record for widget:", error);
       throw new Response("Failed to create shop record", { status: 500 });
     }
+  }
+
+  // Check if user has completed analysis step
+  const completedJob = await prisma.analysisJob.findFirst({
+    where: {
+      shopId: shop.id,
+      status: "completed",
+      completedAt: { not: null },
+    },
+  });
+
+  if (!completedJob) {
+    // Analysis not completed - redirect to welcome or analysis step
+    const activeJob = await prisma.analysisJob.findFirst({
+      where: {
+        shopId: shop.id,
+        status: { in: ["pending", "processing", "queued"] },
+      },
+    });
+
+    if (activeJob) {
+      // Analysis is running - redirect to analysis step
+      return redirect("/app/step/analysis");
+    } else {
+      // Never started analysis - redirect to welcome
+      return redirect("/app/step/welcome");
+    }
+  }
+
+  // Check if widget setup is needed
+  const bundleRecommendations = await prisma.bundleAnalysisResult.findMany({
+    where: { shopId: shop.id, isActive: true },
+    orderBy: { confidence: "desc" },
+    take: 1,
+  });
+
+  if (bundleRecommendations.length === 0) {
+    // Analysis completed but no results - this is the right place for widget setup
+    // Allow access to widget configuration
+  } else {
+    // User already has data and widget - redirect to dashboard
+    return redirect("/app/step/dashboard");
   }
 
   // Get existing widget configuration
