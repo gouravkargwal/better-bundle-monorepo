@@ -10,22 +10,14 @@ import {
   EmptyState,
   List,
   Badge,
-  DataTable,
   Icon,
   InlineStack,
-  Modal,
   Tabs,
   ProgressBar,
+  ButtonGroup,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import {
-  ClockIcon,
-  DataPresentationIcon,
-  FilterIcon,
-  MoneyIcon,
-  PackageIcon,
-  ViewIcon,
-} from "@shopify/polaris-icons";
+import { MoneyIcon, ViewIcon, CartIcon } from "@shopify/polaris-icons";
 import type { AnalysisState, ErrorState } from "../../types";
 
 interface ModernDashboardProps {
@@ -38,21 +30,30 @@ interface ModernDashboardProps {
   onRetry?: () => void;
 }
 
-interface StreamStatus {
-  name: string;
-  count: number;
-  status: "active" | "idle" | "error";
-  lastActivity: string;
+interface BundleRecommendation {
+  id: string;
+  productIds: string[];
+  productNames: string[];
+  confidence: number;
+  lift: number;
+  revenue: number;
+  avgOrderValue: number;
+  isActive: boolean;
+  discount: number;
 }
 
-interface AnalysisJob {
-  id: string;
-  jobId: string;
-  status: string;
-  progress: number;
-  createdAt: string;
-  completedAt?: string;
-  error?: string;
+interface ShopMetrics {
+  totalOrders: number;
+  totalRevenue: number;
+  avgOrderValue: number;
+  totalProducts: number;
+  activeBundles: number;
+  conversionRate: number;
+  topPerformingBundle: {
+    name: string;
+    revenue: number;
+    conversionRate: number;
+  };
 }
 
 export function ModernDashboard({
@@ -65,110 +66,91 @@ export function ModernDashboard({
   onRetry,
 }: ModernDashboardProps) {
   const [selectedTab, setSelectedTab] = useState(0);
-  const [streamStatus, setStreamStatus] = useState<StreamStatus[]>([]);
-  const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
-  const [showStreamModal, setShowStreamModal] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(
-    null,
-  );
+  const [bundleRecommendations, setBundleRecommendations] = useState<
+    BundleRecommendation[]
+  >([]);
+  const [shopMetrics, setShopMetrics] = useState<ShopMetrics>({
+    totalOrders: 0,
+    totalRevenue: 0,
+    avgOrderValue: 0,
+    totalProducts: 0,
+    activeBundles: 0,
+    conversionRate: 0,
+    topPerformingBundle: {
+      name: "No bundles yet",
+      revenue: 0,
+      conversionRate: 0,
+    },
+  });
 
-  // Mock stream status data (replace with real API calls)
+  // Mock data - replace with real API calls
   useEffect(() => {
-    const mockStreams: StreamStatus[] = [
-      {
-        name: "betterbundle:data-jobs",
-        count: 12,
-        status: "active",
-        lastActivity: "2 minutes ago",
-      },
-      {
-        name: "betterbundle:ml-training",
-        count: 3,
-        status: "active",
-        lastActivity: "5 minutes ago",
-      },
-      {
-        name: "betterbundle:analysis-results",
-        count: 8,
-        status: "active",
-        lastActivity: "1 minute ago",
-      },
-      {
-        name: "betterbundle:user-notifications",
-        count: 0,
-        status: "idle",
-        lastActivity: "Never",
-      },
-      {
-        name: "betterbundle:features-computed",
-        count: 15,
-        status: "active",
-        lastActivity: "30 seconds ago",
-      },
-    ];
-    setStreamStatus(mockStreams);
-  }, []);
-
-  // Mock analysis jobs data (replace with real API calls)
-  useEffect(() => {
-    const mockJobs: AnalysisJob[] = [
+    const mockBundles: BundleRecommendation[] = [
       {
         id: "1",
-        jobId: "analysis_1234567890_abc123",
-        status: "completed",
-        progress: 100,
-        createdAt: "2024-01-15T10:30:00Z",
-        completedAt: "2024-01-15T10:35:00Z",
+        productIds: ["prod_1", "prod_2"],
+        productNames: ["Wireless Headphones", "Phone Case"],
+        confidence: 0.85,
+        lift: 2.3,
+        revenue: 1250.5,
+        avgOrderValue: 89.5,
+        isActive: true,
+        discount: 15,
       },
       {
         id: "2",
-        jobId: "analysis_1234567891_def456",
-        status: "processing",
-        progress: 75,
-        createdAt: "2024-01-15T11:00:00Z",
+        productIds: ["prod_3", "prod_4", "prod_5"],
+        productNames: ["Laptop Stand", "Wireless Mouse", "USB Hub"],
+        confidence: 0.72,
+        lift: 1.8,
+        revenue: 890.25,
+        avgOrderValue: 67.25,
+        isActive: true,
+        discount: 20,
       },
     ];
-    setAnalysisJobs(mockJobs);
+
+    const mockMetrics: ShopMetrics = {
+      totalOrders: 156,
+      totalRevenue: 12450.75,
+      avgOrderValue: 79.81,
+      totalProducts: 89,
+      activeBundles: 2,
+      conversionRate: 3.2,
+      topPerformingBundle: {
+        name: "Wireless Headphones + Phone Case",
+        revenue: 1250.5,
+        conversionRate: 4.1,
+      },
+    };
+
+    setBundleRecommendations(mockBundles);
+    setShopMetrics(mockMetrics);
   }, []);
-
-  // Set up refresh interval
-  useEffect(() => {
-    if (state === "queued" || state === "processing") {
-      const interval = setInterval(() => {
-        // Refresh stream status and job progress
-        console.log("🔄 Refreshing dashboard data...");
-      }, 5000);
-      setRefreshInterval(interval);
-
-      return () => {
-        if (interval) clearInterval(interval);
-      };
-    }
-  }, [state]);
 
   const tabs = [
     {
       id: "overview",
       content: "Overview",
-      accessibilityLabel: "Dashboard overview",
+      accessibilityLabel: "Business overview",
       panelID: "overview-panel",
     },
     {
-      id: "streams",
-      content: "Event Streams",
-      accessibilityLabel: "Redis streams monitoring",
-      panelID: "streams-panel",
+      id: "bundles",
+      content: "Product Bundles",
+      accessibilityLabel: "Active bundle recommendations",
+      panelID: "bundles-panel",
     },
     {
-      id: "jobs",
-      content: "Analysis Jobs",
-      accessibilityLabel: "Analysis job history",
-      panelID: "jobs-panel",
+      id: "performance",
+      content: "Performance",
+      accessibilityLabel: "Sales and conversion metrics",
+      panelID: "performance-panel",
     },
     {
       id: "insights",
-      content: "Live Insights",
-      accessibilityLabel: "Real-time insights",
+      content: "Insights",
+      accessibilityLabel: "Actionable business insights",
       panelID: "insights-panel",
     },
   ];
@@ -179,11 +161,12 @@ export function ModernDashboard({
         <Card>
           <BlockStack gap="500">
             <Text as="h2" variant="headingMd">
-              🚀 Real-Time Bundle Analysis
+              🚀 Welcome to BetterBundle
             </Text>
             <Text as="p" variant="bodyMd">
-              Our modern event-driven system analyzes your store data in
-              real-time using Redis Streams and AI-powered insights.
+              Boost your sales with AI-powered product bundle recommendations.
+              We analyze your customer behavior to suggest products that sell
+              better together.
             </Text>
 
             {state === "idle" && (
@@ -194,7 +177,7 @@ export function ModernDashboard({
                 disabled={isSubmitting}
                 loading={isSubmitting}
               >
-                {isSubmitting ? "Starting..." : "🚀 Start Real-Time Analysis"}
+                {isSubmitting ? "Starting..." : "🚀 Start Bundle Analysis"}
               </Button>
             )}
 
@@ -202,14 +185,15 @@ export function ModernDashboard({
               <BlockStack gap="400">
                 <Banner title="🔄 Analysis in Progress" tone="info">
                   <p>
-                    Your analysis is being processed in real-time. Check the
-                    Event Streams tab to monitor progress.
+                    We're analyzing your store data to find the best product
+                    combinations. This usually takes 5-10 minutes.
                   </p>
                 </Banner>
                 <ProgressBar progress={progress} size="large" />
-                                    <Text as="p" variant="bodySm" tone="subdued">
-                      Job ID: {jobId?.substring(0, 12)}...
-                    </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Estimated time remaining:{" "}
+                  {Math.max(0, Math.ceil((100 - progress) / 10))} minutes
+                </Text>
               </BlockStack>
             )}
           </BlockStack>
@@ -220,66 +204,85 @@ export function ModernDashboard({
         <Card>
           <BlockStack gap="400">
             <Text as="h3" variant="headingMd">
-              📊 System Status
+              📊 Your Store at a Glance
             </Text>
             <Layout>
               <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="200" align="center">
-                    <Icon source={PackageIcon} />
-                                         <Text as="h4" variant="headingMd">
-                       {
-                         streamStatus.filter(
-                           (s) => s.status === "active" || s.status === "idle",
-                         ).length
-                       }
-                     </Text>
-                     <Text as="p" variant="bodySm" tone="subdued">
-                       Active Streams
-                     </Text>
+                    <Icon source={MoneyIcon} />
+                    <Text as="h4" variant="headingMd">
+                      ${shopMetrics.totalRevenue.toLocaleString()}
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Total Revenue
+                    </Text>
                   </BlockStack>
                 </Card>
               </Layout.Section>
               <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="200" align="center">
-                    <Icon source={DataPresentationIcon} />
+                    <Icon source={CartIcon} />
                     <Text variant="headingMd" as="h4">
-                      {
-                        analysisJobs.filter(
-                          (j) =>
-                            j.status === "completed" ||
-                            j.status === "processing",
-                        ).length
-                      }
-                      {
-                        analysisJobs.filter((j) => j.status === "completed")
-                          .length
-                      }
-                      {
-                        analysisJobs.filter((j) => j.status === "processing")
-                          .length
-                      }
+                      {shopMetrics.totalOrders}
                     </Text>
-                                         <Text as="p" variant="bodySm" tone="subdued">
-                       Completed Jobs
-                     </Text>
-                   </BlockStack>
-                 </Card>
-               </Layout.Section>
-               <Layout.Section>
-                 <Card padding="400">
-                   <BlockStack gap="200" align="center">
-                     <Icon source={ClockIcon} />
-                     <Text as="h4" variant="headingMd">
-                       {
-                         analysisJobs.filter((j) => j.status === "processing")
-                           .length
-                       }
-                     </Text>
-                     <Text as="p" variant="bodySm" tone="subdued">
-                       Active Jobs
-                     </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Total Orders
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+              <Layout.Section>
+                <Card padding="400">
+                  <BlockStack gap="200" align="center">
+                    <Icon source={MoneyIcon} />
+                    <Text as="h4" variant="headingMd">
+                      {shopMetrics.conversionRate}%
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Conversion Rate
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+            </Layout>
+          </BlockStack>
+        </Card>
+      </Layout.Section>
+
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
+            <Text as="h3" variant="headingMd">
+              🎯 Top Performing Bundle
+            </Text>
+            <Layout>
+              <Layout.Section>
+                <Card padding="400">
+                  <BlockStack gap="300">
+                    <Text variant="headingSm" as="h4">
+                      {shopMetrics.topPerformingBundle.name}
+                    </Text>
+                    <InlineStack gap="400">
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Revenue Generated
+                        </Text>
+                        <Text as="h4" variant="headingMd">
+                          $
+                          {shopMetrics.topPerformingBundle.revenue.toLocaleString()}
+                        </Text>
+                      </BlockStack>
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Conversion Rate
+                        </Text>
+                        <Text as="h4" variant="headingMd">
+                          {shopMetrics.topPerformingBundle.conversionRate}%
+                        </Text>
+                      </BlockStack>
+                    </InlineStack>
                   </BlockStack>
                 </Card>
               </Layout.Section>
@@ -290,103 +293,189 @@ export function ModernDashboard({
     </Layout>
   );
 
-  const renderStreams = () => (
+  const renderBundles = () => (
     <Layout>
       <Layout.Section>
         <Card>
           <BlockStack gap="400">
             <InlineStack align="space-between">
               <Text as="h3" variant="headingMd">
-                📡 Redis Streams Monitor
+                🎁 Active Product Bundles
               </Text>
-              <Button
-                variant="secondary"
-                size="small"
-                onClick={() => setShowStreamModal(true)}
-                icon={ViewIcon}
-              >
-                View Details
+              <Button variant="secondary" size="medium" icon={ViewIcon}>
+                View All
               </Button>
             </InlineStack>
 
-            <DataTable
-              columnContentTypes={["text", "numeric", "text", "text"]}
-              headings={[
-                "Stream Name",
-                "Message Count",
-                "Status",
-                "Last Activity",
-              ]}
-              rows={streamStatus.map((stream) => [
-                stream.name,
-                stream.count.toString(),
-                <Badge
-                  tone={
-                    stream.status === "active"
-                      ? "success"
-                      : stream.status === "idle"
-                        ? "info"
-                        : "critical"
-                  }
-                >
-                  {stream.status}
-                </Badge>,
-                stream.lastActivity,
-              ])}
-            />
+            {bundleRecommendations.length === 0 ? (
+              <EmptyState
+                heading="No bundles yet"
+                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+              >
+                <p>
+                  Start your first analysis to discover product bundles that
+                  sell better together.
+                </p>
+              </EmptyState>
+            ) : (
+              <BlockStack gap="400">
+                {bundleRecommendations.map((bundle) => (
+                  <Card key={bundle.id} padding="400">
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between">
+                        <Text variant="headingSm" as="h4">
+                          {bundle.productNames.join(" + ")}
+                        </Text>
+                        <Badge tone={bundle.isActive ? "success" : "warning"}>
+                          {bundle.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </InlineStack>
+
+                      <Text as="p" variant="bodySm">
+                        {bundle.productNames.length} products •{" "}
+                        {bundle.discount}% discount
+                      </Text>
+
+                      <Layout>
+                        <Layout.Section>
+                          <Card padding="400">
+                            <BlockStack gap="200">
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                Revenue Generated
+                              </Text>
+                              <Text as="h4" variant="headingMd">
+                                ${bundle.revenue.toLocaleString()}
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                        </Layout.Section>
+                        <Layout.Section>
+                          <Card padding="400">
+                            <BlockStack gap="200">
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                Avg Order Value
+                              </Text>
+                              <Text as="h4" variant="headingMd">
+                                ${bundle.avgOrderValue}
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                        </Layout.Section>
+                        <Layout.Section>
+                          <Card padding="400">
+                            <BlockStack gap="200">
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                Confidence
+                              </Text>
+                              <Text as="h4" variant="headingMd">
+                                {(bundle.confidence * 100).toFixed(0)}%
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                        </Layout.Section>
+                      </Layout>
+
+                      <InlineStack gap="200">
+                        <Button variant="secondary" size="medium">
+                          View Details
+                        </Button>
+                        <Button variant="secondary" size="medium">
+                          Edit Bundle
+                        </Button>
+                      </InlineStack>
+                    </BlockStack>
+                  </Card>
+                ))}
+              </BlockStack>
+            )}
           </BlockStack>
         </Card>
       </Layout.Section>
     </Layout>
   );
 
-  const renderJobs = () => (
+  const renderPerformance = () => (
     <Layout>
       <Layout.Section>
         <Card>
           <BlockStack gap="400">
             <Text as="h3" variant="headingMd">
-              🔍 Analysis Job History
+              📈 Sales Performance
             </Text>
 
-            {analysisJobs.length === 0 ? (
-              <EmptyState
-                heading="No analysis jobs yet"
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-              >
-                <p>Start your first analysis to see job history here.</p>
-              </EmptyState>
-            ) : (
-              <DataTable
-                columnContentTypes={["text", "text", "numeric", "text", "text"]}
-                headings={[
-                  "Job ID",
-                  "Status",
-                  "Progress",
-                  "Created",
-                  "Completed",
-                ]}
-                rows={analysisJobs.map((job) => [
-                  job.jobId.substring(0, 12) + "...",
-                  <Badge
-                    tone={
-                      job.status === "completed"
-                        ? "success"
-                        : job.status === "processing"
-                          ? "info"
-                          : "warning"
-                    }
-                  >
-                    {job.status}
-                  </Badge>,
-                  `${job.progress}%`,
-                  new Date(job.createdAt).toLocaleDateString(),
-                  job.completedAt
-                    ? new Date(job.completedAt).toLocaleDateString()
-                    : "-",
-                ])}
-              />
-            )}
+            <Layout>
+              <Layout.Section>
+                <Card padding="400">
+                  <BlockStack gap="300">
+                    <Text variant="headingSm" as="h4">
+                      💰 Revenue Metrics
+                    </Text>
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Total Revenue
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          ${shopMetrics.totalRevenue.toLocaleString()}
+                        </Text>
+                      </InlineStack>
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Average Order Value
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          ${shopMetrics.avgOrderValue}
+                        </Text>
+                      </InlineStack>
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Total Orders
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          {shopMetrics.totalOrders}
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+
+              <Layout.Section>
+                <Card padding="400">
+                  <BlockStack gap="300">
+                    <Text variant="headingSm" as="h4">
+                      🎯 Conversion Metrics
+                    </Text>
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Overall Conversion
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          {shopMetrics.conversionRate}%
+                        </Text>
+                      </InlineStack>
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Active Bundles
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          {shopMetrics.activeBundles}
+                        </Text>
+                      </InlineStack>
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodySm">
+                          Total Products
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          {shopMetrics.totalProducts}
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+            </Layout>
           </BlockStack>
         </Card>
       </Layout.Section>
@@ -399,67 +488,69 @@ export function ModernDashboard({
         <Card>
           <BlockStack gap="400">
             <Text as="h3" variant="headingMd">
-              💡 Live Insights
+              💡 Actionable Insights
             </Text>
 
-            <Banner title="🔄 Real-Time Processing" tone="info">
-              <p>
-                Your analysis results are being computed in real-time. Check
-                back here for live insights as they become available.
-              </p>
-            </Banner>
-
             <Layout>
-              <Layout.Section oneHalf>
+              <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="300">
                     <Text variant="headingSm" as="h4">
-                      🧠 AI Processing
+                      🚀 Quick Wins
                     </Text>
-                    <Text variant="bodySm" tone="subdued">
-                      Our AI models are analyzing your data patterns in
-                      real-time to discover optimal product bundles.
-                    </Text>
-                    <InlineStack gap="200">
-                      <Text variant="bodySm">Pattern Recognition</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Icon source={PackageIcon} />
-                      <Text variant="bodySm">Bundle Optimization</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Icon source={MoneyIcon} />
-                      <Text variant="bodySm">Revenue Prediction</Text>
-                    </InlineStack>
+                    <List>
+                      <List.Item>
+                        Your "Wireless Headphones + Phone Case" bundle is
+                        performing 2.3x better than individual products
+                      </List.Item>
+                      <List.Item>
+                        Consider increasing the discount on your laptop
+                        accessories bundle to boost conversions
+                      </List.Item>
+                      <List.Item>
+                        You have 15 products that could benefit from bundle
+                        recommendations
+                      </List.Item>
+                    </List>
                   </BlockStack>
                 </Card>
               </Layout.Section>
 
-              <Layout.Section oneHalf>
+              <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="300">
                     <Text variant="headingSm" as="h4">
-                      📊 Data Pipeline
+                      📊 Growth Opportunities
                     </Text>
-                    <Text variant="bodySm" tone="subdued">
-                      Your data flows through our event-driven pipeline for
-                      real-time processing and insights.
-                    </Text>
-                    <InlineStack gap="200">
-                      <Text variant="bodySm">Data Collection</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Icon source={FilterIcon} />
-                      <Text variant="bodySm">Feature Engineering</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Icon source={DataPresentationIcon} />
-                      <Text variant="bodySm">Real-Time Analysis</Text>
-                    </InlineStack>
+                    <List>
+                      <List.Item>
+                        Bundle recommendations could increase your AOV by 15-25%
+                      </List.Item>
+                      <List.Item>
+                        Consider seasonal bundles for upcoming holidays
+                      </List.Item>
+                      <List.Item>
+                        Your conversion rate could improve by 1-2% with better
+                        product placement
+                      </List.Item>
+                    </List>
                   </BlockStack>
                 </Card>
               </Layout.Section>
             </Layout>
+
+            <Card padding="400">
+              <BlockStack gap="300">
+                <Text variant="headingSm" as="h4">
+                  🎯 Next Steps
+                </Text>
+                <ButtonGroup>
+                  <Button variant="primary">Create New Bundle</Button>
+                  <Button variant="secondary">View Analytics</Button>
+                  <Button variant="secondary">Export Report</Button>
+                </ButtonGroup>
+              </BlockStack>
+            </Card>
           </BlockStack>
         </Card>
       </Layout.Section>
@@ -471,9 +562,9 @@ export function ModernDashboard({
       case 0:
         return renderOverview();
       case 1:
-        return renderStreams();
+        return renderBundles();
       case 2:
-        return renderJobs();
+        return renderPerformance();
       case 3:
         return renderInsights();
       default:
@@ -507,7 +598,10 @@ export function ModernDashboard({
                 )}
 
                 <BlockStack gap="300">
-                  <Button variant="primary" onClick={onStartAnalysis}>
+                  <Button
+                    variant="primary"
+                    onClick={onRetry || onStartAnalysis}
+                  >
                     🔄 Try Again
                   </Button>
                 </BlockStack>
@@ -521,51 +615,11 @@ export function ModernDashboard({
 
   return (
     <Page>
-      <TitleBar title="BetterBundle - Modern Dashboard" />
+      <TitleBar title="BetterBundle - Smart Product Bundles" />
 
       <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
         {renderTabContent()}
       </Tabs>
-
-      {/* Stream Details Modal */}
-      <Modal
-        open={showStreamModal}
-        onClose={() => setShowStreamModal(false)}
-        title="Redis Stream Details"
-        primaryAction={{
-          content: "Close",
-          onAction: () => setShowStreamModal(false),
-        }}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <Text as="p">
-              Detailed information about each Redis stream and its current
-              status.
-            </Text>
-            {streamStatus.map((stream, index) => (
-              <Card key={index} padding="400">
-                <BlockStack gap="200">
-                  <Text variant="headingSm" as="h4">
-                    {stream.name}
-                  </Text>
-                  <InlineStack gap="400">
-                    <Badge
-                      tone={stream.status === "active" ? "success" : "info"}
-                    >
-                      {stream.status}
-                    </Badge>
-                    <Text variant="bodySm">{stream.count} messages</Text>
-                  </InlineStack>
-                  <Text variant="bodySm" tone="subdued">
-                    Last activity: {stream.lastActivity}
-                  </Text>
-                </BlockStack>
-              </Card>
-            ))}
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
     </Page>
   );
 }

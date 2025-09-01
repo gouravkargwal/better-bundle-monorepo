@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.redis_client import streams_manager
 from app.services.data_collection import DataCollectionService, DataCollectionConfig
-from app.services.scheduler_service import scheduler_service
+
 from app.services.gorse_service import gorse_service
 from app.core.logging import get_logger, log_error, log_performance, log_stream_event
 
