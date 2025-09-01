@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { Logger } from "../utils/logger";
-import { DatabaseOrder, DatabaseProduct } from "./shopify-api.service";
+import {
+  DatabaseOrder,
+  DatabaseProduct,
+  DatabaseCustomer,
+} from "./shopify-api.service";
 
 export interface ShopData {
   id: string;
@@ -172,6 +176,9 @@ export const clearShopData = async (
       await config.prisma.productData.deleteMany({
         where: { shopId: shopDbId },
       });
+      await config.prisma.customerData.deleteMany({
+        where: { shopId: shopDbId },
+      });
     },
     "Data cleanup",
     { shopDbId }
@@ -222,6 +229,12 @@ export const saveOrders = async (
           customerId: order.customerId?.id || null,
           totalAmount: parseFloat(order.totalAmount.shopMoney.amount),
           orderDate: new Date(order.orderDate),
+          orderStatus:
+            order.displayFinancialStatus || order.fulfillmentStatus || null,
+          currencyCode:
+            order.currencyCode ||
+            order.totalAmount.shopMoney.currencyCode ||
+            null,
           lineItems: cleanLineItems,
         };
       });
@@ -272,12 +285,22 @@ export const saveProducts = async (
             update: {
               title: product.title,
               handle: product.handle,
+              description: product.description || null,
               category: product.product_type || null,
+              vendor: product.vendor || null,
               price: parseFloat(product.variants?.[0]?.price || "0"),
+              compareAtPrice: product.variants?.[0]?.compareAtPrice
+                ? parseFloat(product.variants[0].compareAtPrice)
+                : null,
               inventory: product.variants?.[0]?.inventory_quantity || 0,
               tags: product.tags,
               imageUrl: product.image?.src || null,
               imageAlt: product.image?.alt || null,
+              productCreatedAt: product.created_at
+                ? new Date(product.created_at)
+                : null,
+              variants: product.variants as any,
+              metafields: product.metafields as any,
               isActive: true,
               updatedAt: new Date(),
             },
@@ -286,12 +309,22 @@ export const saveProducts = async (
               productId: product.id.toString(),
               title: product.title,
               handle: product.handle,
+              description: product.description || null,
               category: product.product_type || null,
+              vendor: product.vendor || null,
               price: parseFloat(product.variants?.[0]?.price || "0"),
+              compareAtPrice: product.variants?.[0]?.compareAtPrice
+                ? parseFloat(product.variants[0].compareAtPrice)
+                : null,
               inventory: product.variants?.[0]?.inventory_quantity || 0,
               tags: product.tags,
               imageUrl: product.image?.src || null,
               imageAlt: product.image?.alt || null,
+              productCreatedAt: product.created_at
+                ? new Date(product.created_at)
+                : null,
+              variants: product.variants as any,
+              metafields: product.metafields as any,
               isActive: true,
             },
           });
@@ -303,12 +336,22 @@ export const saveProducts = async (
           productId: product.id.toString(),
           title: product.title,
           handle: product.handle,
+          description: product.description || null,
           category: product.product_type || null,
+          vendor: product.vendor || null,
           price: parseFloat(product.variants?.[0]?.price || "0"),
+          compareAtPrice: product.variants?.[0]?.compareAtPrice
+            ? parseFloat(product.variants[0].compareAtPrice)
+            : null,
           inventory: product.variants?.[0]?.inventory_quantity || 0,
           tags: product.tags,
           imageUrl: product.image?.src || null,
           imageAlt: product.image?.alt || null,
+          productCreatedAt: product.created_at
+            ? new Date(product.created_at)
+            : null,
+          variants: product.variants as any,
+          metafields: product.metafields as any,
           isActive: true,
         }));
 
@@ -320,6 +363,78 @@ export const saveProducts = async (
     "Product data processing and saving",
     {
       productsProcessed: products.length,
+      isIncremental,
+    }
+  );
+};
+
+// Save customers to database
+export const saveCustomers = async (
+  config: DatabaseConfig,
+  shopDbId: string,
+  customers: DatabaseCustomer[],
+  isIncremental: boolean = false
+): Promise<void> => {
+  await withDatabaseHealthCheck(
+    config,
+    async () => {
+      if (customers.length === 0) {
+        Logger.info("No customers to save");
+        return;
+      }
+
+      Logger.info("Processing customers for database", {
+        customersCount: customers.length,
+        isIncremental,
+      });
+
+      for (const customer of customers) {
+        await config.prisma.customerData.upsert({
+          where: {
+            shopId_customerId: {
+              shopId: shopDbId,
+              customerId: customer.id,
+            },
+          },
+          update: {
+            email: customer.email || null,
+            firstName: customer.firstName || null,
+            lastName: customer.lastName || null,
+            createdAtShopify: customer.createdAt
+              ? new Date(customer.createdAt)
+              : null,
+            lastOrderId: customer.lastOrder?.id || null,
+            lastOrderDate: customer.lastOrder?.processedAt
+              ? new Date(customer.lastOrder.processedAt)
+              : null,
+            tags: customer.tags || [],
+            location: customer.addresses || [],
+            metafields: customer.metafields || [],
+            updatedAt: new Date(),
+          },
+          create: {
+            shopId: shopDbId,
+            customerId: customer.id,
+            email: customer.email || null,
+            firstName: customer.firstName || null,
+            lastName: customer.lastName || null,
+            createdAtShopify: customer.createdAt
+              ? new Date(customer.createdAt)
+              : null,
+            lastOrderId: customer.lastOrder?.id || null,
+            lastOrderDate: customer.lastOrder?.processedAt
+              ? new Date(customer.lastOrder.processedAt)
+              : null,
+            tags: customer.tags || [],
+            location: customer.addresses || [],
+            metafields: customer.metafields || [],
+          },
+        });
+      }
+    },
+    "Customer data processing and saving",
+    {
+      customersProcessed: customers.length,
       isIncremental,
     }
   );

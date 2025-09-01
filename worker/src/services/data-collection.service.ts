@@ -3,15 +3,18 @@ import {
   createShopifyAxiosInstance,
   fetchOrders,
   fetchProducts,
+  fetchCustomers,
   ShopifyApiConfig,
   DatabaseOrder,
   DatabaseProduct,
+  DatabaseCustomer,
 } from "./shopify-api.service";
 import {
   getOrCreateShop,
   clearShopData,
   saveOrders,
   saveProducts,
+  saveCustomers,
   updateShopLastAnalysis,
   getLatestTimestamps,
   DatabaseConfig,
@@ -26,6 +29,7 @@ export interface DataCollectionConfig {
 export interface DataCollectionResult {
   orders: DatabaseOrder[];
   products: DatabaseProduct[];
+  customers: DatabaseCustomer[];
   shopDbId: string;
 }
 
@@ -106,6 +110,7 @@ export const collectAndSaveShopData = async (
       fetchOrders(shopifyApi, sinceDate),
       fetchProducts(shopifyApi),
     ]);
+    const customers = await fetchCustomers(shopifyApi, sinceDate);
 
     const parallelDuration = Date.now() - parallelStartTime;
 
@@ -113,11 +118,13 @@ export const collectAndSaveShopData = async (
       shopDomain,
       ordersCount: orders.length,
       productsCount: products.length,
+      customersCount: customers.length,
     });
 
     Logger.info("Data collection completed", {
       ordersCount: orders.length,
       productsCount: products.length,
+      customersCount: customers.length,
       totalDuration: Date.now() - startTime,
     });
 
@@ -128,6 +135,7 @@ export const collectAndSaveShopData = async (
     await Promise.all([
       saveProducts(config.database, shopDbId, products),
       saveOrders(config.database, shopDbId, orders),
+      saveCustomers(config.database, shopDbId, customers),
     ]);
 
     // Update shop's last analysis timestamp
@@ -152,6 +160,7 @@ export const collectAndSaveShopData = async (
     return {
       orders,
       products,
+      customers,
       shopDbId,
     };
   } catch (error) {
@@ -295,6 +304,7 @@ export const collectIncrementalShopData = async (
       fetchOrders(shopifyApi, sinceDate),
       fetchProducts(shopifyApi, sinceDate),
     ]);
+    const customers = await fetchCustomers(shopifyApi, sinceDate);
 
     const parallelDuration = Date.now() - parallelStartTime;
 
@@ -305,6 +315,7 @@ export const collectIncrementalShopData = async (
         shopDomain,
         ordersCount: orders.length,
         productsCount: products.length,
+        customersCount: customers.length,
       }
     );
 
@@ -318,6 +329,7 @@ export const collectIncrementalShopData = async (
     await Promise.all([
       saveProducts(config.database, shopDbId, products, true),
       saveOrders(config.database, shopDbId, orders, true),
+      saveCustomers(config.database, shopDbId, customers, true),
     ]);
 
     // Update shop's last analysis timestamp
@@ -349,6 +361,7 @@ export const collectIncrementalShopData = async (
     return {
       orders,
       products,
+      customers,
       shopDbId,
     };
   } catch (error) {

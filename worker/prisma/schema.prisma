@@ -67,6 +67,8 @@ model OrderData {
   totalAmount Float    // From GraphQL 'total_price'
   orderDate   DateTime // From GraphQL 'created_at'
   lineItems   Json     // From GraphQL 'line_items' - direct JSON storage
+  orderStatus String?  // financial/fulfillment status for filtering
+  currencyCode String? // ISO currency code
   createdAt   DateTime @default(now())
   
   // Relationships
@@ -84,13 +86,19 @@ model ProductData {
   productId   String   // Shopify product ID
   title       String
   handle      String
+  description String?  // Product description for embeddings
   category    String?
+  vendor      String?
   price       Float
+  compareAtPrice Float?
   inventory   Int?
   tags        Json?    // Store tags as JSON array
   imageUrl    String?  // Product image URL
   imageAlt    String?  // Product image alt text
   isActive    Boolean  @default(true)
+  productCreatedAt DateTime? // When product was created in Shopify
+  variants    Json?    // Variants array (id, options, price, inventory)
+  metafields  Json?    // Product metafields for business-specific features
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -101,6 +109,30 @@ model ProductData {
   @@index([shopId, category])
   @@index([shopId, price])
   @@index([shopId, isActive])
+}
+
+// Customer profiles cache
+model CustomerData {
+  id              String   @id @default(cuid())
+  shopId          String
+  customerId      String
+  email           String?
+  firstName       String?
+  lastName        String?
+  createdAtShopify DateTime? // Customer account creation date in Shopify
+  lastOrderId     String?
+  lastOrderDate   DateTime?
+  tags            Json?
+  location        Json?    // Addresses or geo info
+  metafields      Json?    // Custom metafields
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relationships
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, createdAtShopify])
 }
 
 // Simplified bundle analysis results
@@ -155,6 +187,7 @@ model WidgetEvent {
   id          String   @id @default(cuid())
   shopId      String
   sessionId   String   // Customer session ID
+  userId      String?  // Optional user identifier when available
   bundleId    String?  // Reference to bundle analysis result
   action      String   // view, click, add_to_cart, purchase
   productIds  String[] // Products involved in the interaction
@@ -166,6 +199,28 @@ model WidgetEvent {
   @@index([shopId, sessionId])
   @@index([shopId, action])
   @@index([shopId, timestamp])
+}
+
+// Generic product review data (from external review apps)
+model ProductReview {
+  id          String   @id @default(cuid())
+  shopId      String
+  reviewId    String
+  productId   String
+  userId      String?
+  rating      Int
+  reviewText  String?
+  reviewDate  DateTime
+  source      String?  // Review provider/app
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Relationships
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, reviewId])
+  @@index([shopId, productId])
+  @@index([shopId, reviewDate])
 }
 
 // Widget configuration for each shop

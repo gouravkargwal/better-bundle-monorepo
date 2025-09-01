@@ -106,6 +106,81 @@ export const createServerService = (config: ServerConfig): ServerService => {
       }
     });
 
+    // Ingest storefront events (views, clicks, add-to-cart)
+    app.post("/api/events", async (req, res) => {
+      try {
+        const {
+          shopId,
+          sessionId,
+          userId,
+          action,
+          productIds,
+          timestamp,
+          metadata,
+        } = req.body;
+        if (!shopId || !sessionId || !action || !Array.isArray(productIds)) {
+          return res
+            .status(400)
+            .json({ success: false, error: "Missing required fields" });
+        }
+
+        await config.database.prisma.widgetEvent.create({
+          data: {
+            shopId,
+            sessionId,
+            userId: userId || null,
+            action,
+            productIds,
+            timestamp: timestamp ? new Date(timestamp) : undefined,
+          },
+        });
+
+        res.json({ success: true });
+      } catch (error) {
+        Logger.error("Failed to ingest event", { error, body: req.body });
+        res
+          .status(500)
+          .json({ success: false, error: "Failed to ingest event" });
+      }
+    });
+
+    // Ingest product reviews
+    app.post("/api/reviews", async (req, res) => {
+      try {
+        const { shopId, reviews } = req.body;
+        if (!shopId || !Array.isArray(reviews)) {
+          return res
+            .status(400)
+            .json({ success: false, error: "Missing required fields" });
+        }
+
+        const data = reviews.map((r: any) => ({
+          shopId,
+          reviewId: r.review_id || r.id,
+          productId: r.product_id,
+          userId: r.user_id || null,
+          rating: r.rating,
+          reviewText: r.review_text || r.body || null,
+          reviewDate: r.review_date ? new Date(r.review_date) : new Date(),
+          source: r.source || r.provider || null,
+          metadata: r.metadata || {},
+        }));
+
+        // Upsert-like behavior using createMany with skip duplicates on unique(reviewId)
+        await config.database.prisma.productReview.createMany({
+          data,
+          skipDuplicates: true,
+        });
+
+        res.json({ success: true, saved: data.length });
+      } catch (error) {
+        Logger.error("Failed to ingest reviews", { error, body: req.body });
+        res
+          .status(500)
+          .json({ success: false, error: "Failed to ingest reviews" });
+      }
+    });
+
     // Cron service endpoint to check analysis schedules
     app.get("/api/cron/check-schedules", async (req, res) => {
       const startTime = Date.now();
@@ -113,32 +188,38 @@ export const createServerService = (config: ServerConfig): ServerService => {
 
       try {
         // Get all shops that need analysis based on heuristic decisions
-        const shopsNeedingAnalysis = await config.database.prisma.shop.findMany({
-          where: {
-            lastAnalysisAt: {
-              not: null,
+        const shopsNeedingAnalysis = await config.database.prisma.shop.findMany(
+          {
+            where: {
+              lastAnalysisAt: {
+                not: null,
+              },
             },
-          },
-          select: {
-            id: true,
-            shopId: true,
-            shopDomain: true,
-            lastAnalysisAt: true,
-          },
-        });
+            select: {
+              id: true,
+              shopId: true,
+              shopDomain: true,
+              lastAnalysisAt: true,
+            },
+          }
+        );
 
         const analysisCandidates = [];
 
         for (const shop of shopsNeedingAnalysis) {
           // Get the latest heuristic decision for this shop
-          const latestDecision = await config.database.prisma.heuristicDecision.findFirst({
-            where: { shopId: shop.id },
-            orderBy: { createdAt: 'desc' },
-          });
+          const latestDecision =
+            await config.database.prisma.heuristicDecision.findFirst({
+              where: { shopId: shop.id },
+              orderBy: { createdAt: "desc" },
+            });
 
           if (latestDecision && latestDecision.metadata?.nextAnalysisHours) {
             const nextAnalysisTime = new Date(shop.lastAnalysisAt!);
-            nextAnalysisTime.setHours(nextAnalysisTime.getHours() + latestDecision.metadata.nextAnalysisHours);
+            nextAnalysisTime.setHours(
+              nextAnalysisTime.getHours() +
+                latestDecision.metadata.nextAnalysisHours
+            );
 
             if (new Date() >= nextAnalysisTime) {
               analysisCandidates.push({

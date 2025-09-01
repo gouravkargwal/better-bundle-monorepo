@@ -6,9 +6,14 @@ export interface DatabaseOrder {
   totalAmount: {
     shopMoney: {
       amount: string;
+      currencyCode?: string;
     };
   };
   orderDate: string;
+  orderStatus?: string;
+  displayFinancialStatus?: string;
+  fulfillmentStatus?: string;
+  currencyCode?: string;
   customerId?: {
     id: string;
   };
@@ -25,7 +30,9 @@ export interface DatabaseOrder {
         quantity: number;
         price: {
           price: string;
+          compareAtPrice?: string;
         };
+        selectedOptions?: Array<{ name: string; value: string }>;
       };
     }>;
   };
@@ -36,6 +43,9 @@ export interface DatabaseProduct {
   title: string;
   handle: string;
   product_type: string;
+  description?: string;
+  vendor?: string;
+  created_at?: string;
   tags: string[];
   image?: {
     src: string;
@@ -44,7 +54,32 @@ export interface DatabaseProduct {
   variants: Array<{
     id: string;
     price: string;
+    compareAtPrice?: string | null;
     inventory_quantity: number;
+    selectedOptions?: Array<{ name: string; value: string }>;
+  }>;
+  metafields?: Array<{
+    namespace: string;
+    key: string;
+    value: string;
+    type?: string;
+  }>;
+}
+
+export interface DatabaseCustomer {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  createdAt: string;
+  lastOrder?: { id: string; processedAt?: string | null } | null;
+  tags?: string[];
+  addresses?: Array<any>;
+  metafields?: Array<{
+    namespace: string;
+    key: string;
+    value: string;
+    type?: string;
   }>;
 }
 
@@ -155,6 +190,80 @@ export const executeGraphQLQuery = async <T>(
   }
 };
 
+// Fetch customers with profiles, tags, and optional metafields
+export const fetchCustomers = async (
+  axiosInstance: AxiosInstance,
+  sinceDate?: string,
+  limit?: number
+): Promise<DatabaseCustomer[]> => {
+  const query = `
+    query getCustomers($query: String, $after: String, $first: Int) {
+      customers(query: $query, after: $after, first: $first) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            email
+            firstName
+            lastName
+            createdAt
+            lastOrder { id processedAt }
+            tags
+            addresses { country province city zip address1 address2 latitude longitude }
+            metafields(first: 10) { edges { node { namespace key value type } } }
+          }
+        }
+      }
+    }
+  `;
+
+  const allCustomers: DatabaseCustomer[] = [];
+  let hasNextPage = true;
+  let cursor: string | null = null;
+  let totalFetched = 0;
+
+  while (hasNextPage && (!limit || totalFetched < limit)) {
+    const remainingLimit = limit ? limit - totalFetched : undefined;
+    const batchSize = remainingLimit ? Math.min(remainingLimit, 250) : 250;
+
+    const response = await executeGraphQLQuery<DatabaseCustomer>(
+      axiosInstance,
+      query,
+      {
+        query: sinceDate ? `created_at:>='${sinceDate}'` : undefined,
+        after: cursor,
+        first: batchSize,
+      }
+    );
+
+    const customersResponse: any = response.data.customers;
+    const edges = customersResponse.edges || [];
+
+    allCustomers.push(
+      ...edges.map((edge: any) => {
+        const n = edge.node;
+        return {
+          id: n.id,
+          email: n.email,
+          firstName: n.firstName,
+          lastName: n.lastName,
+          createdAt: n.createdAt,
+          lastOrder: n.lastOrder,
+          tags: n.tags,
+          addresses: n.addresses,
+          metafields: (n.metafields?.edges || []).map((e: any) => e.node),
+        } as DatabaseCustomer;
+      })
+    );
+    totalFetched += edges.length;
+
+    hasNextPage = customersResponse.pageInfo.hasNextPage;
+    cursor = customersResponse.pageInfo.endCursor;
+  }
+
+  return allCustomers;
+};
+
 // Fetch orders with configurable data amount
 export const fetchOrders = async (
   axiosInstance: AxiosInstance,
@@ -174,9 +283,13 @@ export const fetchOrders = async (
             totalAmount: totalPriceSet {
               shopMoney {
                 amount
+                currencyCode
               }
             }
             orderDate: createdAt
+            displayFinancialStatus
+            fulfillmentStatus
+            currencyCode
             customerId: customer {
               id
             }
@@ -193,6 +306,10 @@ export const fetchOrders = async (
                   quantity
                   price: variant {
                     price
+                    compareAtPrice
+                  }
+                  selectedOptions: variant {
+                    selectedOptions { name value }
                   }
                 }
               }
@@ -268,6 +385,9 @@ export const fetchProducts = async (
             title
             handle
             product_type: productType
+            description: description
+            vendor
+            created_at: createdAt
             tags
             image: images(first: 1) {
               edges {
@@ -282,10 +402,13 @@ export const fetchProducts = async (
                 node {
                   id
                   price
+                  compareAtPrice
                   inventory_quantity: inventoryQuantity
+                  selectedOptions { name value }
                 }
               }
             }
+            metafields(first: 10) { edges { node { namespace key value type } } }
           }
         }
       }
@@ -315,7 +438,20 @@ export const fetchProducts = async (
     const edges = productsResponse.edges || [];
 
     // Direct data storage - no mapping needed
-    allProducts.push(...edges.map((edge: any) => edge.node));
+    allProducts.push(
+      ...edges.map((edge: any) => {
+        const n = edge.node;
+        const firstImage = n.image?.edges?.[0]?.node;
+        return {
+          ...n,
+          image: firstImage
+            ? { src: firstImage.src, alt: firstImage.alt }
+            : undefined,
+          variants: (n.variants?.edges || []).map((e: any) => e.node),
+          metafields: (n.metafields?.edges || []).map((e: any) => e.node),
+        };
+      })
+    );
     totalFetched += edges.length;
 
     hasNextPage = productsResponse.pageInfo.hasNextPage;
