@@ -31,8 +31,10 @@ async def get_redis_client() -> Redis:
             "password": settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
             "db": settings.REDIS_DB,
             "decode_responses": True,
-            "socket_connect_timeout": 5,
-            "socket_timeout": 5,
+            "socket_connect_timeout": 10,  # Increased from 5 to 10 seconds
+            "socket_timeout": 10,  # Increased from 5 to 10 seconds
+            "retry_on_timeout": True,  # Retry on timeout
+            "health_check_interval": 30,  # Health check every 30 seconds
         }
 
         # Only add TLS if explicitly enabled and not localhost
@@ -170,14 +172,21 @@ class RedisStreamsManager:
                 if "BUSYGROUP" not in str(e):
                     raise
 
-            # Read from stream
-            messages = await self.redis.xreadgroup(
-                consumer_group,
-                consumer_name,
-                {stream_name: ">"},
-                count=count,
-                block=block,
-            )
+            # Read from stream with better timeout handling
+            try:
+                messages = await asyncio.wait_for(
+                    self.redis.xreadgroup(
+                        consumer_group,
+                        consumer_name,
+                        {stream_name: ">"},
+                        count=count,
+                        block=block,
+                    ),
+                    timeout=(block / 1000) + 1,  # Add 1 second buffer
+                )
+            except asyncio.TimeoutError:
+                # Timeout is expected when no messages are available
+                return []
 
             events = []
             for stream, msgs in messages:

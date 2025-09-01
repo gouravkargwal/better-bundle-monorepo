@@ -5,7 +5,6 @@ import { prisma } from "../core/database/prisma.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  console.log(session);
 
   // Check for existing shop record
   let shop = await prisma.shop.findUnique({

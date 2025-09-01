@@ -2,7 +2,7 @@
 
 name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://castle-tags-nickel-locate.trycloudflare.com"
+application_url = "https://profession-bedrooms-creating-concept.trycloudflare.com"
 embedded = true
 
 [access_scopes]
@@ -10,7 +10,7 @@ embedded = true
 scopes = "write_products,read_products,read_orders,write_orders,read_customers,write_customers,read_inventory,write_inventory,read_analytics,read_marketing_events,write_marketing_events,read_price_rules,write_price_rules,read_discounts,write_discounts,read_script_tags,write_script_tags,read_themes,write_themes,read_content,write_content,read_locales,write_locales"
 
 [auth]
-redirect_urls = ["https://castle-tags-nickel-locate.trycloudflare.com/auth/callback", "https://castle-tags-nickel-locate.trycloudflare.com/auth/shopify/callback", "https://castle-tags-nickel-locate.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://profession-bedrooms-creating-concept.trycloudflare.com/auth/callback", "https://profession-bedrooms-creating-concept.trycloudflare.com/auth/shopify/callback", "https://profession-bedrooms-creating-concept.trycloudflare.com/api/auth/callback"]
 
 [webhooks]
 api_version = "2024-01"

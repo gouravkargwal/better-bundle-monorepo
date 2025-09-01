@@ -3,6 +3,7 @@ Main FastAPI application for Python Worker
 """
 
 import structlog
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ from app.core.logging import setup_logging
 from app.core.database import get_database, close_database
 from app.core.redis_client import get_redis_client, close_redis_client
 from app.api.v1 import data_jobs, health, scheduler, gorse
+from app.services.data_processor import data_processor
 
 
 # Setup structured logging
@@ -33,10 +35,31 @@ async def lifespan(app: FastAPI):
     await get_redis_client()
     logger.info("Redis connection initialized")
 
+    # Initialize data processor
+    await data_processor.initialize()
+    logger.info("Data processor initialized")
+
+    # Start Redis stream consumer in background
+    consumer_task = asyncio.create_task(
+        data_processor.consume_data_jobs(),
+        name="redis-stream-consumer"
+    )
+    logger.info("Redis stream consumer started in background")
+
     yield
 
     # Shutdown
     logger.info("Shutting down Python Worker application")
+    
+    # Cancel consumer task
+    if not consumer_task.done():
+        consumer_task.cancel()
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Redis stream consumer stopped")
+    
     await close_database()
     await close_redis_client()
     logger.info("Application shutdown complete")

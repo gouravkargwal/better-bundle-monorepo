@@ -359,7 +359,7 @@ class DataProcessor:
                     consumer_group=settings.DATA_PROCESSOR_GROUP,
                     consumer_name=consumer_name,
                     count=1,
-                    block=5000,  # 5 seconds
+                    block=1000,  # Reduced from 5000ms to 1000ms to prevent aggressive timeouts
                 )
 
                 for event in events:
