@@ -1,4 +1,7 @@
-generator client_js {
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -48,18 +51,22 @@ model Shop {
   trackedSales       TrackedSale[]
   widgetConfig       WidgetConfiguration?
   widgetEvents       WidgetEvent[]
+  trackingEvents     TrackingEvent[]
+  shopAnalytics      ShopAnalytics?
+  billingSubscriptions BillingSubscription[]
+  billingCharges    BillingCharge[]
 }
 
 model OrderData {
-  id          String   @id @default(cuid())
-  shopId      String
-  orderId     String
-  customerId  String?
+  id        String   @id @default(cuid())
+  shopId    String
+  orderId   String
+  customerId String?
   totalAmount Float
-  orderDate   DateTime
-  lineItems   Json
-  createdAt   DateTime @default(now())
-  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderDate  DateTime
+  lineItems  Json
+  createdAt  DateTime @default(now())
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, orderId])
   @@index([shopId, orderDate])
@@ -216,4 +223,86 @@ model IncrementalAnalysisLog {
   @@index([shopId, jobId])
   @@index([shopId, action])
   @@index([shopId, createdAt])
+}
+
+// New tracking models
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  shopId      String
+  eventType   String   // "recommendation_displayed", "recommendation_clicked", etc.
+  sessionId   String
+  trackingId  String
+  userId      String?
+  timestamp   DateTime
+  metadata    Json
+  rawEvent    Json
+  createdAt   DateTime @default(now())
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId, eventType])
+  @@index([sessionId])
+  @@index([trackingId])
+  @@index([timestamp])
+  @@index([userId])
+}
+
+model ShopAnalytics {
+  id                              String   @id @default(cuid())
+  shopId                          String   @unique
+  totalRecommendationsDisplayed   Int      @default(0)
+  totalRecommendationsClicked     Int      @default(0)
+  totalRecommendationsAddedToCart Int      @default(0)
+  totalRecommendationsPurchased   Int      @default(0)
+  totalRevenueAttributed          Float    @default(0)
+  totalWidgetInteractions         Int      @default(0)
+  lastUpdated                     DateTime @default(now())
+  createdAt                       DateTime @default(now())
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+}
+
+// Billing models
+model BillingSubscription {
+  id                String   @id @default(cuid())
+  shopId            String
+  planName          String
+  status            String   // "active", "cancelled", "declined", "frozen"
+  trialDays         Int      @default(14)
+  currentPeriodEnd  DateTime
+  nextBillingDate   DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+  charges BillingCharge[]
+
+  @@index([shopId, status])
+  @@index([status, nextBillingDate])
+}
+
+model BillingCharge {
+  id            String   @id @default(cuid())
+  shopId        String
+  subscriptionId String
+  amount        Float
+  currency      String   @default("USD")
+  description   String
+  billingPeriod String
+  status        String   // "pending", "active", "cancelled", "declined"
+  createdAt     DateTime @default(now())
+  dueDate       DateTime
+  paidAt        DateTime?
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+  subscription BillingSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([shopId, status])
+  @@index([subscriptionId])
+  @@index([billingPeriod])
+  @@index([dueDate])
 }

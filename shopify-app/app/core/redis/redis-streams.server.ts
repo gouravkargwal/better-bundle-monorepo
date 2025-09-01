@@ -110,6 +110,10 @@ class RedisStreamsService {
       ...Object.entries(eventData).flat()
     );
 
+    if (!messageId) {
+      throw new Error("Failed to publish data job event");
+    }
+
     console.log(`📤 Published data job event: ${messageId}`, eventData);
     return messageId;
   }
@@ -142,7 +146,47 @@ class RedisStreamsService {
       ...Object.entries(eventData).flat()
     );
 
+    if (!messageId) {
+      throw new Error("Failed to publish user notification event");
+    }
+
     console.log(`📤 Published user notification event: ${messageId}`, eventData);
+    return messageId;
+  }
+
+  /**
+   * Publish a tracking event
+   */
+  async publishTrackingEvent(trackingData: {
+    shop_id: string;
+    event_type: string;
+    event_id: string;
+    session_id: string;
+    tracking_id: string;
+    user_id?: string;
+    timestamp: number;
+    metadata: Record<string, any>;
+  }): Promise<string> {
+    if (!this.redis) {
+      throw new Error("Redis Streams service not initialized");
+    }
+
+    const eventData = {
+      ...trackingData,
+      source: "shopify-app",
+    };
+
+    const messageId = await this.redis.xadd(
+      "betterbundle:tracking-events",
+      "*",
+      ...Object.entries(eventData).flat()
+    );
+
+    if (!messageId) {
+      throw new Error("Failed to publish tracking event");
+    }
+
+    console.log(`📤 Published tracking event: ${messageId}`, eventData);
     return messageId;
   }
 
