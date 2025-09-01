@@ -2,15 +2,15 @@
 
 name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://optimum-las-geo-refresh.trycloudflare.com"
+application_url = "https://high-organisations-kuwait-kit.trycloudflare.com"
 embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,read_products,read_orders,write_orders,read_customers,write_customers,read_inventory,write_inventory,read_analytics,read_marketing_events,write_marketing_events,read_price_rules,write_price_rules,read_discounts,write_discounts,read_script_tags,write_script_tags,read_themes,write_themes,read_content,write_content,read_locales,write_locales,read_currency,write_currency,read_payment_schedules,write_payment_schedules,read_usage_charges,write_usage_charges,read_recurring_application_charges,write_recurring_application_charges"
+scopes = "write_products,read_products,read_orders,write_orders,read_customers,write_customers,read_inventory,write_inventory,read_analytics,read_marketing_events,write_marketing_events,read_price_rules,write_price_rules,read_discounts,write_discounts,read_script_tags,write_script_tags,read_themes,write_themes,read_content,write_content,read_locales,write_locales"
 
 [auth]
-redirect_urls = ["https://optimum-las-geo-refresh.trycloudflare.com/auth/callback", "https://optimum-las-geo-refresh.trycloudflare.com/auth/shopify/callback", "https://optimum-las-geo-refresh.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://high-organisations-kuwait-kit.trycloudflare.com/auth/callback", "https://high-organisations-kuwait-kit.trycloudflare.com/auth/shopify/callback", "https://high-organisations-kuwait-kit.trycloudflare.com/api/auth/callback"]
 
 [webhooks]
 api_version = "2024-01"

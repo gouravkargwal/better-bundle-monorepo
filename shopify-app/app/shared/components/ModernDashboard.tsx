@@ -6,90 +6,25 @@ import {
   BlockStack,
   Text,
   Button,
-  ProgressBar,
-  Box,
   Banner,
   EmptyState,
   List,
-  SkeletonBodyText,
-  SkeletonDisplayText,
-  SkeletonThumbnail,
-  Spinner,
   Badge,
   DataTable,
-  Tabs,
   Icon,
   InlineStack,
-  Thumbnail,
-  Link,
   Modal,
-  TextField,
-  Select,
+  Tabs,
+  ProgressBar,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import {
-  AnalyticsMajor,
-  AnalyticsMinor,
-  BundleIconMajor,
-  BundleIconMinor,
-  CancelMajor,
-  CancelMinor,
-  CheckmarkMajor,
-  CheckmarkMinor,
-  ClockMajor,
-  ClockMinor,
-  DataVisualizationMajor,
-  DataVisualizationMinor,
-  DiamondAlertMajor,
-  DiamondAlertMinor,
-  DiscountsMajor,
-  DiscountsMinor,
-  DynamicSourceMajor,
-  DynamicSourceMinor,
-  EmailMajor,
-  EmailMinor,
-  ExportMajor,
-  ExportMinor,
-  FilterMajor,
-  FilterMinor,
-  GlobeMajor,
-  GlobeMinor,
-  HomeMajor,
-  HomeMinor,
-  ImageMajor,
-  ImageMinor,
-  InventoryMajor,
-  InventoryMinor,
-  KeyMajor,
-  KeyMinor,
-  ListMajor,
-  ListMinor,
-  LocationMajor,
-  LocationMinor,
-  MarketingMajor,
-  MarketingMinor,
-  MoneyMajor,
-  MoneyMinor,
-  NotesMajor,
-  NotesMinor,
-  OrdersMajor,
-  OrdersMinor,
-  PackageMajor,
-  PackageMinor,
-  ProductsMajor,
-  ProductsMinor,
-  ProfileMajor,
-  ProfileMinor,
-  SettingsMajor,
-  SettingsMinor,
-  ThemeEditMajor,
-  ThemeEditMajorMinor,
-  TimelineAttachmentMajor,
-  TimelineAttachmentMinor,
-  TransactionMajor,
-  TransactionMinor,
-  ViewMajor,
-  ViewMinor,
+  ClockIcon,
+  DataPresentationIcon,
+  FilterIcon,
+  MoneyIcon,
+  PackageIcon,
+  ViewIcon,
 } from "@shopify/polaris-icons";
 import type { AnalysisState, ErrorState } from "../../types";
 
@@ -133,7 +68,9 @@ export function ModernDashboard({
   const [streamStatus, setStreamStatus] = useState<StreamStatus[]>([]);
   const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
   const [showStreamModal, setShowStreamModal] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(
+    null,
+  );
 
   // Mock stream status data (replace with real API calls)
   useEffect(() => {
@@ -245,9 +182,10 @@ export function ModernDashboard({
               🚀 Real-Time Bundle Analysis
             </Text>
             <Text as="p" variant="bodyMd">
-              Our modern event-driven system analyzes your store data in real-time using Redis Streams and AI-powered insights.
+              Our modern event-driven system analyzes your store data in
+              real-time using Redis Streams and AI-powered insights.
             </Text>
-            
+
             {state === "idle" && (
               <Button
                 variant="primary"
@@ -255,7 +193,6 @@ export function ModernDashboard({
                 onClick={onStartAnalysis}
                 disabled={isSubmitting}
                 loading={isSubmitting}
-                icon={AnalyticsMajor}
               >
                 {isSubmitting ? "Starting..." : "🚀 Start Real-Time Analysis"}
               </Button>
@@ -264,12 +201,15 @@ export function ModernDashboard({
             {state === "queued" && (
               <BlockStack gap="400">
                 <Banner title="🔄 Analysis in Progress" tone="info">
-                  <p>Your analysis is being processed in real-time. Check the Event Streams tab to monitor progress.</p>
+                  <p>
+                    Your analysis is being processed in real-time. Check the
+                    Event Streams tab to monitor progress.
+                  </p>
                 </Banner>
                 <ProgressBar progress={progress} size="large" />
-                <Text variant="bodySm" tone="subdued">
-                  Job ID: {jobId?.substring(0, 12)}...
-                </Text>
+                                    <Text as="p" variant="bodySm" tone="subdued">
+                      Job ID: {jobId?.substring(0, 12)}...
+                    </Text>
               </BlockStack>
             )}
           </BlockStack>
@@ -283,42 +223,63 @@ export function ModernDashboard({
               📊 System Status
             </Text>
             <Layout>
-              <Layout.Section oneThird>
+              <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="200" align="center">
-                    <Icon source={BundleIconMajor} color="success" />
-                    <Text variant="headingMd" as="h4">
-                      {streamStatus.filter(s => s.status === "active").length}
-                    </Text>
-                    <Text variant="bodySm" tone="subdued">
-                      Active Streams
-                    </Text>
+                    <Icon source={PackageIcon} />
+                                         <Text as="h4" variant="headingMd">
+                       {
+                         streamStatus.filter(
+                           (s) => s.status === "active" || s.status === "idle",
+                         ).length
+                       }
+                     </Text>
+                     <Text as="p" variant="bodySm" tone="subdued">
+                       Active Streams
+                     </Text>
                   </BlockStack>
                 </Card>
               </Layout.Section>
-              <Layout.Section oneThird>
+              <Layout.Section>
                 <Card padding="400">
                   <BlockStack gap="200" align="center">
-                    <Icon source={DataVisualizationMajor} color="info" />
+                    <Icon source={DataPresentationIcon} />
                     <Text variant="headingMd" as="h4">
-                      {analysisJobs.filter(j => j.status === "completed").length}
+                      {
+                        analysisJobs.filter(
+                          (j) =>
+                            j.status === "completed" ||
+                            j.status === "processing",
+                        ).length
+                      }
+                      {
+                        analysisJobs.filter((j) => j.status === "completed")
+                          .length
+                      }
+                      {
+                        analysisJobs.filter((j) => j.status === "processing")
+                          .length
+                      }
                     </Text>
-                    <Text variant="bodySm" tone="subdued">
-                      Completed Jobs
-                    </Text>
-                  </BlockStack>
-                </Card>
-              </Layout.Section>
-              <Layout.Section oneThird>
-                <Card padding="400">
-                  <BlockStack gap="200" align="center">
-                    <Icon source={ClockMajor} color="warning" />
-                    <Text variant="headingMd" as="h4">
-                      {analysisJobs.filter(j => j.status === "processing").length}
-                    </Text>
-                    <Text variant="bodySm" tone="subdued">
-                      Active Jobs
-                    </Text>
+                                         <Text as="p" variant="bodySm" tone="subdued">
+                       Completed Jobs
+                     </Text>
+                   </BlockStack>
+                 </Card>
+               </Layout.Section>
+               <Layout.Section>
+                 <Card padding="400">
+                   <BlockStack gap="200" align="center">
+                     <Icon source={ClockIcon} />
+                     <Text as="h4" variant="headingMd">
+                       {
+                         analysisJobs.filter((j) => j.status === "processing")
+                           .length
+                       }
+                     </Text>
+                     <Text as="p" variant="bodySm" tone="subdued">
+                       Active Jobs
+                     </Text>
                   </BlockStack>
                 </Card>
               </Layout.Section>
@@ -342,19 +303,32 @@ export function ModernDashboard({
                 variant="secondary"
                 size="small"
                 onClick={() => setShowStreamModal(true)}
-                icon={ViewMajor}
+                icon={ViewIcon}
               >
                 View Details
               </Button>
             </InlineStack>
-            
+
             <DataTable
               columnContentTypes={["text", "numeric", "text", "text"]}
-              headings={["Stream Name", "Message Count", "Status", "Last Activity"]}
-              rows={streamStatus.map(stream => [
+              headings={[
+                "Stream Name",
+                "Message Count",
+                "Status",
+                "Last Activity",
+              ]}
+              rows={streamStatus.map((stream) => [
                 stream.name,
                 stream.count.toString(),
-                <Badge tone={stream.status === "active" ? "success" : stream.status === "idle" ? "info" : "critical"}>
+                <Badge
+                  tone={
+                    stream.status === "active"
+                      ? "success"
+                      : stream.status === "idle"
+                        ? "info"
+                        : "critical"
+                  }
+                >
                   {stream.status}
                 </Badge>,
                 stream.lastActivity,
@@ -374,7 +348,7 @@ export function ModernDashboard({
             <Text as="h3" variant="headingMd">
               🔍 Analysis Job History
             </Text>
-            
+
             {analysisJobs.length === 0 ? (
               <EmptyState
                 heading="No analysis jobs yet"
@@ -385,15 +359,31 @@ export function ModernDashboard({
             ) : (
               <DataTable
                 columnContentTypes={["text", "text", "numeric", "text", "text"]}
-                headings={["Job ID", "Status", "Progress", "Created", "Completed"]}
-                rows={analysisJobs.map(job => [
+                headings={[
+                  "Job ID",
+                  "Status",
+                  "Progress",
+                  "Created",
+                  "Completed",
+                ]}
+                rows={analysisJobs.map((job) => [
                   job.jobId.substring(0, 12) + "...",
-                  <Badge tone={job.status === "completed" ? "success" : job.status === "processing" ? "info" : "warning"}>
+                  <Badge
+                    tone={
+                      job.status === "completed"
+                        ? "success"
+                        : job.status === "processing"
+                          ? "info"
+                          : "warning"
+                    }
+                  >
                     {job.status}
                   </Badge>,
                   `${job.progress}%`,
                   new Date(job.createdAt).toLocaleDateString(),
-                  job.completedAt ? new Date(job.completedAt).toLocaleDateString() : "-",
+                  job.completedAt
+                    ? new Date(job.completedAt).toLocaleDateString()
+                    : "-",
                 ])}
               />
             )}
@@ -411,9 +401,12 @@ export function ModernDashboard({
             <Text as="h3" variant="headingMd">
               💡 Live Insights
             </Text>
-            
+
             <Banner title="🔄 Real-Time Processing" tone="info">
-              <p>Your analysis results are being computed in real-time. Check back here for live insights as they become available.</p>
+              <p>
+                Your analysis results are being computed in real-time. Check
+                back here for live insights as they become available.
+              </p>
             </Banner>
 
             <Layout>
@@ -424,24 +417,24 @@ export function ModernDashboard({
                       🧠 AI Processing
                     </Text>
                     <Text variant="bodySm" tone="subdued">
-                      Our AI models are analyzing your data patterns in real-time to discover optimal product bundles.
+                      Our AI models are analyzing your data patterns in
+                      real-time to discover optimal product bundles.
                     </Text>
                     <InlineStack gap="200">
-                      <Icon source={AnalyticsMinor} />
                       <Text variant="bodySm">Pattern Recognition</Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Icon source={BundleIconMinor} />
+                      <Icon source={PackageIcon} />
                       <Text variant="bodySm">Bundle Optimization</Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Icon source={MoneyMinor} />
+                      <Icon source={MoneyIcon} />
                       <Text variant="bodySm">Revenue Prediction</Text>
                     </InlineStack>
                   </BlockStack>
                 </Card>
               </Layout.Section>
-              
+
               <Layout.Section oneHalf>
                 <Card padding="400">
                   <BlockStack gap="300">
@@ -449,18 +442,18 @@ export function ModernDashboard({
                       📊 Data Pipeline
                     </Text>
                     <Text variant="bodySm" tone="subdued">
-                      Your data flows through our event-driven pipeline for real-time processing and insights.
+                      Your data flows through our event-driven pipeline for
+                      real-time processing and insights.
                     </Text>
                     <InlineStack gap="200">
-                      <Icon source={DynamicSourceMinor} />
                       <Text variant="bodySm">Data Collection</Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Icon source={FilterMinor} />
+                      <Icon source={FilterIcon} />
                       <Text variant="bodySm">Feature Engineering</Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Icon source={DataVisualizationMinor} />
+                      <Icon source={DataPresentationIcon} />
                       <Text variant="bodySm">Real-Time Analysis</Text>
                     </InlineStack>
                   </BlockStack>
@@ -529,7 +522,7 @@ export function ModernDashboard({
   return (
     <Page>
       <TitleBar title="BetterBundle - Modern Dashboard" />
-      
+
       <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
         {renderTabContent()}
       </Tabs>
@@ -547,7 +540,8 @@ export function ModernDashboard({
         <Modal.Section>
           <BlockStack gap="400">
             <Text as="p">
-              Detailed information about each Redis stream and its current status.
+              Detailed information about each Redis stream and its current
+              status.
             </Text>
             {streamStatus.map((stream, index) => (
               <Card key={index} padding="400">
@@ -556,12 +550,12 @@ export function ModernDashboard({
                     {stream.name}
                   </Text>
                   <InlineStack gap="400">
-                    <Badge tone={stream.status === "active" ? "success" : "info"}>
+                    <Badge
+                      tone={stream.status === "active" ? "success" : "info"}
+                    >
                       {stream.status}
                     </Badge>
-                    <Text variant="bodySm">
-                      {stream.count} messages
-                    </Text>
+                    <Text variant="bodySm">{stream.count} messages</Text>
                   </InlineStack>
                   <Text variant="bodySm" tone="subdued">
                     Last activity: {stream.lastActivity}
