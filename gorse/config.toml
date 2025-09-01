@@ -1,9 +1,9 @@
 [database]
-# Cache store for Upstash Redis
-cache_store = "{{ env \"REDIS_URL\" }}"
+# Cache store for Upstash Redis (will be overridden by GORSE_CACHE_STORE env var)
+cache_store = ""
 
-# Data store for Render PostgreSQL
-data_store = "{{ env \"DATABASE_URL\" }}"
+# Data store for Render PostgreSQL (will be overridden by GORSE_DATA_STORE env var)
+data_store = ""
 
 [master]
 host = "0.0.0.0"

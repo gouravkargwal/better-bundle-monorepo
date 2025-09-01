@@ -7,6 +7,7 @@ This is a deployment of Gorse, an open-source recommendation system, configured 
 ### Prerequisites
 
 1. **Render PostgreSQL Database**
+
    - Create a new PostgreSQL database on Render
    - Note down the `DATABASE_URL` from the database settings
 
@@ -17,13 +18,15 @@ This is a deployment of Gorse, an open-source recommendation system, configured 
 ### Deployment Steps
 
 1. **Connect your repository to Render**
+
    - Push this code to your GitHub repository
    - Connect the repository to Render
 
 2. **Set Environment Variables**
    In your Render service settings, add these environment variables:
-   - `DATABASE_URL`: Your Render PostgreSQL connection string
-   - `REDIS_URL`: Your Upstash Redis connection string
+
+   - `GORSE_DATA_STORE`: Your Render PostgreSQL connection string
+   - `GORSE_CACHE_STORE`: Your Upstash Redis connection string
 
 3. **Deploy**
    - Render will automatically build and deploy the service
@@ -31,12 +34,13 @@ This is a deployment of Gorse, an open-source recommendation system, configured 
 
 ### Environment Variables
 
-- `DATABASE_URL`: PostgreSQL connection string (from Render)
-- `REDIS_URL`: Redis connection string (from Upstash)
+- `GORSE_DATA_STORE`: PostgreSQL connection string (from Render)
+- `GORSE_CACHE_STORE`: Redis connection string (from Upstash)
 
 ### API Endpoints
 
 Once deployed, you can access:
+
 - Dashboard: `https://your-app.onrender.com`
 - API: `https://your-app.onrender.com/api/`
 
