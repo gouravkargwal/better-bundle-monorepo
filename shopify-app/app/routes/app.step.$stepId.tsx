@@ -1,124 +1,62 @@
 import { useNavigate } from "react-router-dom";
 import { Page, Layout, Card, BlockStack, Text, Button } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useLoaderData } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { authenticate } from "../shopify.server";
-import { prisma } from "../core/database/prisma.server";
+import {
+  useLoaderData,
+  useRouteError,
+  useOutletContext,
+} from "@remix-run/react";
+import type { LoaderFunctionArgs, HeadersFunction } from "@remix-run/node";
 import { useOnboardingStateMachine } from "../hooks/useOnboardingStateMachine";
 import WelcomeStep from "app/components/Onboarding/WelcomeStep";
 import AnalysisStep from "app/components/Onboarding/AnalysisStep";
 import WidgetSetupStep from "app/components/Onboarding/WidgetSetupStep";
 import DashboardStep from "app/components/Onboarding/DashboardStep";
+import { boundary } from "@shopify/shopify-app-remix/server";
 
-// Define the step data types
-type StepData =
-  | { type: "welcome" }
-  | { type: "analysis"; activeJob: any }
-  | { type: "widget-setup"; completedJob: any }
-  | { type: "dashboard"; bundleRecommendations: any[]; metrics: any };
+// Define the context type
+type AppContext = {
+  session: {
+    id: string;
+    shop: string;
+    hasAccessToken: boolean;
+  };
+  shopId: string;
+};
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  console.log("🔍 [STEP_ROUTE] Starting step route loader");
+  console.log("🔍 [STEP_ROUTE] Request URL:", new URL(request.url).pathname);
+  console.log("🔍 [STEP_ROUTE] Params:", params);
+
+  // No need to authenticate here - session comes from parent route
+  console.log("🔍 [STEP_ROUTE] Using session from parent route context");
+
   const { stepId } = params;
+
+  console.log("🔍 [STEP_ROUTE] Step ID:", stepId);
 
   if (!stepId) {
     throw new Response("Step ID is required", { status: 400 });
   }
 
-  // Get the shop
-  let shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-    select: { id: true },
-  });
+  // Get the shop from the parent route context
+  // The shopId will be passed down via useOutletContext
+  console.log("🔍 [STEP_ROUTE] Step route loader completed");
 
-  // If shop doesn't exist, create it
-  if (!shop) {
-    console.log(`🏪 Creating new shop record for step: ${session.shop}`);
-
-    try {
-      shop = await prisma.shop.create({
-        data: {
-          shopId: session.shop,
-          shopDomain: session.shop,
-          accessToken: session.accessToken || "",
-          email: null,
-          planType: "Free",
-          currencyCode: null,
-          moneyFormat: null,
-        },
-        select: { id: true },
-      });
-
-      console.log(`✅ Shop record created for step: ${shop.id}`);
-    } catch (error) {
-      console.error("Failed to create shop record for step:", error);
-      throw new Response("Failed to create shop record", { status: 500 });
-    }
-  }
-
-  // Get current step data
-  const currentStep = await getStepData(shop.id, stepId);
-
-  return { currentStep, shopId: shop.id };
+  return { stepId };
 };
 
-async function getStepData(shopId: string, stepId: string): Promise<StepData> {
-  switch (stepId) {
-    case "welcome":
-      return { type: "welcome" };
-
-    case "analysis":
-      const activeJob = await prisma.analysisJob.findFirst({
-        where: { shopId, status: { in: ["pending", "processing", "queued"] } },
-        select: { jobId: true, status: true, progress: true },
-      });
-      return { type: "analysis", activeJob };
-
-    case "widget-setup":
-      const completedJob = await prisma.analysisJob.findFirst({
-        where: { shopId, status: "completed" },
-      });
-      return { type: "widget-setup", completedJob };
-
-    case "dashboard":
-      const [bundleRecommendations, orderData, productData] = await Promise.all(
-        [
-          prisma.bundleAnalysisResult.findMany({
-            where: { shopId, isActive: true },
-            orderBy: { confidence: "desc" },
-            take: 10,
-          }),
-          prisma.orderData.findMany({
-            where: { shopId },
-            select: { totalAmount: true, orderDate: true },
-          }),
-          prisma.productData.count({ where: { shopId, isActive: true } }),
-        ],
-      );
-
-      const totalRevenue = orderData.reduce(
-        (sum, order) => sum + order.totalAmount,
-        0,
-      );
-      const totalOrders = orderData.length;
-
-      return {
-        type: "dashboard",
-        bundleRecommendations,
-        metrics: { totalRevenue, totalOrders, totalProducts: productData },
-      };
-
-    default:
-      throw new Response("Step not found", { status: 404 });
-  }
-}
-
 export default function StepPage() {
-  const { currentStep } = useLoaderData<typeof loader>();
+  const { stepId } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const { session, shopId } = useOutletContext<AppContext>();
+
   // Use the state machine
   const { isClient } = useOnboardingStateMachine();
+
+  console.log("🔍 [STEP_ROUTE] Component rendered with session:", session);
+  console.log("🔍 [STEP_ROUTE] Shop ID from context:", shopId);
 
   // Show loading state during SSR or while client is initializing
   if (!isClient) {
@@ -145,7 +83,7 @@ export default function StepPage() {
 
   const renderStep = () => {
     // Render the appropriate step content based on currentStep
-    switch (currentStep.type) {
+    switch (stepId) {
       case "welcome":
         return <WelcomeStep onStartAnalysis={() => {}} />;
 
@@ -177,7 +115,7 @@ export default function StepPage() {
 
   return (
     <Page>
-      <TitleBar title={`BetterBundle - Step ${currentStep.type}`} />
+      <TitleBar title={`BetterBundle - Step ${stepId}`} />
       <Layout>
         <Layout.Section>
           <Card>{renderStep()}</Card>
@@ -186,3 +124,21 @@ export default function StepPage() {
     </Page>
   );
 }
+
+// Add error boundary for proper error handling
+export function ErrorBoundary() {
+  const error = useRouteError();
+  console.error("Step route error boundary caught:", error);
+
+  // If it's a redirect response, let Remix handle it
+  if (error instanceof Response && error.status === 302) {
+    throw error;
+  }
+
+  return boundary.error(error);
+}
+
+// Add headers function for proper cookie handling
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

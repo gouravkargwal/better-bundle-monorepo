@@ -20,13 +20,17 @@ import { loginErrorMessage } from "./error.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log("🔍 [AUTH_LOGIN] Starting auth login loader");
   const errors = loginErrorMessage(await login(request));
+  console.log("🔍 [AUTH_LOGIN] Login errors:", errors);
 
   return { errors, polarisTranslations };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log("🔍 [AUTH_LOGIN] Starting auth login action");
   const errors = loginErrorMessage(await login(request));
+  console.log("🔍 [AUTH_LOGIN] Login action errors:", errors);
 
   return {
     errors,

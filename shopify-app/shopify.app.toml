@@ -2,7 +2,7 @@
 
 client_id = "87c44f5966daa80691a480bcd03c225c"
 name = "BetterBundle"
-application_url = "https://gets-perspectives-meetings-minnesota.trycloudflare.com"
+application_url = "https://strikes-responsibility-hopkins-great.trycloudflare.com"
 embedded = true
 handle = "better-bundle-1"
 
@@ -19,7 +19,7 @@ api_version = "2024-01"
 scopes = "read_analytics,read_content,read_customers,read_discounts,read_inventory,read_locales,read_marketing_events,read_orders,read_price_rules,read_products,read_script_tags,read_themes,write_content,write_customers,write_discounts,write_inventory,write_locales,write_marketing_events,write_orders,write_price_rules,write_products,write_script_tags,write_themes"
 
 [auth]
-redirect_urls = ["https://gets-perspectives-meetings-minnesota.trycloudflare.com/auth/callback", "https://gets-perspectives-meetings-minnesota.trycloudflare.com/auth/shopify/callback", "https://gets-perspectives-meetings-minnesota.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://strikes-responsibility-hopkins-great.trycloudflare.com/auth/callback", "https://strikes-responsibility-hopkins-great.trycloudflare.com/auth/shopify/callback", "https://strikes-responsibility-hopkins-great.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

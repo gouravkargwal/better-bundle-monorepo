@@ -7,7 +7,7 @@ const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY || "87c44f5966daa80691a480bcd03c225c",
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "your_api_secret_here",
   apiVersion: LATEST_API_VERSION,
-  scopes: process.env.SHOPIFY_SCOPES || [],
+  scopes: (process.env.SHOPIFY_SCOPES || "").split(",").filter(Boolean),
   appUrl:
     process.env.SHOPIFY_APP_URL ||
     "https://violin-requirement-um-arena.trycloudflare.com",
@@ -16,6 +16,8 @@ const shopify = shopifyApp({
   distribution: AppDistribution.AppStore,
   isEmbeddedApp: true,
   useOnlineTokens: false,
+  // Fix: Use SESSION_SECRET instead of SHOPIFY_SESSION_SECRET
+  sessionSecret: process.env.SESSION_SECRET || "your-session-secret-here",
   future: {
     unstable_newEmbeddedAuthStrategy: true,
     removeRest: true,

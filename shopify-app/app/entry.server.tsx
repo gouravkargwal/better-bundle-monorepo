@@ -19,6 +19,8 @@ export default async function handleRequest(
   responseHeaders: Headers,
   remixContext: EntryContext,
 ) {
+  addDocumentResponseHeaders(request, responseHeaders);
+
   // Skip authentication for all public API endpoints and add CORS headers
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api/")) {
@@ -38,8 +40,6 @@ export default async function handleRequest(
         headers: responseHeaders,
       });
     }
-  } else {
-    addDocumentResponseHeaders(request, responseHeaders);
   }
   const userAgent = request.headers.get("user-agent");
   const callbackName = isbot(userAgent ?? "") ? "onAllReady" : "onShellReady";
@@ -67,6 +67,7 @@ export default async function handleRequest(
         onError(error) {
           responseStatusCode = 500;
           console.error(error);
+          reject(error);
         },
       },
     );
