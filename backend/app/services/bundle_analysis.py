@@ -100,6 +100,19 @@ class BundleAnalysisService:
 
         logger.info(f"Found {len(products_db)} products and {len(orders_db)} orders")
 
+        # Debug: Show sample data
+        if products_db:
+            sample_product = products_db[0]
+            logger.info(
+                f"Sample product: ID={sample_product.productId}, Title={sample_product.title}, Price={sample_product.price}"
+            )
+
+        if orders_db:
+            sample_order = orders_db[0]
+            logger.info(
+                f"Sample order: ID={sample_order.orderId}, Total={sample_order.totalAmount}, LineItems={len(sample_order.lineItems) if sample_order.lineItems else 0}"
+            )
+
         return products_db, orders_db
 
     def _convert_products(self, products_db: List) -> List[ProductData]:

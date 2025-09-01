@@ -33,8 +33,11 @@ async def analyze_bundles_from_database(
         # Initialize service
         bundle_service = BundleAnalysisService()
 
-        # Perform analysis
-        result = await bundle_service.analyze_bundles_from_database(db, shop_id)
+        # Perform analysis using the database client
+        async with db as prisma_client:
+            result = await bundle_service.analyze_bundles_from_database(
+                prisma_client, shop_id
+            )
 
         return result
 

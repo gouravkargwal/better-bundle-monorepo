@@ -2,6 +2,7 @@
 Bundle Analyzer service for the ML API
 Handles product similarity calculations using cosine similarity and TF-IDF
 """
+
 import logging
 import numpy as np
 import pandas as pd
@@ -144,7 +145,8 @@ class BundleAnalyzer:
                 filtered_similarities = [
                     s
                     for s in similarities
-                    if s["similarity"] >= self.similarity_config.min_similarity_threshold
+                    if s["similarity"]
+                    >= self.similarity_config.min_similarity_threshold
                 ][: self.similarity_config.top_k_similar_products]
 
                 product_similarities.append(
@@ -183,14 +185,16 @@ class BundleAnalyzer:
             Dictionary containing bundle analysis results
         """
         try:
-            logger.info(f"Starting bundle analysis for {len(products)} products and {len(orders)} orders")
+            logger.info(
+                f"Starting bundle analysis for {len(products)} products and {len(orders)} orders"
+            )
 
             # Calculate product similarities
             similarity_results = self.calculate_cosine_similarity(products)
-            
+
             # Analyze co-purchase patterns
             co_purchase_patterns = self._analyze_co_purchase_patterns(products, orders)
-            
+
             # Generate bundles
             bundles = self._generate_bundles(
                 products, similarity_results, co_purchase_patterns
@@ -216,48 +220,118 @@ class BundleAnalyzer:
     ) -> Dict[str, Any]:
         """Analyze co-purchase patterns from order data"""
         try:
+            logger.info(
+                f"Co-purchase analysis: Starting with {len(products)} products and {len(orders)} orders"
+            )
+
             # Create product ID set for quick lookup
             product_ids = {p.product_id for p in products}
-            
+            logger.info(
+                f"Co-purchase analysis: Product IDs for lookup: {len(product_ids)}"
+            )
+
             # Analyze co-purchase patterns
             co_purchase_counts = {}
             product_frequencies = {p.product_id: 0 for p in products}
-            
-            for order in orders:
+
+            for order_idx, order in enumerate(orders):
                 order_products = set()
-                
+
+                # Debug: Log raw line items structure
+                if order_idx < 3:  # Log first 3 orders for debugging
+                    logger.info(
+                        f"Co-purchase analysis: Order {order_idx + 1} raw lineItems: {type(order.line_items)} - {order.line_items}"
+                    )
+
                 for item in order.line_items:
                     # Handle different product ID formats and ensure it's a string
                     product_id = None
+
+                    # Debug: Log individual item structure
+                    if order_idx < 3:
+                        logger.info(
+                            f"Co-purchase analysis: Order {order_idx + 1} item: {type(item)} - {item}"
+                        )
+
                     if isinstance(item, dict):
-                        product_id = item.get("productId") or item.get("product_id")
-                    elif hasattr(item, 'productId'):
-                        product_id = item.productId
-                    elif hasattr(item, 'product_id'):
-                        product_id = item.product_id
+                        # Try different possible field names for product ID
+                        product_id = (
+                            item.get("productId")
+                            or item.get("product_id")
+                            or item.get("id")
+                            or item.get("variantId")
+                            or item.get("variant_id")
+                        )
+                        # Handle nested objects like {"productId": {"id": "gid://..."}}
+                        if isinstance(product_id, dict):
+                            product_id = (
+                                product_id.get("id")
+                                or product_id.get("gid")
+                                or product_id.get("_id")
+                            )
+                    elif hasattr(item, "productId"):
+                        product_id = getattr(item, "productId")
+                        if isinstance(product_id, dict):
+                            product_id = product_id.get("id")
+                    elif hasattr(item, "product_id"):
+                        product_id = getattr(item, "product_id")
+                    elif hasattr(item, "id"):
+                        product_id = getattr(item, "id")
+                    elif hasattr(item, "variantId"):
+                        product_id = getattr(item, "variantId")
+                        if isinstance(product_id, dict):
+                            product_id = product_id.get("id")
 
                     if product_id is not None:
                         product_id = str(product_id)  # Ensure it's a string
                         if product_id in product_ids:
                             order_products.add(product_id)
                             product_frequencies[product_id] += 1
-                
+                        else:
+                            if order_idx < 3:
+                                logger.info(
+                                    f"Co-purchase analysis: Product ID {product_id} not found in product lookup set"
+                                )
+                    else:
+                        if order_idx < 3:
+                            logger.info(
+                                f"Co-purchase analysis: Could not extract product ID from item: {item}"
+                            )
+
                 # Count co-purchases
                 if len(order_products) > 1:
                     for i, product1 in enumerate(order_products):
-                        for product2 in list(order_products)[i + 1:]:
+                        for product2 in list(order_products)[i + 1 :]:
                             pair = tuple(sorted([product1, product2]))
-                            co_purchase_counts[pair] = co_purchase_counts.get(pair, 0) + 1
-            
+                            co_purchase_counts[pair] = (
+                                co_purchase_counts.get(pair, 0) + 1
+                            )
+
+                if order_idx < 5:  # Log first 5 orders for debugging
+                    logger.info(
+                        f"Co-purchase analysis: Order {order_idx + 1} - {len(order_products)} products: {list(order_products)[:5]}"
+                    )
+
+            logger.info(
+                f"Co-purchase analysis: Found {len(co_purchase_counts)} co-purchase patterns"
+            )
+            logger.info(
+                f"Co-purchase analysis: Product frequencies: {dict(list(product_frequencies.items())[:5])}..."
+            )
+
             return {
                 "co_purchase_counts": co_purchase_counts,
                 "product_frequencies": product_frequencies,
                 "total_orders": len(orders),
             }
-            
+
         except Exception as e:
             logger.error(f"Error analyzing co-purchase patterns: {str(e)}")
-            return {"co_purchase_counts": {}, "product_frequencies": {}, "total_orders": 0}
+            return {
+                "co_purchase_counts": {},
+                "product_frequencies": {},
+                "total_orders": 0,
+            }
 
     def _generate_bundles(
         self,
@@ -269,16 +343,21 @@ class BundleAnalyzer:
         try:
             bundles = []
             co_purchase_counts = co_purchase_patterns.get("co_purchase_counts", {})
-            
+
             # Generate bundles from co-purchase patterns
             for (product1, product2), count in co_purchase_counts.items():
-                if count >= self.bundle_config.min_support * co_purchase_patterns["total_orders"]:
+                if (
+                    count
+                    >= self.bundle_config.min_support
+                    * co_purchase_patterns["total_orders"]
+                ):
                     # Calculate bundle metrics
                     bundle = {
                         "product_ids": [product1, product2],
                         "co_purchase_count": count,
                         "support": count / co_purchase_patterns["total_orders"],
-                        "confidence": count / co_purchase_patterns["product_frequencies"][product1],
+                        "confidence": count
+                        / co_purchase_patterns["product_frequencies"][product1],
                         "lift": self._calculate_lift(
                             product1, product2, count, co_purchase_patterns
                         ),
@@ -286,14 +365,14 @@ class BundleAnalyzer:
                             product1, product2, similarity_results
                         ),
                     }
-                    
+
                     # Apply filters
                     if (
                         bundle["confidence"] >= self.bundle_config.min_confidence
                         and bundle["lift"] >= self.bundle_config.min_lift
                     ):
                         bundles.append(bundle)
-            
+
             # Sort bundles by score
             bundles.sort(
                 key=lambda x: (
@@ -303,9 +382,9 @@ class BundleAnalyzer:
                 ),
                 reverse=True,
             )
-            
+
             return bundles
-            
+
         except Exception as e:
             logger.error(f"Error generating bundles: {str(e)}")
             return []
@@ -322,16 +401,16 @@ class BundleAnalyzer:
             total_orders = co_purchase_patterns["total_orders"]
             freq1 = co_purchase_patterns["product_frequencies"][product1]
             freq2 = co_purchase_patterns["product_frequencies"][product2]
-            
+
             if freq1 == 0 or freq2 == 0:
                 return 0.0
-            
+
             expected = (freq1 * freq2) / total_orders
             if expected == 0:
                 return 0.0
-            
+
             return co_purchase_count / expected
-            
+
         except Exception:
             return 0.0
 
@@ -345,14 +424,14 @@ class BundleAnalyzer:
         try:
             # Find product indices
             product_similarities = similarity_results["product_similarities"]
-            
+
             for ps in product_similarities:
                 if ps["product_id"] == product1:
                     for similar in ps["similar_products"]:
                         if similar["product_id"] == product2:
                             return similar["similarity"]
-            
+
             return 0.0
-            
+
         except Exception:
             return 0.0
