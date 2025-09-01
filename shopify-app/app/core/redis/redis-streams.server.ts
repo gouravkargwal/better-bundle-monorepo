@@ -44,13 +44,13 @@ class RedisStreamsService {
 
     try {
       this.redis = new Redis(redisConfig);
-      
+
       // Test connection
       await this.redis.ping();
-      
+
       // Create consumer groups if they don't exist
       await this.createConsumerGroups();
-      
+
       this.isInitialized = true;
       console.log("✅ Redis Streams service initialized successfully");
     } catch (error) {
@@ -69,7 +69,13 @@ class RedisStreamsService {
       // Create consumer groups for each stream
       for (const [name, stream] of Object.entries(STREAMS)) {
         try {
-          await this.redis.xgroup("CREATE", stream, CONSUMER_GROUPS.DATA_PROCESSOR, "$", "MKSTREAM");
+          await this.redis.xgroup(
+            "CREATE",
+            stream,
+            CONSUMER_GROUPS.DATA_PROCESSOR,
+            "$",
+            "MKSTREAM",
+          );
           console.log(`✅ Created consumer group for ${name} stream`);
         } catch (error: any) {
           // Group already exists is not an error
@@ -107,7 +113,7 @@ class RedisStreamsService {
     const messageId = await this.redis.xadd(
       STREAMS.DATA_JOB,
       "*",
-      ...Object.entries(eventData).flat()
+      ...Object.entries(eventData).flat(),
     );
 
     if (!messageId) {
@@ -124,7 +130,11 @@ class RedisStreamsService {
   async publishUserNotification(notificationData: {
     shopDomain: string;
     userId?: string;
-    type: "analysis_complete" | "analysis_failed" | "bundle_created" | "insights_ready";
+    type:
+      | "analysis_complete"
+      | "analysis_failed"
+      | "bundle_created"
+      | "insights_ready";
     title: string;
     message: string;
     actionUrl?: string;
@@ -143,14 +153,17 @@ class RedisStreamsService {
     const messageId = await this.redis.xadd(
       STREAMS.USER_NOTIFICATIONS,
       "*",
-      ...Object.entries(eventData).flat()
+      ...Object.entries(eventData).flat(),
     );
 
     if (!messageId) {
       throw new Error("Failed to publish user notification event");
     }
 
-    console.log(`📤 Published user notification event: ${messageId}`, eventData);
+    console.log(
+      `📤 Published user notification event: ${messageId}`,
+      eventData,
+    );
     return messageId;
   }
 
@@ -179,7 +192,7 @@ class RedisStreamsService {
     const messageId = await this.redis.xadd(
       "betterbundle:tracking-events",
       "*",
-      ...Object.entries(eventData).flat()
+      ...Object.entries(eventData).flat(),
     );
 
     if (!messageId) {
@@ -196,7 +209,7 @@ class RedisStreamsService {
   async readAnalysisResults(
     shopDomain: string,
     lastId: string = "0",
-    count: number = 10
+    count: number = 10,
   ): Promise<Array<{ id: string; data: any }>> {
     if (!this.redis) {
       throw new Error("Redis Streams service not initialized");
@@ -208,7 +221,7 @@ class RedisStreamsService {
         count,
         "STREAMS",
         STREAMS.ANALYSIS_RESULTS,
-        lastId
+        lastId,
       );
 
       if (!results || results.length === 0) {
@@ -219,7 +232,9 @@ class RedisStreamsService {
       return messages
         .filter(([, fields]) => {
           // Filter by shop domain if present
-          const shopField = fields.find((_, index) => index % 2 === 0 && fields[index] === "shopDomain");
+          const shopField = fields.find(
+            (_, index) => index % 2 === 0 && fields[index] === "shopDomain",
+          );
           if (shopField) {
             const shopIndex = fields.indexOf("shopDomain");
             return fields[shopIndex + 1] === shopDomain;
@@ -261,17 +276,27 @@ class RedisStreamsService {
   async getPendingMessages(
     streamName: string,
     groupName: string,
-    consumerName: string
+    consumerName: string,
   ): Promise<any[]> {
     if (!this.redis) {
       throw new Error("Redis Streams service not initialized");
     }
 
     try {
-      const pending = await this.redis.xpending(streamName, groupName, "-", "+", 100, consumerName);
+      const pending = await this.redis.xpending(
+        streamName,
+        groupName,
+        "-",
+        "+",
+        100,
+        consumerName,
+      );
       return pending;
     } catch (error) {
-      console.error(`❌ Error getting pending messages for ${streamName}:`, error);
+      console.error(
+        `❌ Error getting pending messages for ${streamName}:`,
+        error,
+      );
       return [];
     }
   }
@@ -279,7 +304,11 @@ class RedisStreamsService {
   /**
    * Acknowledge a message as processed
    */
-  async acknowledgeMessage(streamName: string, groupName: string, messageId: string): Promise<void> {
+  async acknowledgeMessage(
+    streamName: string,
+    groupName: string,
+    messageId: string,
+  ): Promise<void> {
     if (!this.redis) {
       throw new Error("Redis Streams service not initialized");
     }

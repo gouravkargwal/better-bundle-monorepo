@@ -16,7 +16,9 @@ const shopify = shopifyApp({
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "your_api_secret_here",
   apiVersion: LATEST_API_VERSION,
   scopes: scopes,
-  appUrl: process.env.SHOPIFY_APP_URL || "https://betterbundle.vercel.app",
+  appUrl:
+    process.env.SHOPIFY_APP_URL ||
+    "https://violin-requirement-um-arena.trycloudflare.com",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,

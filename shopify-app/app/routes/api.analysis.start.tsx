@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { prisma } from "../core/database/prisma.server";
-import { ShopifyNotificationService } from "../core/notifications/shopify-notification.server";
 import { redisStreamsService } from "../core/redis/redis-streams.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -29,7 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Create job record in database
     const jobId = `analysis_${Date.now()}_${crypto.randomUUID()}`;
-    
+
     const analysisJob = await prisma.analysisJob.create({
       data: {
         jobId,
@@ -64,10 +63,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           progress: 5, // Indicate job has been queued
         },
       });
-
     } catch (error) {
       console.error("Error publishing job to Redis Streams:", error);
-      
+
       // Update job status to failed
       await prisma.analysisJob.update({
         where: { id: analysisJob.id },

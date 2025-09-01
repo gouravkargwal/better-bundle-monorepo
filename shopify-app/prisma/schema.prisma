@@ -38,6 +38,7 @@ model Shop {
   moneyFormat        String?
   isActive           Boolean                  @default(true)
   email              String?
+  onboardingStatus   String                   @default("new_user") // "new_user", "analysis_running", "analysis_complete_no_widget", "has_data"
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   lastAnalysisAt     DateTime?
