@@ -1,8 +1,8 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import axios from "axios";
 import { prisma } from "../core/database/prisma.server";
 import { ShopifyNotificationService } from "../core/notifications/shopify-notification.server";
+import { redisStreamsService } from "../core/redis/redis-streams.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
@@ -40,29 +40,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Send job to Fly.io worker
-    const flyWorkerUrl = process.env.FLY_WORKER_URL || "http://localhost:3001";
-    
+    // Initialize Redis Streams service
+    await redisStreamsService.initialize();
+
+    // Publish job to Redis Streams instead of sending to Fly.io worker
     try {
-      const response = await axios.post(`${flyWorkerUrl}/api/queue`, {
+      const messageId = await redisStreamsService.publishDataJob({
         jobId,
-        shopId,
+        shopId: shop.id,
         shopDomain: shop.shopDomain,
         accessToken: shop.accessToken,
+        type: "analysis",
+        priority: "normal",
       });
 
-      if (!response.data.success) {
-        throw new Error("Failed to queue job in Fly.io worker");
-      }
+      console.log(`✅ Analysis job published to Redis Streams: ${messageId}`);
+
+      // Update job status to indicate it's been queued
+      await prisma.analysisJob.update({
+        where: { id: analysisJob.id },
+        data: {
+          status: "queued",
+          progress: 5, // Indicate job has been queued
+        },
+      });
+
     } catch (error) {
-      console.error("Error sending job to Fly.io worker:", error);
+      console.error("Error publishing job to Redis Streams:", error);
       
       // Update job status to failed
       await prisma.analysisJob.update({
         where: { id: analysisJob.id },
         data: {
           status: "failed",
-          error: "Failed to send job to worker",
+          error: "Failed to publish job to Redis Streams",
           completedAt: new Date(),
         },
       });
@@ -76,8 +87,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { status: 500 },
       );
     }
-
-
 
     // Return 202 Accepted with job information
     return Response.json(

@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 import { prisma } from "../core/database/prisma.server";
-import { DashboardState } from "../shared/components/DashboardState";
+import { ModernDashboard } from "../shared/components/ModernDashboard";
 import { useAnalysis } from "../hooks/useAnalysis";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -19,7 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const activeJob = await prisma.analysisJob.findFirst({
       where: {
         shopId: shop.id,
-        status: { in: ["pending", "processing"] },
+        status: { in: ["pending", "processing", "queued"] },
       },
       orderBy: { createdAt: "desc" },
       select: { jobId: true, status: true, progress: true },
@@ -44,7 +44,7 @@ export default function Index() {
   const currentJobId = loaderData?.activeJob?.jobId || null;
 
   return (
-    <DashboardState
+    <ModernDashboard
       state={currentState}
       error={error || undefined}
       progress={currentProgress}

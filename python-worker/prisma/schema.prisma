@@ -1,0 +1,269 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider             = "prisma-client-py"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// RAW STAGING TABLES (immutable landing zone)
+// ----------------------------------------------------------------------------
+
+model RawOrder {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawOrder")
+}
+
+model RawProduct {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawProduct")
+}
+
+model RawCustomer {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawCustomer")
+}
+
+// Shop data
+model Shop {
+  id             String    @id @default(cuid())
+  shopId         String    @unique
+  shopDomain     String
+  accessToken    String
+  planType       String    @default("Free")
+  isActive       Boolean   @default(true)
+  lastAnalysisAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  products        ProductData[]
+  orders          OrderData[]
+  customers       CustomerData[]
+  analysisJobs    AnalysisJob[]
+  configurations  ShopConfiguration[]
+  bundles         Bundle[]
+  notifications   Notification[]
+  heuristics      HeuristicDecision[]
+
+  @@map("Shop")
+}
+
+// Shop configuration
+model ShopConfiguration {
+  id               String   @id @default(cuid())
+  shopId           String
+  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  analysisSchedule String   @default("weekly") // daily, weekly, monthly
+  isScheduleActive Boolean  @default(true)
+  autoAnalysis     Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopId])
+  @@map("ShopConfiguration")
+}
+
+// Product data collected from Shopify
+model ProductData {
+  id               String    @id @default(cuid())
+  shopId           String
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productId        String
+  title            String
+  handle           String
+  description      String?
+  category         String?
+  vendor           String?
+  price            Float
+  compareAtPrice   Float?
+  inventory        Int       @default(0)
+  tags             String[]
+  imageUrl         String?
+  imageAlt         String?
+  productCreatedAt DateTime?
+  variants         Json?
+  metafields       Json?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([shopId, productId])
+  @@map("ProductData")
+}
+
+// Order data collected from Shopify
+model OrderData {
+  id           String   @id @default(cuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orderId      String
+  customerId   String?
+  totalAmount  Float
+  orderDate    DateTime
+  orderStatus  String?
+  currencyCode String?
+  lineItems    Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopId, orderId])
+  @@map("OrderData")
+}
+
+// Customer data collected from Shopify
+model CustomerData {
+  id                 String    @id @default(cuid())
+  shopId             String
+  shop               Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerId         String
+  email              String?
+  firstName          String?
+  lastName           String?
+  createdAtShopify   DateTime?
+  lastOrderId        String?
+  lastOrderDate      DateTime?
+  tags               String[]
+  location           Json?
+  metafields         Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([shopId, customerId])
+  @@map("CustomerData")
+}
+
+// ----------------------------------------------------------------------------
+// FEATURE TABLES (derived)
+// ----------------------------------------------------------------------------
+
+model UserFeatures {
+  id                     String   @id @default(cuid())
+  shopId                 String
+  customerId             String
+  totalPurchases         Int      @default(0)
+  recencyDays            Int?
+  avgPurchaseIntervalDays Float?
+  totalSpent             Float    @default(0)
+  preferredCategory      String?
+  lastComputedAt         DateTime @default(now())
+
+  @@unique([shopId, customerId])
+  @@index([shopId])
+  @@map("UserFeatures")
+}
+
+model ProductFeatures {
+  id             String   @id @default(cuid())
+  shopId         String
+  productId      String
+  popularity     Int      @default(0)
+  avgRating      Float?
+  priceTier      String?
+  category       String?
+  tags           String[]
+  lastComputedAt DateTime @default(now())
+
+  @@unique([shopId, productId])
+  @@index([shopId])
+  @@map("ProductFeatures")
+}
+
+model InteractionFeatures {
+  id               String   @id @default(cuid())
+  shopId           String
+  customerId       String
+  productId        String
+  purchaseCount    Int      @default(0)
+  lastPurchaseDate DateTime?
+  timeDecayedWeight Float? 
+  lastComputedAt   DateTime @default(now())
+
+  @@unique([shopId, customerId, productId])
+  @@index([shopId])
+  @@map("InteractionFeatures")
+}
+
+// Analysis jobs
+model AnalysisJob {
+  id        String   @id @default(cuid())
+  jobId     String   @unique
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  status    String   @default("queued") // queued, processing, completed, failed
+  progress  Int      @default(0)
+  error     String?
+  results   Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("AnalysisJob")
+}
+
+// Bundle recommendations
+model Bundle {
+  id            String   @id @default(cuid())
+  shopId        String
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productIds    String[]
+  bundleName    String
+  bundleType    String   @default("recommended") // recommended, custom
+  confidence    Float?
+  revenue       Float?
+  frequency     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("Bundle")
+}
+
+// Notifications
+model Notification {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("Notification")
+}
+
+// Heuristic decisions for analysis scheduling
+model HeuristicDecision {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  decision  String
+  reason    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@map("HeuristicDecision")
+}

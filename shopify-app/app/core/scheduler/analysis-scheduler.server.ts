@@ -1,6 +1,6 @@
 import { prisma } from "../database/prisma.server";
 import { AnalysisHeuristicService } from "../heuristics/analysis-heuristic.server";
-import axios from "axios";
+import { redisStreamsService } from "../redis/redis-streams.server";
 
 export class AnalysisScheduler {
   private static isRunning = false;
@@ -136,30 +136,36 @@ export class AnalysisScheduler {
             },
           });
 
-          // Send job to Fly.io worker
-          const flyWorkerUrl =
-            process.env.FLY_WORKER_URL || "http://localhost:3001";
+          // Initialize Redis Streams service if not already done
+          await redisStreamsService.initialize();
 
+          // Publish job to Redis Streams instead of sending to Fly.io worker
           try {
-            const response = await axios.post(`${flyWorkerUrl}/api/queue`, {
+            const messageId = await redisStreamsService.publishDataJob({
               jobId,
-              shopId: shopConfig.shop.shopId,
+              shopId: shopConfig.shopId,
               shopDomain: shop.shopDomain,
               accessToken: shop.accessToken,
+              type: "scheduled",
+              priority: "normal",
             });
 
-            if (response.data.success) {
-              console.log(
-                `✅ Scheduled analysis queued for ${shopConfig.shop.shopDomain}: ${jobId}`,
-              );
-            } else {
-              console.error(
-                `❌ Failed to queue scheduled analysis for ${shopConfig.shop.shopDomain}`,
-              );
-            }
+            console.log(
+              `✅ Scheduled analysis published to Redis Streams for ${shop.shopDomain}: ${messageId}`,
+            );
+
+            // Update job status to indicate it's been queued
+            await prisma.analysisJob.update({
+              where: { id: analysisJob.id },
+              data: {
+                status: "queued",
+                progress: 5, // Indicate job has been queued
+              },
+            });
+
           } catch (error) {
             console.error(
-              `❌ Error sending scheduled analysis to Fly.io worker for ${shopConfig.shop.shopDomain}:`,
+              `❌ Error publishing scheduled analysis to Redis Streams for ${shop.shopDomain}:`,
               error,
             );
 
@@ -168,7 +174,7 @@ export class AnalysisScheduler {
               where: { id: analysisJob.id },
               data: {
                 status: "failed",
-                error: "Failed to send job to worker",
+                error: "Failed to publish job to Redis Streams",
                 completedAt: new Date(),
               },
             });
@@ -346,28 +352,35 @@ export class AnalysisScheduler {
         },
       });
 
-      // Send job to Fly.io worker
-      const flyWorkerUrl =
-        process.env.FLY_WORKER_URL || "http://localhost:3001";
+      // Initialize Redis Streams service if not already done
+      await redisStreamsService.initialize();
 
+      // Publish job to Redis Streams instead of sending to Fly.io worker
       try {
-        const response = await axios.post(`${flyWorkerUrl}/api/queue`, {
+        const messageId = await redisStreamsService.publishDataJob({
           jobId,
           shopId,
           shopDomain: shop.shopDomain,
           accessToken: shop.accessToken,
+          type: "analysis",
+          priority: "high",
         });
 
-        if (response.data.success) {
-          console.log(`✅ Manual analysis triggered for ${shopId}: ${jobId}`);
-          return { success: true, jobId: jobId };
-        } else {
-          console.error(`❌ Failed to trigger manual analysis for ${shopId}`);
-          return { success: false, error: "Failed to queue job" };
-        }
+        console.log(`✅ Manual analysis published to Redis Streams for ${shopId}: ${messageId}`);
+
+        // Update job status to indicate it's been queued
+        await prisma.analysisJob.update({
+          where: { id: analysisJob.id },
+          data: {
+            status: "queued",
+            progress: 5, // Indicate job has been queued
+          },
+        });
+
+        return { success: true, jobId: jobId };
       } catch (error) {
         console.error(
-          `❌ Error sending manual analysis to Fly.io worker for ${shopId}:`,
+          `❌ Error publishing manual analysis to Redis Streams for ${shopId}:`,
           error,
         );
 
@@ -376,12 +389,12 @@ export class AnalysisScheduler {
           where: { id: analysisJob.id },
           data: {
             status: "failed",
-            error: "Failed to send job to worker",
+            error: "Failed to publish job to Redis Streams",
             completedAt: new Date(),
           },
         });
 
-        return { success: false, error: "Failed to send job to worker" };
+        return { success: false, error: "Failed to publish job to Redis Streams" };
       }
     } catch (error) {
       console.error(

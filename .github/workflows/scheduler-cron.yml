@@ -1,0 +1,63 @@
+name: Scheduler Cron Job
+
+on:
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-scheduled-analyses:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd python-worker
+          pip install -r requirements.txt
+
+      - name: Run scheduler check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB: ${{ secrets.REDIS_DB }}
+          REDIS_TLS: ${{ secrets.REDIS_TLS }}
+        run: |
+          cd python-worker
+          python -c "
+          import asyncio
+          import sys
+          import os
+          sys.path.append('.')
+
+          from app.services.scheduler_service import scheduler_service
+
+          async def main():
+              try:
+                  await scheduler_service.initialize()
+                  result = await scheduler_service.check_and_trigger_scheduled_analyses()
+                  print(f'Scheduler result: {result}')
+                  if not result['success']:
+                      sys.exit(1)
+              except Exception as e:
+                  print(f'Error: {e}')
+                  sys.exit(1)
+
+          asyncio.run(main())
+          "
+
+      - name: Notify on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: "#alerts"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
