@@ -1,24 +1,29 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://profession-bedrooms-creating-concept.trycloudflare.com"
+name = "BetterBundle"
+application_url = "https://liverpool-files-hunter-avenue.trycloudflare.com"
 embedded = true
-
-[access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,read_products,read_orders,write_orders,read_customers,write_customers,read_inventory,write_inventory,read_analytics,read_marketing_events,write_marketing_events,read_price_rules,write_price_rules,read_discounts,write_discounts,read_script_tags,write_script_tags,read_themes,write_themes,read_content,write_content,read_locales,write_locales"
-
-[auth]
-redirect_urls = ["https://profession-bedrooms-creating-concept.trycloudflare.com/auth/callback", "https://profession-bedrooms-creating-concept.trycloudflare.com/auth/shopify/callback", "https://profession-bedrooms-creating-concept.trycloudflare.com/api/auth/callback"]
-
-[webhooks]
-api_version = "2024-01"
-
-[pos]
-embedded = false
+handle = "better-bundle-1"
 
 [build]
 automatically_update_urls_on_dev = true
 dev_store_url = "vnsaid.myshopify.com"
 include_config_on_deploy = true
+
+[webhooks]
+api_version = "2024-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_analytics,read_content,read_customers,read_discounts,read_inventory,read_locales,read_marketing_events,read_orders,read_price_rules,read_products,read_script_tags,read_themes,write_content,write_customers,write_discounts,write_inventory,write_locales,write_marketing_events,write_orders,write_price_rules,write_products,write_script_tags,write_themes"
+
+[auth]
+redirect_urls = [
+  "https://liverpool-files-hunter-avenue.trycloudflare.com/auth/callback",
+  "https://liverpool-files-hunter-avenue.trycloudflare.com/auth/shopify/callback",
+  "https://liverpool-files-hunter-avenue.trycloudflare.com/api/auth/callback"
+]
+
+[pos]
+embedded = false
