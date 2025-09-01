@@ -1,11 +1,21 @@
 [database]
-type = "postgres"
-dsn = "{{ env \"DATABASE_DSN\" }}"
+# Cache store for Upstash Redis
+cache_store = "{{ env \"REDIS_URL\" }}"
 
-[cache]
-type = "redis"
-endpoint = "{{ env \"REDIS_ENDPOINT\" }}"
-password = "{{ env \"REDIS_PASSWORD\" }}"
+# Data store for Render PostgreSQL
+data_store = "{{ env \"DATABASE_URL\" }}"
+
+[master]
+host = "0.0.0.0"
+port = 8086
+http_port = 8088
 
 [server]
 http_port = 8088
+
+[recommend.data_source]
+# The feedback types for positive events.
+positive_feedback_types = ["star","like"]
+
+# The feedback types for read events.
+read_feedback_types = ["read"]

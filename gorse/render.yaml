@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: gorse-recommendation-engine
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+    healthCheckPath: /
+    autoDeploy: true
