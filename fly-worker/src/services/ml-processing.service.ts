@@ -3,6 +3,8 @@ import { Logger } from "../utils/logger";
 import { PrismaClient } from "@prisma/client";
 import { updateJobStatus } from "./job-status.service";
 import { sendAnalysisCompletionEmail } from "./email-notification.service";
+import { saveHeuristicDecision } from "./database.service";
+import { AnalysisHeuristicService } from "./heuristic.service";
 
 export interface MLProcessingConfig {
   jobId: string;
@@ -94,6 +96,35 @@ export const processMLAnalysis = async (
         jobId,
         shopId,
         totalDuration: Date.now() - startTime,
+      });
+
+      // Calculate complex heuristic for next analysis run
+      const heuristicResult = await AnalysisHeuristicService.calculateNextAnalysisTime(
+        database.prisma,
+        shopId,
+        response.data
+      );
+
+      // Save detailed heuristic decision for next analysis run
+      await saveHeuristicDecision(database, shopId, {
+        decision: "analysis_completed",
+        reason: "ML analysis completed successfully",
+        metadata: {
+          jobId,
+          totalDuration: Date.now() - startTime,
+          analysisDate: new Date(),
+          nextAnalysisHours: heuristicResult.nextAnalysisHours,
+          nextAnalysisDays: (heuristicResult.nextAnalysisHours / 24).toFixed(1),
+          factors: heuristicResult.factors,
+          reasoning: heuristicResult.reasoning,
+          confidence: heuristicResult.confidence,
+        },
+      });
+
+      // Update shop's last analysis timestamp
+      await database.prisma.shop.update({
+        where: { id: shopId },
+        data: { lastAnalysisAt: new Date() },
       });
 
       // Send success email notification

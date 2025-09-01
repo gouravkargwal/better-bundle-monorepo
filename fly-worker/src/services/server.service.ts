@@ -7,6 +7,7 @@ import Queue from "bull";
 export interface ServerConfig {
   analysisQueue: Queue.Queue;
   mlProcessingQueue: Queue.Queue;
+  database: { prisma: any };
 }
 
 export interface ServerService {
@@ -101,6 +102,72 @@ export const createServerService = (config: ServerConfig): ServerService => {
         res.status(500).json({
           success: false,
           error: "Failed to queue job",
+        });
+      }
+    });
+
+    // Cron service endpoint to check analysis schedules
+    app.get("/api/cron/check-schedules", async (req, res) => {
+      const startTime = Date.now();
+      Logger.info("Cron service checking analysis schedules");
+
+      try {
+        // Get all shops that need analysis based on heuristic decisions
+        const shopsNeedingAnalysis = await config.database.prisma.shop.findMany({
+          where: {
+            lastAnalysisAt: {
+              not: null,
+            },
+          },
+          select: {
+            id: true,
+            shopId: true,
+            shopDomain: true,
+            lastAnalysisAt: true,
+          },
+        });
+
+        const analysisCandidates = [];
+
+        for (const shop of shopsNeedingAnalysis) {
+          // Get the latest heuristic decision for this shop
+          const latestDecision = await config.database.prisma.heuristicDecision.findFirst({
+            where: { shopId: shop.id },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (latestDecision && latestDecision.metadata?.nextAnalysisHours) {
+            const nextAnalysisTime = new Date(shop.lastAnalysisAt!);
+            nextAnalysisTime.setHours(nextAnalysisTime.getHours() + latestDecision.metadata.nextAnalysisHours);
+
+            if (new Date() >= nextAnalysisTime) {
+              analysisCandidates.push({
+                shopId: shop.shopId,
+                shopDomain: shop.shopDomain,
+                lastAnalysisAt: shop.lastAnalysisAt,
+                nextAnalysisTime,
+                heuristicDecision: latestDecision.metadata,
+              });
+            }
+          }
+        }
+
+        Logger.info("Analysis schedule check completed", {
+          totalShops: shopsNeedingAnalysis.length,
+          shopsNeedingAnalysis: analysisCandidates.length,
+        });
+
+        res.json({
+          success: true,
+          shopsNeedingAnalysis: analysisCandidates,
+          totalShops: shopsNeedingAnalysis.length,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        Logger.error("Failed to check analysis schedules", { error });
+        res.status(500).json({
+          success: false,
+          error: "Failed to check analysis schedules",
         });
       }
     });

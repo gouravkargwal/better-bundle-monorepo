@@ -68,6 +68,7 @@ const queueService = createQueueService({
 const serverService = createServerService({
   analysisQueue: queueService.analysisQueue,
   mlProcessingQueue: queueService.mlProcessingQueue,
+  database: connectionManager.database,
 });
 
 // Setup services

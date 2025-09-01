@@ -398,3 +398,30 @@ export const getLatestProductTimestamp = async (
   const timestamps = await getLatestTimestamps(config, shopDbId);
   return timestamps.latestProductDate;
 };
+
+// Save heuristic decision for analysis scheduling
+export const saveHeuristicDecision = async (
+  config: DatabaseConfig,
+  shopId: string,
+  decision: {
+    decision: string;
+    reason: string;
+    metadata?: any;
+  }
+): Promise<void> => {
+  return await withDatabaseHealthCheck(
+    config,
+    async () => {
+      await config.prisma.heuristicDecision.create({
+        data: {
+          shopId,
+          decision: decision.decision,
+          reason: decision.reason,
+          metadata: decision.metadata || {},
+        },
+      });
+    },
+    "Save heuristic decision",
+    { shopId, decision: decision.decision }
+  );
+};
