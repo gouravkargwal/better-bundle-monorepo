@@ -212,6 +212,17 @@ async def analyze_bundles_from_db(shop_id: str):
             f"Found {len(products_db)} products and {len(orders_db)} orders in database"
         )
 
+        # Log sample line_items structure for debugging
+        if orders_db:
+            sample_order = orders_db[0]
+            logger.info(f"Sample line_items structure: {type(sample_order.lineItems)}")
+            if isinstance(sample_order.lineItems, dict):
+                logger.info(
+                    f"Sample line_items keys: {list(sample_order.lineItems.keys())}"
+                )
+            elif isinstance(sample_order.lineItems, list):
+                logger.info(f"Sample line_items length: {len(sample_order.lineItems)}")
+
         # Convert to ProductData objects
         products = []
         for product in products_db:
@@ -227,16 +238,30 @@ async def analyze_bundles_from_db(shop_id: str):
                 )
             )
 
-        # Convert to OrderData objects
+        # Convert to OrderData objects with proper line_items transformation
         orders = []
         for order in orders_db:
+            # Transform line_items from GraphQL structure to simple list
+            line_items = []
+            if isinstance(order.lineItems, dict) and "edges" in order.lineItems:
+                # GraphQL structure: {"edges": [{"node": {...}}]}
+                for edge in order.lineItems["edges"]:
+                    if "node" in edge:
+                        line_items.append(edge["node"])
+            elif isinstance(order.lineItems, list):
+                # Already a list
+                line_items = order.lineItems
+            else:
+                # Fallback: try to use as-is
+                line_items = order.lineItems if order.lineItems else []
+
             orders.append(
                 OrderData(
                     order_id=order.orderId,
                     customer_id=order.customerId,
                     total_amount=order.totalAmount,
                     order_date=order.orderDate.isoformat(),
-                    line_items=order.lineItems,
+                    line_items=line_items,
                 )
             )
 

@@ -58,15 +58,15 @@ model Shop {
   incrementalLogs IncrementalAnalysisLog[]
 }
 
-// Raw order data for analysis
+// Raw order data for analysis - matches GraphQL response exactly
 model OrderData {
   id          String   @id @default(cuid())
   shopId      String
-  orderId     String   // Shopify order ID
-  customerId  String?
-  totalAmount Float
-  orderDate   DateTime
-  lineItems   Json     // Store product data as JSON array
+  orderId     String   // Shopify order ID (from GraphQL 'id')
+  customerId  String?  // From GraphQL 'customer.id'
+  totalAmount Float    // From GraphQL 'total_price'
+  orderDate   DateTime // From GraphQL 'created_at'
+  lineItems   Json     // From GraphQL 'line_items' - direct JSON storage
   createdAt   DateTime @default(now())
   
   // Relationships

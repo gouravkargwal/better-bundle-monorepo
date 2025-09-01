@@ -9,7 +9,7 @@ async function testShopifyAPI(shopDomain) {
   try {
     // Get the current session and shop data (check for online token first)
     let session = await prisma.session.findFirst({
-      where: { 
+      where: {
         shop: shopDomain,
         isOnline: true
       }
@@ -489,7 +489,7 @@ async function testShopifyAPI(shopDomain) {
           { query: simpleQuery },
           {
             headers: {
-              'X-Shopify-Access-Token': session.accessToken,
+              'X-Shopify-Access-Token': "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",
               'Content-Type': 'application/json',
             },
             timeout: 30000

@@ -2,7 +2,7 @@
 
 name = "BetterBundle"
 client_id = "87c44f5966daa80691a480bcd03c225c"
-application_url = "https://theme-officials-hour-aims.trycloudflare.com"
+application_url = "https://optimum-las-geo-refresh.trycloudflare.com"
 embedded = true
 
 [access_scopes]
@@ -10,7 +10,7 @@ embedded = true
 scopes = "write_products,read_products,read_orders,write_orders"
 
 [auth]
-redirect_urls = ["https://theme-officials-hour-aims.trycloudflare.com/auth/callback", "https://theme-officials-hour-aims.trycloudflare.com/auth/shopify/callback", "https://theme-officials-hour-aims.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://optimum-las-geo-refresh.trycloudflare.com/auth/callback", "https://optimum-las-geo-refresh.trycloudflare.com/auth/shopify/callback", "https://optimum-las-geo-refresh.trycloudflare.com/api/auth/callback"]
 
 [webhooks]
 api_version = "2024-01"
