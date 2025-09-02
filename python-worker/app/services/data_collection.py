@@ -174,11 +174,13 @@ class DataCollectionService:
                                 "orderId": order_record["orderId"],
                             }
                         },
-                        data=order_record,
-                        update={
-                            key: value
-                            for key, value in order_record.items()
-                            if key not in ["shopId", "orderId"]
+                        data={
+                            "create": order_record,
+                            "update": {
+                                key: value
+                                for key, value in order_record.items()
+                                if key not in ["shopId", "orderId"]
+                            },
                         },
                     )
             else:
@@ -290,11 +292,13 @@ class DataCollectionService:
                                 "productId": str(product["id"]),
                             }
                         },
-                        data=product_record,
-                        update={
-                            key: value
-                            for key, value in product_record.items()
-                            if key not in ["shopId", "productId"]
+                        data={
+                            "create": product_record,
+                            "update": {
+                                key: value
+                                for key, value in product_record.items()
+                                if key not in ["shopId", "productId"]
+                            },
                         },
                     )
             else:
@@ -388,54 +392,60 @@ class DataCollectionService:
                 is_incremental=is_incremental,
             )
 
-            # Always use upsert for customers (they can be updated)
-            for customer in customers:
-                # Defensive reads for optional/nested fields
-                last_order = customer.get("lastOrder") or {}
-                tags_val = customer.get("tags") or []
-                addresses_val = customer.get("addresses") or []
-                metafields_val = customer.get("metafields") or {}
+            # Parallelize upserts with bounded concurrency for speed
+            semaphore = asyncio.Semaphore(20)
 
-                customer_record = {
-                    "shopId": shop_db_id,
-                    "customerId": customer["id"],
-                    "email": customer.get("email"),
-                    "firstName": customer.get("firstName"),
-                    "lastName": customer.get("lastName"),
-                    "createdAtShopify": (
-                        datetime.fromisoformat(
-                            customer["createdAt"].replace("Z", "+00:00")
-                        )
-                        if customer.get("createdAt")
-                        else None
-                    ),
-                    "lastOrderId": last_order.get("id"),
-                    "lastOrderDate": (
-                        datetime.fromisoformat(
-                            last_order["processedAt"].replace("Z", "+00:00")
-                        )
-                        if last_order.get("processedAt")
-                        else None
-                    ),
-                    "tags": Json(tags_val),
-                    "location": Json(addresses_val),
-                    "metafields": Json(metafields_val),
-                }
+            async def upsert_one(customer: Dict[str, Any]):
+                async with semaphore:
+                    last_order = customer.get("lastOrder") or {}
+                    tags_val = customer.get("tags") or []
+                    addresses_val = customer.get("addresses") or []
+                    metafields_val = customer.get("metafields") or {}
 
-                await self.db.customerdata.upsert(
-                    where={
-                        "shopId_customerId": {
-                            "shopId": shop_db_id,
-                            "customerId": customer["id"],
-                        }
-                    },
-                    data=customer_record,
-                    update={
-                        key: value
-                        for key, value in customer_record.items()
-                        if key not in ["shopId", "customerId"]
-                    },
-                )
+                    customer_record = {
+                        "shopId": shop_db_id,
+                        "customerId": customer["id"],
+                        "email": customer.get("email"),
+                        "firstName": customer.get("firstName"),
+                        "lastName": customer.get("lastName"),
+                        "createdAtShopify": (
+                            datetime.fromisoformat(
+                                customer["createdAt"].replace("Z", "+00:00")
+                            )
+                            if customer.get("createdAt")
+                            else None
+                        ),
+                        "lastOrderId": last_order.get("id"),
+                        "lastOrderDate": (
+                            datetime.fromisoformat(
+                                last_order["processedAt"].replace("Z", "+00:00")
+                            )
+                            if last_order.get("processedAt")
+                            else None
+                        ),
+                        "tags": Json(tags_val),
+                        "location": Json(addresses_val),
+                        "metafields": Json(metafields_val),
+                    }
+
+                    await self.db.customerdata.upsert(
+                        where={
+                            "shopId_customerId": {
+                                "shopId": shop_db_id,
+                                "customerId": customer["id"],
+                            }
+                        },
+                        data={
+                            "create": customer_record,
+                            "update": {
+                                key: value
+                                for key, value in customer_record.items()
+                                if key not in ["shopId", "customerId"]
+                            },
+                        },
+                    )
+
+            await asyncio.gather(*(upsert_one(c) for c in customers))
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             log_performance(
@@ -919,30 +929,36 @@ class DataCollectionService:
                         f"Shop configuration not found for shop_id: {shop_id}"
                     )
 
-            # Check if we already have recent products data
+            # Always compute since_date from database and collect
             shop_db_id = await self.get_or_create_shop_db_id(config)
-            existing_products = await self.get_existing_products_count(shop_db_id)
 
-            if existing_products > 0:
-                logger.info(
-                    "Products data already exists, skipping collection",
-                    shop_id=shop_id,
-                    existing_count=existing_products,
+            # Prefer latest normalized product updatedAt; fallback to configured window
+            since_date = None
+            try:
+                timestamps = await get_latest_timestamps(shop_db_id)
+                latest_product = (
+                    timestamps.get("latest_product_date") if timestamps else None
                 )
-                return {
-                    "success": True,
-                    "message": "Products data already exists",
-                    "products_count": existing_products,
-                    "skipped": True,
-                }
+                if latest_product:
+                    if isinstance(latest_product, str):
+                        since_date = latest_product
+                    else:
+                        since_date = latest_product.isoformat()
+            except Exception:
+                since_date = None
+
+            if not since_date:
+                since_date = self.calculate_since_date(
+                    config.days_back or settings.MAX_INITIAL_DAYS
+                )
 
             # Create Shopify API client
             api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
 
             try:
                 # Collect only products
-                logger.info("Fetching products data")
-                products = await api_client.fetch_products()
+                logger.info("Fetching products data", since_date=since_date)
+                products = await api_client.fetch_products(since_date)
 
                 logger.info(
                     "Products collection completed",
@@ -950,8 +966,8 @@ class DataCollectionService:
                     products_count=len(products),
                 )
 
-                # Save products to database
-                await self.save_products(shop_db_id, products, False)
+                # Save products to database using upsert (idempotent)
+                await self.save_products(shop_db_id, products, True)
 
                 # Update shop's last products collection timestamp
                 await self.update_shop_last_products_collection(shop_db_id)
@@ -992,32 +1008,34 @@ class DataCollectionService:
                         f"Shop configuration not found for shop_id: {shop_id}"
                     )
 
-            # Check if we already have recent orders data
+            # Always compute since_date from database and collect
             shop_db_id = await self.get_or_create_shop_db_id(config)
-            existing_orders = await self.get_existing_orders_count(shop_db_id)
 
-            if existing_orders > 0:
-                logger.info(
-                    "Orders data already exists, skipping collection",
-                    shop_id=shop_id,
-                    existing_count=existing_orders,
+            # Prefer latest normalized orderDate; fallback to configured window
+            since_date = None
+            try:
+                timestamps = await get_latest_timestamps(shop_db_id)
+                latest_order = (
+                    timestamps.get("latest_order_date") if timestamps else None
                 )
-                return {
-                    "success": True,
-                    "message": "Orders data already exists",
-                    "orders_count": existing_orders,
-                    "skipped": True,
-                }
+                if latest_order:
+                    # latest_order may be datetime already
+                    if isinstance(latest_order, str):
+                        since_date = latest_order
+                    else:
+                        since_date = latest_order.isoformat()
+            except Exception as _:
+                since_date = None
+
+            if not since_date:
+                since_date = self.calculate_since_date(
+                    config.days_back or settings.MAX_INITIAL_DAYS
+                )
 
             # Create Shopify API client
             api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
 
             try:
-                # Calculate since date
-                since_date = self.calculate_since_date(
-                    config.days_back or settings.MAX_INITIAL_DAYS
-                )
-
                 # Collect only orders
                 logger.info("Fetching orders data", since_date=since_date)
                 orders = await api_client.fetch_orders(since_date)
@@ -1028,8 +1046,8 @@ class DataCollectionService:
                     orders_count=len(orders),
                 )
 
-                # Save orders to database
-                await self.save_orders(shop_db_id, orders, False)
+                # Save orders to database using upsert (idempotent, incremental-safe)
+                await self.save_orders(shop_db_id, orders, True)
 
                 # Update shop's last orders collection timestamp
                 await self.update_shop_last_orders_collection(shop_db_id)
@@ -1070,32 +1088,18 @@ class DataCollectionService:
                         f"Shop configuration not found for shop_id: {shop_id}"
                     )
 
-            # Check if we already have recent customers data
+            # Always compute since_date and collect
             shop_db_id = await self.get_or_create_shop_db_id(config)
-            existing_customers = await self.get_existing_customers_count(shop_db_id)
 
-            if existing_customers > 0:
-                logger.info(
-                    "Customers data already exists, skipping collection",
-                    shop_id=shop_id,
-                    existing_count=existing_customers,
-                )
-                return {
-                    "success": True,
-                    "message": "Customers data already exists",
-                    "customers_count": existing_customers,
-                    "skipped": False,
-                }
+            # For customers, use createdAt-based window
+            since_date = self.calculate_since_date(
+                config.days_back or settings.MAX_INITIAL_DAYS
+            )
 
             # Create Shopify API client
             api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
 
             try:
-                # Calculate since date
-                since_date = self.calculate_since_date(
-                    config.days_back or settings.MAX_INITIAL_DAYS
-                )
-
                 # Collect only customers
                 logger.info("Fetching customers data", since_date=since_date)
                 customers = await api_client.fetch_customers(since_date)
@@ -1106,8 +1110,8 @@ class DataCollectionService:
                     customers_count=len(customers),
                 )
 
-                # Save customers to database
-                await self.save_customers(shop_db_id, customers, False)
+                # Save customers to database using upsert (idempotent)
+                await self.save_customers(shop_db_id, customers, True)
 
                 # Update shop's last customers collection timestamp
                 await self.update_shop_last_customers_collection(shop_db_id)
