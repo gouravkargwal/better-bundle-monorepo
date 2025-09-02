@@ -88,6 +88,9 @@ model Shop {
   featureComputations FeatureComputation[]
   billingSubscriptions BillingSubscription[]
   billingCharges    BillingCharge[]
+  userFeatures       UserFeatures[]
+  productFeatures    ProductFeatures[]
+  interactionFeatures InteractionFeatures[]
 }
 
 model OrderData {
@@ -314,19 +317,18 @@ model TrackingEvent {
 }
 
 model ShopAnalytics {
-  id                              String   @id @default(cuid())
-  shopId                          String   @unique
-  totalRecommendationsDisplayed   Int      @default(0)
-  totalRecommendationsClicked     Int      @default(0)
-  totalRecommendationsAddedToCart Int      @default(0)
-  totalRecommendationsPurchased   Int      @default(0)
-  totalRevenueAttributed          Float    @default(0)
-  totalWidgetInteractions         Int      @default(0)
-  lastUpdated                     DateTime @default(now())
-  createdAt                       DateTime @default(now())
+  id              String   @id @default(cuid())
+  shopId          String   @unique
+  totalOrders     Int      @default(0)
+  totalRevenue    Float    @default(0)
+  avgOrderValue   Float    @default(0)
+  topProducts     Json?    // Top 10 products by quantity
+  topCategories   Json?    // Top categories by revenue
+  lastComputedAt  DateTime @default(now())
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  // Relations
-  shop Shop @relation(fields: [shopId], references: [id])
+  @@index([shopId, totalRevenue])
+  @@index([shopId, totalOrders])
 }
 
 // Billing models
@@ -405,4 +407,56 @@ model FeatureComputation {
 
   @@index([shopId, status])
   @@index([shopId, createdAt])
+}
+
+model UserFeatures {
+  id                      String   @id @default(cuid())
+  shopId                  String
+  customerId              String
+  totalPurchases          Int      @default(0)
+  recencyDays             Int?
+  avgPurchaseIntervalDays  Float?
+  totalSpent              Float    @default(0)
+  preferredCategory       String?
+  lastComputedAt          DateTime @default(now())
+  shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, totalSpent])
+  @@index([shopId, recencyDays])
+}
+
+model ProductFeatures {
+  id              String   @id @default(cuid())
+  shopId          String
+  productId       String
+  popularity      Int      @default(0)
+  avgRating       Float?
+  priceTier       String?  // "low", "mid", "high"
+  category        String?
+  tags            Json?
+  lastComputedAt  DateTime @default(now())
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, popularity])
+  @@index([shopId, priceTier])
+  @@index([shopId, category])
+}
+
+model InteractionFeatures {
+  id                  String   @id @default(cuid())
+  shopId              String
+  customerId          String
+  productId           String
+  purchaseCount       Int      @default(0)
+  lastPurchaseDate    DateTime?
+  timeDecayedWeight   Float?
+  lastComputedAt      DateTime @default(now())
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId, productId])
+  @@index([shopId, customerId])
+  @@index([shopId, productId])
+  @@index([shopId, timeDecayedWeight])
 }
