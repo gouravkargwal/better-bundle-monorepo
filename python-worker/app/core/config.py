@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     # External Services
     ML_API_URL: str = Field(default="http://localhost:8000", env="ML_API_URL")
     SHOPIFY_APP_URL: str = Field(default="http://localhost:3000", env="SHOPIFY_APP_URL")
+    SHOPIFY_ACCESS_TOKEN: str = Field(default="", env="SHOPIFY_ACCESS_TOKEN")
 
     # Data Collection Configuration
     MAX_INITIAL_DAYS: int = Field(default=60, env="MAX_INITIAL_DAYS")

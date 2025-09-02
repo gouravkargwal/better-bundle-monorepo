@@ -8,9 +8,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
-
 from app.core.config import settings
-from app.core.logging import get_logger, log_error, log_performance, log_shopify_api
+from app.core.logging import get_logger, log_error, log_shopify_api
 
 logger = get_logger(__name__)
 
@@ -29,7 +28,7 @@ class ShopifyAPIClient:
             timeout=30.0,
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
             headers={
-                "X-Shopify-Access-Token": access_token,
+                "X-Shopify-Access-Token": settings.SHOPIFY_ACCESS_TOKEN,
                 "Content-Type": "application/json",
             },
         )
@@ -45,7 +44,7 @@ class ShopifyAPIClient:
     async def execute_graphql_query(
         self, query: str, variables: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """Execute a GraphQL query with retry logic"""
+        """Execute a GraphQL query with retry logic and timeout protection"""
 
         start_time = asyncio.get_event_loop().time()
 
@@ -54,7 +53,9 @@ class ShopifyAPIClient:
             if variables:
                 payload["variables"] = variables
 
-            response = await self.client.post(self.graphql_url, json=payload)
+            # Add timeout protection to the HTTP request
+            async with asyncio.timeout(45):  # 45 second timeout for GraphQL queries
+                response = await self.client.post(self.graphql_url, json=payload)
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
@@ -85,6 +86,16 @@ class ShopifyAPIClient:
 
             return result
 
+        except asyncio.TimeoutError:
+            log_error(
+                Exception("GraphQL query timeout"),
+                {
+                    "shop_domain": self.shop_domain,
+                    "query": query[:200] + "..." if len(query) > 200 else query,
+                    "variables": variables,
+                },
+            )
+            raise Exception("GraphQL query timed out after 45 seconds")
         except httpx.HTTPStatusError as e:
             log_error(
                 e,
@@ -114,7 +125,7 @@ class ShopifyAPIClient:
     async def fetch_orders(
         self, since_date: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Fetch orders from Shopify GraphQL API"""
+        """Fetch orders from Shopify GraphQL API with timeout protection"""
 
         query = """
         query getOrders($query: String, $after: String, $first: Int) {
@@ -169,8 +180,31 @@ class ShopifyAPIClient:
         has_next_page = True
         cursor = None
         total_fetched = 0
+        max_iterations = 100  # Prevent infinite loops
+        iteration_count = 0
 
-        while has_next_page and (not limit or total_fetched < limit):
+        # Add overall timeout for entire pagination process
+        overall_start_time = asyncio.get_event_loop().time()
+        overall_timeout = 180  # 3 minutes total timeout for all orders
+
+        while (
+            has_next_page
+            and (not limit or total_fetched < limit)
+            and iteration_count < max_iterations
+        ):
+            # Check overall timeout
+            if (asyncio.get_event_loop().time() - overall_start_time) > overall_timeout:
+                logger.error(
+                    "Orders fetch overall timeout reached",
+                    shop_domain=self.shop_domain,
+                    total_orders=len(all_orders),
+                    iteration_count=iteration_count,
+                    overall_timeout_seconds=overall_timeout,
+                )
+                break
+
+            iteration_count += 1
+
             remaining_limit = limit - total_fetched if limit else None
             batch_size = min(
                 remaining_limit or settings.SHOPIFY_API_BATCH_SIZE,
@@ -182,7 +216,19 @@ class ShopifyAPIClient:
             if since_date:
                 variables["query"] = f"created_at:>='{since_date}'"
 
-            result = await self.execute_graphql_query(query, variables)
+            try:
+                # Add timeout protection for each batch
+                async with asyncio.timeout(30):  # 30 second timeout per batch
+                    result = await self.execute_graphql_query(query, variables)
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Order batch fetch timed out",
+                    shop_domain=self.shop_domain,
+                    batch_size=batch_size,
+                    cursor=cursor,
+                    iteration_count=iteration_count,
+                )
+                break
 
             orders_data = result.get("data", {}).get("orders", {})
             edges = orders_data.get("edges", [])
@@ -216,17 +262,30 @@ class ShopifyAPIClient:
                 total_fetched=total_fetched,
                 limit=limit,
                 has_next_page=has_next_page,
+                iteration_count=iteration_count,
             )
 
-            # Rate limiting
-            await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            # Rate limiting with timeout protection
+            try:
+                async with asyncio.timeout(5):  # 5 second timeout for rate limiting
+                    await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            except asyncio.TimeoutError:
+                logger.warning("Rate limiting sleep interrupted, continuing...")
+
+        if iteration_count >= max_iterations:
+            logger.warning(
+                "Maximum iterations reached for orders fetch",
+                shop_domain=self.shop_domain,
+                total_orders=len(all_orders),
+                max_iterations=max_iterations,
+            )
 
         return all_orders
 
     async def fetch_products(
         self, since_date: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Fetch products from Shopify GraphQL API"""
+        """Fetch products from Shopify GraphQL API with timeout protection"""
 
         query = """
         query getProducts($query: String, $after: String, $first: Int) {
@@ -287,8 +346,16 @@ class ShopifyAPIClient:
         has_next_page = True
         cursor = None
         total_fetched = 0
+        max_iterations = 100  # Prevent infinite loops
+        iteration_count = 0
 
-        while has_next_page and (not limit or total_fetched < limit):
+        while (
+            has_next_page
+            and (not limit or total_fetched < limit)
+            and iteration_count < max_iterations
+        ):
+            iteration_count += 1
+
             remaining_limit = limit - total_fetched if limit else None
             batch_size = min(
                 remaining_limit or settings.SHOPIFY_API_BATCH_SIZE,
@@ -300,7 +367,19 @@ class ShopifyAPIClient:
             if since_date:
                 variables["query"] = f"updated_at:>='{since_date}'"
 
-            result = await self.execute_graphql_query(query, variables)
+            try:
+                # Add timeout protection for each batch
+                async with asyncio.timeout(30):  # 30 second timeout per batch
+                    result = await self.execute_graphql_query(query, variables)
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Product batch fetch timed out",
+                    shop_domain=self.shop_domain,
+                    batch_size=batch_size,
+                    cursor=cursor,
+                    iteration_count=iteration_count,
+                )
+                break
 
             products_data = result.get("data", {}).get("products", {})
             edges = products_data.get("edges", [])
@@ -308,25 +387,25 @@ class ShopifyAPIClient:
             # Process products
             for edge in edges:
                 node = edge["node"]
-                # Get first image
-                first_image = None
-                if node["images"]["edges"]:
-                    img_node = node["images"]["edges"][0]["node"]
-                    first_image = {"src": img_node["url"], "alt": img_node["altText"]}
-
                 # Transform to match the expected format
                 product = {
                     "id": node["id"],
-                    "title": node["title"],
-                    "handle": node["handle"],
-                    "product_type": node["productType"],
+                    "title": node.get("title"),
+                    "handle": node.get("handle"),
+                    "productType": node.get("productType"),
                     "description": node.get("description"),
                     "vendor": node.get("vendor"),
-                    "created_at": node["createdAt"],
-                    "tags": node["tags"],
-                    "image": first_image,
-                    "variants": [e["node"] for e in node["variants"]["edges"]],
-                    "metafields": [e["node"] for e in node["metafields"]["edges"]],
+                    "createdAt": node["createdAt"],
+                    "tags": node.get("tags", []),
+                    "images": [
+                        e["node"] for e in node.get("images", {}).get("edges", [])
+                    ],
+                    "variants": [
+                        e["node"] for e in node.get("variants", {}).get("edges", [])
+                    ],
+                    "metafields": [
+                        e["node"] for e in node.get("metafields", {}).get("edges", [])
+                    ],
                 }
                 all_products.append(product)
 
@@ -343,10 +422,23 @@ class ShopifyAPIClient:
                 total_fetched=total_fetched,
                 limit=limit,
                 has_next_page=has_next_page,
+                iteration_count=iteration_count,
             )
 
-            # Rate limiting
-            await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            # Rate limiting with timeout protection
+            try:
+                async with asyncio.timeout(5):  # 5 second timeout for rate limiting
+                    await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            except asyncio.TimeoutError:
+                logger.warning("Rate limiting sleep interrupted, continuing...")
+
+        if iteration_count >= max_iterations:
+            logger.warning(
+                "Maximum iterations reached for products fetch",
+                shop_domain=self.shop_domain,
+                total_products=len(all_products),
+                max_iterations=max_iterations,
+            )
 
         return all_products
 
@@ -404,8 +496,31 @@ class ShopifyAPIClient:
         has_next_page = True
         cursor = None
         total_fetched = 0
+        max_iterations = 100  # Prevent infinite loops
+        iteration_count = 0
 
-        while has_next_page and (not limit or total_fetched < limit):
+        # Add overall timeout for entire pagination process
+        overall_start_time = asyncio.get_event_loop().time()
+        overall_timeout = 180  # 3 minutes total timeout for all customers
+
+        while (
+            has_next_page
+            and (not limit or total_fetched < limit)
+            and iteration_count < max_iterations
+        ):
+            # Check overall timeout
+            if (asyncio.get_event_loop().time() - overall_start_time) > overall_timeout:
+                logger.error(
+                    "Customers fetch overall timeout reached",
+                    shop_domain=self.shop_domain,
+                    total_customers=len(all_customers),
+                    iteration_count=iteration_count,
+                    overall_timeout_seconds=overall_timeout,
+                )
+                break
+
+            iteration_count += 1
+
             remaining_limit = limit - total_fetched if limit else None
             batch_size = min(
                 remaining_limit or settings.SHOPIFY_API_BATCH_SIZE,
@@ -417,25 +532,29 @@ class ShopifyAPIClient:
             if since_date:
                 variables["query"] = f"created_at:>='{since_date}'"
 
-        try:
-            result = await self.execute_graphql_query(query, variables)
-            customers_data = result.get("data", {}).get("customers", {})
-            edges = customers_data.get("edges", [])
-        except Exception as e:
-            # Check if it's an access denied error
-            if "ACCESS_DENIED" in str(
-                e
-            ) or "not approved to access the Customer object" in str(e):
-                logger.warning(
-                    "Customer data access denied by Shopify. Continuing without customer data.",
-                    shop_domain=self.shop_domain,
-                    error=str(e),
-                )
-                # Return empty list - we'll continue without customer data
-                return []
-            else:
-                # Re-raise other errors
-                raise
+            try:
+                # Add timeout protection for each batch
+                async with asyncio.timeout(30):  # 30 second timeout per batch
+                    result = await self.execute_graphql_query(query, variables)
+
+                customers_data = result.get("data", {}).get("customers", {})
+                edges = customers_data.get("edges", [])
+
+            except Exception as e:
+                # Check if it's an access denied error
+                if "ACCESS_DENIED" in str(
+                    e
+                ) or "not approved to access the Customer object" in str(e):
+                    logger.warning(
+                        "Customer data access denied by Shopify. Continuing without customer data.",
+                        shop_domain=self.shop_domain,
+                        error=str(e),
+                    )
+                    # Return empty list - we'll continue without customer data
+                    return []
+                else:
+                    # Re-raise other errors
+                    raise
 
             # Process customers
             for edge in edges:
@@ -469,10 +588,23 @@ class ShopifyAPIClient:
                 total_fetched=total_fetched,
                 limit=limit,
                 has_next_page=has_next_page,
+                iteration_count=iteration_count,
             )
 
-            # Rate limiting
-            await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            # Rate limiting with timeout protection
+            try:
+                async with asyncio.timeout(5):  # 5 second timeout for rate limiting
+                    await asyncio.sleep(1.0 / settings.SHOPIFY_API_RATE_LIMIT)
+            except asyncio.TimeoutError:
+                logger.warning("Rate limiting sleep interrupted, continuing...")
+
+        if iteration_count >= max_iterations:
+            logger.warning(
+                "Maximum iterations reached for customers fetch",
+                shop_domain=self.shop_domain,
+                total_customers=len(all_customers),
+                max_iterations=max_iterations,
+            )
 
         return all_customers
 

@@ -3,43 +3,16 @@ Data processing service that orchestrates data collection and ML training events
 """
 
 import asyncio
-import uuid
-from typing import Dict, Any, Optional
-from pydantic import BaseModel
+import time
+from typing import Dict, Any
 
 from app.core.config import settings
 from app.core.redis_client import streams_manager
-from app.services.data_collection import DataCollectionService, DataCollectionConfig
-
+from app.services.data_collection import DataCollectionService
 from app.services.gorse_service import gorse_service
-from app.core.logging import get_logger, log_error, log_performance, log_stream_event
+from app.core.logger import get_logger
 
-logger = get_logger(__name__)
-
-
-class DataJobRequest(BaseModel):
-    """Data job request model"""
-
-    job_id: str
-    shop_id: str
-    shop_domain: str
-    access_token: str
-    job_type: str = "complete"  # complete or incremental
-    days_back: Optional[int] = None
-
-
-class DataJobResult(BaseModel):
-    """Data job result model"""
-
-    job_id: str
-    shop_id: str
-    shop_db_id: str
-    success: bool
-    orders_count: int = 0
-    products_count: int = 0
-    customers_count: int = 0
-    duration_ms: float = 0
-    error: str = None
+logger = get_logger("data-processor")
 
 
 class DataProcessor:
@@ -48,274 +21,63 @@ class DataProcessor:
     def __init__(self):
         self.data_collection_service = DataCollectionService()
         self.streams_manager = streams_manager
+        self._shutdown_event = asyncio.Event()
+        self._consumer_task = None
 
     async def initialize(self):
         """Initialize the data processor"""
+        logger.log_consumer_event("initializing", component="data_processor")
+
         await self.data_collection_service.initialize()
         await self.streams_manager.initialize()
-        logger.info("Data processor initialized successfully")
 
-    async def process_data_job(self, request: DataJobRequest) -> DataJobResult:
-        """
-        Process a data job: collect data, save to database, and publish ML training event
-        """
-        start_time = asyncio.get_event_loop().time()
-
-        logger.info(
-            "Starting data job processing",
-            job_id=request.job_id,
-            shop_id=request.shop_id,
-            shop_domain=request.shop_domain,
-            job_type=request.job_type,
+        logger.log_consumer_event(
+            "initialized", component="data_processor", status="success"
         )
 
-        try:
-            # Step 1: Update job status to processing
-            await self._update_job_status(request.job_id, "processing", 10)
+    async def shutdown(self):
+        """Gracefully shutdown the data processor"""
+        logger.log_consumer_event("shutting_down", component="data_processor")
 
-            # Analysis started - no need to track onboarding status anymore
+        self._shutdown_event.set()
 
-            # Step 2: Collect and save data
-            collection_config = DataCollectionConfig(
-                shop_id=request.shop_id,
-                shop_domain=request.shop_domain,
-                access_token=request.access_token,
-                days_back=request.days_back,
-                is_incremental=(request.job_type == "incremental"),
-            )
-
-            if request.job_type == "incremental":
-                collection_result = await self.data_collection_service.collect_and_save_incremental_data(
-                    collection_config
-                )
-            else:
-                collection_result = (
-                    await self.data_collection_service.collect_and_save_complete_data(
-                        collection_config
-                    )
-                )
-
-            if not collection_result.success:
-                # Data collection failed
-                await self._update_job_status(
-                    request.job_id, "failed", 0, collection_result.error
-                )
-
-                return DataJobResult(
-                    job_id=request.job_id,
-                    shop_id=request.shop_id,
-                    shop_db_id=collection_result.shop_db_id,
-                    success=False,
-                    error=collection_result.error,
-                )
-
-            # Step 3: Update job status to data collection completed (60%)
-            await self._update_job_status(request.job_id, "processing", 60)
-
-            # Step 4: Run feature transformations here (to be implemented)
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
             try:
-                from app.services.transformations import run_transformations_for_shop
-
-                transform_stats = await run_transformations_for_shop(
-                    shop_id=request.shop_id,
-                    backfill_if_needed=True,
-                )
-
-                # Step 5: Publish features-computed event
-                features_event_id = (
-                    await self.streams_manager.publish_features_computed_event(
-                        job_id=request.job_id,
-                        shop_id=request.shop_id,
-                        features_ready=True,
-                        metadata=transform_stats,
-                    )
-                )
-
-                logger.info(
-                    "Features computed and event published",
-                    job_id=request.job_id,
-                    shop_id=request.shop_id,
-                    features_event_id=features_event_id,
-                )
-
-                # Step 5.5: Send data to Gorse for automatic training (if enabled)
-                if settings.ENABLE_GORSE_SYNC:
-                    try:
-                        await gorse_service.initialize()
-                        gorse_result = await gorse_service.train_model_for_shop(
-                            shop_id=request.shop_id, shop_domain=request.shop_domain
-                        )
-
-                        if gorse_result["success"]:
-                            logger.info(
-                                "Data sent to Gorse successfully",
-                                job_id=request.job_id,
-                                shop_id=request.shop_id,
-                                gorse_result=gorse_result,
-                            )
-                        else:
-                            logger.warning(
-                                "Gorse training failed",
-                                job_id=request.job_id,
-                                shop_id=request.shop_id,
-                                error=gorse_result.get("error"),
-                            )
-                    except Exception as gorse_error:
-                        log_error(
-                            gorse_error,
-                            {
-                                "operation": "gorse_training",
-                                "job_id": request.job_id,
-                                "shop_id": request.shop_id,
-                            },
-                        )
-                        logger.warning(
-                            "Failed to send data to Gorse, but continuing with ML training event",
-                            job_id=request.job_id,
-                            shop_id=request.shop_id,
-                            error=str(gorse_error),
-                        )
-
-                # Step 6: Publish ML training event (decoupled, still triggered here)
-                ml_event_id = await self.streams_manager.publish_ml_training_event(
-                    job_id=request.job_id,
-                    shop_id=request.shop_id,
-                    shop_domain=request.shop_domain,
-                    data_collection_completed=True,
-                )
-
-                logger.info(
-                    "ML training event published successfully",
-                    job_id=request.job_id,
-                    shop_id=request.shop_id,
-                    ml_event_id=ml_event_id,
-                )
-
-                # Step 7: Update job status to ML training queued (80%)
-                await self._update_job_status(request.job_id, "ml_training_queued", 80)
-
-                # Step 8: Publish user notification
-                await self.streams_manager.publish_user_notification_event(
-                    shop_id=request.shop_id,
-                    notification_type="data_collection_completed",
-                    message=f"Data collection and feature computation completed for {request.shop_domain}. ML training has been queued.",
-                    data={
-                        "job_id": request.job_id,
-                        "orders_count": collection_result.orders_count,
-                        "products_count": collection_result.products_count,
-                        "customers_count": collection_result.customers_count,
-                        "transform_stats": transform_stats,
-                    },
-                )
-
-            except Exception as stream_error:
-                log_error(
-                    stream_error,
-                    {
-                        "operation": "publish_ml_training_event",
-                        "job_id": request.job_id,
-                        "shop_id": request.shop_id,
-                    },
-                )
-
-                # Even if stream publishing fails, data collection succeeded
-                # Just log the error and continue
-                logger.warning(
-                    "Failed to publish ML training event, but data collection succeeded",
-                    job_id=request.job_id,
-                    shop_id=request.shop_id,
-                    error=str(stream_error),
-                )
-
-            total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-            log_performance(
-                "data_job_processing",
-                total_duration_ms,
-                job_id=request.job_id,
-                shop_id=request.shop_id,
-                job_type=request.job_type,
-            )
-
-            logger.info(
-                "Data job processing completed successfully",
-                job_id=request.job_id,
-                shop_id=request.shop_id,
-                shop_domain=request.shop_domain,
-                total_duration_ms=total_duration_ms,
-                orders_count=collection_result.orders_count,
-                products_count=collection_result.products_count,
-                customers_count=collection_result.customers_count,
-            )
-
-            # Analysis completed successfully - user can proceed to widget setup
-
-            return DataJobResult(
-                job_id=request.job_id,
-                shop_id=request.shop_id,
-                shop_db_id=collection_result.shop_db_id,
-                success=True,
-                orders_count=collection_result.orders_count,
-                products_count=collection_result.products_count,
-                customers_count=collection_result.customers_count,
-                duration_ms=total_duration_ms,
-            )
-
-        except Exception as e:
-            total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-            log_error(
-                e,
-                {
-                    "operation": "data_job_processing",
-                    "job_id": request.job_id,
-                    "shop_id": request.shop_id,
-                    "shop_domain": request.shop_domain,
-                    "total_duration_ms": total_duration_ms,
-                },
-            )
-
-            # Try to update job status to failed - but don't let failures stop us
-            try:
-                await self._update_job_status(request.job_id, "failed", 0, str(e))
-            except Exception as status_error:
-                log_error(
-                    status_error,
-                    {
-                        "operation": "update_job_status_failed",
-                        "job_id": request.job_id,
-                        "original_error": str(e),
-                    },
-                )
-
-            # Analysis failed - log the error for debugging
-            logger.error(
-                "Analysis failed",
-                shop_id=request.shop_id,
-                shop_domain=request.shop_domain,
-                job_id=request.job_id,
-                error=str(e),
-            )
-
-            # Publish failure notification
-            try:
-                await self.streams_manager.publish_user_notification_event(
-                    shop_id=request.shop_id,
-                    notification_type="data_collection_failed",
-                    message=f"Data collection failed for {request.shop_domain}: {str(e)}",
-                    data={"job_id": request.job_id, "error": str(e)},
-                )
-            except Exception:
-                # Ignore notification failures
+                await self._consumer_task
+            except asyncio.CancelledError:
                 pass
+            logger.log_consumer_event(
+                "consumer_task_cancelled", component="data_processor"
+            )
 
-            return DataJobResult(
-                job_id=request.job_id,
-                shop_id=request.shop_id,
-                shop_db_id="",
-                success=False,
-                duration_ms=total_duration_ms,
-                error=str(e),
+        logger.log_consumer_event("shutdown_complete", component="data_processor")
+
+    def is_shutdown_requested(self) -> bool:
+        """Check if shutdown has been requested"""
+        return self._shutdown_event.is_set()
+
+    async def start_consumer(self):
+        """Start the consumer in a separate task"""
+        if self._consumer_task and not self._consumer_task.done():
+            logger.warning("Consumer is already running")
+            return
+
+        self._consumer_task = asyncio.create_task(
+            self.consume_data_jobs(), name="data-processor-consumer"
+        )
+        logger.log_consumer_event("consumer_task_started", component="data_processor")
+
+    async def stop_consumer(self):
+        """Stop the consumer task"""
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                pass
+            logger.log_consumer_event(
+                "consumer_task_stopped", component="data_processor"
             )
 
     async def _update_job_status(
@@ -349,148 +111,504 @@ class DataProcessor:
             )
 
         except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": "update_job_status",
-                    "job_id": job_id,
-                    "status": status,
-                    "progress": progress,
-                },
-            )
+            logger.error(f"Failed to update job status: {e}", job_id=job_id)
             # Don't raise - status update failures shouldn't stop the main process
 
     async def consume_data_jobs(self):
         """
         Consumer loop for processing data jobs from Redis Streams
         """
-        consumer_name = f"{settings.WORKER_ID}-{uuid.uuid4().hex[:8]}"
+        consumer_name = f"{settings.WORKER_ID}-main"
+        consecutive_failures = 0
+        max_consecutive_failures = 3  # Reduced from 5
 
-        logger.info(
-            "Starting data job consumer",
+        # CRITICAL FIX: Add configurable sleep intervals to prevent resource exhaustion
+        idle_sleep_interval = 2.0  # Sleep 2 seconds when idle
+        error_sleep_interval = 5.0  # Sleep 5 seconds after errors
+
+        # Circuit breaker state
+        circuit_breaker_open = False
+        circuit_breaker_open_time = 0
+        circuit_breaker_timeout = 300  # 5 minutes
+
+        logger.log_consumer_event(
+            "starting_consumer",
             stream_name=settings.DATA_JOB_STREAM,
             consumer_group=settings.DATA_PROCESSOR_GROUP,
             consumer_name=consumer_name,
         )
 
-        while True:
+        # Initialize services before starting the consumer loop
+        logger.info("Initializing services...")
+        await self.initialize()
+        logger.info("Services initialized successfully")
+
+        logger.info("Starting main consumer loop...")
+        loop_iteration = 0
+
+        while not self.is_shutdown_requested():
+            loop_iteration += 1
+            loop_start_time = time.time()
+
             try:
-                # Consume events from the stream
+                logger.log_consumer_event(
+                    "loop_iteration_start",
+                    iteration=loop_iteration,
+                    consecutive_failures=consecutive_failures,
+                    circuit_breaker_open=circuit_breaker_open,
+                )
+
+                # Check circuit breaker
+                if circuit_breaker_open:
+                    current_time = time.time()
+                    if (
+                        current_time - circuit_breaker_open_time
+                        > circuit_breaker_timeout
+                    ):
+                        logger.log_consumer_event(
+                            "circuit_breaker_timeout_reached",
+                            timeout_seconds=circuit_breaker_timeout,
+                        )
+                        circuit_breaker_open = False
+                        consecutive_failures = 0
+                    else:
+                        remaining_time = circuit_breaker_timeout - (
+                            current_time - circuit_breaker_open_time
+                        )
+                        logger.log_consumer_event(
+                            "circuit_breaker_waiting",
+                            remaining_time_seconds=remaining_time,
+                            timeout_seconds=circuit_breaker_timeout,
+                        )
+                        # Check shutdown every 5 seconds instead of 30
+                        for i in range(6):  # 6 * 5 = 30 seconds
+                            if self.is_shutdown_requested():
+                                logger.log_consumer_event(
+                                    "shutdown_requested_during_circuit_breaker_wait"
+                                )
+                                return
+                            await asyncio.sleep(5)
+                        continue
+
+                # Check shutdown before consuming
+                if self.is_shutdown_requested():
+                    logger.log_consumer_event("shutdown_requested_before_consuming")
+                    return
+
+                logger.log_consumer_event(
+                    "attempting_to_consume_messages",
+                    stream_name=settings.DATA_JOB_STREAM,
+                    consumer_group=settings.DATA_PROCESSOR_GROUP,
+                    consumer_name=consumer_name,
+                )
+
+                # SIMPLE FIX: Always sleep between iterations to prevent resource exhaustion
+                await asyncio.sleep(idle_sleep_interval)  # Sleep when idle
+
+                # Consume events with reasonable timeout
+                consume_start_time = time.time()
                 events = await self.streams_manager.consume_events(
                     stream_name=settings.DATA_JOB_STREAM,
                     consumer_group=settings.DATA_PROCESSOR_GROUP,
                     consumer_name=consumer_name,
                     count=1,
-                    block=1000,  # Reduced from 5000ms to 1000ms to prevent aggressive timeouts
+                    block=1000,  # 1 second block time
+                )
+                consume_duration_ms = (time.time() - consume_start_time) * 1000
+
+                logger.log_consumer_event(
+                    "consume_operation_completed",
+                    duration_ms=consume_duration_ms,
+                    events_count=len(events) if events else 0,
                 )
 
-                for event in events:
-                    try:
-                        # Process the data job - handle both camelCase and snake_case field names
-                        job_id = event.get("job_id") or event.get("jobId")
-                        shop_id = event.get("shop_id") or event.get("shopId")
-                        shop_domain = event.get("shop_domain") or event.get(
-                            "shopDomain"
-                        )
-                        access_token = event.get("access_token") or event.get(
-                            "accessToken"
-                        )
-                        job_type = event.get("job_type") or event.get(
-                            "jobType", "complete"
-                        )
-                        # Handle days_back field - only convert to int if it exists and is not None
-                        days_back_raw = event.get("days_back") or event.get("daysBack")
-                        days_back = (
-                            int(days_back_raw) if days_back_raw is not None else None
-                        )
+                # Reset failure counter on successful consumption
+                if events:
+                    consecutive_failures = 0
+                    logger.log_consumer_event(
+                        f"received_{len(events)}_messages",
+                        stream_name=settings.DATA_JOB_STREAM,
+                        consumer_group=settings.DATA_PROCESSOR_GROUP,
+                        consumer_name=consumer_name,
+                    )
 
-                        # Log the field mapping for debugging
-                        logger.info(
-                            "Field mapping for data job",
-                            original_event=event,
-                            mapped_fields={
-                                "job_id": job_id,
-                                "shop_id": shop_id,
-                                "shop_domain": shop_domain,
-                                "job_type": job_type,
-                                "days_back": days_back,
-                            },
-                        )
-
-                        # Validate required fields
-                        if not all([job_id, shop_id, shop_domain, access_token]):
-                            missing_fields = []
-                            if not job_id:
-                                missing_fields.append("job_id")
-                            if not shop_id:
-                                missing_fields.append("shop_id")
-                            if not shop_domain:
-                                missing_fields.append("shop_domain")
-                            if not access_token:
-                                missing_fields.append("access_token")
-
-                            error_msg = (
-                                f"Missing required fields: {', '.join(missing_fields)}"
+                    for event in events:
+                        # Check shutdown before processing each event
+                        if self.is_shutdown_requested():
+                            logger.log_consumer_event(
+                                "shutdown_requested_during_event_processing"
                             )
-                            logger.error(error_msg, event=event)
-                            raise ValueError(error_msg)
+                            return
 
-                        request = DataJobRequest(
-                            job_id=job_id,
-                            shop_id=shop_id,
-                            shop_domain=shop_domain,
-                            access_token=access_token,
-                            job_type=job_type,
-                            days_back=days_back,
-                        )
+                        try:
+                            logger.log_consumer_event(
+                                "processing_event",
+                                event_id=event.get("_message_id"),
+                                event_data=event,
+                            )
 
-                        logger.info(
-                            "Processing data job from stream",
-                            job_id=request.job_id,
-                            shop_id=request.shop_id,
-                            message_id=event["_message_id"],
-                        )
+                            # Process the event
+                            await self._process_single_event(event)
 
-                        # Process the job
-                        result = await self.process_data_job(request)
+                        except Exception as e:
+                            logger.log_consumer_event(
+                                "event_processing_error",
+                                event_id=event.get("_message_id"),
+                                error=str(e),
+                                error_type=type(e).__name__,
+                            )
+                            # Acknowledge failed events to prevent infinite retries
+                            await self._acknowledge_event_safely(event)
 
-                        # Acknowledge successful processing
-                        await self.streams_manager.acknowledge_event(
-                            stream_name=settings.DATA_JOB_STREAM,
-                            consumer_group=settings.DATA_PROCESSOR_GROUP,
-                            message_id=event["_message_id"],
-                        )
+                else:
+                    logger.log_consumer_event(
+                        "no_messages_received", stream_name=settings.DATA_JOB_STREAM
+                    )
+                    consecutive_failures = 0
 
-                        logger.info(
-                            "Data job processed and acknowledged",
-                            job_id=request.job_id,
-                            shop_id=request.shop_id,
-                            success=result.success,
-                            message_id=event["_message_id"],
-                        )
-
-                    except Exception as e:
-                        log_error(
-                            e,
-                            {
-                                "operation": "process_stream_event",
-                                "event": event,
-                                "message_id": event.get("_message_id"),
-                            },
-                        )
-
-                        # For now, acknowledge even failed events to avoid infinite retries
-                        # In production, you might want to implement a dead letter queue
-                        await self.streams_manager.acknowledge_event(
-                            stream_name=settings.DATA_JOB_STREAM,
-                            consumer_group=settings.DATA_PROCESSOR_GROUP,
-                            message_id=event["_message_id"],
-                        )
+                # Log loop iteration completion
+                loop_duration_ms = (time.time() - loop_start_time) * 1000
+                logger.log_consumer_event(
+                    "loop_iteration_completed",
+                    iteration=loop_iteration,
+                    duration_ms=loop_duration_ms,
+                    consecutive_failures=consecutive_failures,
+                )
 
             except Exception as e:
-                log_error(e, {"operation": "consume_data_jobs"})
-                # Wait before retrying
-                await asyncio.sleep(5)
+                consecutive_failures += 1
+                error_duration_ms = (time.time() - loop_start_time) * 1000
+
+                logger.log_consumer_event(
+                    "consumer_error",
+                    iteration=loop_iteration,
+                    consecutive_failures=consecutive_failures,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    duration_ms=error_duration_ms,
+                )
+
+                # Implement exponential backoff with circuit breaker
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.log_consumer_event(
+                        "circuit_breaker_triggered",
+                        consecutive_failures=consecutive_failures,
+                        max_failures=max_consecutive_failures,
+                    )
+
+                    # Open circuit breaker
+                    circuit_breaker_open = True
+                    circuit_breaker_open_time = time.time()
+
+                    # Wait longer when circuit breaker is triggered
+                    retry_delay = min(60, 2**consecutive_failures)  # Cap at 60 seconds
+                    logger.log_consumer_event(
+                        "circuit_breaker_wait", retry_delay_seconds=retry_delay
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    # Normal exponential backoff
+                    retry_delay = min(30, 2**consecutive_failures)  # Cap at 30 seconds
+                    logger.log_consumer_event(
+                        "exponential_backoff_wait", retry_delay_seconds=retry_delay
+                    )
+                    await asyncio.sleep(retry_delay)
+
+                # Reset failure counter after a successful recovery period
+                if consecutive_failures > 0:
+                    logger.log_consumer_event(
+                        "waiting_before_retry", wait_seconds=error_sleep_interval
+                    )
+                    await asyncio.sleep(error_sleep_interval)  # Wait before retrying
+
+        logger.log_consumer_event(
+            "consumer_loop_exited_due_to_shutdown_request", component="data_processor"
+        )
+
+    async def _process_single_event(self, event: dict):
+        """Process a single event with proper error handling"""
+        try:
+            # Extract job details
+            job_id = event.get("job_id") or event.get("jobId")
+            shop_id = event.get("shop_id") or event.get("shopId")
+            shop_domain = event.get("shop_domain") or event.get("shopDomain")
+            access_token = event.get("access_token") or event.get("accessToken")
+            job_type = event.get("job_type") or event.get("jobType", "complete")
+            days_back_raw = event.get("days_back") or event.get("daysBack")
+            days_back = int(days_back_raw) if days_back_raw is not None else None
+
+            # Validate required fields
+            if not all([job_id, shop_id, shop_domain, access_token]):
+                raise ValueError(f"Missing required fields in event: {event}")
+
+            logger.log_job_processing(
+                job_id=job_id,
+                stage="processing_data_job",
+                shop_id=shop_id,
+                shop_domain=shop_domain,
+            )
+
+            # Process with timeout using the new modular data collection method
+            async with asyncio.timeout(300):  # 5 minute timeout
+                result = await self.process_data_collection_job(
+                    {
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "shop_domain": shop_domain,
+                        "access_token": access_token,
+                        "job_type": job_type,
+                        "days_back": days_back,
+                    }
+                )
+
+            # Acknowledge successful processing
+            await self.streams_manager.acknowledge_event(
+                stream_name=settings.DATA_JOB_STREAM,
+                consumer_group=settings.DATA_PROCESSOR_GROUP,
+                message_id=event["_message_id"],
+            )
+
+            logger.log_job_processing(
+                job_id=job_id, stage="job_completed_successfully", result=result
+            )
+
+        except asyncio.TimeoutError:
+            logger.error(f"Job processing timed out: {event.get('job_id', 'unknown')}")
+            await self._acknowledge_event_safely(event)
+        except Exception as e:
+            logger.error(f"Error processing job: {e}")
+            await self._acknowledge_event_safely(event)
+
+    async def _acknowledge_event_safely(self, event: dict):
+        """Safely acknowledge an event even if it failed"""
+        try:
+            await self.streams_manager.acknowledge_event(
+                stream_name=settings.DATA_JOB_STREAM,
+                consumer_group=settings.DATA_PROCESSOR_GROUP,
+                message_id=event["_message_id"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to acknowledge event: {e}")
+
+    async def process_data_collection_job(
+        self, job_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Process a data collection job using separate, idempotent collection methods"""
+        job_id = job_data.get("job_id")
+        shop_id = job_data.get("shop_id")
+
+        if not shop_id:
+            logger.error("Missing shop_id in job data", job_data=job_data)
+            return {"success": False, "error": "Missing shop_id"}
+            
+
+        
+        try:
+            # Collect each data type independently
+            results = {}
+
+            # 1. Collect Products (most likely to succeed)
+            logger.log_job_processing(
+                job_id=job_id, stage="products_collection_start", shop_id=shop_id
+            )
+            
+            # Create shop config from job data
+            shop_config = {
+                "shop_id": shop_id,
+                "shop_domain": job_data.get("shop_domain"),
+                "access_token": job_data.get("access_token"),
+                "days_back": job_data.get("days_back"),
+            }
+            
+            products_result = await self.data_collection_service.collect_products_only(
+                shop_id, shop_config
+            )
+            results["products"] = products_result
+
+            if products_result["success"]:
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="products_collection_completed",
+                    shop_id=shop_id,
+                    products_count=products_result.get("products_count", 0),
+                )
+            else:
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="products_collection_failed",
+                    shop_id=shop_id,
+                    error=products_result.get("message", "Unknown error"),
+                )
+
+            # 2. Try to collect Orders (may fail due to permissions)
+            logger.log_job_processing(
+                job_id=job_id, stage="orders_collection_start", shop_id=shop_id
+            )
+            try:
+                orders_result = await self.data_collection_service.collect_orders_only(
+                    shop_id, shop_config
+                )
+                results["orders"] = orders_result
+
+                if orders_result["success"]:
+                    logger.log_job_processing(
+                        job_id=job_id,
+                        stage="orders_collection_completed",
+                        shop_id=shop_id,
+                        orders_count=orders_result.get("orders_count", 0),
+                    )
+                else:
+                    logger.log_job_processing(
+                        job_id=job_id,
+                        stage="orders_collection_failed",
+                        shop_id=shop_id,
+                        error=orders_result.get("message", "Unknown error"),
+                    )
+            except Exception as e:
+                orders_result = {"success": False, "message": str(e), "orders_count": 0}
+                results["orders"] = orders_result
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="orders_collection_failed",
+                    error=str(e),
+                )
+
+            # 3. Try to collect Customers (may fail due to permissions)
+            logger.log_job_processing(
+                job_id=job_id, stage="customers_collection_start", shop_id=shop_id
+            )
+            try:
+                customers_result = (
+                    await self.data_collection_service.collect_customers_only(shop_id, shop_config)
+                )
+                results["customers"] = customers_result
+
+                if customers_result["success"]:
+                    logger.log_job_processing(
+                        job_id=job_id,
+                        stage="customers_collection_completed",
+                        shop_id=shop_id,
+                        customers_count=customers_result.get("customers_count", 0),
+                    )
+                else:
+                    logger.log_job_processing(
+                        job_id=job_id,
+                        stage="customers_collection_failed",
+                        shop_id=shop_id,
+                        error=customers_result.get("message", "Unknown error"),
+                    )
+            except Exception as e:
+                customers_result = {
+                    "success": False,
+                    "message": str(e),
+                    "customers_count": 0,
+                }
+                results["customers"] = customers_result
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="customers_collection_failed",
+                    error=str(e),
+                )
+
+            # 4. Determine overall success and send notification
+            overall_success = any(
+                [
+                    products_result.get("success", False),
+                    orders_result.get("success", False),
+                    customers_result.get("success", False),
+                ]
+            )
+
+            if overall_success:
+                # Send success notification
+                await self._send_data_collection_notification(
+                    shop_id, results, overall_success=True
+                )
+
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="data_collection_completed",
+                    shop_id=shop_id,
+                    results=results,
+                    overall_success=True,
+                )
+
+                return {
+                    "success": True,
+                    "message": "Data collection completed with partial success",
+                    "results": results,
+                    "overall_success": True,
+                }
+            else:
+                # All collections failed
+                await self._send_data_collection_notification(
+                    shop_id, results, overall_success=False
+                )
+
+                logger.log_job_processing(
+                    job_id=job_id,
+                    stage="data_collection_failed",
+                    shop_id=shop_id,
+                    results=results,
+                    overall_success=False,
+                )
+
+                return {
+                    "success": False,
+                    "message": "All data collections failed",
+                    "results": results,
+                    "overall_success": False,
+                }
+
+        except Exception as e:
+            logger.error(
+                f"Data collection job failed: {e}", job_id=job_id, shop_id=shop_id
+            )
+            return {"success": False, "error": str(e)}
+
+    async def _send_data_collection_notification(
+        self, shop_id: str, results: Dict[str, Any], overall_success: bool
+    ):
+        """Send notification about data collection results"""
+        try:
+            from app.core.redis_client import streams_manager
+
+            # Calculate totals
+            total_products = results.get("products", {}).get("products_count", 0)
+            total_orders = results.get("orders", {}).get("orders_count", 0)
+            total_customers = results.get("customers", {}).get("customers_count", 0)
+
+            if overall_success:
+                if total_products > 0 and total_orders > 0 and total_customers > 0:
+                    message = f"✅ Complete data collection successful! Collected {total_products} products, {total_orders} orders, and {total_customers} customers."
+                    notification_type = "data_collection_completed"
+                elif total_products > 0:
+                    message = f"✅ Products data collected successfully! Collected {total_products} products. Orders and customers data not available due to app permissions."
+                    notification_type = "data_collection_partial_success"
+                else:
+                    message = "⚠️ Data collection completed with limited success. Some data types failed due to app permissions."
+                    notification_type = "data_collection_partial_success"
+            else:
+                message = "❌ Data collection failed for all data types. Please check app permissions and try again."
+                notification_type = "data_collection_failed"
+
+            await streams_manager.publish_user_notification_event(
+                shop_id=shop_id,
+                notification_type=notification_type,
+                message=message,
+                data={
+                    "products_count": total_products,
+                    "orders_count": total_orders,
+                    "customers_count": total_customers,
+                    "results": results,
+                    "overall_success": overall_success,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to send data collection notification: {e}", shop_id=shop_id
+            )
 
 
 # Global data processor instance

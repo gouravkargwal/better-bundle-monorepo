@@ -3,7 +3,7 @@ Data collection service for gathering and saving Shopify data
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from pydantic import BaseModel
 
@@ -52,6 +52,79 @@ class DataCollectionService:
     async def initialize(self):
         """Initialize database connection"""
         self.db = await get_database()
+
+    async def get_shop_config(self, shop_id: str) -> Optional[Dict[str, Any]]:
+        """Get shop configuration from database"""
+        try:
+            # Get shop from database
+            shop = await self.db.shop.find_first(where={"shopId": shop_id})
+
+            if not shop:
+                raise Exception(f"Shop not found in database for shop_id: {shop_id}")
+
+            # Return shop configuration
+            return {
+                "shop_id": shop.shopId,
+                "shop_domain": shop.shopDomain,
+                "access_token": shop.accessToken,
+                "days_back": None,  # Could be configurable in the future
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get shop config from database: {e}", shop_id=shop_id
+            )
+            raise Exception(f"Failed to get shop configuration: {str(e)}")
+
+    async def get_or_create_shop_db_id(self, config: Dict[str, Any]) -> str:
+        """Get or create shop record in database and return the database ID"""
+        try:
+            # First try to find existing shop by shopId
+            shop = await self.db.shop.find_first(where={"shopId": config["shop_id"]})
+
+            if shop:
+                logger.info(f"Found existing shop by shopId: {shop.id}")
+                return shop.id
+
+            # If not found by shopId, try to find by shopDomain
+            shop = await self.db.shop.find_first(
+                where={"shopDomain": config["shop_domain"]}
+            )
+
+            if shop:
+                # Update existing shop record with new shopId and accessToken
+                logger.info(
+                    f"Found existing shop by domain, updating shopId and accessToken"
+                )
+                updated_shop = await self.db.shop.update(
+                    where={"id": shop.id},
+                    data={
+                        "shopId": config["shop_id"],
+                        "accessToken": config["access_token"],
+                        "updatedAt": datetime.now(),
+                    },
+                )
+                logger.info(f"Updated shop record: {updated_shop.id}")
+                return updated_shop.id
+
+            # Create new shop if neither exists
+            logger.info(f"Creating new shop record for shop_id: {config['shop_id']}")
+            new_shop = await self.db.shop.create(
+                data={
+                    "shopId": config["shop_id"],
+                    "shopDomain": config["shop_domain"],
+                    "accessToken": config["access_token"],
+                    "createdAt": datetime.now(),
+                    "updatedAt": datetime.now(),
+                }
+            )
+
+            logger.info(f"Created shop record with ID: {new_shop.id}")
+            return new_shop.id
+
+        except Exception as e:
+            logger.error(f"Failed to get or create shop: {e}", config=config)
+            raise Exception(f"Failed to get or create shop: {str(e)}")
 
     async def save_orders(
         self,
@@ -431,12 +504,25 @@ class DataCollectionService:
 
                 parallel_start = asyncio.get_event_loop().time()
 
-                # Collect data in parallel, but handle customer access gracefully
-                orders, products, customers = await asyncio.gather(
-                    api_client.fetch_orders(since_date),
-                    api_client.fetch_products(),
-                    api_client.fetch_customers(since_date),
-                )
+                # Collect data in parallel with timeout protection
+                try:
+                    async with asyncio.timeout(
+                        300
+                    ):  # 5 minute timeout for entire parallel operation
+                        orders, products, customers = await asyncio.gather(
+                            api_client.fetch_orders(since_date),
+                            api_client.fetch_products(),
+                            api_client.fetch_customers(since_date),
+                        )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Data collection timed out after 5 minutes",
+                        shop_domain=config.shop_domain,
+                        since_date=since_date,
+                    )
+                    raise Exception(
+                        "Data collection timed out - Shopify API calls took too long"
+                    )
 
                 # Log what we collected
                 logger.info(
@@ -473,11 +559,22 @@ class DataCollectionService:
                 await clear_shop_data(shop_db_id)
 
                 # Save data to database in parallel
-                await asyncio.gather(
-                    self.save_products(shop_db_id, products, False),
-                    self.save_orders(shop_db_id, orders, False),
-                    self.save_customers(shop_db_id, customers, False),
-                )
+                try:
+                    async with asyncio.timeout(120):  # 2 minute timeout for saving data
+                        await asyncio.gather(
+                            self.save_products(shop_db_id, products, False),
+                            self.save_orders(shop_db_id, orders, False),
+                            self.save_customers(shop_db_id, customers, False),
+                        )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Data saving timed out after 2 minutes",
+                        shop_domain=config.shop_domain,
+                        shop_db_id=shop_db_id,
+                    )
+                    raise Exception(
+                        "Data saving timed out - database operations took too long"
+                    )
 
                 # Update shop's last analysis timestamp
                 await update_shop_last_analysis(shop_db_id)
@@ -738,3 +835,318 @@ class DataCollectionService:
                 success=False,
                 error=str(e),
             )
+
+    async def get_existing_products_count(self, shop_db_id: str) -> int:
+        """Get count of existing products for a shop"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            count = await prisma.product.count(where={"shopId": shop_db_id})
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get existing products count: {e}")
+            return 0
+
+    async def get_existing_orders_count(self, shop_db_id: str) -> int:
+        """Get count of existing orders for a shop"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            count = await prisma.order.count(where={"shopId": shop_db_id})
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get existing orders count: {e}")
+            return 0
+
+    async def get_existing_customers_count(self, shop_db_id: str) -> int:
+        """Get count of existing customers for a shop"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            count = await prisma.customer.count(where={"shopId": shop_db_id})
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get existing customers count: {e}")
+            return 0
+
+    async def update_shop_last_products_collection(self, shop_db_id: str):
+        """Update shop's last products collection timestamp"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            await prisma.shop.update(
+                where={"id": shop_db_id},
+                data={"lastProductsCollection": datetime.utcnow()},
+            )
+        except Exception as e:
+            logger.error(f"Failed to update last products collection timestamp: {e}")
+
+    async def update_shop_last_orders_collection(self, shop_db_id: str):
+        """Update shop's last orders collection timestamp"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            await prisma.shop.update(
+                where={"id": shop_db_id},
+                data={"lastOrdersCollection": datetime.utcnow()},
+            )
+        except Exception as e:
+            logger.error(f"Failed to update last orders collection timestamp: {e}")
+
+    async def update_shop_last_customers_collection(self, shop_db_id: str):
+        """Update shop's last customers collection timestamp"""
+        try:
+            from app.core.database import get_prisma_client
+
+            prisma = get_prisma_client()
+
+            await prisma.shop.update(
+                where={"id": shop_db_id},
+                data={"lastCustomersCollection": datetime.utcnow()},
+            )
+        except Exception as e:
+            logger.error(f"Failed to update last customers collection timestamp: {e}")
+
+    def calculate_since_date(self, days_back: int) -> str:
+        """Calculate the since date for data collection"""
+        since_date = datetime.utcnow() - timedelta(days=days_back)
+        return since_date.isoformat()
+
+    async def collect_products_only(
+        self, shop_id: str, shop_config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Collect only products data - idempotent operation"""
+        try:
+            logger.info("Starting products-only data collection", shop_id=shop_id)
+
+            # Use provided shop config or get from database
+            if shop_config:
+                config = shop_config
+            else:
+                config = await self.get_shop_config(shop_id)
+                if not config:
+                    raise Exception(
+                        f"Shop configuration not found for shop_id: {shop_id}"
+                    )
+
+            # Check if we already have recent products data
+            shop_db_id = await self.get_or_create_shop_db_id(config)
+            existing_products = await self.get_existing_products_count(shop_db_id)
+
+            if existing_products > 0:
+                logger.info(
+                    "Products data already exists, skipping collection",
+                    shop_id=shop_id,
+                    existing_count=existing_products,
+                )
+                return {
+                    "success": True,
+                    "message": "Products data already exists",
+                    "products_count": existing_products,
+                    "skipped": True,
+                }
+
+            # Create Shopify API client
+            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
+
+            try:
+                # Collect only products
+                logger.info("Fetching products data")
+                products = await api_client.fetch_products()
+
+                logger.info(
+                    "Products collection completed",
+                    shop_domain=config.shop_domain,
+                    products_count=len(products),
+                )
+
+                # Save products to database
+                await self.save_products(shop_db_id, products, False)
+
+                # Update shop's last products collection timestamp
+                await self.update_shop_last_products_collection(shop_db_id)
+
+                return {
+                    "success": True,
+                    "message": "Products collected successfully",
+                    "products_count": len(products),
+                    "skipped": False,
+                }
+
+            finally:
+                await api_client.close()
+
+        except Exception as e:
+            logger.error("Products collection failed", shop_id=shop_id, error=str(e))
+            return {
+                "success": False,
+                "message": f"Products collection failed: {str(e)}",
+                "products_count": 0,
+                "skipped": False,
+            }
+
+    async def collect_orders_only(
+        self, shop_id: str, shop_config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Collect only orders data - idempotent operation"""
+        try:
+            logger.info("Starting orders-only data collection", shop_id=shop_id)
+
+            # Use provided shop config or get from database
+            if shop_config:
+                config = shop_config
+            else:
+                config = await self.get_shop_config(shop_id)
+                if not config:
+                    raise Exception(
+                        f"Shop configuration not found for shop_id: {shop_id}"
+                    )
+
+            # Check if we already have recent orders data
+            shop_db_id = await self.get_or_create_shop_db_id(config)
+            existing_orders = await self.get_existing_orders_count(shop_db_id)
+
+            if existing_orders > 0:
+                logger.info(
+                    "Orders data already exists, skipping collection",
+                    shop_id=shop_id,
+                    existing_count=existing_orders,
+                )
+                return {
+                    "success": True,
+                    "message": "Orders data already exists",
+                    "orders_count": existing_orders,
+                    "skipped": True,
+                }
+
+            # Create Shopify API client
+            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
+
+            try:
+                # Calculate since date
+                since_date = self.calculate_since_date(
+                    config.days_back or settings.MAX_INITIAL_DAYS
+                )
+
+                # Collect only orders
+                logger.info("Fetching orders data", since_date=since_date)
+                orders = await api_client.fetch_orders(since_date)
+
+                logger.info(
+                    "Orders collection completed",
+                    shop_domain=config.shop_domain,
+                    orders_count=len(orders),
+                )
+
+                # Save orders to database
+                await self.save_orders(shop_db_id, orders, False)
+
+                # Update shop's last orders collection timestamp
+                await self.update_shop_last_orders_collection(shop_db_id)
+
+                return {
+                    "success": True,
+                    "message": "Orders collected successfully",
+                    "orders_count": len(orders),
+                    "skipped": False,
+                }
+
+            finally:
+                await api_client.close()
+
+        except Exception as e:
+            logger.error("Orders collection failed", shop_id=shop_id, error=str(e))
+            return {
+                "success": False,
+                "message": f"Orders collection failed: {str(e)}",
+                "orders_count": 0,
+                "skipped": False,
+            }
+
+    async def collect_customers_only(
+        self, shop_id: str, shop_config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Collect only customers data - idempotent operation"""
+        try:
+            logger.info("Starting customers-only data collection", shop_id=shop_id)
+
+            # Use provided shop config or get from database
+            if shop_config:
+                config = shop_config
+            else:
+                config = await self.get_shop_config(shop_id)
+                if not config:
+                    raise Exception(
+                        f"Shop configuration not found for shop_id: {shop_id}"
+                    )
+
+            # Check if we already have recent customers data
+            shop_db_id = await self.get_or_create_shop_db_id(config)
+            existing_customers = await self.get_existing_customers_count(shop_db_id)
+
+            if existing_customers > 0:
+                logger.info(
+                    "Customers data already exists, skipping collection",
+                    shop_id=shop_id,
+                    existing_count=existing_customers,
+                )
+                return {
+                    "success": True,
+                    "message": "Customers data already exists",
+                    "customers_count": existing_customers,
+                    "skipped": False,
+                }
+
+            # Create Shopify API client
+            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
+
+            try:
+                # Calculate since date
+                since_date = self.calculate_since_date(
+                    config.days_back or settings.MAX_INITIAL_DAYS
+                )
+
+                # Collect only customers
+                logger.info("Fetching customers data", since_date=since_date)
+                customers = await api_client.fetch_customers(since_date)
+
+                logger.info(
+                    "Customers collection completed",
+                    shop_domain=config.shop_domain,
+                    customers_count=len(customers),
+                )
+
+                # Save customers to database
+                await self.save_customers(shop_db_id, customers, False)
+
+                # Update shop's last customers collection timestamp
+                await self.update_shop_last_customers_collection(shop_db_id)
+
+                return {
+                    "success": True,
+                    "message": "Customers collected successfully",
+                    "customers_count": len(customers),
+                    "skipped": False,
+                }
+
+            finally:
+                await api_client.close()
+
+        except Exception as e:
+            logger.error("Customers collection failed", shop_id=shop_id, error=str(e))
+            return {
+                "success": False,
+                "message": f"Customers collection failed: {str(e)}",
+                "customers_count": 0,
+                "skipped": False,
+            }

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.redis_client import streams_manager
-from app.services.data_processor import data_processor, DataJobRequest
+from app.services.data_processor import data_processor
 from app.core.logging import get_logger, log_error, log_request_start, log_request_end
 from app.services.transformations import run_transformations_for_shop
 
@@ -195,21 +195,19 @@ async def process_data_job_direct(request: DataJobRequestModel):
             "Job record created in database", job_id=job_id, db_id=analysis_job.id
         )
 
-        # Process the job directly
-        job_request = DataJobRequest(
-            job_id=job_id,
-            shop_id=request.shop_id,
-            shop_domain=request.shop_domain,
-            access_token=request.access_token,
-            job_type=request.job_type,
-            days_back=request.days_back,
-        )
-
-        result = await data_processor.process_data_job(job_request)
+        # Process the job directly using the new modular system
+        result = await data_processor.process_data_collection_job({
+            "job_id": job_id,
+            "shop_id": request.shop_id,
+            "shop_domain": request.shop_domain,
+            "access_token": request.access_token,
+            "job_type": request.job_type,
+            "days_back": request.days_back,
+        })
 
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-        if result.success:
+        if result.get("success"):
             log_request_end(
                 "POST",
                 "/api/v1/data-jobs/process",
@@ -219,10 +217,16 @@ async def process_data_job_direct(request: DataJobRequestModel):
                 shop_id=request.shop_id,
             )
 
+            # Extract counts from the new result structure
+            results = result.get("results", {})
+            products_count = results.get("products", {}).get("products_count", 0)
+            orders_count = results.get("orders", {}).get("orders_count", 0)
+            customers_count = results.get("customers", {}).get("customers_count", 0)
+
             return DataJobResponse(
                 success=True,
                 job_id=job_id,
-                message=f"Data job completed successfully. Processed {result.orders_count} orders, {result.products_count} products, {result.customers_count} customers.",
+                message=f"Data job completed successfully. Processed {orders_count} orders, {products_count} products, {customers_count} customers.",
                 shop_id=request.shop_id,
                 status="completed",
             )
@@ -234,11 +238,11 @@ async def process_data_job_direct(request: DataJobRequestModel):
                 duration_ms,
                 job_id=job_id,
                 shop_id=request.shop_id,
-                error=result.error,
+                error=result.get("error", "Unknown error"),
             )
 
             raise HTTPException(
-                status_code=500, detail=f"Data job failed: {result.error}"
+                status_code=500, detail=f"Data job failed: {result.get('error', 'Unknown error')}"
             )
 
     except Exception as e:
