@@ -1,4 +1,6 @@
 services:
+  # Redis service removed - using external Redis at 10.80.138.89:6379
+
   gorse-worker:
     image: zhenghaoz/gorse-worker:latest
     restart: unless-stopped
@@ -14,8 +16,6 @@ services:
       - worker_data:/var/lib/gorse
     depends_on:
       - gorse-master
-    networks:
-      - gorse-network
     environment:
       - GORSE_LOG_LEVEL=info
 
@@ -34,8 +34,6 @@ services:
       - server_data:/var/lib/gorse
     depends_on:
       - gorse-master
-    networks:
-      - gorse-network
     environment:
       - GORSE_LOG_LEVEL=info
 
@@ -46,14 +44,9 @@ services:
       - "8086:8086"
       - "8088:8088"
     environment:
-      # Database connections - will be overridden by env vars
-      GORSE_CACHE_STORE: ${GORSE_CACHE_STORE}
-      GORSE_DATA_STORE: ${GORSE_DATA_STORE}
+      GORSE_CACHE_STORE: redis://10.80.138.89:6379/0
+      GORSE_DATA_STORE: postgresql://better_bundle_user:6eV4BA1YcoeFedPRJEJ0oDYlMOgFwTnF@dpg-d2qpjbemcj7s73cegbv0-a.singapore-postgres.render.com/better_bundle
       GORSE_LOG_LEVEL: info
-      # Production settings
-      GORSE_MASTER_HOST: 0.0.0.0
-      GORSE_MASTER_PORT: 8086
-      GORSE_MASTER_HTTP_PORT: 8088
     command: >
       -c /etc/gorse/config.toml 
       --log-path /var/log/gorse/master.log 
@@ -62,30 +55,11 @@ services:
       - ./config/config.production.toml:/etc/gorse/config.toml
       - gorse_log:/var/log/gorse
       - master_data:/var/lib/gorse
-      # Mount host DNS resolver to fix external hostname resolution
-      - /etc/resolv.conf:/etc/resolv.conf:ro
-    networks:
-      - gorse-network
-    # Health check
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8088/api/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    # No dependencies - using external services
 
 volumes:
   worker_data:
   server_data:
   master_data:
   gorse_log:
-
-networks:
-  gorse-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-    driver_opts:
-      com.docker.network.bridge.enable_icc: "true"
-      com.docker.network.bridge.enable_ip_masquerade: "true"
+# Using external Redis and PostgreSQL services
