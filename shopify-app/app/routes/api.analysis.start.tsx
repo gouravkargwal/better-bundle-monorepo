@@ -26,13 +26,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Create shop if it doesn't exist
       shop = await prisma.shop.create({
         data: {
-          shopId,
           shopDomain: shopId,
           accessToken: session.accessToken!,
           isActive: true,
         },
       });
-      console.log(`Created new shop: ${shopId}`);
+      console.log(
+        `Created new shop: ${shop.id} for domain: ${shop.shopDomain}`,
+      );
     }
 
     // Create job record in database

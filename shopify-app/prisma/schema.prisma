@@ -61,7 +61,6 @@ model Session {
 
 model Shop {
   id                 String                   @id @default(cuid())
-  shopId             String                   @unique
   shopDomain         String                   @unique
   accessToken        String
   planType           String                   @default("Free")

@@ -413,12 +413,14 @@ class DataProcessor:
             )
             
             # Create shop config from job data
-            shop_config = {
-                "shop_id": shop_id,
-                "shop_domain": job_data.get("shop_domain"),
-                "access_token": job_data.get("access_token"),
-                "days_back": job_data.get("days_back"),
-            }
+            from app.services.data_collection import DataCollectionConfig
+            
+            shop_config = DataCollectionConfig(
+                shop_id=shop_id,
+                shop_domain=job_data.get("shop_domain") or job_data.get("shopDomain"),
+                access_token=job_data.get("access_token") or job_data.get("accessToken"),
+                days_back=job_data.get("days_back") or job_data.get("daysBack"),
+            )
             
             products_result = await self.data_collection_service.collect_products_only(
                 shop_id, shop_config

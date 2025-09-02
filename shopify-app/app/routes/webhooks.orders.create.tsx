@@ -50,12 +50,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Update shop analytics with attributed revenue
-    await updateShopAnalytics(shopDomain, attributedRevenue, orderId);
+    await updateShopAnalytics(shop.id, attributedRevenue, orderId);
+
+    // Get shop ID from domain
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain },
+      select: { id: true }
+    });
+
+    if (!shop) {
+      console.error(`Shop not found for domain: ${shopDomain}`);
+      return json({ error: "Shop not found" }, { status: 404 });
+    }
 
     // Log the revenue attribution
     await prisma.trackingEvent.create({
       data: {
-        shopId: shopDomain,
+        shopId: shop.id,
         eventType: "revenue_attributed",
         sessionId: trackingData.sessionId,
         trackingId: trackingData.trackingId,
@@ -233,21 +244,21 @@ function calculateAttributedRevenue(
  * Update shop analytics with attributed revenue
  */
 async function updateShopAnalytics(
-  shopDomain: string,
+  shopId: string,
   attributedRevenue: number,
   orderId: string
 ): Promise<void> {
   try {
     // Get current analytics
     let analytics = await prisma.shopAnalytics.findUnique({
-      where: { shopId: shopDomain }
+      where: { shopId }
     });
 
     if (!analytics) {
       // Create new analytics record
       analytics = await prisma.shopAnalytics.create({
         data: {
-          shopId: shopDomain,
+          shopId,
           totalRecommendationsDisplayed: 0,
           totalRecommendationsClicked: 0,
           totalRecommendationsAddedToCart: 0,
@@ -260,7 +271,7 @@ async function updateShopAnalytics(
     } else {
       // Update existing analytics
       await prisma.shopAnalytics.update({
-        where: { shopId: shopDomain },
+        where: { shopId },
         data: {
           totalRecommendationsPurchased: {
             increment: 1
@@ -274,7 +285,7 @@ async function updateShopAnalytics(
     }
 
     // Log the analytics update
-    console.log(`Updated analytics for shop ${shopDomain}: +$${attributedRevenue} attributed revenue`);
+    console.log(`Updated analytics for shop ${shopId}: +$${attributedRevenue} attributed revenue`);
 
   } catch (error) {
     console.error("Failed to update shop analytics:", error);

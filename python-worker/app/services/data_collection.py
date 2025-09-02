@@ -16,7 +16,7 @@ from app.core.database import (
     get_latest_timestamps,
 )
 from app.services.shopify_api import ShopifyAPIClient, calculate_since_date
-from app.core.logging import get_logger, log_error, log_performance, log_data_collection
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -56,15 +56,19 @@ class DataCollectionService:
     async def get_shop_config(self, shop_id: str) -> Optional[Dict[str, Any]]:
         """Get shop configuration from database"""
         try:
-            # Get shop from database
-            shop = await self.db.shop.find_first(where={"shopId": shop_id})
+            # Try to find shop by ID first (in case shop_id is the database ID)
+            shop = await self.db.shop.find_first(where={"id": shop_id})
+
+            if not shop:
+                # If not found by ID, try by domain (in case shop_id is the domain)
+                shop = await self.db.shop.find_first(where={"shopDomain": shop_id})
 
             if not shop:
                 raise Exception(f"Shop not found in database for shop_id: {shop_id}")
 
             # Return shop configuration
             return {
-                "shop_id": shop.shopId,
+                "shop_id": shop.id,  # Use the database ID
                 "shop_domain": shop.shopDomain,
                 "access_token": shop.accessToken,
                 "days_back": None,  # Could be configurable in the future
@@ -76,44 +80,24 @@ class DataCollectionService:
             )
             raise Exception(f"Failed to get shop configuration: {str(e)}")
 
-    async def get_or_create_shop_db_id(self, config: Dict[str, Any]) -> str:
+    async def get_or_create_shop_db_id(self, config) -> str:
         """Get or create shop record in database and return the database ID"""
         try:
-            # First try to find existing shop by shopId
-            shop = await self.db.shop.find_first(where={"shopId": config["shop_id"]})
-
-            if shop:
-                logger.info(f"Found existing shop by shopId: {shop.id}")
-                return shop.id
-
-            # If not found by shopId, try to find by shopDomain
+            # First try to find existing shop by domain
             shop = await self.db.shop.find_first(
-                where={"shopDomain": config["shop_domain"]}
+                where={"shopDomain": config.shop_domain}
             )
 
             if shop:
-                # Update existing shop record with new shopId and accessToken
-                logger.info(
-                    f"Found existing shop by domain, updating shopId and accessToken"
-                )
-                updated_shop = await self.db.shop.update(
-                    where={"id": shop.id},
-                    data={
-                        "shopId": config["shop_id"],
-                        "accessToken": config["access_token"],
-                        "updatedAt": datetime.now(),
-                    },
-                )
-                logger.info(f"Updated shop record: {updated_shop.id}")
-                return updated_shop.id
+                logger.info(f"Found existing shop by domain: {shop.id}")
+                return shop.id
 
-            # Create new shop if neither exists
-            logger.info(f"Creating new shop record for shop_id: {config['shop_id']}")
+            # Create new shop if it doesn't exist
+            logger.info(f"Creating new shop record for domain: {config.shop_domain}")
             new_shop = await self.db.shop.create(
                 data={
-                    "shopId": config["shop_id"],
-                    "shopDomain": config["shop_domain"],
-                    "accessToken": config["access_token"],
+                    "shopDomain": config.shop_domain,
+                    "accessToken": config.access_token,
                     "createdAt": datetime.now(),
                     "updatedAt": datetime.now(),
                 }
@@ -230,6 +214,35 @@ class DataCollectionService:
             )
             raise
 
+    async def save_raw_products(
+        self,
+        shop_db_id: str,
+        products: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw product data to RawProduct table"""
+        try:
+            logger.info(f"Saving {len(products)} raw products to RawProduct table")
+
+            # Clear existing raw products for this shop
+            await self.db.rawProduct.deleteMany(where={"shopId": shop_db_id})
+
+            # Save raw products
+            raw_products = []
+            for product in products:
+                raw_products.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": product,
+                    }
+                )
+
+            await self.db.rawProduct.createMany(data=raw_products)
+            logger.info(f"Successfully saved {len(products)} raw products")
+
+        except Exception as e:
+            logger.error(f"Failed to save raw products: {e}")
+            # Don't fail the entire process if raw saving fails
+
     async def save_products(
         self,
         shop_db_id: str,
@@ -258,17 +271,9 @@ class DataCollectionService:
                         "productId": str(product["id"]),
                         "title": product["title"],
                         "handle": product["handle"],
-                        "description": product.get("description"),
                         "category": product.get("product_type"),
-                        "vendor": product.get("vendor"),
                         "price": float(
                             product.get("variants", [{}])[0].get("price", 0)
-                        ),
-                        "compareAtPrice": (
-                            float(product["variants"][0]["compareAtPrice"])
-                            if product.get("variants")
-                            and product["variants"][0].get("compareAtPrice")
-                            else None
                         ),
                         "inventory": product.get("variants", [{}])[0].get(
                             "inventory_quantity", 0
@@ -276,15 +281,6 @@ class DataCollectionService:
                         "tags": product.get("tags", []),
                         "imageUrl": product.get("image", {}).get("src"),
                         "imageAlt": product.get("image", {}).get("alt"),
-                        "productCreatedAt": (
-                            datetime.fromisoformat(
-                                product["created_at"].replace("Z", "+00:00")
-                            )
-                            if product.get("created_at")
-                            else None
-                        ),
-                        "variants": product.get("variants"),
-                        "metafields": product.get("metafields"),
                         "isActive": True,
                     }
 
@@ -303,6 +299,9 @@ class DataCollectionService:
                         },
                     )
             else:
+                # First, save raw data to RawProduct table
+                await self.save_raw_products(shop_db_id, products)
+
                 # For complete saves, use create_many for better performance
                 product_data = []
                 for product in products:

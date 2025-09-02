@@ -16,6 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Authenticate once at the parent level - this is the key fix
     console.log("🔍 [APP_MAIN] Authenticating in main route");
     const { session } = await authenticate.admin(request);
+    console.log(session, "Sesession asdkhaskdnad akdjaldk alkd alkdjadl al dj");
 
     if (!session?.shop) {
       console.error("❌ [APP_MAIN] No shop in session - authentication failed");
@@ -41,7 +42,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
       shop = await prisma.shop.create({
         data: {
-          shopId: session.shop,
           shopDomain: session.shop,
           accessToken: session.accessToken || "",
           email: null,

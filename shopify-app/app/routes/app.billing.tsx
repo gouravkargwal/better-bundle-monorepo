@@ -23,7 +23,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Get the shop
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true, shopId: true, shopDomain: true },
+    select: { id: true, shopDomain: true },
   });
 
   if (!shop) {
@@ -36,7 +36,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get billing subscription status
   const subscription = await prisma.billingSubscription.findFirst({
-    where: { shopId: shop.shopDomain },
+    where: { shopId: shop.id },
     orderBy: { createdAt: "desc" },
   });
 

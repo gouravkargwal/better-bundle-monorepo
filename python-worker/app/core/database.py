@@ -8,7 +8,7 @@ from prisma import Prisma
 from prisma.errors import PrismaError
 
 from app.core.config import settings
-from app.core.logging import get_logger, log_error, log_performance
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -29,11 +29,11 @@ async def get_database() -> Prisma:
             await _db_instance.connect()
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-            log_performance("database_connection", duration_ms)
+            logger.info(f"Database connection established in {duration_ms:.2f}ms")
             logger.info("Database connection established successfully")
 
         except PrismaError as e:
-            log_error(e, {"operation": "database_connection"})
+            logger.error(f"Database connection failed: {e}")
             raise Exception(f"Failed to connect to database: {str(e)}")
 
     # Check if connection is still alive
@@ -64,7 +64,7 @@ async def close_database() -> None:
             _db_instance = None
             logger.info("Database connection closed successfully")
         except Exception as e:
-            log_error(e, {"operation": "database_disconnection"})
+            logger.error(f"Database disconnection failed: {e}")
 
 
 async def check_database_health() -> bool:
@@ -75,7 +75,7 @@ async def check_database_health() -> bool:
         await db.query_raw("SELECT 1")
         return True
     except Exception as e:
-        log_error(e, {"operation": "database_health_check"})
+        logger.error(f"Database health check failed: {e}")
         return False
 
 
@@ -106,7 +106,7 @@ async def reconnect_database() -> bool:
             return False
 
     except Exception as e:
-        log_error(e, {"operation": "database_reconnection"})
+        logger.error(f"Database reconnection failed: {e}")
         return False
 
 
@@ -122,9 +122,9 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
             if context:
-                log_performance(operation_name, duration_ms, **context)
+                logger.info(f"Operation {operation_name} completed in {duration_ms:.2f}ms", **context)
             else:
-                log_performance(operation_name, duration_ms)
+                logger.info(f"Operation {operation_name} completed in {duration_ms:.2f}ms")
             return result
 
         except PrismaError as e:
@@ -143,24 +143,20 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
                     continue
 
             # Log error and re-raise
-            log_error(
-                e,
-                {
-                    "operation": operation_name,
-                    "attempt": attempt + 1,
-                    "context": context,
-                },
+            logger.error(
+                f"Database operation {operation_name} failed on attempt {attempt + 1}: {e}",
+                operation=operation_name,
+                attempt=attempt + 1,
+                context=context,
             )
             raise
 
         except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": operation_name,
-                    "attempt": attempt + 1,
-                    "context": context,
-                },
+            logger.error(
+                f"Database operation {operation_name} failed on attempt {attempt + 1}: {e}",
+                operation=operation_name,
+                attempt=attempt + 1,
+                context=context,
             )
             raise
 

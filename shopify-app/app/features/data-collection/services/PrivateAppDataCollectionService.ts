@@ -33,14 +33,13 @@ export class PrivateAppDataCollectionService {
 
       // Ensure shop exists in database first
       let shop = await prisma.shop.findUnique({
-        where: { shopId: this.shopDomain },
+        where: { shopDomain: this.shopDomain },
       });
 
       if (!shop) {
         // Create shop record if it doesn't exist
         shop = await prisma.shop.create({
           data: {
-            shopId: this.shopDomain,
             shopDomain: this.shopDomain,
             accessToken: this.accessToken,
             planType: "Free",

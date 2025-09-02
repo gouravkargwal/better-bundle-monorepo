@@ -11,7 +11,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Get the shop
   let shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true, shopId: true, shopDomain: true },
+    select: { id: true, shopDomain: true },
   });
 
   // If shop doesn't exist, create it
@@ -23,7 +23,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     try {
       shop = await prisma.shop.create({
         data: {
-          shopId: session.shop,
           shopDomain: session.shop,
           accessToken: session.accessToken || "",
           email: null,
@@ -31,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           currencyCode: null,
           moneyFormat: null,
         },
-        select: { id: true, shopId: true, shopDomain: true },
+        select: { id: true, shopDomain: true },
       });
 
       console.log(`✅ Shop record created for widget: ${shop.id}`);

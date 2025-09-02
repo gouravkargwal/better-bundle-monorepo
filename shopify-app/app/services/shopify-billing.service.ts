@@ -3,7 +3,7 @@
  * Handles automatic commission collection through Shopify's billing API
  */
 
-import { prisma } from "../db.server";
+import { prisma } from "../core/database/prisma.server";
 import { performanceBillingService } from "./performance-billing.service";
 
 export interface BillingCharge {
@@ -43,10 +43,23 @@ export class ShopifyBillingService {
     accessToken: string,
   ): Promise<{ success: boolean; subscriptionId?: string; error?: string }> {
     try {
+      // Get shop ID from domain
+      const shop = await prisma.shop.findUnique({
+        where: { shopDomain },
+        select: { id: true }
+      });
+
+      if (!shop) {
+        return {
+          success: false,
+          error: "Shop not found in database",
+        };
+      }
+
       // Check if shop already has an active subscription
       const existingSubscription = await prisma.billingSubscription.findFirst({
         where: {
-          shopId: shopDomain,
+          shopId: shop.id,
           status: "active",
         },
       });
@@ -70,7 +83,7 @@ export class ShopifyBillingService {
         await prisma.billingSubscription.create({
           data: {
             id: subscription.subscriptionId,
-            shopId: shopDomain,
+            shopId: shop.id,
             planName: this.PLAN_NAME,
             status: "active",
             trialDays: this.TRIAL_DAYS,
