@@ -83,8 +83,6 @@ async def reconnect_database() -> bool:
     """Reconnect to database with retry logic"""
     global _db_instance
 
-    logger.info("Attempting database reconnection")
-
     try:
         # Close existing connection
         if _db_instance:
@@ -117,14 +115,7 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
 
     for attempt in range(max_retries + 1):
         try:
-            start_time = asyncio.get_event_loop().time()
             result = await operation()
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-            if context:
-                logger.info(f"Operation {operation_name} completed in {duration_ms:.2f}ms", **context)
-            else:
-                logger.info(f"Operation {operation_name} completed in {duration_ms:.2f}ms")
             return result
 
         except PrismaError as e:

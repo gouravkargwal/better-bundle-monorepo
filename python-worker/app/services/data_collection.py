@@ -16,7 +16,8 @@ from app.core.database import (
     get_latest_timestamps,
 )
 from app.services.shopify_api import ShopifyAPIClient, calculate_since_date
-from app.core.logger import get_logger
+from app.core.logging import get_logger, log_error, log_data_collection, log_performance
+from prisma import Json
 
 logger = get_logger(__name__)
 
@@ -148,19 +149,17 @@ class DataCollectionService:
                         if order.get("customerId")
                         else None
                     ),
-                    "totalAmount": float(order["totalAmount"]["shopMoney"]["amount"]),
+                    "totalAmount": float(
+                        ((order.get("totalAmount") or {}).get("shopMoney") or {}).get(
+                            "amount", 0
+                        )
+                    ),
                     "orderDate": datetime.fromisoformat(
                         order["orderDate"].replace("Z", "+00:00")
                     ),
-                    "orderStatus": (
-                        order.get("displayFinancialStatus")
-                        # or order.get("fulfillmentStatus") # Removed - field doesn't exist
-                    ),
-                    "currencyCode": (
-                        order.get("currencyCode")
-                        or order["totalAmount"]["shopMoney"].get("currencyCode")
-                    ),
-                    "lineItems": line_items,
+                    # Normalized fields
+                    "orderStatus": order.get("displayFinancialStatus"),
+                    "lineItems": Json(line_items),
                 }
                 order_data.append(order_record)
 
@@ -224,7 +223,7 @@ class DataCollectionService:
             logger.info(f"Saving {len(products)} raw products to RawProduct table")
 
             # Clear existing raw products for this shop
-            await self.db.rawProduct.deleteMany(where={"shopId": shop_db_id})
+            await self.db.rawproduct.delete_many(where={"shopId": shop_db_id})
 
             # Save raw products
             raw_products = []
@@ -232,11 +231,11 @@ class DataCollectionService:
                 raw_products.append(
                     {
                         "shopId": shop_db_id,
-                        "payload": product,
+                        "payload": Json(product),
                     }
                 )
 
-            await self.db.rawProduct.createMany(data=raw_products)
+            await self.db.rawproduct.create_many(data=raw_products)
             logger.info(f"Successfully saved {len(products)} raw products")
 
         except Exception as e:
@@ -278,7 +277,7 @@ class DataCollectionService:
                         "inventory": product.get("variants", [{}])[0].get(
                             "inventory_quantity", 0
                         ),
-                        "tags": product.get("tags", []),
+                        "tags": Json(product.get("tags", [])),
                         "imageUrl": product.get("image", {}).get("src"),
                         "imageAlt": product.get("image", {}).get("alt"),
                         "isActive": True,
@@ -325,7 +324,7 @@ class DataCollectionService:
                         "inventory": product.get("variants", [{}])[0].get(
                             "inventory_quantity", 0
                         ),
-                        "tags": product.get("tags", []),
+                        "tags": Json(product.get("tags", [])),
                         "imageUrl": product.get("image", {}).get("src"),
                         "imageAlt": product.get("image", {}).get("alt"),
                         "productCreatedAt": (
@@ -335,8 +334,8 @@ class DataCollectionService:
                             if product.get("created_at")
                             else None
                         ),
-                        "variants": product.get("variants"),
-                        "metafields": product.get("metafields"),
+                        "variants": Json(product.get("variants")),
+                        "metafields": Json(product.get("metafields")),
                         "isActive": True,
                     }
                     product_data.append(product_record)
@@ -391,6 +390,12 @@ class DataCollectionService:
 
             # Always use upsert for customers (they can be updated)
             for customer in customers:
+                # Defensive reads for optional/nested fields
+                last_order = customer.get("lastOrder") or {}
+                tags_val = customer.get("tags") or []
+                addresses_val = customer.get("addresses") or []
+                metafields_val = customer.get("metafields") or {}
+
                 customer_record = {
                     "shopId": shop_db_id,
                     "customerId": customer["id"],
@@ -404,17 +409,17 @@ class DataCollectionService:
                         if customer.get("createdAt")
                         else None
                     ),
-                    "lastOrderId": customer.get("lastOrder", {}).get("id"),
+                    "lastOrderId": last_order.get("id"),
                     "lastOrderDate": (
                         datetime.fromisoformat(
-                            customer["lastOrder"]["processedAt"].replace("Z", "+00:00")
+                            last_order["processedAt"].replace("Z", "+00:00")
                         )
-                        if customer.get("lastOrder", {}).get("processedAt")
+                        if last_order.get("processedAt")
                         else None
                     ),
-                    "tags": customer.get("tags", []),
-                    "location": customer.get("addresses", []),
-                    "metafields": customer.get("metafields", []),
+                    "tags": Json(tags_val),
+                    "location": Json(addresses_val),
+                    "metafields": Json(metafields_val),
                 }
 
                 await self.db.customerdata.upsert(
@@ -838,11 +843,7 @@ class DataCollectionService:
     async def get_existing_products_count(self, shop_db_id: str) -> int:
         """Get count of existing products for a shop"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            count = await prisma.product.count(where={"shopId": shop_db_id})
+            count = await self.db.productdata.count(where={"shopId": shop_db_id})
             return count
         except Exception as e:
             logger.error(f"Failed to get existing products count: {e}")
@@ -851,11 +852,7 @@ class DataCollectionService:
     async def get_existing_orders_count(self, shop_db_id: str) -> int:
         """Get count of existing orders for a shop"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            count = await prisma.order.count(where={"shopId": shop_db_id})
+            count = await self.db.orderdata.count(where={"shopId": shop_db_id})
             return count
         except Exception as e:
             logger.error(f"Failed to get existing orders count: {e}")
@@ -864,11 +861,7 @@ class DataCollectionService:
     async def get_existing_customers_count(self, shop_db_id: str) -> int:
         """Get count of existing customers for a shop"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            count = await prisma.customer.count(where={"shopId": shop_db_id})
+            count = await self.db.customerdata.count(where={"shopId": shop_db_id})
             return count
         except Exception as e:
             logger.error(f"Failed to get existing customers count: {e}")
@@ -877,13 +870,9 @@ class DataCollectionService:
     async def update_shop_last_products_collection(self, shop_db_id: str):
         """Update shop's last products collection timestamp"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            await prisma.shop.update(
+            await self.db.shop.update(
                 where={"id": shop_db_id},
-                data={"lastProductsCollection": datetime.utcnow()},
+                data={"lastAnalysisAt": datetime.utcnow()},
             )
         except Exception as e:
             logger.error(f"Failed to update last products collection timestamp: {e}")
@@ -891,13 +880,9 @@ class DataCollectionService:
     async def update_shop_last_orders_collection(self, shop_db_id: str):
         """Update shop's last orders collection timestamp"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            await prisma.shop.update(
+            await self.db.shop.update(
                 where={"id": shop_db_id},
-                data={"lastOrdersCollection": datetime.utcnow()},
+                data={"lastAnalysisAt": datetime.utcnow()},
             )
         except Exception as e:
             logger.error(f"Failed to update last orders collection timestamp: {e}")
@@ -905,13 +890,9 @@ class DataCollectionService:
     async def update_shop_last_customers_collection(self, shop_db_id: str):
         """Update shop's last customers collection timestamp"""
         try:
-            from app.core.database import get_prisma_client
-
-            prisma = get_prisma_client()
-
-            await prisma.shop.update(
+            await self.db.shop.update(
                 where={"id": shop_db_id},
-                data={"lastCustomersCollection": datetime.utcnow()},
+                data={"lastAnalysisAt": datetime.utcnow()},
             )
         except Exception as e:
             logger.error(f"Failed to update last customers collection timestamp: {e}")

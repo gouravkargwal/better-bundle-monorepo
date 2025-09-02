@@ -146,6 +146,10 @@ model CustomerData {
   orderCount Int     @default(0)
   lastOrderDate DateTime?
   tags      Json?
+  createdAtShopify DateTime?
+  lastOrderId String?
+  location Json?
+  metafields Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

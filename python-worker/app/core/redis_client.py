@@ -48,19 +48,9 @@ async def get_redis_client() -> Redis:
             redis_config["ssl_cert_reqs"] = None
 
         try:
-            start_time = time.time()
             _redis_instance = Redis(**redis_config)
-
             # Test connection with shorter timeout
             await asyncio.wait_for(_redis_instance.ping(), timeout=5.0)
-
-            duration_ms = (time.time() - start_time) * 1000
-            logger.log_performance("redis_connection", duration_ms)
-            logger.log_redis_operation(
-                "connection_established",
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-            )
 
         except RedisError as e:
             logger.log_redis_operation(
@@ -94,11 +84,7 @@ async def check_redis_health() -> bool:
     """Check Redis connection health"""
     try:
         redis = await get_redis_client()
-        start_time = time.time()
         await redis.ping()
-        duration_ms = (time.time() - start_time) * 1000
-
-        logger.log_redis_operation("health_check_success", duration_ms=duration_ms)
         return True
     except Exception as e:
         logger.log_redis_operation("health_check_failed", error=str(e))
@@ -113,9 +99,7 @@ class RedisStreamsManager:
 
     async def initialize(self):
         """Initialize Redis connection"""
-        logger.log_redis_operation("streams_manager_initializing")
         self.redis = await get_redis_client()
-        logger.log_redis_operation("streams_manager_initialized")
 
     async def publish_event(
         self, stream_name: str, event_data: Dict[str, Any], event_id: str = "*"
@@ -125,8 +109,6 @@ class RedisStreamsManager:
             await self.initialize()
 
         try:
-            start_time = time.time()
-
             # Serialize complex data structures
             serialized_data = {}
             for key, value in event_data.items():
@@ -139,29 +121,9 @@ class RedisStreamsManager:
             serialized_data["timestamp"] = str(time.time())
             serialized_data["worker_id"] = settings.WORKER_ID
 
-            logger.log_redis_operation(
-                "publishing_event",
-                stream_name=stream_name,
-                event_data_keys=list(serialized_data.keys()),
-            )
-
             # Publish to stream
             message_id = await self.redis.xadd(
                 stream_name, serialized_data, id=event_id
-            )
-
-            duration_ms = (time.time() - start_time) * 1000
-            logger.log_performance(
-                "stream_publish",
-                duration_ms,
-                stream_name=stream_name,
-                message_id=message_id,
-            )
-            logger.log_redis_operation(
-                "event_published",
-                stream_name=stream_name,
-                message_id=message_id,
-                duration_ms=duration_ms,
             )
 
             return message_id
@@ -188,24 +150,11 @@ class RedisStreamsManager:
             await self.initialize()
 
         try:
-            logger.log_redis_operation(
-                "consuming_events",
-                stream_name=stream_name,
-                consumer_group=consumer_group,
-                consumer_name=consumer_name,
-                count=count,
-                block=block,
-            )
 
             # Ensure consumer group exists
             try:
                 await self.redis.xgroup_create(
                     stream_name, consumer_group, id="0", mkstream=True
-                )
-                logger.log_redis_operation(
-                    "consumer_group_created",
-                    stream_name=stream_name,
-                    consumer_group=consumer_group,
                 )
             except RedisError as e:
                 # Group already exists
@@ -217,21 +166,9 @@ class RedisStreamsManager:
                         error=str(e),
                     )
                     raise
-                else:
-                    logger.log_redis_operation(
-                        "consumer_group_already_exists",
-                        stream_name=stream_name,
-                        consumer_group=consumer_group,
-                    )
 
             # First, try to read pending messages (messages that were processed but not acknowledged)
             try:
-                logger.log_redis_operation(
-                    "checking_pending_messages",
-                    stream_name=stream_name,
-                    consumer_group=consumer_group,
-                )
-
                 pending_messages = await self.redis.xreadgroup(
                     consumer_group,
                     consumer_name,
@@ -243,17 +180,7 @@ class RedisStreamsManager:
                 if pending_messages and any(msgs for _, msgs in pending_messages):
                     # Process pending messages first
                     messages = pending_messages
-                    logger.log_redis_operation(
-                        "found_pending_messages",
-                        stream_name=stream_name,
-                        count=len(pending_messages[0][1]) if pending_messages else 0,
-                    )
                 else:
-                    # No pending messages, read new messages
-                    logger.log_redis_operation(
-                        "reading_new_messages", stream_name=stream_name, block=block
-                    )
-
                     messages = await asyncio.wait_for(
                         self.redis.xreadgroup(
                             consumer_group,
@@ -263,11 +190,6 @@ class RedisStreamsManager:
                             block=block,
                         ),
                         timeout=(block / 1000) + 1,  # Add 1 second buffer
-                    )
-                    logger.log_redis_operation(
-                        "new_messages_read",
-                        stream_name=stream_name,
-                        count=len(messages[0][1]) if messages else 0,
                     )
 
             except asyncio.TimeoutError:
@@ -294,16 +216,6 @@ class RedisStreamsManager:
                     event_data["_stream_name"] = stream
                     events.append(event_data)
 
-                    logger.log_redis_operation(
-                        "event_deserialized",
-                        stream_name=stream,
-                        message_id=msg_id,
-                        fields_count=len(fields),
-                    )
-
-            logger.log_redis_operation(
-                "consume_completed", stream_name=stream_name, events_count=len(events)
-            )
             return events
 
         except RedisError as e:
@@ -324,22 +236,7 @@ class RedisStreamsManager:
             await self.initialize()
 
         try:
-            logger.log_redis_operation(
-                "acknowledging_event",
-                stream_name=stream_name,
-                consumer_group=consumer_group,
-                message_id=message_id,
-            )
-
             result = await self.redis.xack(stream_name, consumer_group, message_id)
-
-            logger.log_redis_operation(
-                "event_acknowledged",
-                stream_name=stream_name,
-                message_id=message_id,
-                result=result,
-            )
-
             return result > 0
 
         except RedisError as e:

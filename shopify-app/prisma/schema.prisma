@@ -97,6 +97,7 @@ model OrderData {
   customerId String?
   totalAmount Float
   orderDate  DateTime
+  orderStatus String?
   lineItems  Json
   createdAt  DateTime @default(now())
   shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -112,12 +113,18 @@ model ProductData {
   productId String
   title     String
   handle    String
+  description String?
   category  String?
+  vendor    String?
   price     Float
+  compareAtPrice Float?
   inventory Int?
   tags      Json?
   imageUrl  String?
   imageAlt  String?
+  productCreatedAt DateTime?
+  variants  Json?
+  metafields Json?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -140,6 +147,10 @@ model CustomerData {
   orderCount Int     @default(0)
   lastOrderDate DateTime?
   tags      Json?
+  createdAtShopify DateTime?
+  lastOrderId String?
+  location Json?
+  metafields Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

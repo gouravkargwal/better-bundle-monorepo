@@ -131,19 +131,9 @@ class DataProcessor:
         circuit_breaker_open_time = 0
         circuit_breaker_timeout = 300  # 5 minutes
 
-        logger.log_consumer_event(
-            "starting_consumer",
-            stream_name=settings.DATA_JOB_STREAM,
-            consumer_group=settings.DATA_PROCESSOR_GROUP,
-            consumer_name=consumer_name,
-        )
-
         # Initialize services before starting the consumer loop
-        logger.info("Initializing services...")
         await self.initialize()
-        logger.info("Services initialized successfully")
 
-        logger.info("Starting main consumer loop...")
         loop_iteration = 0
 
         while not self.is_shutdown_requested():
@@ -151,13 +141,6 @@ class DataProcessor:
             loop_start_time = time.time()
 
             try:
-                logger.log_consumer_event(
-                    "loop_iteration_start",
-                    iteration=loop_iteration,
-                    consecutive_failures=consecutive_failures,
-                    circuit_breaker_open=circuit_breaker_open,
-                )
-
                 # Check circuit breaker
                 if circuit_breaker_open:
                     current_time = time.time()
@@ -195,18 +178,10 @@ class DataProcessor:
                     logger.log_consumer_event("shutdown_requested_before_consuming")
                     return
 
-                logger.log_consumer_event(
-                    "attempting_to_consume_messages",
-                    stream_name=settings.DATA_JOB_STREAM,
-                    consumer_group=settings.DATA_PROCESSOR_GROUP,
-                    consumer_name=consumer_name,
-                )
-
                 # SIMPLE FIX: Always sleep between iterations to prevent resource exhaustion
                 await asyncio.sleep(idle_sleep_interval)  # Sleep when idle
 
                 # Consume events with reasonable timeout
-                consume_start_time = time.time()
                 events = await self.streams_manager.consume_events(
                     stream_name=settings.DATA_JOB_STREAM,
                     consumer_group=settings.DATA_PROCESSOR_GROUP,
@@ -214,23 +189,10 @@ class DataProcessor:
                     count=1,
                     block=1000,  # 1 second block time
                 )
-                consume_duration_ms = (time.time() - consume_start_time) * 1000
-
-                logger.log_consumer_event(
-                    "consume_operation_completed",
-                    duration_ms=consume_duration_ms,
-                    events_count=len(events) if events else 0,
-                )
 
                 # Reset failure counter on successful consumption
                 if events:
                     consecutive_failures = 0
-                    logger.log_consumer_event(
-                        f"received_{len(events)}_messages",
-                        stream_name=settings.DATA_JOB_STREAM,
-                        consumer_group=settings.DATA_PROCESSOR_GROUP,
-                        consumer_name=consumer_name,
-                    )
 
                     for event in events:
                         # Check shutdown before processing each event
@@ -241,11 +203,6 @@ class DataProcessor:
                             return
 
                         try:
-                            logger.log_consumer_event(
-                                "processing_event",
-                                event_id=event.get("_message_id"),
-                                event_data=event,
-                            )
 
                             # Process the event
                             await self._process_single_event(event)
@@ -261,19 +218,7 @@ class DataProcessor:
                             await self._acknowledge_event_safely(event)
 
                 else:
-                    logger.log_consumer_event(
-                        "no_messages_received", stream_name=settings.DATA_JOB_STREAM
-                    )
                     consecutive_failures = 0
-
-                # Log loop iteration completion
-                loop_duration_ms = (time.time() - loop_start_time) * 1000
-                logger.log_consumer_event(
-                    "loop_iteration_completed",
-                    iteration=loop_iteration,
-                    duration_ms=loop_duration_ms,
-                    consecutive_failures=consecutive_failures,
-                )
 
             except Exception as e:
                 consecutive_failures += 1
@@ -400,9 +345,7 @@ class DataProcessor:
         if not shop_id:
             logger.error("Missing shop_id in job data", job_data=job_data)
             return {"success": False, "error": "Missing shop_id"}
-            
 
-        
         try:
             # Collect each data type independently
             results = {}
@@ -411,17 +354,18 @@ class DataProcessor:
             logger.log_job_processing(
                 job_id=job_id, stage="products_collection_start", shop_id=shop_id
             )
-            
+
             # Create shop config from job data
             from app.services.data_collection import DataCollectionConfig
-            
+
             shop_config = DataCollectionConfig(
                 shop_id=shop_id,
                 shop_domain=job_data.get("shop_domain") or job_data.get("shopDomain"),
-                access_token=job_data.get("access_token") or job_data.get("accessToken"),
+                access_token=job_data.get("access_token")
+                or job_data.get("accessToken"),
                 days_back=job_data.get("days_back") or job_data.get("daysBack"),
             )
-            
+
             products_result = await self.data_collection_service.collect_products_only(
                 shop_id, shop_config
             )
@@ -481,7 +425,9 @@ class DataProcessor:
             )
             try:
                 customers_result = (
-                    await self.data_collection_service.collect_customers_only(shop_id, shop_config)
+                    await self.data_collection_service.collect_customers_only(
+                        shop_id, shop_config
+                    )
                 )
                 results["customers"] = customers_result
 
