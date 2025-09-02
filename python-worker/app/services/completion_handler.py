@@ -2,14 +2,14 @@
 Completion handler for processing ML training completion events
 """
 
+import asyncio
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from app.core.database import get_database
 from app.core.redis_client import get_redis_client, streams_manager
 from app.services.heuristic_service import heuristic_service
-from app.utils.sendpulse_email import SendPulseEmailService
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +20,7 @@ class CompletionHandler:
     def __init__(self):
         self.db = None
         self.redis = None
-        self.email_service = None
+        self._consumer_task = None
 
     async def initialize(self):
         """Initialize database and Redis connections"""
@@ -28,7 +28,27 @@ class CompletionHandler:
         self.redis = await get_redis_client()
         await streams_manager.initialize()
         await heuristic_service.initialize()
-        self.email_service = SendPulseEmailService()
+
+    async def start_consumer(self):
+        """Start the consumer in a separate task"""
+        if self._consumer_task and not self._consumer_task.done():
+            logger.warning("Completion handler consumer is already running")
+            return
+
+        self._consumer_task = asyncio.create_task(
+            self.consume_ml_completion_events(), name="completion-handler-consumer"
+        )
+        logger.info("Completion handler consumer started")
+
+    async def stop_consumer(self):
+        """Stop the consumer task"""
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Completion handler consumer stopped")
 
     async def handle_ml_training_completion(
         self, event_data: Dict[str, Any]
@@ -41,6 +61,8 @@ class CompletionHandler:
             success = event_data.get("success", False)
             error = event_data.get("error")
             analysis_result = event_data.get("analysis_result")
+            skipped = event_data.get("skipped", False)
+            skipped_reason = event_data.get("skipped_reason")
 
             logger.info(
                 "Handling ML training completion",
@@ -48,6 +70,8 @@ class CompletionHandler:
                 shop_id=shop_id,
                 shop_domain=shop_domain,
                 success=success,
+                skipped=skipped,
+                skipped_reason=skipped_reason if skipped else None,
             )
 
             # Step 1: Update job status
@@ -57,42 +81,91 @@ class CompletionHandler:
             await self._update_shop_analysis_timestamp(shop_id)
 
             if success:
-                # Step 3: Schedule next analysis using heuristic
-                schedule_result = await self._schedule_next_analysis(
-                    shop_id, analysis_result
-                )
+                if skipped:
+                    # Handle skipped training case
+                    logger.info(
+                        "🔄 ML training skipped - no data changes",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                        reason=skipped_reason,
+                    )
 
-                # Step 4: Send success email notification
-                email_result = await self._send_completion_email(
-                    shop_domain,
-                    success=True,
-                    job_id=job_id,
-                    analysis_result=analysis_result,
-                )
+                    # Step 3: Schedule next analysis using heuristic (even for skipped)
+                    schedule_result = await self._schedule_next_analysis(
+                        shop_id, analysis_result
+                    )
 
-                # Step 5: Publish completion event to results stream
-                await self._publish_completion_event(event_data, schedule_result)
+                    # Step 4: Skip email notification for internal ML training
+                    email_result = {
+                        "success": True,
+                        "skipped": True,
+                        "reason": "No email sent for internal ML training",
+                    }
 
-                logger.info(
-                    "✅ ML training completion handled successfully",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    schedule_result=schedule_result.get("success"),
-                    email_sent=email_result.get("success"),
-                )
+                    # Step 5: Publish heuristic decision requested event
+                    await self._publish_heuristic_decision_requested(
+                        event_data, schedule_result
+                    )
 
-                return {
-                    "success": True,
-                    "job_id": job_id,
-                    "shop_id": shop_id,
-                    "schedule_result": schedule_result,
-                    "email_result": email_result,
-                }
+                    logger.info(
+                        "🔄 ML training skipped handled successfully",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                        reason=skipped_reason,
+                        schedule_result=schedule_result.get("success"),
+                        email_sent=email_result.get("success"),
+                    )
+
+                    return {
+                        "success": True,
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "skipped": True,
+                        "reason": skipped_reason,
+                        "schedule_result": schedule_result,
+                        "email_result": email_result,
+                    }
+                else:
+                    # Handle successful training case
+                    # Step 3: Schedule next analysis using heuristic
+                    schedule_result = await self._schedule_next_analysis(
+                        shop_id, analysis_result
+                    )
+
+                    # Step 4: Skip email notification for internal ML training
+                    email_result = {
+                        "success": True,
+                        "skipped": True,
+                        "reason": "No email sent for internal ML training",
+                    }
+
+                    # Step 5: Publish heuristic decision requested event
+                    await self._publish_heuristic_decision_requested(
+                        event_data, schedule_result
+                    )
+
+                    logger.info(
+                        "✅ ML training completion handled successfully",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                        schedule_result=schedule_result.get("success"),
+                        email_sent=email_result.get("success"),
+                    )
+
+                    return {
+                        "success": True,
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "schedule_result": schedule_result,
+                        "email_result": email_result,
+                    }
             else:
-                # Step 3: Send failure email notification
-                email_result = await self._send_completion_email(
-                    shop_domain, success=False, job_id=job_id, error=error
-                )
+                # Step 3: Skip email notification for internal ML training failures
+                email_result = {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "No email sent for internal ML training failure",
+                }
 
                 # Step 4: Publish failure event
                 await self._publish_completion_event(event_data, None)
@@ -189,6 +262,8 @@ class CompletionHandler:
         job_id: str,
         analysis_result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
+        skipped: bool = False,
+        skipped_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send completion email notification"""
         try:
@@ -203,13 +278,24 @@ class CompletionHandler:
                 return {"success": False, "error": "No email found"}
 
             if success:
-                # Send success email
-                email_result = await self.email_service.send_analysis_complete_email(
-                    to_email=shop.email,
-                    shop_domain=shop_domain,
-                    job_id=job_id,
-                    analysis_result=analysis_result,
-                )
+                if skipped:
+                    # Send skipped email
+                    email_result = await self.email_service.send_analysis_skipped_email(
+                        to_email=shop.email,
+                        shop_domain=shop_domain,
+                        job_id=job_id,
+                        skipped_reason=skipped_reason,
+                    )
+                else:
+                    # Send success email
+                    email_result = (
+                        await self.email_service.send_analysis_complete_email(
+                            to_email=shop.email,
+                            shop_domain=shop_domain,
+                            job_id=job_id,
+                            analysis_result=analysis_result,
+                        )
+                    )
             else:
                 # Send failure email
                 email_result = await self.email_service.send_analysis_failed_email(
@@ -237,16 +323,18 @@ class CompletionHandler:
     async def _publish_completion_event(
         self, event_data: Dict[str, Any], schedule_result: Optional[Dict[str, Any]]
     ):
-        """Publish completion event to results stream"""
+        """Publish completion event to completion-results stream (separate from consumption stream)"""
         try:
             completion_event = {
                 **event_data,
-                "completion_timestamp": datetime.now().isoformat(),
+                "completion_timestamp": datetime.now(timezone.utc).isoformat(),
                 "schedule_result": schedule_result,
             }
 
-            message_id = await streams_manager.publish_analysis_results_event(
-                completion_event
+            from app.core.config import settings
+            
+            message_id = await streams_manager.publish_event(
+                settings.COMPLETION_RESULTS_STREAM, completion_event
             )
 
             logger.info("Completion event published", message_id=message_id)
@@ -254,9 +342,41 @@ class CompletionHandler:
         except Exception as e:
             logger.error("Error publishing completion event", error=str(e))
 
+    async def _publish_heuristic_decision_requested(
+        self, event_data: Dict[str, Any], schedule_result: Optional[Dict[str, Any]]
+    ):
+        """Publish heuristic decision requested event"""
+        try:
+            from app.core.config import settings
+
+            heuristic_event = {
+                "event_type": "HEURISTIC_DECISION_REQUESTED",
+                "job_id": event_data.get("job_id"),
+                "shop_id": event_data.get("shop_id"),
+                "shop_domain": event_data.get("shop_domain"),
+                "training_result": event_data.get("result"),
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "schedule_result": schedule_result,
+            }
+
+            message_id = await streams_manager.publish_event(
+                settings.HEURISTIC_DECISION_REQUESTED_STREAM, heuristic_event
+            )
+
+            logger.info(
+                "Heuristic decision requested event published", message_id=message_id
+            )
+
+        except Exception as e:
+            logger.error(
+                "Error publishing heuristic decision requested event", error=str(e)
+            )
+
     async def consume_ml_completion_events(self):
         """Consumer loop for ML training completion events"""
-        consumer_name = f"completion-handler-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        consumer_name = (
+            f"completion-handler-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        )
 
         logger.info(
             "Starting ML completion event consumer", consumer_name=consumer_name

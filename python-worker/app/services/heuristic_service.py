@@ -442,15 +442,13 @@ class AnalysisHeuristicService:
         """Store heuristic decision for learning"""
         try:
             await self.db.heuristicdecision.create(
-                {
-                    "data": {
-                        "shopId": shop_id,
-                        "predictedInterval": heuristic_result.next_analysis_hours,
-                        "factors": heuristic_result.factors.__dict__,
-                        "reasoning": heuristic_result.reasoning,
-                        "confidence": heuristic_result.confidence,
-                        "analysisResult": analysis_result or {},
-                    }
+                data={
+                    "shopId": shop_id,
+                    "predictedInterval": heuristic_result.next_analysis_hours,
+                    "factors": heuristic_result.factors.__dict__,
+                    "reasoning": heuristic_result.reasoning,
+                    "confidence": heuristic_result.confidence,
+                    "analysisResult": analysis_result or {},
                 }
             )
             logger.info("Stored heuristic decision", shop_id=shop_id)

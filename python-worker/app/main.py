@@ -35,6 +35,8 @@ def start_consumer_process():
     try:
         from app.services.data_processor import data_processor
         from app.services.ml_training_consumer import ml_training_consumer
+        from app.services.completion_handler import completion_handler
+        from app.services.heuristic_decision_consumer import heuristic_decision_consumer
 
         # Start consumer in separate process
         _consumer_process = multiprocessing.Process(
@@ -55,6 +57,8 @@ def run_consumer_worker():
         import asyncio
         from app.services.data_processor import data_processor
         from app.services.ml_training_consumer import ml_training_consumer
+        from app.services.completion_handler import completion_handler
+        from app.services.heuristic_decision_consumer import heuristic_decision_consumer
 
         # Setup logging for the worker process
         from app.core.logger import get_logger
@@ -62,20 +66,26 @@ def run_consumer_worker():
         worker_logger = get_logger("consumer-worker")
         worker_logger.info("Starting consumer worker process")
 
-        # Run both consumers
+        # Run all consumers
         async def run_consumers():
-            # Start both consumers
+            # Start all consumers
             await data_processor.initialize()
             await ml_training_consumer.initialize()
+            await completion_handler.initialize()
+            await heuristic_decision_consumer.initialize()
 
             # Start consumer tasks
             await data_processor.start_consumer()
             await ml_training_consumer.start_consumer()
+            await completion_handler.start_consumer()
+            await heuristic_decision_consumer.start_consumer()
 
-            # Wait for both to complete (they run indefinitely)
+            # Wait for all to complete (they run indefinitely)
             await asyncio.gather(
                 data_processor._consumer_task,
                 ml_training_consumer._consumer_task,
+                completion_handler._consumer_task,
+                heuristic_decision_consumer._consumer_task,
                 return_exceptions=True,
             )
 

@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     ML_TRAINING_COMPLETE_STREAM: str = Field(
         default="betterbundle:ml-training-complete", env="ML_TRAINING_COMPLETE_STREAM"
     )
+    HEURISTIC_DECISION_REQUESTED_STREAM: str = Field(
+        default="betterbundle:heuristic-decision-requested", env="HEURISTIC_DECISION_REQUESTED_STREAM"
+    )
+    HEURISTIC_DECISION_MADE_STREAM: str = Field(
+        default="betterbundle:heuristic-decision-made", env="HEURISTIC_DECISION_MADE_STREAM"
+    )
+    NEXT_ANALYSIS_SCHEDULED_STREAM: str = Field(
+        default="betterbundle:next-analysis-scheduled", env="NEXT_ANALYSIS_SCHEDULED_STREAM"
+    )
+    COMPLETION_RESULTS_STREAM: str = Field(
+        default="betterbundle:completion-results", env="COMPLETION_RESULTS_STREAM"
+    )
 
     # Consumer Group Names
     DATA_PROCESSOR_GROUP: str = Field(

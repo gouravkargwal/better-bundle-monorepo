@@ -4,7 +4,7 @@ Consumes ML training events from Redis Streams and processes them asynchronously
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from app.core.config import settings
@@ -198,35 +198,25 @@ class MLTrainingConsumer:
             # Create MLTrainingJob record to reflect in-progress status
             try:
                 db = await get_database()
-
-                # Check if shop exists first
-                shop = await db.shop.find_first(where={"id": shop_id})
-                if not shop:
-                    logger.warning(
-                        "Shop not found in database, skipping MLTrainingJob record creation",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                    )
-                else:
-                    await db.mltrainingjob.create(
-                        data={
-                            "shopId": shop_id,
-                            "jobId": job_id,
-                            "status": "training",
-                            "progress": 0,
-                            "startedAt": datetime.now(),
-                            "metadata": {
-                                "shop_domain": shop_domain,
-                                "training_type": "gorse_recommendations",
-                            },
-                            "shop": {"connect": {"id": shop_id}},
-                        }
-                    )
-                    logger.info(
-                        "MLTrainingJob record created successfully",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                    )
+                # Create MLTrainingJob record using Prisma's native relation handling
+                await db.mltrainingjob.create(
+                    data={
+                        "jobId": job_id,
+                        "shop_id": shop_id,  # Try using snake_case to match database
+                        "status": "training",
+                        "progress": 0,
+                        "startedAt": datetime.now(timezone.utc),
+                        "metadata": {
+                            "shop_domain": shop_domain,
+                            "training_type": "gorse_recommendations",
+                        },
+                    }
+                )
+                logger.info(
+                    "MLTrainingJob record created successfully",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                )
             except Exception as e:
                 logger.warning(
                     "Failed to create MLTrainingJob record at start",
@@ -250,23 +240,44 @@ class MLTrainingConsumer:
             )
 
             if result["success"]:
-                logger.info(
-                    "Gorse training completed successfully",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    result=result,
-                )
+                if result.get("skipped", False):
+                    logger.info(
+                        "Gorse training skipped - no data changes",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                        reason=result.get("reason"),
+                        hours_since_training=result.get("hours_since_training"),
+                    )
 
-                # Publish completion event
-                completion_event = {
-                    "event_type": "ML_TRAINING_COMPLETED",
-                    "job_id": job_id,
-                    "shop_id": shop_id,
-                    "shop_domain": shop_domain,
-                    "training_type": "gorse_recommendations",
-                    "result": result,
-                    "completed_at": datetime.now().isoformat(),
-                }
+                    # Publish completion event for skipped training
+                    completion_event = {
+                        "event_type": "ML_TRAINING_SKIPPED",
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "shop_domain": shop_domain,
+                        "training_type": "gorse_recommendations",
+                        "result": result,
+                        "completed_at": datetime.now().isoformat(),
+                        "skipped_reason": result.get("reason"),
+                    }
+                else:
+                    logger.info(
+                        "Gorse training completed successfully",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                        result=result,
+                    )
+
+                    # Publish completion event for successful training
+                    completion_event = {
+                        "event_type": "ML_TRAINING_COMPLETED",
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "shop_domain": shop_domain,
+                        "training_type": "gorse_recommendations",
+                        "result": result,
+                        "completed_at": datetime.now().isoformat(),
+                    }
 
                 await streams_manager.publish_event(
                     stream_name=settings.ML_TRAINING_COMPLETE_STREAM,

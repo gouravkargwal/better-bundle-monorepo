@@ -60,14 +60,12 @@ class SchedulerService:
                     job_id = f"scheduled_{int(datetime.now().timestamp())}_{shop.id}"
 
                     analysis_job = await self.db.analysisjob.create(
-                        {
-                            "data": {
-                                "jobId": job_id,
-                                "shopId": shop.id,
-                                "status": "queued",
-                                "progress": 0,
-                                "createdAt": datetime.now(),
-                            }
+                        data={
+                            "jobId": job_id,
+                            "shopId": shop.id,
+                            "status": "queued",
+                            "progress": 0,
+                            "createdAt": datetime.now(),
                         }
                     )
 
@@ -156,16 +154,14 @@ class SchedulerService:
             job_id = f"manual_{int(datetime.now().timestamp())}_{shop.id}"
 
             analysis_job = await self.db.analysisjob.create(
-                {
-                    "data": {
-                        "jobId": job_id,
-                        "shopId": shop.id,
-                        "status": "queued",
+                data={
+                    "jobId": job_id,
+                    "shopId": shop.id,
+                    "status": "queued",
                         "progress": 0,
                         "createdAt": datetime.now(),
                     }
-                }
-            )
+                )
 
             # Publish to Redis Streams
             message_id = await streams_manager.publish_data_job_event(

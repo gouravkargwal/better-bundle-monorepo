@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import httpx
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.database import get_database
@@ -48,6 +48,38 @@ class GorseService:
                     "success": False,
                     "error": f"Insufficient data for training: {data_check['reason']}",
                     "data_summary": data_check,
+                }
+
+            # Step 1.5: Check if training should be skipped using time-based fallback
+            logger.info(f"🔍 Checking if training should be skipped for shop {shop_id}")
+            skip_check = await self._should_skip_ml_training_fallback(shop_id)
+            logger.info(f"🔍 Skip check result: {skip_check}")
+
+            if skip_check["should_skip"]:
+                logger.info(
+                    "Skipping ML training - no data changes detected",
+                    shop_id=shop_id,
+                    reason=skip_check["reason"],
+                    method=skip_check.get("method", "unknown"),
+                    last_training=skip_check.get("last_training"),
+                    hours_since_training=skip_check.get("hours_since_training"),
+                    hours_since_last_order=skip_check.get("hours_since_last_order"),
+                    hours_since_last_product=skip_check.get("hours_since_last_product"),
+                )
+                return {
+                    "success": True,
+                    "shop_id": shop_id,
+                    "shop_domain": shop_domain,
+                    "skipped": True,
+                    "reason": skip_check["reason"],
+                    "method": skip_check.get("method", "unknown"),
+                    "last_training": skip_check.get("last_training"),
+                    "hours_since_training": skip_check.get("hours_since_training"),
+                    "hours_since_last_order": skip_check.get("hours_since_last_order"),
+                    "hours_since_last_product": skip_check.get(
+                        "hours_since_last_product"
+                    ),
+                    "message": "Training skipped - no new data since last training",
                 }
 
             # Step 2: Extract and prepare training data
@@ -129,6 +161,233 @@ class GorseService:
             )
             return {"can_train": False, "reason": f"Error checking data: {str(e)}"}
 
+    async def _should_skip_ml_training(self, shop_id: str) -> Dict[str, Any]:
+        """Check if ML training should be skipped due to no data changes"""
+        try:
+            # Get last successful training timestamp
+            last_training = await self.db.mltrainingjob.find_first(
+                where={"shopId": shop_id, "status": "completed"},
+                order={"completedAt": "desc"},
+            )
+
+            if not last_training:
+                return {
+                    "should_skip": False,
+                    "reason": "no_previous_training",
+                    "last_training": None,
+                }
+
+            # Check if data has changed since last training
+            last_order = await self.db.orderdata.find_first(
+                where={"shopId": shop_id}, order={"orderDate": "desc"}
+            )
+
+            last_product = await self.db.productdata.find_first(
+                where={"shopId": shop_id}, order={"updatedAt": "desc"}
+            )
+
+            # Skip if no new data since last training
+            if (
+                last_order
+                and last_order.orderDate <= last_training.completedAt
+                and last_product
+                and last_product.updatedAt <= last_training.completedAt
+            ):
+                return {
+                    "should_skip": True,
+                    "reason": "no_data_changes_since_last_training",
+                    "last_training": last_training.completedAt,
+                    "last_order": last_order.orderDate,
+                    "last_product": last_product.updatedAt,
+                    "hours_since_training": (
+                        (
+                            datetime.now(timezone.utc) - last_training.completedAt
+                        ).total_seconds()
+                        / 3600
+                    ),
+                }
+
+            return {
+                "should_skip": False,
+                "reason": "data_has_changed",
+                "last_training": last_training.completedAt,
+                "last_order": last_order.orderDate if last_order else None,
+                "last_product": last_product.updatedAt if last_product else None,
+            }
+
+        except Exception as e:
+            logger.error(f"Error checking if training should be skipped: {e}")
+            return {
+                "should_skip": False,
+                "reason": f"error_checking_status: {str(e)}",
+                "last_training": None,
+            }
+
+    async def _should_skip_ml_training_fallback(self, shop_id: str) -> Dict[str, Any]:
+        """Check if training should be skipped based on event stream data changes"""
+        try:
+            logger.info(
+                f"🧠 Checking for data changes using event streams for shop {shop_id}"
+            )
+
+            # Get the latest analysis completion event for this shop
+            latest_analysis = await self._get_latest_analysis_event(shop_id)
+
+            if not latest_analysis:
+                logger.info(
+                    f"🧠 No previous analysis found - allowing training to proceed"
+                )
+                return {
+                    "should_skip": False,
+                    "reason": "no_previous_analysis",
+                    "method": "event_based_detection",
+                    "order_count": await self.db.orderdata.count(
+                        where={"shopId": shop_id}
+                    ),
+                    "product_count": await self.db.productdata.count(
+                        where={"shopId": shop_id}
+                    ),
+                }
+
+            # Get the analysis completion timestamp
+            analysis_time = latest_analysis.get("completion_timestamp")
+            if not analysis_time:
+                logger.info(f"🧠 No timestamp in analysis event - allowing training")
+                return {
+                    "should_skip": False,
+                    "reason": "no_analysis_timestamp",
+                    "method": "event_based_detection",
+                }
+
+            # Parse the timestamp
+            try:
+                from datetime import datetime
+
+                analysis_datetime = datetime.fromisoformat(
+                    analysis_time.replace("Z", "+00:00")
+                )
+            except Exception as e:
+                logger.warning(f"Could not parse analysis timestamp: {e}")
+                return {
+                    "should_skip": False,
+                    "reason": "timestamp_parse_error",
+                    "method": "event_based_detection",
+                }
+
+            # Check for new orders since last analysis
+            new_orders_count = await self.db.orderdata.count(
+                where={"shopId": shop_id, "orderDate": {"gt": analysis_datetime}}
+            )
+
+            # Check for updated products since last analysis
+            updated_products_count = await self.db.productdata.count(
+                where={"shopId": shop_id, "updatedAt": {"gt": analysis_datetime}}
+            )
+
+            # Check for new products since last analysis
+            new_products_count = await self.db.productdata.count(
+                where={"shopId": shop_id, "createdAt": {"gt": analysis_datetime}}
+            )
+
+            # Get current total counts
+            current_order_count = await self.db.orderdata.count(
+                where={"shopId": shop_id}
+            )
+            current_product_count = await self.db.productdata.count(
+                where={"shopId": shop_id}
+            )
+
+            # Calculate total changes
+            total_changes = (
+                new_orders_count + updated_products_count + new_products_count
+            )
+
+            logger.info(f"🧠 Event-based data change analysis for shop {shop_id}:")
+            logger.info(f"  - Last analysis: {analysis_datetime}")
+            logger.info(f"  - New orders since analysis: {new_orders_count}")
+            logger.info(
+                f"  - Updated products since analysis: {updated_products_count}"
+            )
+            logger.info(f"  - New products since analysis: {new_products_count}")
+            logger.info(f"  - Total changes: {total_changes}")
+
+            # Skip training only if there are NO changes
+            if total_changes == 0:
+                logger.info(f"🧠 No data changes detected - skipping training")
+                return {
+                    "should_skip": True,
+                    "reason": "no_data_changes_since_last_analysis",
+                    "method": "event_based_detection",
+                    "last_analysis": analysis_datetime,
+                    "new_orders": new_orders_count,
+                    "updated_products": updated_products_count,
+                    "new_products": new_products_count,
+                    "total_changes": total_changes,
+                    "current_order_count": current_order_count,
+                    "current_product_count": current_product_count,
+                }
+            else:
+                logger.info(f"🧠 Data changes detected - allowing training to proceed")
+                return {
+                    "should_skip": False,
+                    "reason": f"data_changes_detected_{total_changes}_changes",
+                    "method": "event_based_detection",
+                    "last_analysis": analysis_datetime,
+                    "new_orders": new_orders_count,
+                    "updated_products": updated_products_count,
+                    "new_products": new_products_count,
+                    "total_changes": total_changes,
+                    "current_order_count": current_order_count,
+                    "current_product_count": current_product_count,
+                }
+
+        except Exception as e:
+            logger.error(f"Error in event-based data change detection: {e}")
+            return {
+                "should_skip": False,
+                "reason": f"detection_error: {str(e)}",
+                "method": "event_based_detection_failed",
+            }
+
+    async def _get_latest_analysis_event(
+        self, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get the latest analysis completion event for a shop from the event stream"""
+        try:
+            from app.core.redis_client import streams_manager
+
+            # Get the latest event from the analysis results stream
+            events = await streams_manager.consume_events(
+                stream_name="betterbundle:analysis-results",
+                consumer_group="gorse-service",
+                consumer_name=f"gorse-service-{shop_id}",
+                count=10,  # Get last 10 events to find shop-specific ones
+                block=1000,  # 1 second timeout
+            )
+
+            if not events:
+                logger.info(f"No analysis events found in stream for shop {shop_id}")
+                return None
+
+            # Find the most recent event for this specific shop
+            shop_events = [event for event in events if event.get("shop_id") == shop_id]
+
+            if not shop_events:
+                logger.info(f"No analysis events found for shop {shop_id}")
+                return None
+
+            # Return the most recent one (they should be ordered by timestamp)
+            latest_event = shop_events[0]
+            logger.info(
+                f"Found latest analysis event for shop {shop_id}: {latest_event.get('event_type', 'unknown')}"
+            )
+
+            return latest_event
+
+        except Exception as e:
+            logger.error(f"Error getting latest analysis event: {e}")
+            return None
+
     async def _prepare_training_data(self, shop_id: str) -> Dict[str, Any]:
         """Prepare training data for Gorse"""
         try:
@@ -149,7 +408,7 @@ class GorseService:
                 items.append(
                     {
                         "item_id": product.productId,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "categories": [product.category] if product.category else [],
                         "tags": [],
                         "labels": [],
@@ -296,7 +555,7 @@ class GorseService:
                     "users_count": users_success,
                     "feedback_count": feedback_success,
                     "training_automatic": True,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "message": f"Data sent to Gorse - {items_success} items, {users_success} users, {feedback_success} feedback records inserted",
                 }
 
@@ -310,7 +569,7 @@ class GorseService:
         """Update training metadata in database"""
         try:
             # Create or update MLTrainingJob record
-            job_id = f"gorse_training_{shop_id}_{int(datetime.now().timestamp())}"
+            job_id = f"gorse_training_{shop_id}_{int(datetime.now(timezone.utc).timestamp())}"
 
             # Check if there's an existing training job for this shop
             existing_job = await self.db.mltrainingjob.find_first(
@@ -330,7 +589,7 @@ class GorseService:
                         ),
                         "progress": 100 if gorse_result.get("items_inserted") else 0,
                         "completedAt": (
-                            datetime.now()
+                            datetime.now(timezone.utc)
                             if gorse_result.get("items_inserted")
                             else None
                         ),
@@ -340,7 +599,7 @@ class GorseService:
                             else "Data insertion failed"
                         ),
                         "metadata": gorse_result,
-                        "updatedAt": datetime.now(),
+                        "updatedAt": datetime.now(timezone.utc),
                     },
                 )
                 logger.info(
@@ -355,7 +614,6 @@ class GorseService:
                 # Create new completed job
                 await self.db.mltrainingjob.create(
                     data={
-                        "shopId": shop_id,
                         "jobId": job_id,
                         "status": (
                             "completed"
@@ -363,9 +621,9 @@ class GorseService:
                             else "failed"
                         ),
                         "progress": 100 if gorse_result.get("items_inserted") else 0,
-                        "startedAt": datetime.now(),
+                        "startedAt": datetime.now(timezone.utc),
                         "completedAt": (
-                            datetime.now()
+                            datetime.now(timezone.utc)
                             if gorse_result.get("items_inserted")
                             else None
                         ),
@@ -374,8 +632,8 @@ class GorseService:
                             if gorse_result.get("items_inserted")
                             else "Data insertion failed"
                         ),
+                        "shop_id": shop_id,  # Try using snake_case to match database
                         "metadata": gorse_result,
-                        "shop": {"connect": {"id": shop_id}},
                     }
                 )
                 logger.info(
@@ -473,7 +731,7 @@ class GorseService:
                 "feedback_type": feedback_type,
                 "user_id": user_id,
                 "item_id": item_id,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             if comment:
