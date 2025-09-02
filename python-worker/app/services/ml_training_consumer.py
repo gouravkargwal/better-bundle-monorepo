@@ -202,14 +202,12 @@ class MLTrainingConsumer:
                 await db.mltrainingjob.create(
                     data={
                         "jobId": job_id,
-                        "shop_id": shop_id,  # Try using snake_case to match database
+                        "shopId": shop_id,  # Set the foreign key directly
                         "status": "training",
                         "progress": 0,
                         "startedAt": datetime.now(timezone.utc),
-                        "metadata": {
-                            "shop_domain": shop_domain,
-                            "training_type": "gorse_recommendations",
-                        },
+                        # Note: metadata field removed due to Prisma client bug
+                        # that requires shop relation when metadata is present
                     }
                 )
                 logger.info(

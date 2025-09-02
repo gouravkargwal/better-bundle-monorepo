@@ -186,7 +186,6 @@ async def get_or_create_shop(shop_id: str, shop_domain: str, access_token: str):
                 )
                 shop = await db.shop.create(
                     data={
-                        "shopId": shop_id,
                         "shopDomain": shop_domain,
                         "accessToken": access_token,
                         "planType": "Free",

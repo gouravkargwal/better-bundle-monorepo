@@ -50,14 +50,52 @@ class GorseService:
                     "data_summary": data_check,
                 }
 
-            # Step 1.5: Check if training should be skipped using time-based fallback
+                # Step 1.5: Check if training should be skipped - first check ML table, then event streams
             logger.info(f"🔍 Checking if training should be skipped for shop {shop_id}")
-            skip_check = await self._should_skip_ml_training_fallback(shop_id)
-            logger.info(f"🔍 Skip check result: {skip_check}")
+
+            # First, check ML table for recent training (primary method)
+            # This checks if we've recently trained and if data has changed since then
+            ml_table_skip_check = await self._should_skip_ml_training(shop_id)
+            logger.info(f"🔍 ML table skip check result: {ml_table_skip_check}")
+
+            if ml_table_skip_check["should_skip"]:
+                logger.info(
+                    "Skipping ML training - no data changes since last training (ML table check)",
+                    shop_id=shop_id,
+                    reason=ml_table_skip_check["reason"],
+                    method="ml_table_check",
+                    last_training=ml_table_skip_check.get("last_training"),
+                    hours_since_training=ml_table_skip_check.get(
+                        "hours_since_training"
+                    ),
+                )
+                return {
+                    "success": True,
+                    "shop_id": shop_id,
+                    "shop_domain": shop_domain,
+                    "skipped": True,
+                    "reason": ml_table_skip_check["reason"],
+                    "method": "ml_table_check",
+                    "last_training": ml_table_skip_check.get("last_training"),
+                    "hours_since_training": ml_table_skip_check.get(
+                        "hours_since_training"
+                    ),
+                    "message": "Training skipped - no new data since last training (ML table check)",
+                }
+
+            # If ML table check doesn't indicate skip, fall back to event stream check
+            logger.info(f"🔍 ML table check passed, falling back to event stream check")
+            event_stream_skip_check = await self._should_skip_ml_training_fallback(
+                shop_id
+            )
+            logger.info(f"🔍 Event stream skip check result: {event_stream_skip_check}")
+
+            # Use the event stream check result
+            skip_check = event_stream_skip_check
 
             if skip_check["should_skip"]:
                 logger.info(
-                    "Skipping ML training - no data changes detected",
+                    "Skipping ML training - no data changes detected (event stream fallback check)",
                     shop_id=shop_id,
                     reason=skip_check["reason"],
                     method=skip_check.get("method", "unknown"),
@@ -79,7 +117,7 @@ class GorseService:
                     "hours_since_last_product": skip_check.get(
                         "hours_since_last_product"
                     ),
-                    "message": "Training skipped - no new data since last training",
+                    "message": "Training skipped - no new data since last training (event stream fallback check)",
                 }
 
             # Step 2: Extract and prepare training data
@@ -224,10 +262,14 @@ class GorseService:
             }
 
     async def _should_skip_ml_training_fallback(self, shop_id: str) -> Dict[str, Any]:
-        """Check if training should be skipped based on event stream data changes"""
+        """Check if training should be skipped based on event stream data changes (fallback method)
+
+        This method is used as a fallback when the ML table check doesn't indicate a skip.
+        It checks for data changes since the last analysis completion event.
+        """
         try:
             logger.info(
-                f"🧠 Checking for data changes using event streams for shop {shop_id}"
+                f"🧠 Checking for data changes using event streams (fallback method) for shop {shop_id}"
             )
 
             # Get the latest analysis completion event for this shop
@@ -632,8 +674,9 @@ class GorseService:
                             if gorse_result.get("items_inserted")
                             else "Data insertion failed"
                         ),
-                        "shop_id": shop_id,  # Try using snake_case to match database
-                        "metadata": gorse_result,
+                        "shopId": shop_id,  # Set the foreign key directly
+                        # Note: metadata field removed due to Prisma client bug
+                        # that requires shop relation when metadata is present
                     }
                 )
                 logger.info(
