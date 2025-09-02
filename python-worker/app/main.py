@@ -34,6 +34,7 @@ def start_consumer_process():
 
     try:
         from app.services.data_processor import data_processor
+        from app.services.ml_training_consumer import ml_training_consumer
 
         # Start consumer in separate process
         _consumer_process = multiprocessing.Process(
@@ -53,6 +54,7 @@ def run_consumer_worker():
     try:
         import asyncio
         from app.services.data_processor import data_processor
+        from app.services.ml_training_consumer import ml_training_consumer
 
         # Setup logging for the worker process
         from app.core.logger import get_logger
@@ -60,8 +62,24 @@ def run_consumer_worker():
         worker_logger = get_logger("consumer-worker")
         worker_logger.info("Starting consumer worker process")
 
-        # Run the consumer
-        asyncio.run(data_processor.consume_data_jobs())
+        # Run both consumers
+        async def run_consumers():
+            # Start both consumers
+            await data_processor.initialize()
+            await ml_training_consumer.initialize()
+
+            # Start consumer tasks
+            await data_processor.start_consumer()
+            await ml_training_consumer.start_consumer()
+
+            # Wait for both to complete (they run indefinitely)
+            await asyncio.gather(
+                data_processor._consumer_task,
+                ml_training_consumer._consumer_task,
+                return_exceptions=True,
+            )
+
+        asyncio.run(run_consumers())
 
     except KeyboardInterrupt:
         worker_logger.info("Consumer worker interrupted")

@@ -717,7 +717,7 @@ async def run_transformations_for_shop(
                 shop_id, customer_data_available=True
             )
             stats.update(u)
-            stats.update(i)
+        stats.update(i)
         else:
             # Compute anonymous features as fallback
             a = await _compute_anonymous_features(shop_id)

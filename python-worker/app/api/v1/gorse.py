@@ -5,9 +5,13 @@ Gorse integration API endpoints for testing and manual operations
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
+from datetime import datetime
 
 from app.services.gorse_service import gorse_service
 from app.core.config import settings
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -36,25 +40,47 @@ async def train_gorse_model(request: GorseTrainingRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Gorse integration is not enabled")
 
     try:
-        # Initialize Gorse service
-        await gorse_service.initialize()
-
-        # Start training
-        result = await gorse_service.train_model_for_shop(
-            shop_id=request.shop_id, shop_domain=request.shop_domain
+        # Generate unique job ID
+        import uuid
+        job_id = str(uuid.uuid4())
+        
+        # Publish training event to Redis Stream
+        from app.core.redis_client import streams_manager
+        await streams_manager.initialize()
+        
+        training_event = {
+            "event_type": "ML_TRAINING_REQUESTED",
+            "job_id": job_id,
+            "shop_id": request.shop_id,
+            "shop_domain": request.shop_domain,
+            "timestamp": datetime.now().isoformat(),
+            "training_type": "gorse_recommendations"
+        }
+        
+        await streams_manager.publish_event(
+            stream_name=settings.ML_TRAINING_STREAM,
+            event_data=training_event
         )
-
-        if result["success"]:
-            return {
-                "success": True,
-                "message": "Gorse training initiated successfully",
-                "result": result,
-            }
-        else:
-            raise HTTPException(status_code=400, detail=result.get("error"))
+        
+        logger.info(
+            "Gorse training event published",
+            job_id=job_id,
+            shop_id=request.shop_id,
+            stream=settings.ML_TRAINING_STREAM
+        )
+        
+        return {
+            "success": True,
+            "message": "Gorse training event published successfully",
+            "job_id": job_id,
+            "shop_id": request.shop_id,
+            "status": "queued",
+            "note": "Training will be processed asynchronously. Check status endpoint for updates."
+        }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gorse training error: {str(e)}")
+        logger.error(f"Failed to publish training event: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to publish training event: {str(e)}")
 
 
 @router.get("/recommendations/{shop_id}")
