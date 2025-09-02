@@ -148,12 +148,12 @@ class GorseService:
             for product in products:
                 items.append(
                     {
-                        "ItemId": product.productId,
-                        "Timestamp": datetime.now().isoformat(),
-                        "Categories": [product.category] if product.category else [],
-                        "Tags": [],
-                        "Labels": [],
-                        "Comment": product.title,
+                        "item_id": product.productId,
+                        "timestamp": datetime.now().isoformat(),
+                        "categories": [product.category] if product.category else [],
+                        "tags": [],
+                        "labels": [],
+                        "comment": product.title,
                     }
                 )
 
@@ -167,10 +167,10 @@ class GorseService:
                         user_orders[order.customerId] = []
                         users.append(
                             {
-                                "UserId": order.customerId,
-                                "Labels": [],
-                                "Subscribe": "true",
-                                "Comment": f"Customer from {shop_id}",
+                                "user_id": order.customerId,
+                                "labels": [],
+                                "subscribe": [],
+                                "comment": f"Customer from {shop_id}",
                             }
                         )
 
@@ -191,11 +191,11 @@ class GorseService:
                         if item.get("product_id") in product_lookup:
                             feedback.append(
                                 {
-                                    "FeedbackType": "star",
-                                    "UserId": order.customerId,
-                                    "ItemId": item["product_id"],
-                                    "Timestamp": order.orderDate.isoformat(),
-                                    "Comment": f"Purchase from order {order.id}",
+                                    "feedback_type": "star",
+                                    "user_id": order.customerId,
+                                    "item_id": item["product_id"],
+                                    "timestamp": order.orderDate.isoformat(),
+                                    "comment": f"Purchase from order {order.id}",
                                 }
                             )
 
@@ -257,7 +257,7 @@ class GorseService:
                             users_success += 1
                     except Exception as e:
                         logger.warning(
-                            f"Failed to insert user {user.get('UserId', 'unknown')}: {e}"
+                            f"Failed to insert user {user.get('user_id', 'unknown')}: {e}"
                         )
 
                 logger.info(
@@ -470,14 +470,14 @@ class GorseService:
         """Submit feedback to Gorse"""
         try:
             feedback_data = {
-                "FeedbackType": feedback_type,
-                "UserId": user_id,
-                "ItemId": item_id,
-                "Timestamp": datetime.now().isoformat(),
+                "feedback_type": feedback_type,
+                "user_id": user_id,
+                "item_id": item_id,
+                "timestamp": datetime.now().isoformat(),
             }
 
             if comment:
-                feedback_data["Comment"] = comment
+                feedback_data["comment"] = comment
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
