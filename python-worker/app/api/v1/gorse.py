@@ -100,7 +100,7 @@ async def get_gorse_recommendations(
         raise HTTPException(status_code=500, detail=f"Recommendation error: {str(e)}")
 
 
-@router.get("/health")
+@router.get("/gorse-health")
 async def gorse_health_check() -> Dict[str, Any]:
     """Check Gorse service health"""
     if not settings.ENABLE_GORSE_SYNC:

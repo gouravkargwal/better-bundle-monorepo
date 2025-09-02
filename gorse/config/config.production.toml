@@ -1,0 +1,90 @@
+[database]
+# Cache store for Upstash Redis
+cache_store = ""
+
+# Data store for Render PostgreSQL  
+data_store = ""
+
+[master]
+host = "0.0.0.0"
+port = 8086
+http_port = 8088
+
+[server]
+http_port = 8087
+
+[worker]
+# Worker configuration for production
+num_workers = 4
+cache_size = 1000
+
+[recommend.data_source]
+# The feedback types for positive events.
+positive_feedback_types = ["star","like","purchase"]
+
+# The feedback types for read events.
+read_feedback_types = ["view","read"]
+
+[recommend.ranking]
+# Ranking algorithm configuration
+ranking_model = "bpr"
+# Enable real-time recommendation
+enable_realtime = true
+
+[recommend.collaborative]
+# Collaborative filtering settings
+enable_collaborative = true
+# Enable item-based recommendation
+enable_item_based = true
+# Enable user-based recommendation  
+enable_user_based = true
+
+[recommend.content]
+# Content-based recommendation settings
+enable_content = true
+# Enable category-based recommendation
+enable_category = true
+
+[recommend.popular]
+# Popular item recommendation
+enable_popular = true
+# Popular item cache size
+popular_cache_size = 100
+
+[recommend.latest]
+# Latest item recommendation
+enable_latest = true
+# Latest item cache size
+latest_cache_size = 100
+
+[master.cache]
+# Master cache configuration
+cache_size = 10000
+# Cache expiration time
+cache_expire = "24h"
+
+[master.meta]
+# Metadata store configuration
+meta_store = "postgres"
+# Metadata store address
+meta_store_address = ""
+
+[master.master]
+# Master node configuration
+master_port = 8086
+# Master HTTP port
+master_http_port = 8088
+# Master cache path
+master_cache_path = "/var/lib/gorse"
+
+[master.server]
+# Server configuration
+server_port = 8087
+# Server cache path  
+server_cache_path = "/var/lib/gorse"
+
+[master.worker]
+# Worker configuration
+worker_port = 8089
+# Worker cache path
+worker_cache_path = "/var/lib/gorse"

@@ -133,26 +133,11 @@ class GorseService:
         """Prepare training data for Gorse"""
         try:
             # Get orders with line items
-            orders = await self.db.orderdata.find_many(
-                where={"shopId": shop_id},
-                select={
-                    "id": True,
-                    "customerId": True,
-                    "lineItems": True,
-                    "orderDate": True,
-                },
-            )
+            orders = await self.db.orderdata.find_many(where={"shopId": shop_id})
 
             # Get products
             products = await self.db.productdata.find_many(
-                where={"shopId": shop_id, "isActive": True},
-                select={
-                    "id": True,
-                    "productId": True,
-                    "title": True,
-                    "category": True,
-                    "price": True,
-                },
+                where={"shopId": shop_id, "isActive": True}
             )
 
             # Create product lookup
@@ -233,56 +218,86 @@ class GorseService:
         """Send training data to Gorse (Gorse will handle training automatically)"""
         try:
             async with httpx.AsyncClient() as client:
-                # Step 1: Insert items
-                items_response = await client.post(
-                    f"{self.base_url}/api/item",
-                    headers={"X-API-Key": self.master_key},
-                    json=training_data["items"],
-                    timeout=30.0,
+                # Step 1: Insert items one by one
+                items_success = 0
+                items_total = len(training_data["items"])
+
+                for item in training_data["items"]:
+                    try:
+                        item_response = await client.post(
+                            f"{self.base_url}/api/item",
+                            headers={"X-API-Key": self.master_key},
+                            json=item,  # Send individual item, not array
+                            timeout=30.0,
+                        )
+                        if item_response.status_code == 200:
+                            items_success += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to insert item {item.get('ItemId', 'unknown')}: {e}"
+                        )
+
+                logger.info(
+                    f"Inserted {items_success}/{items_total} items successfully"
                 )
 
-                if items_response.status_code != 200:
-                    logger.error(
-                        "Failed to insert items", status_code=items_response.status_code
-                    )
+                # Step 2: Insert users one by one
+                users_success = 0
+                users_total = len(training_data["users"])
 
-                # Step 2: Insert users
-                users_response = await client.post(
-                    f"{self.base_url}/api/user",
-                    headers={"X-API-Key": self.master_key},
-                    json=training_data["users"],
-                    timeout=30.0,
+                for user in training_data["users"]:
+                    try:
+                        user_response = await client.post(
+                            f"{self.base_url}/api/user",
+                            headers={"X-API-Key": self.master_key},
+                            json=user,  # Send individual user, not array
+                            timeout=30.0,
+                        )
+                        if user_response.status_code == 200:
+                            users_success += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to insert user {user.get('UserId', 'unknown')}: {e}"
+                        )
+
+                logger.info(
+                    f"Inserted {users_success}/{users_total} users successfully"
                 )
 
-                if users_response.status_code != 200:
-                    logger.error(
-                        "Failed to insert users", status_code=users_response.status_code
-                    )
+                # Step 3: Insert feedback one by one
+                feedback_success = 0
+                feedback_total = len(training_data["feedback"])
 
-                # Step 3: Insert feedback
-                feedback_response = await client.post(
-                    f"{self.base_url}/api/feedback",
-                    headers={"X-API-Key": self.master_key},
-                    json=training_data["feedback"],
-                    timeout=30.0,
+                for feedback_item in training_data["feedback"]:
+                    try:
+                        feedback_response = await client.post(
+                            f"{self.base_url}/api/feedback",
+                            headers={"X-API-Key": self.master_key},
+                            json=feedback_item,  # Send individual feedback, not array
+                            timeout=30.0,
+                        )
+                        if feedback_response.status_code == 200:
+                            feedback_success += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to insert feedback: {e}")
+
+                logger.info(
+                    f"Inserted {feedback_success}/{feedback_total} feedback records successfully"
                 )
-
-                if feedback_response.status_code != 200:
-                    logger.error(
-                        "Failed to insert feedback",
-                        status_code=feedback_response.status_code,
-                    )
 
                 # Note: Gorse will automatically start training when new data is inserted
                 # We don't need to explicitly trigger training
 
                 return {
-                    "items_inserted": items_response.status_code == 200,
-                    "users_inserted": users_response.status_code == 200,
-                    "feedback_inserted": feedback_response.status_code == 200,
+                    "items_inserted": items_success > 0,
+                    "users_inserted": users_success > 0,
+                    "feedback_inserted": feedback_success > 0,
+                    "items_count": items_success,
+                    "users_count": users_success,
+                    "feedback_count": feedback_success,
                     "training_automatic": True,
                     "timestamp": datetime.now().isoformat(),
-                    "message": "Data sent to Gorse - training will start automatically",
+                    "message": f"Data sent to Gorse - {items_success} items, {users_success} users, {feedback_success} feedback records inserted",
                 }
 
         except Exception as e:
@@ -294,11 +309,54 @@ class GorseService:
     ):
         """Update training metadata in database"""
         try:
-            # This would update a training metadata table
-            # For now, we'll just log it
-            logger.info(
-                "Training metadata updated", shop_id=shop_id, gorse_result=gorse_result
+            # Create or update MLTrainingJob record
+            job_id = f"gorse_training_{shop_id}_{int(datetime.now().timestamp())}"
+            
+            # Check if there's an existing training job for this shop
+            existing_job = await self.db.mltrainingjob.find_first(
+                where={"shopId": shop_id, "status": {"in": ["queued", "training"]}},
+                order={"createdAt": "desc"}
             )
+            
+            if existing_job:
+                # Update existing job
+                await self.db.mltrainingjob.update(
+                    where={"id": existing_job.id},
+                    data={
+                        "status": "completed" if gorse_result.get("items_inserted") else "failed",
+                        "progress": 100 if gorse_result.get("items_inserted") else 0,
+                        "completedAt": datetime.now() if gorse_result.get("items_inserted") else None,
+                        "error": None if gorse_result.get("items_inserted") else "Data insertion failed",
+                        "metadata": gorse_result,
+                        "updatedAt": datetime.now()
+                    }
+                )
+                logger.info(
+                    "Training job updated", 
+                    shop_id=shop_id, 
+                    job_id=existing_job.id,
+                    status="completed" if gorse_result.get("items_inserted") else "failed"
+                )
+            else:
+                # Create new completed job
+                await self.db.mltrainingjob.create(
+                    data={
+                        "shopId": shop_id,
+                        "jobId": job_id,
+                        "status": "completed" if gorse_result.get("items_inserted") else "failed",
+                        "progress": 100 if gorse_result.get("items_inserted") else 0,
+                        "startedAt": datetime.now(),
+                        "completedAt": datetime.now() if gorse_result.get("items_inserted") else None,
+                        "error": None if gorse_result.get("items_inserted") else "Data insertion failed",
+                        "metadata": gorse_result
+                    }
+                )
+                logger.info(
+                    "Training job created", 
+                    shop_id=shop_id, 
+                    job_id=job_id,
+                    status="completed" if gorse_result.get("items_inserted") else "failed"
+                )
 
         except Exception as e:
             logger.error(
@@ -431,17 +489,59 @@ class GorseService:
     async def get_model_status(self, shop_id: str) -> Dict[str, Any]:
         """Get model training status for a shop"""
         try:
-            # Check if shop has been trained recently
-            # This would query a training metadata table
-            # For now, return basic status
+            # Query the MLTrainingJob table for this shop
+            training_jobs = await self.db.mltrainingjob.find_many(
+                where={"shopId": shop_id},
+                order={"createdAt": "desc"},
+                take=5  # Get last 5 training jobs
+            )
+
+            if not training_jobs:
+                return {
+                    "success": True,
+                    "shop_id": shop_id,
+                    "model_status": "never_trained",
+                    "last_training": None,
+                    "training_count": 0,
+                    "recommendations_available": False,
+                    "message": "No training jobs found for this shop"
+                }
+
+            # Get the most recent training job
+            latest_job = training_jobs[0]
+            
+            # Check if there are any completed jobs
+            completed_jobs = [job for job in training_jobs if job.status == "completed"]
+            failed_jobs = [job for job in training_jobs if job.status == "failed"]
+            
+            # Determine overall status
+            if latest_job.status == "training":
+                model_status = "training_in_progress"
+            elif latest_job.status == "completed":
+                model_status = "trained"
+            elif latest_job.status == "failed":
+                model_status = "training_failed"
+            else:
+                model_status = "queued"
 
             return {
                 "success": True,
                 "shop_id": shop_id,
-                "model_status": "unknown",
-                "last_training": None,
-                "training_count": 0,
-                "recommendations_available": False,
+                "model_status": model_status,
+                "latest_job": {
+                    "id": latest_job.id,
+                    "status": latest_job.status,
+                    "progress": latest_job.progress,
+                    "started_at": latest_job.startedAt.isoformat() if latest_job.startedAt else None,
+                    "completed_at": latest_job.completedAt.isoformat() if latest_job.completedAt else None,
+                    "error": latest_job.error,
+                    "metadata": latest_job.metadata
+                },
+                "training_count": len(training_jobs),
+                "completed_count": len(completed_jobs),
+                "failed_count": len(failed_jobs),
+                "recommendations_available": model_status == "trained",
+                "last_training": latest_job.completedAt.isoformat() if latest_job.completedAt else None
             }
 
         except Exception as e:
