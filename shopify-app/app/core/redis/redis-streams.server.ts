@@ -1,10 +1,4 @@
-/**
- * Redis Streams service for event-driven architecture
- * Replaces the old Bull queue system with Redis Streams
- */
-
 import Redis from "ioredis";
-import { prisma } from "../database/prisma.server";
 
 // Redis client configuration
 const redisConfig = {

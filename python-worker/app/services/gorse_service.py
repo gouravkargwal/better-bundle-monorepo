@@ -60,7 +60,7 @@ class GorseService:
             await self._update_training_metadata(shop_id, gorse_result)
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            log_performance("model_training", duration_ms, {"shop_id": shop_id})
+            log_performance("model_training", duration_ms, shop_id=shop_id)
 
             logger.info(
                 "Data sent to Gorse successfully",

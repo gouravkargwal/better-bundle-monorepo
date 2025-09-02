@@ -134,7 +134,7 @@ class ShopifyAPIClient:
                         }
                         createdAt
                         displayFinancialStatus
-                        fulfillmentStatus
+                        # fulfillmentStatus - removed as it doesn't exist in current API version
                         currencyCode
                         customer {
                             id
@@ -196,7 +196,7 @@ class ShopifyAPIClient:
                     "totalAmount": {"shopMoney": node["totalPriceSet"]["shopMoney"]},
                     "orderDate": node["createdAt"],
                     "displayFinancialStatus": node.get("displayFinancialStatus"),
-                    "fulfillmentStatus": node.get("fulfillmentStatus"),
+                    # "fulfillmentStatus": node.get("fulfillmentStatus"), # Removed - field doesn't exist
                     "currencyCode": node.get("currencyCode"),
                     "customerId": node.get("customer"),
                     "lineItems": {"edges": node["lineItems"]["edges"]},
@@ -417,10 +417,25 @@ class ShopifyAPIClient:
             if since_date:
                 variables["query"] = f"created_at:>='{since_date}'"
 
+        try:
             result = await self.execute_graphql_query(query, variables)
-
             customers_data = result.get("data", {}).get("customers", {})
             edges = customers_data.get("edges", [])
+        except Exception as e:
+            # Check if it's an access denied error
+            if "ACCESS_DENIED" in str(
+                e
+            ) or "not approved to access the Customer object" in str(e):
+                logger.warning(
+                    "Customer data access denied by Shopify. Continuing without customer data.",
+                    shop_domain=self.shop_domain,
+                    error=str(e),
+                )
+                # Return empty list - we'll continue without customer data
+                return []
+            else:
+                # Re-raise other errors
+                raise
 
             # Process customers
             for edge in edges:

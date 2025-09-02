@@ -10,6 +10,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Raw data models for data collection
+model RawOrder {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawOrder")
+}
+
+model RawProduct {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawProduct")
+}
+
+model RawCustomer {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawCustomer")
+}
+
 model Session {
   id            String    @id
   shop          String
@@ -38,7 +69,6 @@ model Shop {
   moneyFormat        String?
   isActive           Boolean                  @default(true)
   email              String?
-  onboardingStatus   String                   @default("new_user") // "new_user", "analysis_running", "analysis_complete_no_widget", "has_data"
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   lastAnalysisAt     DateTime?
@@ -48,12 +78,15 @@ model Shop {
   incrementalLogs    IncrementalAnalysisLog[]
   orderData          OrderData[]
   productData        ProductData[]
+  customerData       CustomerData[]
   analysisConfig     ShopAnalysisConfig?
   trackedSales       TrackedSale[]
   widgetConfig       WidgetConfiguration?
   widgetEvents       WidgetEvent[]
   trackingEvents     TrackingEvent[]
   shopAnalytics      ShopAnalytics?
+  mlTrainingJobs     MLTrainingJob[]
+  featureComputations FeatureComputation[]
   billingSubscriptions BillingSubscription[]
   billingCharges    BillingCharge[]
 }
@@ -95,6 +128,27 @@ model ProductData {
   @@index([shopId, category])
   @@index([shopId, price])
   @@index([shopId, isActive])
+}
+
+model CustomerData {
+  id        String   @id @default(cuid())
+  shopId    String
+  customerId String
+  email     String?
+  firstName String?
+  lastName  String?
+  totalSpent Float   @default(0)
+  orderCount Int     @default(0)
+  lastOrderDate DateTime?
+  tags      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, email])
+  @@index([shopId, totalSpent])
+  @@index([shopId, lastOrderDate])
 }
 
 model BundleAnalysisResult {
@@ -306,4 +360,39 @@ model BillingCharge {
   @@index([subscriptionId])
   @@index([billingPeriod])
   @@index([dueDate])
+}
+
+// ML Training and Features models
+model MLTrainingJob {
+  id          String   @id @default(cuid())
+  shopId      String
+  jobId       String   @unique
+  status      String   @default("queued") // "queued", "training", "completed", "failed"
+  progress    Int      @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@index([status, createdAt])
+}
+
+model FeatureComputation {
+  id          String   @id @default(cuid())
+  shopId      String
+  jobId       String
+  status      String   @default("pending") // "pending", "computing", "completed", "failed"
+  featureCount Int     @default(0)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
 }

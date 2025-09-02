@@ -119,7 +119,7 @@ async def _compute_user_features(shop_id: str) -> Dict[str, Any]:
     )
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_user_features", dur, {"shop_id": shop_id})
+    log_performance("compute_user_features", dur, shop_id=shop_id)
     return {"user_features_ms": dur}
 
 
@@ -178,7 +178,7 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
     )
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_product_features", dur, {"shop_id": shop_id})
+    log_performance("compute_product_features", dur, shop_id=shop_id)
     return {"product_features_ms": dur}
 
 
@@ -246,7 +246,7 @@ async def _compute_interaction_features(shop_id: str) -> Dict[str, Any]:
     )
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_interaction_features", dur, {"shop_id": shop_id})
+    log_performance("compute_interaction_features", dur, shop_id=shop_id)
     return {"interaction_features_ms": dur}
 
 

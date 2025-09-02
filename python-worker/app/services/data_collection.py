@@ -97,7 +97,7 @@ class DataCollectionService:
                     ),
                     "orderStatus": (
                         order.get("displayFinancialStatus")
-                        or order.get("fulfillmentStatus")
+                        # or order.get("fulfillmentStatus") # Removed - field doesn't exist
                     ),
                     "currencyCode": (
                         order.get("currencyCode")
@@ -135,7 +135,8 @@ class DataCollectionService:
             log_performance(
                 "save_orders",
                 duration_ms,
-                {"orders_count": len(orders), "is_incremental": is_incremental},
+                orders_count=len(orders),
+                is_incremental=is_incremental,
             )
 
             log_data_collection(
@@ -274,7 +275,8 @@ class DataCollectionService:
             log_performance(
                 "save_products",
                 duration_ms,
-                {"products_count": len(products), "is_incremental": is_incremental},
+                products_count=len(products),
+                is_incremental=is_incremental,
             )
 
             log_data_collection(
@@ -362,7 +364,8 @@ class DataCollectionService:
             log_performance(
                 "save_customers",
                 duration_ms,
-                {"customers_count": len(customers), "is_incremental": is_incremental},
+                customers_count=len(customers),
+                is_incremental=is_incremental,
             )
 
             log_data_collection(
@@ -428,11 +431,30 @@ class DataCollectionService:
 
                 parallel_start = asyncio.get_event_loop().time()
 
+                # Collect data in parallel, but handle customer access gracefully
                 orders, products, customers = await asyncio.gather(
                     api_client.fetch_orders(since_date),
                     api_client.fetch_products(),
                     api_client.fetch_customers(since_date),
                 )
+
+                # Log what we collected
+                logger.info(
+                    "Data collection results",
+                    shop_domain=config.shop_domain,
+                    orders_count=len(orders),
+                    products_count=len(products),
+                    customers_count=len(customers),
+                    has_customer_access=customers is not None and len(customers) > 0,
+                )
+
+                # If no customers, that's okay - we can still do analysis
+                if not customers:
+                    customers = []
+                    logger.info(
+                        "No customer data available - continuing with orders and products only",
+                        shop_domain=config.shop_domain,
+                    )
 
                 parallel_duration_ms = (
                     asyncio.get_event_loop().time() - parallel_start
@@ -441,12 +463,10 @@ class DataCollectionService:
                 log_performance(
                     "parallel_data_collection",
                     parallel_duration_ms,
-                    {
-                        "shop_domain": config.shop_domain,
-                        "orders_count": len(orders),
-                        "products_count": len(products),
-                        "customers_count": len(customers),
-                    },
+                    shop_domain=config.shop_domain,
+                    orders_count=len(orders),
+                    products_count=len(products),
+                    customers_count=len(customers),
                 )
 
                 # Clear existing data
@@ -462,6 +482,42 @@ class DataCollectionService:
                 # Update shop's last analysis timestamp
                 await update_shop_last_analysis(shop_db_id)
 
+                # Notify user about data collection results
+                try:
+                    from app.core.redis_client import streams_manager
+
+                    if customers:
+                        await streams_manager.publish_user_notification_event(
+                            shop_id=config.shop_id,
+                            notification_type="data_collection_completed",
+                            message=f"Data collection completed successfully! Collected {len(orders)} orders, {len(products)} products, and {len(customers)} customers.",
+                            data={
+                                "orders_count": len(orders),
+                                "products_count": len(products),
+                                "customers_count": len(customers),
+                                "has_full_data": True,
+                            },
+                        )
+                    else:
+                        await streams_manager.publish_user_notification_event(
+                            shop_id=config.shop_id,
+                            notification_type="data_collection_completed_limited",
+                            message=f"✅ Data collection completed! Collected {len(orders)} orders and {len(products)} products. We'll analyze product bundles and recommendations using this data.",
+                            data={
+                                "orders_count": len(orders),
+                                "products_count": len(products),
+                                "customers_count": 0,
+                                "has_full_data": False,
+                                "note": "Customer data access not available - using orders and products for analysis",
+                            },
+                        )
+                except Exception as notification_error:
+                    logger.warning(
+                        "Failed to send data collection notification",
+                        error=str(notification_error),
+                        shop_id=config.shop_id,
+                    )
+
                 total_duration_ms = (
                     asyncio.get_event_loop().time() - start_time
                 ) * 1000
@@ -472,15 +528,28 @@ class DataCollectionService:
                     duration_ms=total_duration_ms,
                 )
 
-                logger.info(
-                    "Data collection and saving completed successfully",
-                    shop_id=config.shop_id,
-                    shop_domain=config.shop_domain,
-                    products_saved=len(products),
-                    orders_saved=len(orders),
-                    customers_saved=len(customers),
-                    total_duration_ms=total_duration_ms,
-                )
+                # Log success with data availability info
+                if customers:
+                    logger.info(
+                        "Data collection and saving completed successfully with full data",
+                        shop_id=config.shop_id,
+                        shop_domain=config.shop_domain,
+                        products_saved=len(products),
+                        orders_saved=len(orders),
+                        customers_saved=len(customers),
+                        total_duration_ms=total_duration_ms,
+                    )
+                else:
+                    logger.info(
+                        "Data collection completed with limited data (no customer access)",
+                        shop_id=config.shop_id,
+                        shop_domain=config.shop_domain,
+                        products_saved=len(products),
+                        orders_saved=len(orders),
+                        customers_saved=0,
+                        total_duration_ms=total_duration_ms,
+                        note="Customer data access denied by Shopify - analysis will use orders and products only",
+                    )
 
                 return DataCollectionResult(
                     shop_db_id=shop_db_id,
@@ -599,12 +668,10 @@ class DataCollectionService:
                 log_performance(
                     "parallel_incremental_collection",
                     parallel_duration_ms,
-                    {
-                        "shop_domain": config.shop_domain,
-                        "orders_count": len(orders),
-                        "products_count": len(products),
-                        "customers_count": len(customers),
-                    },
+                    shop_domain=config.shop_domain,
+                    orders_count=len(orders),
+                    products_count=len(products),
+                    customers_count=len(customers),
                 )
 
                 # Save incremental data to database in parallel

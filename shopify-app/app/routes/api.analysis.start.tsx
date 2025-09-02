@@ -1,12 +1,21 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { prisma } from "../core/database/prisma.server";
 import { redisStreamsService } from "../core/redis/redis-streams.server";
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log("🔍 [API_ANALYSIS] GET request received");
+  return json({ message: "Analysis API endpoint", method: "GET" });
+};
+
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log("🔍 [API_ANALYSIS] POST request received");
   try {
     const { session } = await authenticate.admin(request);
     const shopId = session.shop!;
+
+    console.log(`🔍 [API_ANALYSIS] Processing request for shop: ${shopId}`);
 
     // Ensure shop exists in database
     let shop = await prisma.shop.findUnique({
@@ -39,10 +48,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
+    console.log(`🔍 [API_ANALYSIS] Created analysis job: ${jobId}`);
+
     // Initialize Redis Streams service
     await redisStreamsService.initialize();
 
-    // Publish job to Redis Streams instead of sending to Fly.io worker
+    // Publish job to Redis Streams
     try {
       const messageId = await redisStreamsService.publishDataJob({
         jobId,
@@ -64,15 +75,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      // Update shop onboarding status to indicate analysis is running
-      // This provides immediate UI feedback, worker will update it further
+      // Update last analysis timestamp
       await prisma.shop.update({
         where: { id: shop.id },
         data: {
-          onboardingStatus: "analysis_running",
           lastAnalysisAt: new Date(),
         },
       });
+
+      console.log(`🔍 [API_ANALYSIS] Successfully queued analysis job`);
     } catch (error) {
       console.error("Error publishing job to Redis Streams:", error);
 
@@ -86,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      return Response.json(
+      return json(
         {
           success: false,
           error: "Failed to queue analysis job",
@@ -97,7 +108,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Return 202 Accepted with job information
-    return Response.json(
+    return json(
       {
         success: true,
         message: "Analysis job queued successfully",
@@ -125,7 +136,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    return Response.json(
+    return json(
       {
         success: false,
         error: "Failed to start bundle analysis. Please try again.",

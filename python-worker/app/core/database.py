@@ -17,7 +17,7 @@ _db_instance: Optional[Prisma] = None
 
 
 async def get_database() -> Prisma:
-    """Get or create database connection"""
+    """Get or create database connection with retry logic"""
     global _db_instance
 
     if _db_instance is None:
@@ -35,6 +35,20 @@ async def get_database() -> Prisma:
         except PrismaError as e:
             log_error(e, {"operation": "database_connection"})
             raise Exception(f"Failed to connect to database: {str(e)}")
+
+    # Check if connection is still alive
+    try:
+        # Test connection with a simple query
+        await _db_instance.query_raw("SELECT 1")
+    except Exception:
+        logger.warning("Database connection lost, reconnecting...")
+        try:
+            await _db_instance.disconnect()
+        except Exception:
+            pass
+
+        _db_instance = None
+        return await get_database()  # Recursive call to reconnect
 
     return _db_instance
 
@@ -107,7 +121,10 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
             result = await operation()
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-            log_performance(operation_name, duration_ms, context)
+            if context:
+                log_performance(operation_name, duration_ms, **context)
+            else:
+                log_performance(operation_name, duration_ms)
             return result
 
         except PrismaError as e:
@@ -154,25 +171,51 @@ async def get_or_create_shop(shop_id: str, shop_domain: str, access_token: str):
     db = await get_database()
 
     async def operation():
-        # Try to find existing shop
-        shop = await db.shop.find_unique(where={"shopId": shop_id})
+        # Try to find existing shop by id first (assuming shop_id is the database id)
+        shop = await db.shop.find_unique(where={"id": shop_id})
 
         if not shop:
-            logger.info(
-                "Creating new shop record", shop_id=shop_id, shop_domain=shop_domain
-            )
-            shop = await db.shop.create(
-                data={
-                    "shopId": shop_id,
-                    "shopDomain": shop_domain,
-                    "accessToken": access_token,
-                    "planType": "Free",
-                    "isActive": True,
-                }
-            )
-            logger.info("Shop record created successfully", shop_id=shop.id)
+            # Try to find by shopDomain as fallback
+            shop = await db.shop.find_unique(where={"shopDomain": shop_domain})
+
+            if shop:
+                # Update existing shop with new accessToken
+                logger.info(
+                    "Updating existing shop access token",
+                    shop_id=shop.id,
+                    shop_domain=shop_domain,
+                )
+                shop = await db.shop.update(
+                    where={"id": shop.id},
+                    data={
+                        "accessToken": access_token,
+                        "isActive": True,
+                    },
+                )
+            else:
+                # Create new shop record
+                logger.info(
+                    "Creating new shop record", shop_id=shop_id, shop_domain=shop_domain
+                )
+                shop = await db.shop.create(
+                    data={
+                        "shopId": shop_id,
+                        "shopDomain": shop_domain,
+                        "accessToken": access_token,
+                        "planType": "Free",
+                        "isActive": True,
+                    }
+                )
+                logger.info("Shop record created successfully", shop_id=shop.id)
         else:
-            logger.info("Using existing shop record", shop_id=shop.id)
+            # Update access token if it changed
+            if shop.accessToken != access_token:
+                logger.info("Updating shop access token", shop_id=shop.id)
+                shop = await db.shop.update(
+                    where={"id": shop.id}, data={"accessToken": access_token}
+                )
+            else:
+                logger.info("Using existing shop record", shop_id=shop.id)
 
         return shop
 

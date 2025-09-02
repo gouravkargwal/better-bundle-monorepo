@@ -35,7 +35,6 @@
     "@shopify/polaris": "^12.0.0",
     "@shopify/shopify-app-remix": "^3.7.0",
     "@shopify/shopify-app-session-storage-prisma": "^6.0.0",
-    "@xstate/react": "^6.0.0",
     "axios": "^1.6.0",
     "dotenv": "^17.2.1",
     "graphql-request": "^7.2.0",

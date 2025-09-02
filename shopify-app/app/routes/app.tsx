@@ -74,15 +74,13 @@ export default function App() {
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
-        <Link to="/app/step/welcome" rel="home">
+        <Link to="/app/welcome" rel="home">
           Welcome
         </Link>
-        <Link to="/app/step/dashboard">Dashboard</Link>
+        <Link to="/app/dashboard">Dashboard</Link>
         <Link to="/app/widget">Widget Config</Link>
         <Link to="/app/billing">Billing & Plans</Link>
-        <Link to="/app/test-cookies">Test Cookies</Link>
       </NavMenu>
-      {/* Pass session data down to child routes via context */}
       <Outlet context={{ session, shopId }} />
     </AppProvider>
   );

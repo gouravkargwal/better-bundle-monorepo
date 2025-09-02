@@ -73,10 +73,7 @@ class DataProcessor:
             # Step 1: Update job status to processing
             await self._update_job_status(request.job_id, "processing", 10)
 
-            # Update shop onboarding status to indicate analysis is in progress
-            await self._update_shop_onboarding_status(
-                request.shop_id, "analysis_running"
-            )
+            # Analysis started - no need to track onboarding status anymore
 
             # Step 2: Collect and save data
             collection_config = DataCollectionConfig(
@@ -235,11 +232,9 @@ class DataProcessor:
             log_performance(
                 "data_job_processing",
                 total_duration_ms,
-                {
-                    "job_id": request.job_id,
-                    "shop_id": request.shop_id,
-                    "job_type": request.job_type,
-                },
+                job_id=request.job_id,
+                shop_id=request.shop_id,
+                job_type=request.job_type,
             )
 
             logger.info(
@@ -253,11 +248,7 @@ class DataProcessor:
                 customers_count=collection_result.customers_count,
             )
 
-            # Update shop onboarding status to indicate analysis is complete
-            # Gorse training has finished, user can proceed to widget setup
-            await self._update_shop_onboarding_status(
-                request.shop_id, "analysis_complete_no_widget"
-            )
+            # Analysis completed successfully - user can proceed to widget setup
 
             return DataJobResult(
                 job_id=request.job_id,
@@ -284,11 +275,27 @@ class DataProcessor:
                 },
             )
 
-            # Update job status to failed
-            await self._update_job_status(request.job_id, "failed", 0, str(e))
+            # Try to update job status to failed - but don't let failures stop us
+            try:
+                await self._update_job_status(request.job_id, "failed", 0, str(e))
+            except Exception as status_error:
+                log_error(
+                    status_error,
+                    {
+                        "operation": "update_job_status_failed",
+                        "job_id": request.job_id,
+                        "original_error": str(e),
+                    },
+                )
 
-            # Update shop onboarding status to indicate analysis failed
-            await self._update_shop_onboarding_status(request.shop_id, "new_user")
+            # Analysis failed - log the error for debugging
+            logger.error(
+                "Analysis failed",
+                shop_id=request.shop_id,
+                shop_domain=request.shop_domain,
+                job_id=request.job_id,
+                error=str(e),
+            )
 
             # Publish failure notification
             try:
@@ -316,15 +323,16 @@ class DataProcessor:
     ) -> None:
         """Update job status in database"""
         try:
-            db = (
-                await self.data_collection_service.db
-                or await self.data_collection_service.initialize()
-            )
+            from app.core.database import get_database
+
+            db = await get_database()
+
+            from datetime import datetime
 
             update_data = {
                 "status": status,
                 "progress": progress,
-                "updatedAt": asyncio.get_event_loop().time(),
+                "updatedAt": datetime.now(),
             }
 
             if error:
@@ -348,35 +356,6 @@ class DataProcessor:
                     "job_id": job_id,
                     "status": status,
                     "progress": progress,
-                },
-            )
-            # Don't raise - status update failures shouldn't stop the main process
-
-    async def _update_shop_onboarding_status(self, shop_id: str, status: str) -> None:
-        """Update shop onboarding status in database"""
-        try:
-            db = (
-                await self.data_collection_service.db
-                or await self.data_collection_service.initialize()
-            )
-
-            await db.shop.update(
-                where={"id": shop_id}, data={"onboardingStatus": status}
-            )
-
-            logger.info(
-                "Shop onboarding status updated",
-                shop_id=shop_id,
-                status=status,
-            )
-
-        except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": "update_shop_onboarding_status",
-                    "shop_id": shop_id,
-                    "status": status,
                 },
             )
             # Don't raise - status update failures shouldn't stop the main process
