@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.redis_client import streams_manager
 from app.core.database import get_database
 from app.services.gorse_service import gorse_service
+from app.services.gorse_training_monitor import gorse_training_monitor
 from app.core.logger import get_logger
 
 logger = get_logger("ml-training-consumer")
@@ -28,6 +29,7 @@ class MLTrainingConsumer:
         logger.info("Initializing ML training consumer")
         await streams_manager.initialize()
         await gorse_service.initialize()
+        await gorse_training_monitor.initialize()
         logger.info("ML training consumer initialized")
 
     async def shutdown(self):
@@ -41,6 +43,9 @@ class MLTrainingConsumer:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
+
+        # Shutdown the training monitor
+        await gorse_training_monitor.shutdown()
 
         logger.info("ML training consumer shutdown complete")
 
@@ -193,21 +198,35 @@ class MLTrainingConsumer:
             # Create MLTrainingJob record to reflect in-progress status
             try:
                 db = await get_database()
-                await db.mltrainingjob.create(
-                    data={
-                        "shopId": shop_id,
-                        "jobId": job_id,
-                        "status": "training",
-                        "progress": 0,
-                        "startedAt": datetime.now(),
-                        "metadata": {"shop_domain": shop_domain, "training_type": "gorse_recommendations"}
-                    }
-                )
-                logger.info(
-                    "MLTrainingJob record created successfully",
-                    job_id=job_id,
-                    shop_id=shop_id
-                )
+
+                # Check if shop exists first
+                shop = await db.shop.find_first(where={"id": shop_id})
+                if not shop:
+                    logger.warning(
+                        "Shop not found in database, skipping MLTrainingJob record creation",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                    )
+                else:
+                    await db.mltrainingjob.create(
+                        data={
+                            "shopId": shop_id,
+                            "jobId": job_id,
+                            "status": "training",
+                            "progress": 0,
+                            "startedAt": datetime.now(),
+                            "metadata": {
+                                "shop_domain": shop_domain,
+                                "training_type": "gorse_recommendations",
+                            },
+                            "shop": {"connect": {"id": shop_id}},
+                        }
+                    )
+                    logger.info(
+                        "MLTrainingJob record created successfully",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                    )
             except Exception as e:
                 logger.warning(
                     "Failed to create MLTrainingJob record at start",
@@ -215,6 +234,15 @@ class MLTrainingConsumer:
                     shop_id=shop_id,
                     error=str(e),
                 )
+
+            # Start monitoring Gorse training progress (resource-efficient)
+            async def training_progress_callback(progress: Dict[str, Any]):
+                """Callback for training progress updates"""
+                logger.info(f"Training progress for shop {shop_id}: {progress}")
+
+            await gorse_training_monitor.start_monitoring_shop(
+                shop_id=shop_id, job_id=job_id, callback=training_progress_callback
+            )
 
             # Execute Gorse training
             result = await gorse_service.train_model_for_shop(

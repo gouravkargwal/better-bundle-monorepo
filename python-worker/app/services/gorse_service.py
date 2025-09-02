@@ -311,31 +311,45 @@ class GorseService:
         try:
             # Create or update MLTrainingJob record
             job_id = f"gorse_training_{shop_id}_{int(datetime.now().timestamp())}"
-            
+
             # Check if there's an existing training job for this shop
             existing_job = await self.db.mltrainingjob.find_first(
                 where={"shopId": shop_id, "status": {"in": ["queued", "training"]}},
-                order={"createdAt": "desc"}
+                order={"createdAt": "desc"},
             )
-            
+
             if existing_job:
                 # Update existing job
                 await self.db.mltrainingjob.update(
                     where={"id": existing_job.id},
                     data={
-                        "status": "completed" if gorse_result.get("items_inserted") else "failed",
+                        "status": (
+                            "completed"
+                            if gorse_result.get("items_inserted")
+                            else "failed"
+                        ),
                         "progress": 100 if gorse_result.get("items_inserted") else 0,
-                        "completedAt": datetime.now() if gorse_result.get("items_inserted") else None,
-                        "error": None if gorse_result.get("items_inserted") else "Data insertion failed",
+                        "completedAt": (
+                            datetime.now()
+                            if gorse_result.get("items_inserted")
+                            else None
+                        ),
+                        "error": (
+                            None
+                            if gorse_result.get("items_inserted")
+                            else "Data insertion failed"
+                        ),
                         "metadata": gorse_result,
-                        "updatedAt": datetime.now()
-                    }
+                        "updatedAt": datetime.now(),
+                    },
                 )
                 logger.info(
-                    "Training job updated", 
-                    shop_id=shop_id, 
+                    "Training job updated",
+                    shop_id=shop_id,
                     job_id=existing_job.id,
-                    status="completed" if gorse_result.get("items_inserted") else "failed"
+                    status=(
+                        "completed" if gorse_result.get("items_inserted") else "failed"
+                    ),
                 )
             else:
                 # Create new completed job
@@ -343,19 +357,34 @@ class GorseService:
                     data={
                         "shopId": shop_id,
                         "jobId": job_id,
-                        "status": "completed" if gorse_result.get("items_inserted") else "failed",
+                        "status": (
+                            "completed"
+                            if gorse_result.get("items_inserted")
+                            else "failed"
+                        ),
                         "progress": 100 if gorse_result.get("items_inserted") else 0,
                         "startedAt": datetime.now(),
-                        "completedAt": datetime.now() if gorse_result.get("items_inserted") else None,
-                        "error": None if gorse_result.get("items_inserted") else "Data insertion failed",
-                        "metadata": gorse_result
+                        "completedAt": (
+                            datetime.now()
+                            if gorse_result.get("items_inserted")
+                            else None
+                        ),
+                        "error": (
+                            None
+                            if gorse_result.get("items_inserted")
+                            else "Data insertion failed"
+                        ),
+                        "metadata": gorse_result,
+                        "shop": {"connect": {"id": shop_id}},
                     }
                 )
                 logger.info(
-                    "Training job created", 
-                    shop_id=shop_id, 
+                    "Training job created",
+                    shop_id=shop_id,
                     job_id=job_id,
-                    status="completed" if gorse_result.get("items_inserted") else "failed"
+                    status=(
+                        "completed" if gorse_result.get("items_inserted") else "failed"
+                    ),
                 )
 
         except Exception as e:
@@ -493,7 +522,7 @@ class GorseService:
             training_jobs = await self.db.mltrainingjob.find_many(
                 where={"shopId": shop_id},
                 order={"createdAt": "desc"},
-                take=5  # Get last 5 training jobs
+                take=5,  # Get last 5 training jobs
             )
 
             if not training_jobs:
@@ -504,16 +533,16 @@ class GorseService:
                     "last_training": None,
                     "training_count": 0,
                     "recommendations_available": False,
-                    "message": "No training jobs found for this shop"
+                    "message": "No training jobs found for this shop",
                 }
 
             # Get the most recent training job
             latest_job = training_jobs[0]
-            
+
             # Check if there are any completed jobs
             completed_jobs = [job for job in training_jobs if job.status == "completed"]
             failed_jobs = [job for job in training_jobs if job.status == "failed"]
-            
+
             # Determine overall status
             if latest_job.status == "training":
                 model_status = "training_in_progress"
@@ -532,16 +561,28 @@ class GorseService:
                     "id": latest_job.id,
                     "status": latest_job.status,
                     "progress": latest_job.progress,
-                    "started_at": latest_job.startedAt.isoformat() if latest_job.startedAt else None,
-                    "completed_at": latest_job.completedAt.isoformat() if latest_job.completedAt else None,
+                    "started_at": (
+                        latest_job.startedAt.isoformat()
+                        if latest_job.startedAt
+                        else None
+                    ),
+                    "completed_at": (
+                        latest_job.completedAt.isoformat()
+                        if latest_job.completedAt
+                        else None
+                    ),
                     "error": latest_job.error,
-                    "metadata": latest_job.metadata
+                    "metadata": latest_job.metadata,
                 },
                 "training_count": len(training_jobs),
                 "completed_count": len(completed_jobs),
                 "failed_count": len(failed_jobs),
                 "recommendations_available": model_status == "trained",
-                "last_training": latest_job.completedAt.isoformat() if latest_job.completedAt else None
+                "last_training": (
+                    latest_job.completedAt.isoformat()
+                    if latest_job.completedAt
+                    else None
+                ),
             }
 
         except Exception as e:
