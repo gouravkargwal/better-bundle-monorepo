@@ -3,7 +3,7 @@ Scheduler service for triggering analysis based on heuristic logic
 This service is called by GitHub Actions cron jobs
 """
 
-import structlog
+from app.core.logger import get_logger
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -11,7 +11,7 @@ from app.core.database import get_database
 from app.core.redis_client import get_redis_client, streams_manager
 from app.services.heuristic_service import heuristic_service
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class SchedulerService:
@@ -31,21 +31,17 @@ class SchedulerService:
     async def check_and_trigger_scheduled_analyses(self) -> Dict[str, Any]:
         """Check for shops due for analysis and trigger them"""
         try:
-            logger.info("🔍 Checking for shops due for analysis")
 
             # Get shops due for analysis
             shops_due = await heuristic_service.get_shops_due_for_analysis()
 
             if not shops_due:
-                logger.info("✅ No shops due for analysis")
                 return {
                     "success": True,
                     "message": "No shops due for analysis",
                     "shops_processed": 0,
                     "shops_failed": 0,
                 }
-
-            logger.info(f"📋 Found {len(shops_due)} shops due for analysis")
 
             processed_count = 0
             failed_count = 0
@@ -54,7 +50,6 @@ class SchedulerService:
             for shop_config in shops_due:
                 try:
                     shop = shop_config.shop
-                    logger.info(f"🚀 Triggering analysis for shop: {shop.shopDomain}")
 
                     # Create analysis job
                     job_id = f"scheduled_{int(datetime.now().timestamp())}_{shop.id}"
@@ -76,10 +71,6 @@ class SchedulerService:
                         shop_domain=shop.shopDomain,
                         access_token=shop.accessToken,
                         job_type="scheduled",
-                    )
-
-                    logger.info(
-                        f"✅ Scheduled analysis triggered for {shop.shopDomain}: {message_id}"
                     )
 
                     processed_count += 1
@@ -113,10 +104,6 @@ class SchedulerService:
                         }
                     )
 
-            logger.info(
-                f"✅ Scheduler completed: {processed_count} processed, {failed_count} failed"
-            )
-
             return {
                 "success": True,
                 "message": f"Processed {processed_count} shops, {failed_count} failed",
@@ -139,7 +126,6 @@ class SchedulerService:
     async def trigger_manual_analysis(self, shop_id: str) -> Dict[str, Any]:
         """Trigger manual analysis for a specific shop"""
         try:
-            logger.info(f"🚀 Triggering manual analysis for shop: {shop_id}")
 
             # Get shop data
             shop = await self.db.shop.find_unique(
@@ -170,10 +156,6 @@ class SchedulerService:
                 shop_domain=shop.shopDomain,
                 access_token=shop.accessToken,
                 job_type="manual",
-            )
-
-            logger.info(
-                f"✅ Manual analysis triggered for {shop.shopDomain}: {message_id}"
             )
 
             return {
@@ -250,7 +232,6 @@ class SchedulerService:
     ) -> Dict[str, Any]:
         """Update analysis schedule for a shop after analysis completion"""
         try:
-            logger.info(f"📅 Updating analysis schedule for shop: {shop_id}")
 
             # Schedule next analysis using heuristic
             result = await heuristic_service.schedule_next_analysis(
@@ -258,7 +239,6 @@ class SchedulerService:
             )
 
             if result["success"]:
-                logger.info(f"✅ Analysis schedule updated for shop {shop_id}")
                 return result
             else:
                 logger.error(

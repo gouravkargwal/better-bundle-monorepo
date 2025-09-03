@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import settings
-from app.core.logging import get_logger, log_error, log_shopify_api
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -46,8 +46,6 @@ class ShopifyAPIClient:
     ) -> Dict[str, Any]:
         """Execute a GraphQL query with retry logic and timeout protection"""
 
-        start_time = asyncio.get_event_loop().time()
-
         try:
             payload = {"query": query}
             if variables:
@@ -57,16 +55,6 @@ class ShopifyAPIClient:
             async with asyncio.timeout(45):  # 45 second timeout for GraphQL queries
                 response = await self.client.post(self.graphql_url, json=payload)
 
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-            log_shopify_api(
-                endpoint="graphql",
-                method="POST",
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-                shop_domain=self.shop_domain,
-            )
-
             response.raise_for_status()
 
             result = response.json()
@@ -74,36 +62,21 @@ class ShopifyAPIClient:
             # Check for GraphQL errors
             if "errors" in result:
                 error_msg = f"GraphQL errors: {json.dumps(result['errors'])}"
-                log_error(
-                    Exception(error_msg),
-                    {
-                        "shop_domain": self.shop_domain,
-                        "query": query[:200] + "..." if len(query) > 200 else query,
-                        "variables": variables,
-                    },
+                logger.error(
+                    f"GraphQL errors | shop_domain={self.shop_domain} | query={query[:200] + '...' if len(query) > 200 else query} | variables={variables}"
                 )
                 raise Exception(error_msg)
 
             return result
 
         except asyncio.TimeoutError:
-            log_error(
-                Exception("GraphQL query timeout"),
-                {
-                    "shop_domain": self.shop_domain,
-                    "query": query[:200] + "..." if len(query) > 200 else query,
-                    "variables": variables,
-                },
+            logger.error(
+                f"GraphQL query timeout | shop_domain={self.shop_domain} | query={query[:200] + '...' if len(query) > 200 else query} | variables={variables}"
             )
             raise Exception("GraphQL query timed out after 45 seconds")
         except httpx.HTTPStatusError as e:
-            log_error(
-                e,
-                {
-                    "shop_domain": self.shop_domain,
-                    "status_code": e.response.status_code,
-                    "response_text": e.response.text[:500],
-                },
+            logger.error(
+                f"GraphQL query failed | shop_domain={self.shop_domain} | status_code={e.response.status_code} | response_text={e.response.text[:500]}"
             )
 
             # Handle specific Shopify API errors
@@ -119,7 +92,9 @@ class ShopifyAPIClient:
             raise
 
         except Exception as e:
-            log_error(e, {"shop_domain": self.shop_domain})
+            logger.error(
+                f"GraphQL query exception | shop_domain={self.shop_domain} | error={str(e)}"
+            )
             raise
 
     async def fetch_orders(
@@ -255,15 +230,6 @@ class ShopifyAPIClient:
             page_info = orders_data.get("pageInfo", {})
             has_next_page = page_info.get("hasNextPage", False)
             cursor = page_info.get("endCursor")
-
-            logger.info(
-                "Orders pagination progress",
-                orders_collected=len(all_orders),
-                total_fetched=total_fetched,
-                limit=limit,
-                has_next_page=has_next_page,
-                iteration_count=iteration_count,
-            )
 
             # Rate limiting with timeout protection
             try:
@@ -415,15 +381,6 @@ class ShopifyAPIClient:
             page_info = products_data.get("pageInfo", {})
             has_next_page = page_info.get("hasNextPage", False)
             cursor = page_info.get("endCursor")
-
-            logger.info(
-                "Products pagination progress",
-                products_collected=len(all_products),
-                total_fetched=total_fetched,
-                limit=limit,
-                has_next_page=has_next_page,
-                iteration_count=iteration_count,
-            )
 
             # Rate limiting with timeout protection
             try:
@@ -581,15 +538,6 @@ class ShopifyAPIClient:
             page_info = customers_data.get("pageInfo", {})
             has_next_page = page_info.get("hasNextPage", False)
             cursor = page_info.get("endCursor")
-
-            logger.info(
-                "Customers pagination progress",
-                customers_collected=len(all_customers),
-                total_fetched=total_fetched,
-                limit=limit,
-                has_next_page=has_next_page,
-                iteration_count=iteration_count,
-            )
 
             # Rate limiting with timeout protection
             try:

@@ -2,7 +2,7 @@
 Gorse integration service for training models and serving recommendations
 """
 
-import structlog
+from app.core.logger import get_logger
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import httpx
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.database import get_database
-from app.core.logging import get_logger, log_error, log_performance
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -152,7 +152,9 @@ class GorseService:
             await self._update_training_metadata(shop_id, gorse_result)
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            log_performance("model_training", duration_ms, shop_id=shop_id)
+            logger.info(
+                f"Performance: model_training | duration_ms={duration_ms:.2f} | shop_id={shop_id}"
+            )
 
             logger.info(
                 "Data sent to Gorse successfully",
@@ -174,7 +176,9 @@ class GorseService:
             }
 
         except Exception as e:
-            log_error(e, {"operation": "train_model", "shop_id": shop_id})
+            logger.error(
+                f"Train model error | operation=train_model | shop_id={shop_id} | error={str(e)}"
+            )
             return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def _check_training_data_requirements(self, shop_id: str) -> Dict[str, Any]:
@@ -498,7 +502,8 @@ class GorseService:
                             {
                                 "user_id": order.customerId,
                                 "labels": [],
-                                "subscribe": [],
+                                # Removed subscribe field to avoid Gorse SQL storage bug
+                                # "subscribe": [],  # This was causing JSON unmarshal errors
                                 "comment": f"Customer from {shop_id}",
                             }
                         )
@@ -544,75 +549,166 @@ class GorseService:
     async def _send_data_to_gorse(
         self, shop_domain: str, training_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Send training data to Gorse (Gorse will handle training automatically)"""
+        """Send training data to Gorse using batch operations for optimal performance"""
         try:
             async with httpx.AsyncClient() as client:
-                # Step 1: Insert items one by one
+                # Step 1: Insert items in batches (Gorse supports batch operations)
                 items_success = 0
                 items_total = len(training_data["items"])
 
-                for item in training_data["items"]:
+                # Process items in batches of 100 for optimal performance
+                batch_size = 100
+                for i in range(0, items_total, batch_size):
+                    batch = training_data["items"][i : i + batch_size]
                     try:
-                        item_response = await client.post(
-                            f"{self.base_url}/api/item",
-                            headers={"X-API-Key": self.master_key},
-                            json=item,  # Send individual item, not array
-                            timeout=30.0,
-                        )
-                        if item_response.status_code == 200:
-                            items_success += 1
-                    except Exception as e:
+                        # Use batch endpoint if available, otherwise fallback to individual
+                        batch_response = await self._batch_insert_items(client, batch)
+                        if batch_response:
+                            items_success += len(batch)
+                        else:
+                            # Fallback to individual inserts for this batch
+                            for item in batch:
+                                try:
+                                    item_response = await client.post(
+                                        f"{self.base_url}/api/item",
+                                        headers={"X-API-Key": self.master_key},
+                                        json=item,
+                                        timeout=30.0,
+                                    )
+                                    if item_response.status_code == 200:
+                                        items_success += 1
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Failed to insert item {item.get('ItemId', 'unknown')}: {e}"
+                                    )
+                    except Exception as batch_error:
                         logger.warning(
-                            f"Failed to insert item {item.get('ItemId', 'unknown')}: {e}"
+                            f"Batch insert failed for items {i}-{i+batch_size}: {batch_error}"
                         )
+                        # Fallback to individual inserts for this batch
+                        for item in batch:
+                            try:
+                                item_response = await client.post(
+                                    f"{self.base_url}/api/item",
+                                    headers={"X-API-Key": self.master_key},
+                                    json=item,
+                                    timeout=30.0,
+                                )
+                                if item_response.status_code == 200:
+                                    items_success += 1
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to insert item {item.get('ItemId', 'unknown')}: {e}"
+                                )
 
                 logger.info(
                     f"Inserted {items_success}/{items_total} items successfully"
                 )
 
-                # Step 2: Insert users one by one
+                # Step 2: Insert users in batches
                 users_success = 0
                 users_total = len(training_data["users"])
 
-                for user in training_data["users"]:
+                # Process users in batches of 100
+                for i in range(0, users_total, batch_size):
+                    batch = training_data["users"][i : i + batch_size]
                     try:
-                        user_response = await client.post(
-                            f"{self.base_url}/api/user",
-                            headers={"X-API-Key": self.master_key},
-                            json=user,  # Send individual user, not array
-                            timeout=30.0,
-                        )
-                        if user_response.status_code == 200:
-                            users_success += 1
-                    except Exception as e:
+                        # Use batch endpoint if available, otherwise fallback to individual
+                        batch_response = await self._batch_insert_users(client, batch)
+                        if batch_response:
+                            users_success += len(batch)
+                        else:
+                            # Fallback to individual inserts for this batch
+                            for user in batch:
+                                try:
+                                    user_response = await client.post(
+                                        f"{self.base_url}/api/user",
+                                        headers={"X-API-Key": self.master_key},
+                                        json=user,
+                                        timeout=30.0,
+                                    )
+                                    if user_response.status_code == 200:
+                                        users_success += 1
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Failed to insert user {user.get('user_id', 'unknown')}: {e}"
+                                    )
+                    except Exception as batch_error:
                         logger.warning(
-                            f"Failed to insert user {user.get('user_id', 'unknown')}: {e}"
+                            f"Batch insert failed for users {i}-{i+batch_size}: {batch_error}"
                         )
+                        # Fallback to individual inserts for this batch
+                        for user in batch:
+                            try:
+                                user_response = await client.post(
+                                    f"{self.base_url}/api/user",
+                                    headers={"X-API-Key": self.master_key},
+                                    json=user,
+                                    timeout=30.0,
+                                )
+                                if user_response.status_code == 200:
+                                    users_success += 1
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to insert user {user.get('user_id', 'unknown')}: {e}"
+                                )
 
                 logger.info(
                     f"Inserted {users_success}/{users_total} users successfully"
                 )
 
-                # Step 3: Insert feedback one by one
+                # Step 3: Insert feedback in batches (if any)
                 feedback_success = 0
                 feedback_total = len(training_data["feedback"])
 
-                for feedback_item in training_data["feedback"]:
-                    try:
-                        feedback_response = await client.post(
-                            f"{self.base_url}/api/feedback",
-                            headers={"X-API-Key": self.master_key},
-                            json=feedback_item,  # Send individual feedback, not array
-                            timeout=30.0,
-                        )
-                        if feedback_response.status_code == 200:
-                            feedback_success += 1
-                    except Exception as e:
-                        logger.warning(f"Failed to insert feedback: {e}")
+                if feedback_total > 0:
+                    # Process feedback in batches of 100
+                    for i in range(0, feedback_total, batch_size):
+                        batch = training_data["feedback"][i : i + batch_size]
+                        try:
+                            # Use batch endpoint if available, otherwise fallback to individual
+                            batch_response = await self._batch_insert_feedback(
+                                client, batch
+                            )
+                            if batch_response:
+                                feedback_success += len(batch)
+                            else:
+                                # Fallback to individual inserts for this batch
+                                for feedback_item in batch:
+                                    try:
+                                        feedback_response = await client.post(
+                                            f"{self.base_url}/api/feedback",
+                                            headers={"X-API-Key": self.master_key},
+                                            json=feedback_item,
+                                            timeout=30.0,
+                                        )
+                                        if feedback_response.status_code == 200:
+                                            feedback_success += 1
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Failed to insert feedback: {e}"
+                                        )
+                        except Exception as batch_error:
+                            logger.warning(
+                                f"Batch insert failed for feedback {i}-{i+batch_size}: {batch_error}"
+                            )
+                            # Fallback to individual inserts for this batch
+                            for feedback_item in batch:
+                                try:
+                                    feedback_response = await client.post(
+                                        f"{self.base_url}/api/feedback",
+                                        headers={"X-API-Key": self.master_key},
+                                        json=feedback_item,
+                                        timeout=30.0,
+                                    )
+                                    if feedback_response.status_code == 200:
+                                        feedback_success += 1
+                                except Exception as e:
+                                    logger.warning(f"Failed to insert feedback: {e}")
 
-                logger.info(
-                    f"Inserted {feedback_success}/{feedback_total} feedback records successfully"
-                )
+                    logger.info(
+                        f"Inserted {feedback_success}/{feedback_total} feedback records successfully"
+                    )
 
                 # Note: Gorse will automatically start training when new data is inserted
                 # We don't need to explicitly trigger training
@@ -660,16 +756,19 @@ class GorseService:
                             else None
                         ),
                         "durationMs": (
-                            int((datetime.now(timezone.utc) - existing_log.startedAt).total_seconds() * 1000)
+                            int(
+                                (
+                                    datetime.now(timezone.utc) - existing_log.startedAt
+                                ).total_seconds()
+                                * 1000
+                            )
                             if existing_log.startedAt
                             else None
                         ),
                         "productsCount": gorse_result.get("items_inserted", 0),
                         "usersCount": gorse_result.get("users_inserted", 0),
                         "error": (
-                            None
-                            if gorse_result.get("items_inserted")
-                            else "failed"
+                            None if gorse_result.get("items_inserted") else "failed"
                         ),
                     },
                 )
@@ -737,7 +836,9 @@ class GorseService:
                     "shopId": shop_id,
                     "status": "skipped",
                     "startedAt": datetime.now(timezone.utc),
-                    "completedAt": datetime.now(timezone.utc),  # Same as started since it's skipped
+                    "completedAt": datetime.now(
+                        timezone.utc
+                    ),  # Same as started since it's skipped
                     "durationMs": 0,  # No duration since training was skipped
                     "productsCount": 0,  # No products processed
                     "usersCount": 0,  # No users processed
@@ -823,7 +924,9 @@ class GorseService:
                     }
 
         except Exception as e:
-            log_error(e, {"operation": "get_recommendations", "shop_id": shop_id})
+            logger.error(
+                f"Get recommendations error | operation=get_recommendations | shop_id={shop_id} | error={str(e)}"
+            )
             return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def submit_feedback(
@@ -879,7 +982,9 @@ class GorseService:
                     }
 
         except Exception as e:
-            log_error(e, {"operation": "submit_feedback", "shop_id": shop_id})
+            logger.error(
+                f"Submit feedback error | operation=submit_feedback | shop_id={shop_id} | error={str(e)}"
+            )
             return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def get_model_status(self, shop_id: str) -> Dict[str, Any]:
@@ -954,7 +1059,9 @@ class GorseService:
             }
 
         except Exception as e:
-            log_error(e, {"operation": "get_model_status", "shop_id": shop_id})
+            logger.error(
+                f"Get model status error | operation=get_model_status | shop_id={shop_id} | error={str(e)}"
+            )
             return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def check_gorse_health(self) -> Dict[str, Any]:
@@ -988,6 +1095,80 @@ class GorseService:
                 "gorse_url": self.base_url,
                 "error": str(e),
             }
+
+    async def _batch_insert_items(
+        self, client: httpx.AsyncClient, items: List[Dict[str, Any]]
+    ) -> bool:
+        """Insert multiple items in a single API call to Gorse"""
+        try:
+            # Gorse supports batch item insertion via POST /api/items (plural)
+            response = await client.post(
+                f"{self.base_url}/api/items",
+                headers={"X-API-Key": self.master_key},
+                json=items,  # Send array of items
+                timeout=60.0,  # Longer timeout for batch operations
+            )
+            if response.status_code == 200:
+                logger.info(f"Batch inserted {len(items)} items successfully")
+                return True
+            else:
+                logger.warning(
+                    f"Batch insert failed with status {response.status_code}"
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Batch insert items failed: {e}")
+            return False
+
+    async def _batch_insert_users(
+        self, client: httpx.AsyncClient, users: List[Dict[str, Any]]
+    ) -> bool:
+        """Insert multiple users in a single API call to Gorse"""
+        try:
+            # Gorse supports batch user insertion via POST /api/users (plural)
+            response = await client.post(
+                f"{self.base_url}/api/users",
+                headers={"X-API-Key": self.master_key},
+                json=users,  # Send array of users
+                timeout=60.0,  # Longer timeout for batch operations
+            )
+            if response.status_code == 200:
+                logger.info(f"Batch inserted {len(users)} users successfully")
+                return True
+            else:
+                logger.warning(
+                    f"Batch insert failed with status {response.status_code}"
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Batch insert users failed: {e}")
+            return False
+
+    async def _batch_insert_feedback(
+        self, client: httpx.AsyncClient, feedback: List[Dict[str, Any]]
+    ) -> bool:
+        """Insert multiple feedback records in a single API call to Gorse"""
+        try:
+            # Gorse supports batch feedback insertion via POST /api/feedback (plural)
+            response = await client.post(
+                f"{self.base_url}/api/feedback",
+                headers={"X-API-Key": self.master_key},
+                json=feedback,  # Send array of feedback records
+                timeout=60.0,  # Longer timeout for batch operations
+            )
+            if response.status_code == 200:
+                logger.info(
+                    f"Batch inserted {len(feedback)} feedback records successfully"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"Batch insert failed with status {response.status_code}"
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Batch insert feedback failed: {e}")
+            return False
 
 
 # Global instance

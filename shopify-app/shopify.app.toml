@@ -2,7 +2,7 @@
 
 client_id = "87c44f5966daa80691a480bcd03c225c"
 name = "BetterBundle"
-application_url = "https://chef-louisiana-continued-threatening.trycloudflare.com"
+application_url = "https://head-psi-medicaid-leisure.trycloudflare.com"
 embedded = true
 handle = "better-bundle-1"
 
@@ -19,7 +19,7 @@ api_version = "2024-01"
 scopes = "read_analytics,read_content,read_customers,read_discounts,read_inventory,read_locales,read_marketing_events,read_orders,read_price_rules,read_products,read_script_tags,read_themes,write_content,write_customers,write_discounts,write_inventory,write_locales,write_marketing_events,write_orders,write_price_rules,write_products,write_script_tags,write_themes"
 
 [auth]
-redirect_urls = ["https://chef-louisiana-continued-threatening.trycloudflare.com/auth/callback", "https://chef-louisiana-continued-threatening.trycloudflare.com/auth/shopify/callback", "https://chef-louisiana-continued-threatening.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://head-psi-medicaid-leisure.trycloudflare.com/auth/callback", "https://head-psi-medicaid-leisure.trycloudflare.com/auth/shopify/callback", "https://head-psi-medicaid-leisure.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

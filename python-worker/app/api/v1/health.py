@@ -10,7 +10,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.database import check_database_health
 from app.core.redis_client import check_redis_health
-from app.core.logging import get_logger
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()

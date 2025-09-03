@@ -8,6 +8,7 @@ import time
 from typing import Dict, Any, Optional, List
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ConnectionError
+from datetime import datetime
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -24,15 +25,16 @@ async def get_redis_client() -> Redis:
 
     if _redis_instance is None:
 
-        # Simplified Redis configuration for local development
+        # Optimized Redis configuration for better performance and stability
         redis_config = {
             "host": settings.REDIS_HOST,
             "port": settings.REDIS_PORT,
             "password": settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
             "db": settings.REDIS_DB,
             "decode_responses": True,
-            "socket_connect_timeout": 10,  # Increased from 5 to 10 seconds
-            "socket_timeout": 10,  # Increased from 5 to 10 seconds
+            "socket_connect_timeout": 60,  # Increased from 30 to 60 seconds
+            "socket_timeout": 60,  # Increased from 30 to 60 seconds
+            "socket_keepalive": True,  # Enable TCP keepalive
             "retry_on_timeout": True,  # Retry on timeout
             "health_check_interval": 30,  # Health check every 30 seconds
         }
@@ -48,13 +50,13 @@ async def get_redis_client() -> Redis:
             await asyncio.wait_for(_redis_instance.ping(), timeout=5.0)
 
         except RedisError as e:
-            logger.log_redis_operation(
-                "connection_failed", error=str(e), error_type=type(e).__name__
+            logger.error(
+                f"Redis operation: connection_failed | error={str(e)} | error_type={type(e).__name__}"
             )
             raise Exception(f"Failed to connect to Redis: {str(e)}")
         except asyncio.TimeoutError as e:
-            logger.log_redis_operation(
-                "connection_timeout", error=str(e), error_type=type(e).__name__
+            logger.error(
+                f"Redis operation: connection_timeout | error={str(e)} | error_type={type(e).__name__}"
             )
             raise Exception(f"Redis connection timeout: {str(e)}")
 
@@ -70,7 +72,7 @@ async def close_redis_client() -> None:
             await _redis_instance.close()
             _redis_instance = None
         except Exception as e:
-            logger.log_redis_operation("connection_close_error", error=str(e))
+            logger.error(f"Redis operation: connection_close_error | error={str(e)}")
 
 
 async def check_redis_health() -> bool:
@@ -80,7 +82,7 @@ async def check_redis_health() -> bool:
         await redis.ping()
         return True
     except Exception as e:
-        logger.log_redis_operation("health_check_failed", error=str(e))
+        logger.error(f"Redis operation: health_check_failed | error={str(e)}")
         return False
 
 
@@ -102,11 +104,13 @@ class RedisStreamsManager:
             await self.initialize()
 
         try:
-            # Serialize complex data structures
+            # Serialize complex data structures with proper datetime handling
             serialized_data = {}
             for key, value in event_data.items():
                 if isinstance(value, (dict, list)):
-                    serialized_data[key] = json.dumps(value)
+                    # Convert datetime objects to ISO strings before JSON serialization
+                    cleaned_value = self._clean_for_serialization(value)
+                    serialized_data[key] = json.dumps(cleaned_value)
                 else:
                     serialized_data[key] = str(value)
 
@@ -122,13 +126,25 @@ class RedisStreamsManager:
             return message_id
 
         except RedisError as e:
-            logger.log_redis_operation(
-                "publish_failed",
-                stream_name=stream_name,
-                error=str(e),
-                error_type=type(e).__name__,
+            logger.error(
+                f"Redis operation: publish_failed | stream_name={stream_name} | error={str(e)} | error_type={type(e).__name__}"
             )
             raise
+
+    def _clean_for_serialization(self, obj: Any) -> Any:
+        """
+        Recursively clean objects for JSON serialization by converting datetime objects to ISO strings.
+        """
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {
+                key: self._clean_for_serialization(value) for key, value in obj.items()
+            }
+        elif isinstance(obj, list):
+            return [self._clean_for_serialization(item) for item in obj]
+        else:
+            return obj
 
     async def consume_events(
         self,
@@ -152,11 +168,8 @@ class RedisStreamsManager:
             except RedisError as e:
                 # Group already exists
                 if "BUSYGROUP" not in str(e):
-                    logger.log_redis_operation(
-                        "consumer_group_creation_failed",
-                        stream_name=stream_name,
-                        consumer_group=consumer_group,
-                        error=str(e),
+                    logger.error(
+                        f"Redis operation: consumer_group_creation_failed | stream_name={stream_name} | consumer_group={consumer_group} | error={str(e)}"
                     )
                     raise
 
@@ -188,9 +201,6 @@ class RedisStreamsManager:
 
             except asyncio.TimeoutError:
                 # Timeout is expected when no messages are available
-                logger.log_redis_operation(
-                    "consume_timeout", stream_name=stream_name, block=block
-                )
                 return []
 
             events = []
@@ -213,12 +223,8 @@ class RedisStreamsManager:
             return events
 
         except RedisError as e:
-            logger.log_redis_operation(
-                "consume_failed",
-                stream_name=stream_name,
-                consumer_group=consumer_group,
-                error=str(e),
-                error_type=type(e).__name__,
+            logger.error(
+                f"Redis operation: consume_failed | stream_name={stream_name} | consumer_group={consumer_group} | error={str(e)} | error_type={type(e).__name__}"
             )
             raise
 
@@ -234,12 +240,8 @@ class RedisStreamsManager:
             return result > 0
 
         except RedisError as e:
-            logger.log_redis_operation(
-                "acknowledge_failed",
-                stream_name=stream_name,
-                message_id=message_id,
-                error=str(e),
-                error_type=type(e).__name__,
+            logger.error(
+                f"Redis operation: acknowledge_failed | stream_name={stream_name} | message_id={message_id} | error={str(e)} | error_type={type(e).__name__}"
             )
             raise
 

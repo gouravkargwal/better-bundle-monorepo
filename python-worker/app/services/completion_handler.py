@@ -3,7 +3,7 @@ Completion handler for processing ML training completion events
 """
 
 import asyncio
-import structlog
+from app.core.logger import get_logger
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
@@ -11,7 +11,7 @@ from app.core.database import get_database
 from app.core.redis_client import get_redis_client, streams_manager
 from app.services.heuristic_service import heuristic_service
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class CompletionHandler:
@@ -38,7 +38,6 @@ class CompletionHandler:
         self._consumer_task = asyncio.create_task(
             self.consume_ml_completion_events(), name="completion-handler-consumer"
         )
-        logger.info("Completion handler consumer started")
 
     async def stop_consumer(self):
         """Stop the consumer task"""
@@ -48,7 +47,6 @@ class CompletionHandler:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Completion handler consumer stopped")
 
     async def handle_ml_training_completion(
         self, event_data: Dict[str, Any]
@@ -64,16 +62,6 @@ class CompletionHandler:
             skipped = event_data.get("skipped", False)
             skipped_reason = event_data.get("skipped_reason")
 
-            logger.info(
-                "Handling ML training completion",
-                job_id=job_id,
-                shop_id=shop_id,
-                shop_domain=shop_domain,
-                success=success,
-                skipped=skipped,
-                skipped_reason=skipped_reason if skipped else None,
-            )
-
             # Step 1: Update job status
             await self._update_job_status(job_id, success, error)
 
@@ -83,12 +71,6 @@ class CompletionHandler:
             if success:
                 if skipped:
                     # Handle skipped training case
-                    logger.info(
-                        "🔄 ML training skipped - no data changes",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                        reason=skipped_reason,
-                    )
 
                     # Step 3: Schedule next analysis using heuristic (even for skipped)
                     schedule_result = await self._schedule_next_analysis(
@@ -105,15 +87,6 @@ class CompletionHandler:
                     # Step 5: Publish heuristic decision requested event
                     await self._publish_heuristic_decision_requested(
                         event_data, schedule_result
-                    )
-
-                    logger.info(
-                        "🔄 ML training skipped handled successfully",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                        reason=skipped_reason,
-                        schedule_result=schedule_result.get("success"),
-                        email_sent=email_result.get("success"),
                     )
 
                     return {
@@ -142,14 +115,6 @@ class CompletionHandler:
                     # Step 5: Publish heuristic decision requested event
                     await self._publish_heuristic_decision_requested(
                         event_data, schedule_result
-                    )
-
-                    logger.info(
-                        "✅ ML training completion handled successfully",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                        schedule_result=schedule_result.get("success"),
-                        email_sent=email_result.get("success"),
                     )
 
                     return {
@@ -206,8 +171,6 @@ class CompletionHandler:
 
             await self.db.analysisjob.update(where={"jobId": job_id}, data=update_data)
 
-            logger.info("Job status updated", job_id=job_id, success=success)
-
         except Exception as e:
             logger.error("Error updating job status", job_id=job_id, error=str(e))
 
@@ -217,8 +180,6 @@ class CompletionHandler:
             await self.db.shop.update(
                 where={"id": shop_id}, data={"lastAnalysisAt": datetime.now()}
             )
-
-            logger.info("Shop analysis timestamp updated", shop_id=shop_id)
 
         except Exception as e:
             logger.error(
@@ -233,19 +194,6 @@ class CompletionHandler:
             result = await heuristic_service.schedule_next_analysis(
                 shop_id, analysis_result
             )
-
-            if result["success"]:
-                logger.info(
-                    "Next analysis scheduled",
-                    shop_id=shop_id,
-                    next_hours=result["heuristic_result"].next_analysis_hours,
-                )
-            else:
-                logger.error(
-                    "Failed to schedule next analysis",
-                    shop_id=shop_id,
-                    error=result.get("error"),
-                )
 
             return result
 
@@ -305,13 +253,6 @@ class CompletionHandler:
                     error=error,
                 )
 
-            logger.info(
-                "Completion email sent",
-                shop_domain=shop_domain,
-                success=success,
-                email_result=email_result.get("success"),
-            )
-
             return email_result
 
         except Exception as e:
@@ -337,8 +278,6 @@ class CompletionHandler:
                 settings.COMPLETION_RESULTS_STREAM, completion_event
             )
 
-            logger.info("Completion event published", message_id=message_id)
-
         except Exception as e:
             logger.error("Error publishing completion event", error=str(e))
 
@@ -363,10 +302,6 @@ class CompletionHandler:
                 settings.HEURISTIC_DECISION_REQUESTED_STREAM, heuristic_event
             )
 
-            logger.info(
-                "Heuristic decision requested event published", message_id=message_id
-            )
-
         except Exception as e:
             logger.error(
                 "Error publishing heuristic decision requested event", error=str(e)
@@ -378,28 +313,21 @@ class CompletionHandler:
             f"completion-handler-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         )
 
-        logger.info(
-            "Starting ML completion event consumer", consumer_name=consumer_name
-        )
-
         while True:
             try:
                 # Consume events from ML training completion stream
+                from app.core.config import settings
+
                 events = await streams_manager.consume_events(
-                    stream_name="betterbundle:ml-training-complete",
-                    consumer_group="completion-handlers",
+                    stream_name=settings.COMPLETION_EVENTS_STREAM,
+                    consumer_group=settings.COMPLETION_HANDLER_GROUP,
                     consumer_name=consumer_name,
-                    count=1,
-                    block=5000,  # 5 seconds
+                    count=settings.CONSUMER_BATCH_SIZE,
+                    block=10000,  # 10 seconds (increased from 5 seconds)
                 )
 
                 for event in events:
                     try:
-                        logger.info(
-                            "Processing ML completion event",
-                            message_id=event.get("_message_id"),
-                            job_id=event.get("job_id"),
-                        )
 
                         # Handle the completion
                         result = await self.handle_ml_training_completion(event)
@@ -409,12 +337,6 @@ class CompletionHandler:
                             stream_name="betterbundle:ml-training-complete",
                             consumer_group="completion-handlers",
                             message_id=event["_message_id"],
-                        )
-
-                        logger.info(
-                            "ML completion event processed",
-                            message_id=event.get("_message_id"),
-                            success=result.get("success"),
                         )
 
                     except Exception as e:

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.redis_client import streams_manager
 from app.services.data_processor import data_processor
-from app.core.logging import get_logger, log_error, log_request_start, log_request_end
+from app.core.logger import get_logger
 from app.services.transformations import run_transformations_for_shop
 
 logger = get_logger(__name__)
@@ -54,18 +54,7 @@ async def queue_data_job(request: DataJobRequestModel):
     start_time = asyncio.get_event_loop().time()
     job_id = f"data_job_{int(asyncio.get_event_loop().time())}_{uuid.uuid4().hex[:8]}"
 
-    log_request_start(
-        "POST", "/api/v1/data-jobs/queue", job_id=job_id, shop_id=request.shop_id
-    )
-
     try:
-        logger.info(
-            "Received data job queue request",
-            job_id=job_id,
-            shop_id=request.shop_id,
-            shop_domain=request.shop_domain,
-            job_type=request.job_type,
-        )
 
         # Initialize streams manager if needed
         if not streams_manager.redis:
@@ -85,10 +74,6 @@ async def queue_data_job(request: DataJobRequestModel):
             }
         )
 
-        logger.info(
-            "Job record created in database", job_id=job_id, db_id=analysis_job.id
-        )
-
         # Publish job to Redis stream
         event_id = await streams_manager.publish_data_job_event(
             job_id=job_id,
@@ -99,23 +84,6 @@ async def queue_data_job(request: DataJobRequestModel):
         )
 
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-        log_request_end(
-            "POST",
-            "/api/v1/data-jobs/queue",
-            200,
-            duration_ms,
-            job_id=job_id,
-            shop_id=request.shop_id,
-        )
-
-        logger.info(
-            "Data job queued successfully",
-            job_id=job_id,
-            shop_id=request.shop_id,
-            event_id=event_id,
-            duration_ms=duration_ms,
-        )
 
         return DataJobResponse(
             success=True,
@@ -128,24 +96,12 @@ async def queue_data_job(request: DataJobRequestModel):
     except Exception as e:
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-        log_error(
-            e,
-            {
-                "operation": "queue_data_job",
-                "job_id": job_id,
-                "shop_id": request.shop_id,
-                "duration_ms": duration_ms,
-            },
+        logger.error(
+            f"Queue data job error | operation=queue_data_job | job_id={job_id} | shop_id={request.shop_id} | duration_ms={duration_ms:.2f} | error={str(e)}"
         )
 
-        log_request_end(
-            "POST",
-            "/api/v1/data-jobs/queue",
-            500,
-            duration_ms,
-            job_id=job_id,
-            shop_id=request.shop_id,
-            error=str(e),
+        logger.error(
+            f"Request failed | method=POST | path=/api/v1/data-jobs/queue | status=500 | duration_ms={duration_ms:.2f} | job_id={job_id} | shop_id={request.shop_id} | error={str(e)}"
         )
 
         raise HTTPException(
@@ -160,18 +116,7 @@ async def process_data_job_direct(request: DataJobRequestModel):
     start_time = asyncio.get_event_loop().time()
     job_id = f"direct_job_{int(asyncio.get_event_loop().time())}_{uuid.uuid4().hex[:8]}"
 
-    log_request_start(
-        "POST", "/api/v1/data-jobs/process", job_id=job_id, shop_id=request.shop_id
-    )
-
     try:
-        logger.info(
-            "Received direct data job processing request",
-            job_id=job_id,
-            shop_id=request.shop_id,
-            shop_domain=request.shop_domain,
-            job_type=request.job_type,
-        )
 
         # Initialize data processor if needed
         if not data_processor.data_collection_service.db:
@@ -191,31 +136,21 @@ async def process_data_job_direct(request: DataJobRequestModel):
             }
         )
 
-        logger.info(
-            "Job record created in database", job_id=job_id, db_id=analysis_job.id
-        )
-
         # Process the job directly using the new modular system
-        result = await data_processor.process_data_collection_job({
-            "job_id": job_id,
-            "shop_id": request.shop_id,
-            "shop_domain": request.shop_domain,
-            "access_token": request.access_token,
-            "job_type": request.job_type,
-            "days_back": request.days_back,
-        })
+        result = await data_processor.process_data_collection_job(
+            {
+                "job_id": job_id,
+                "shop_id": request.shop_id,
+                "shop_domain": request.shop_domain,
+                "access_token": request.access_token,
+                "job_type": request.job_type,
+                "days_back": request.days_back,
+            }
+        )
 
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
         if result.get("success"):
-            log_request_end(
-                "POST",
-                "/api/v1/data-jobs/process",
-                200,
-                duration_ms,
-                job_id=job_id,
-                shop_id=request.shop_id,
-            )
 
             # Extract counts from the new result structure
             results = result.get("results", {})
@@ -231,41 +166,24 @@ async def process_data_job_direct(request: DataJobRequestModel):
                 status="completed",
             )
         else:
-            log_request_end(
-                "POST",
-                "/api/v1/data-jobs/process",
-                500,
-                duration_ms,
-                job_id=job_id,
-                shop_id=request.shop_id,
-                error=result.get("error", "Unknown error"),
+            logger.error(
+                f"Request failed | method=POST | path=/api/v1/data-jobs/process | status=500 | duration_ms={duration_ms:.2f} | job_id={job_id} | shop_id={request.shop_id} | error={result.get('error', 'Unknown error')}"
             )
 
             raise HTTPException(
-                status_code=500, detail=f"Data job failed: {result.get('error', 'Unknown error')}"
+                status_code=500,
+                detail=f"Data job failed: {result.get('error', 'Unknown error')}",
             )
 
     except Exception as e:
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-        log_error(
-            e,
-            {
-                "operation": "process_data_job_direct",
-                "job_id": job_id,
-                "shop_id": request.shop_id,
-                "duration_ms": duration_ms,
-            },
+        logger.error(
+            f"Process data job direct error | operation=process_data_job_direct | job_id={job_id} | shop_id={request.shop_id} | duration_ms={duration_ms:.2f} | error={str(e)}"
         )
 
-        log_request_end(
-            "POST",
-            "/api/v1/data-jobs/process",
-            500,
-            duration_ms,
-            job_id=job_id,
-            shop_id=request.shop_id,
-            error=str(e),
+        logger.error(
+            f"Request failed | method=POST | path=/api/v1/data-jobs/process | status=500 | duration_ms={duration_ms:.2f} | job_id={job_id} | shop_id={request.shop_id} | error={str(e)}"
         )
 
         raise HTTPException(
@@ -299,13 +217,8 @@ async def publish_ml_training_event(
         )
 
     except Exception as e:
-        log_error(
-            e,
-            {
-                "operation": "publish_ml_training_event",
-                "job_id": job_id,
-                "shop_id": shop_id,
-            },
+        logger.error(
+            f"Publish ML training event error | operation=publish_ml_training_event | job_id={job_id} | shop_id={shop_id} | error={str(e)}"
         )
 
         raise HTTPException(
@@ -339,13 +252,8 @@ async def publish_user_notification(
         )
 
     except Exception as e:
-        log_error(
-            e,
-            {
-                "operation": "publish_user_notification",
-                "shop_id": shop_id,
-                "notification_type": notification_type,
-            },
+        logger.error(
+            f"Publish user notification error | operation=publish_user_notification | shop_id={shop_id} | notification_type={notification_type} | error={str(e)}"
         )
 
         raise HTTPException(
@@ -384,7 +292,9 @@ async def get_job_status(job_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        log_error(e, {"operation": "get_job_status", "job_id": job_id})
+        logger.error(
+            f"Get job status error | operation=get_job_status | job_id={job_id} | error={str(e)}"
+        )
 
         raise HTTPException(
             status_code=500, detail=f"Failed to get job status: {str(e)}"
@@ -411,7 +321,9 @@ async def start_consumer(background_tasks: BackgroundTasks):
         }
 
     except Exception as e:
-        log_error(e, {"operation": "start_consumer"})
+        logger.error(
+            f"Start consumer error | operation=start_consumer | error={str(e)}"
+        )
 
         raise HTTPException(
             status_code=500, detail=f"Failed to start consumer: {str(e)}"
@@ -425,7 +337,9 @@ async def trigger_transformations(shop_id: str):
         stats = await run_transformations_for_shop(shop_id, backfill_if_needed=True)
         return {"success": True, "shop_id": shop_id, "stats": stats}
     except Exception as e:
-        log_error(e, {"operation": "trigger_transformations", "shop_id": shop_id})
+        logger.error(
+            f"Trigger transformations error | operation=trigger_transformations | shop_id={shop_id} | error={str(e)}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Failed to run transformations: {str(e)}"
         )

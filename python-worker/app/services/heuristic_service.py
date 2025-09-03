@@ -2,7 +2,7 @@
 Heuristic service for determining when to run analysis based on shop data
 """
 
-import structlog
+from app.core.logger import get_logger
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from app.core.database import get_database
 from app.core.redis_client import get_redis_client
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -58,7 +58,6 @@ class AnalysisHeuristicService:
     ) -> HeuristicResult:
         """Calculate next analysis time based on current shop data"""
         try:
-            logger.info("🧠 Calculating heuristic for shop", shop_id=shop_id)
 
             # Gather all heuristic factors
             factors = await self._gather_heuristic_factors(shop_id, analysis_result)
@@ -88,13 +87,6 @@ class AnalysisHeuristicService:
                 factors=factors,
                 reasoning=reasoning,
                 confidence=confidence,
-            )
-
-            logger.info(
-                "✅ Heuristic calculated",
-                shop_id=shop_id,
-                interval_hours=final_interval,
-                interval_days=final_interval / 24,
             )
 
             return result
@@ -451,7 +443,6 @@ class AnalysisHeuristicService:
                     "analysisResult": analysis_result or {},
                 }
             )
-            logger.info("Stored heuristic decision", shop_id=shop_id)
         except Exception as e:
             logger.error(
                 "Error storing heuristic decision", shop_id=shop_id, error=str(e)
@@ -480,7 +471,6 @@ class AnalysisHeuristicService:
                 },
             )
 
-            logger.info("Found shops due for analysis", count=len(shops))
             return shops
 
         except Exception as e:
@@ -534,13 +524,6 @@ class AnalysisHeuristicService:
             # Store heuristic decision for learning
             await self.store_heuristic_decision(
                 shop_id, heuristic_result, analysis_result
-            )
-
-            logger.info(
-                "✅ Next analysis scheduled",
-                shop_id=shop_id,
-                next_analysis_hours=heuristic_result.next_analysis_hours,
-                next_scheduled_time=next_scheduled_time.isoformat(),
             )
 
             return {

@@ -16,7 +16,7 @@ from app.core.database import (
     get_latest_timestamps,
 )
 from app.services.shopify_api import ShopifyAPIClient, calculate_since_date
-from app.core.logging import get_logger, log_error, log_data_collection, log_performance
+from app.core.logger import get_logger
 from prisma import Json
 
 logger = get_logger(__name__)
@@ -90,11 +90,9 @@ class DataCollectionService:
             )
 
             if shop:
-                logger.info(f"Found existing shop by domain: {shop.id}")
                 return shop.id
 
             # Create new shop if it doesn't exist
-            logger.info(f"Creating new shop record for domain: {config.shop_domain}")
             new_shop = await self.db.shop.create(
                 data={
                     "shopDomain": config.shop_domain,
@@ -104,7 +102,6 @@ class DataCollectionService:
                 }
             )
 
-            logger.info(f"Created shop record with ID: {new_shop.id}")
             return new_shop.id
 
         except Exception as e:
@@ -119,17 +116,15 @@ class DataCollectionService:
     ) -> None:
         """Save orders to database"""
         if not orders:
-            logger.info("No orders to save")
             return
 
         start_time = asyncio.get_event_loop().time()
 
         try:
-            logger.info(
-                "Processing orders for database",
-                orders_count=len(orders),
-                is_incremental=is_incremental,
-            )
+
+            # Always use batch operations for better performance
+            # First, save raw data to RawOrder table
+            await self.save_raw_orders(shop_db_id, orders)
 
             # Transform orders data
             order_data = []
@@ -193,31 +188,65 @@ class DataCollectionService:
                         },
                     )
 
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            log_performance(
-                "save_orders",
-                duration_ms,
-                orders_count=len(orders),
-                is_incremental=is_incremental,
-            )
-
-            log_data_collection(
-                shop_id=shop_db_id,
-                operation="save_orders",
-                items_count=len(orders),
-                duration_ms=duration_ms,
-            )
-
         except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": "save_orders",
-                    "shop_db_id": shop_db_id,
-                    "orders_count": len(orders),
-                },
+            logger.error(
+                f"Save orders error | operation=save_orders | shop_db_id={shop_db_id} | orders_count={len(orders)} | error={str(e)}"
             )
             raise
+
+    async def save_raw_orders(
+        self,
+        shop_db_id: str,
+        orders: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw order data to RawOrder table"""
+        try:
+
+            # Clear existing raw orders for this shop
+            await self.db.raworder.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw orders
+            raw_orders = []
+            for order in orders:
+                raw_orders.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(order),
+                    }
+                )
+
+            await self.db.raworder.create_many(data=raw_orders)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw orders: {e}")
+            # Don't fail the entire process if raw saving fails
+
+    async def save_raw_customers(
+        self,
+        shop_db_id: str,
+        customers: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw customer data to RawCustomer table"""
+        try:
+
+            # Clear existing raw customers for this shop
+            await self.db.rawcustomer.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw customers
+            raw_customers = []
+            for customer in customers:
+                raw_customers.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(customer),
+                    }
+                )
+
+            await self.db.rawcustomer.create_many(data=raw_customers)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw customers: {e}")
+            # Don't fail the entire process if raw saving fails
 
     async def save_raw_products(
         self,
@@ -226,7 +255,6 @@ class DataCollectionService:
     ) -> None:
         """Save raw product data to RawProduct table"""
         try:
-            logger.info(f"Saving {len(products)} raw products to RawProduct table")
 
             # Clear existing raw products for this shop
             await self.db.rawproduct.delete_many(where={"shopId": shop_db_id})
@@ -242,7 +270,6 @@ class DataCollectionService:
                 )
 
             await self.db.rawproduct.create_many(data=raw_products)
-            logger.info(f"Successfully saved {len(products)} raw products")
 
         except Exception as e:
             logger.error(f"Failed to save raw products: {e}")
@@ -256,17 +283,11 @@ class DataCollectionService:
     ) -> None:
         """Save products to database"""
         if not products:
-            logger.info("No products to save")
             return
 
         start_time = asyncio.get_event_loop().time()
 
         try:
-            logger.info(
-                "Processing products for database",
-                products_count=len(products),
-                is_incremental=is_incremental,
-            )
 
             # Always use batch operations for better performance
             # First, save raw data to RawProduct table
@@ -337,29 +358,9 @@ class DataCollectionService:
                         },
                     )
 
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            log_performance(
-                "save_products",
-                duration_ms,
-                products_count=len(products),
-                is_incremental=is_incremental,
-            )
-
-            log_data_collection(
-                shop_id=shop_db_id,
-                operation="save_products",
-                items_count=len(products),
-                duration_ms=duration_ms,
-            )
-
         except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": "save_products",
-                    "shop_db_id": shop_db_id,
-                    "products_count": len(products),
-                },
+            logger.error(
+                f"Save products error | operation=save_products | shop_db_id={shop_db_id} | products_count={len(products)} | error={str(e)}"
             )
             raise
 
@@ -369,7 +370,7 @@ class DataCollectionService:
         customers: List[Dict[str, Any]],
         is_incremental: bool = False,
     ) -> None:
-        """Save customers to database"""
+        """Save customers to database using batch operations for optimal performance"""
         if not customers:
             logger.info("No customers to save")
             return
@@ -383,47 +384,65 @@ class DataCollectionService:
                 is_incremental=is_incremental,
             )
 
-            # Parallelize upserts with bounded concurrency for speed
-            semaphore = asyncio.Semaphore(20)
+            # Always use batch operations for better performance
+            # First, save raw data to RawCustomer table
+            await self.save_raw_customers(shop_db_id, customers)
 
-            async def upsert_one(customer: Dict[str, Any]):
-                async with semaphore:
-                    last_order = customer.get("lastOrder") or {}
-                    tags_val = customer.get("tags") or []
-                    addresses_val = customer.get("addresses") or []
-                    metafields_val = customer.get("metafields") or {}
+            # Prepare customer data for batch operations
+            customer_data = []
+            for customer in customers:
+                last_order = customer.get("lastOrder") or {}
+                tags_val = customer.get("tags") or []
+                addresses_val = customer.get("addresses") or []
+                metafields_val = customer.get("metafields") or {}
 
-                    customer_record = {
-                        "shopId": shop_db_id,
-                        "customerId": customer["id"],
-                        "email": customer.get("email"),
-                        "firstName": customer.get("firstName"),
-                        "lastName": customer.get("lastName"),
-                        "createdAtShopify": (
-                            datetime.fromisoformat(
-                                customer["createdAt"].replace("Z", "+00:00")
-                            )
-                            if customer.get("createdAt")
-                            else None
-                        ),
-                        "lastOrderId": last_order.get("id"),
-                        "lastOrderDate": (
-                            datetime.fromisoformat(
-                                last_order["processedAt"].replace("Z", "+00:00")
-                            )
-                            if last_order.get("processedAt")
-                            else None
-                        ),
-                        "tags": Json(tags_val),
-                        "location": Json(addresses_val),
-                        "metafields": Json(metafields_val),
-                    }
+                customer_record = {
+                    "shopId": shop_db_id,
+                    "customerId": customer["id"],
+                    "email": customer.get("email"),
+                    "firstName": customer.get("firstName"),
+                    "lastName": customer.get("lastName"),
+                    "createdAtShopify": (
+                        datetime.fromisoformat(
+                            customer["createdAt"].replace("Z", "+00:00")
+                        )
+                        if customer.get("createdAt")
+                        else None
+                    ),
+                    "lastOrderId": last_order.get("id"),
+                    "lastOrderDate": (
+                        datetime.fromisoformat(
+                            last_order["processedAt"].replace("Z", "+00:00")
+                        )
+                        if last_order.get("processedAt")
+                        else None
+                    ),
+                    "tags": Json(tags_val),
+                    "location": Json(addresses_val),
+                    "metafields": Json(metafields_val),
+                }
+                customer_data.append(customer_record)
 
+            # Use batch upsert operations for optimal performance
+            try:
+                # First, try to use create_many with skip_duplicates for better performance
+                await self.db.customerdata.create_many(
+                    data=customer_data, skip_duplicates=True
+                )
+                logger.info(
+                    f"Batch insert completed successfully for {len(customer_data)} customers"
+                )
+            except Exception as batch_error:
+                logger.warning(
+                    f"Batch insert failed, falling back to individual upserts: {batch_error}"
+                )
+                # Fallback to individual upserts if batch fails
+                for customer_record in customer_data:
                     await self.db.customerdata.upsert(
                         where={
                             "shopId_customerId": {
-                                "shopId": shop_db_id,
-                                "customerId": customer["id"],
+                                "shopId": customer_record["shopId"],
+                                "customerId": customer_record["customerId"],
                             }
                         },
                         data={
@@ -436,31 +455,17 @@ class DataCollectionService:
                         },
                     )
 
-            await asyncio.gather(*(upsert_one(c) for c in customers))
-
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            log_performance(
-                "save_customers",
-                duration_ms,
-                customers_count=len(customers),
-                is_incremental=is_incremental,
+            logger.info(
+                f"Performance: save_customers | duration_ms={duration_ms:.2f} | customers_count={len(customers)} | is_incremental={is_incremental}"
             )
-
-            log_data_collection(
-                shop_id=shop_db_id,
-                operation="save_customers",
-                items_count=len(customers),
-                duration_ms=duration_ms,
+            logger.info(
+                f"Data collection: save_customers | shop_id={shop_db_id} | operation=save_customers | items_count={len(customers)} | duration_ms={duration_ms:.2f}"
             )
 
         except Exception as e:
-            log_error(
-                e,
-                {
-                    "operation": "save_customers",
-                    "shop_db_id": shop_db_id,
-                    "customers_count": len(customers),
-                },
+            logger.error(
+                f"Save customers error | operation=save_customers | shop_db_id={shop_db_id} | customers_count={len(customers)} | error={str(e)}"
             )
             raise
 
@@ -469,13 +474,6 @@ class DataCollectionService:
     ) -> DataCollectionResult:
         """Collect and save complete shop data"""
         start_time = asyncio.get_event_loop().time()
-
-        logger.info(
-            "Starting complete data collection",
-            shop_id=config.shop_id,
-            shop_domain=config.shop_domain,
-            days_back=config.days_back or settings.MAX_INITIAL_DAYS,
-        )
 
         try:
             # Ensure database is initialized
@@ -493,19 +491,11 @@ class DataCollectionService:
                 config.days_back or settings.MAX_INITIAL_DAYS
             )
 
-            logger.info(
-                "Complete data collection - fetching data from configured period",
-                shop_domain=config.shop_domain,
-                since_date=since_date,
-                days_back=config.days_back or settings.MAX_INITIAL_DAYS,
-            )
-
             # Create Shopify API client
             api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
 
             try:
                 # Collect data in parallel for better performance
-                logger.info("Fetching orders, products, and customers in parallel")
 
                 parallel_start = asyncio.get_event_loop().time()
 
@@ -530,35 +520,10 @@ class DataCollectionService:
                     )
 
                 # Log what we collected
-                logger.info(
-                    "Data collection results",
-                    shop_domain=config.shop_domain,
-                    orders_count=len(orders),
-                    products_count=len(products),
-                    customers_count=len(customers),
-                    has_customer_access=customers is not None and len(customers) > 0,
-                )
 
                 # If no customers, that's okay - we can still do analysis
                 if not customers:
                     customers = []
-                    logger.info(
-                        "No customer data available - continuing with orders and products only",
-                        shop_domain=config.shop_domain,
-                    )
-
-                parallel_duration_ms = (
-                    asyncio.get_event_loop().time() - parallel_start
-                ) * 1000
-
-                log_performance(
-                    "parallel_data_collection",
-                    parallel_duration_ms,
-                    shop_domain=config.shop_domain,
-                    orders_count=len(orders),
-                    products_count=len(products),
-                    customers_count=len(customers),
-                )
 
                 # Clear existing data
                 await clear_shop_data(shop_db_id)
@@ -624,10 +589,8 @@ class DataCollectionService:
                     asyncio.get_event_loop().time() - start_time
                 ) * 1000
 
-                log_data_collection(
-                    shop_id=config.shop_id,
-                    operation="complete_data_collection",
-                    duration_ms=total_duration_ms,
+                logger.info(
+                    f"Data collection: complete_data_collection | shop_id={config.shop_id} | operation=complete_data_collection | duration_ms={total_duration_ms:.2f}"
                 )
 
                 # Log success with data availability info
@@ -668,14 +631,8 @@ class DataCollectionService:
         except Exception as e:
             total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-            log_error(
-                e,
-                {
-                    "operation": "complete_data_collection",
-                    "shop_id": config.shop_id,
-                    "shop_domain": config.shop_domain,
-                    "total_duration_ms": total_duration_ms,
-                },
+            logger.error(
+                f"Complete data collection error | operation=complete_data_collection | shop_id={config.shop_id} | shop_domain={config.shop_domain} | total_duration_ms={total_duration_ms:.2f} | error={str(e)}"
             )
 
             return DataCollectionResult(
@@ -767,13 +724,8 @@ class DataCollectionService:
                     asyncio.get_event_loop().time() - parallel_start
                 ) * 1000
 
-                log_performance(
-                    "parallel_incremental_collection",
-                    parallel_duration_ms,
-                    shop_domain=config.shop_domain,
-                    orders_count=len(orders),
-                    products_count=len(products),
-                    customers_count=len(customers),
+                logger.info(
+                    f"Performance: parallel_incremental_collection | duration_ms={parallel_duration_ms:.2f} | shop_domain={config.shop_domain} | orders_count={len(orders)} | products_count={len(products)} | customers_count={len(customers)}"
                 )
 
                 # Save incremental data to database in parallel
@@ -790,10 +742,8 @@ class DataCollectionService:
                     asyncio.get_event_loop().time() - start_time
                 ) * 1000
 
-                log_data_collection(
-                    shop_id=config.shop_id,
-                    operation="incremental_data_collection",
-                    duration_ms=total_duration_ms,
+                logger.info(
+                    f"Data collection: incremental_data_collection | shop_id={config.shop_id} | operation=incremental_data_collection | duration_ms={total_duration_ms:.2f}"
                 )
 
                 logger.info(
@@ -821,14 +771,8 @@ class DataCollectionService:
         except Exception as e:
             total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
 
-            log_error(
-                e,
-                {
-                    "operation": "incremental_data_collection",
-                    "shop_id": config.shop_id,
-                    "shop_domain": config.shop_domain,
-                    "total_duration_ms": total_duration_ms,
-                },
+            logger.error(
+                f"Incremental data collection error | operation=incremental_data_collection | shop_id={config.shop_id} | shop_domain={config.shop_domain} | total_duration_ms={total_duration_ms:.2f} | error={str(e)}"
             )
 
             return DataCollectionResult(

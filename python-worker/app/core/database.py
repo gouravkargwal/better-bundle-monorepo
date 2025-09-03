@@ -21,16 +21,10 @@ async def get_database() -> Prisma:
     global _db_instance
 
     if _db_instance is None:
-        logger.info("Initializing database connection")
         _db_instance = Prisma()
 
         try:
-            start_time = asyncio.get_event_loop().time()
             await _db_instance.connect()
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
-            logger.info(f"Database connection established in {duration_ms:.2f}ms")
-            logger.info("Database connection established successfully")
 
         except PrismaError as e:
             logger.error(f"Database connection failed: {e}")
@@ -58,11 +52,9 @@ async def close_database() -> None:
     global _db_instance
 
     if _db_instance:
-        logger.info("Closing database connection")
         try:
             await _db_instance.disconnect()
             _db_instance = None
-            logger.info("Database connection closed successfully")
         except Exception as e:
             logger.error(f"Database disconnection failed: {e}")
 
@@ -97,7 +89,6 @@ async def reconnect_database() -> bool:
 
         # Test connection
         if await check_database_health():
-            logger.info("Database reconnection successful")
             return True
         else:
             logger.error("Database reconnection failed - health check failed")
@@ -167,11 +158,7 @@ async def get_or_create_shop(shop_id: str, shop_domain: str, access_token: str):
 
             if shop:
                 # Update existing shop with new accessToken
-                logger.info(
-                    "Updating existing shop access token",
-                    shop_id=shop.id,
-                    shop_domain=shop_domain,
-                )
+
                 shop = await db.shop.update(
                     where={"id": shop.id},
                     data={
@@ -181,9 +168,7 @@ async def get_or_create_shop(shop_id: str, shop_domain: str, access_token: str):
                 )
             else:
                 # Create new shop record
-                logger.info(
-                    "Creating new shop record", shop_id=shop_id, shop_domain=shop_domain
-                )
+
                 shop = await db.shop.create(
                     data={
                         "shopDomain": shop_domain,
@@ -192,16 +177,12 @@ async def get_or_create_shop(shop_id: str, shop_domain: str, access_token: str):
                         "isActive": True,
                     }
                 )
-                logger.info("Shop record created successfully", shop_id=shop.id)
         else:
             # Update access token if it changed
             if shop.accessToken != access_token:
-                logger.info("Updating shop access token", shop_id=shop.id)
                 shop = await db.shop.update(
                     where={"id": shop.id}, data={"accessToken": access_token}
                 )
-            else:
-                logger.info("Using existing shop record", shop_id=shop.id)
 
         return shop
 
@@ -215,7 +196,6 @@ async def clear_shop_data(shop_db_id: str):
     db = await get_database()
 
     async def operation():
-        logger.info("Clearing existing data", shop_db_id=shop_db_id)
 
         # Delete in parallel for better performance
         await asyncio.gather(
@@ -223,8 +203,6 @@ async def clear_shop_data(shop_db_id: str):
             db.productdata.delete_many(where={"shopId": shop_db_id}),
             db.customerdata.delete_many(where={"shopId": shop_db_id}),
         )
-
-        logger.info("Data cleanup completed", shop_db_id=shop_db_id)
 
     return await with_database_retry(
         operation, "clear_shop_data", {"shop_db_id": shop_db_id}
@@ -240,7 +218,6 @@ async def update_shop_last_analysis(shop_db_id: str):
             where={"id": shop_db_id},
             data={"lastAnalysisAt": asyncio.get_event_loop().time()},
         )
-        logger.info("Updated shop last analysis timestamp", shop_db_id=shop_db_id)
 
     return await with_database_retry(
         operation, "update_shop_last_analysis", {"shop_db_id": shop_db_id}

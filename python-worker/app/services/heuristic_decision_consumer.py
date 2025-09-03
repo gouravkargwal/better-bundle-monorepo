@@ -25,10 +25,8 @@ class HeuristicDecisionConsumer:
 
     async def initialize(self):
         """Initialize the consumer"""
-        logger.info("Initializing heuristic decision consumer")
         await streams_manager.initialize()
         await heuristic_service.initialize()
-        logger.info("Heuristic decision consumer initialized")
 
     async def start_consumer(self):
         """Start the consumer in a separate task"""
@@ -39,7 +37,6 @@ class HeuristicDecisionConsumer:
         self._consumer_task = asyncio.create_task(
             self.consume_heuristic_decision_events(), name="heuristic-decision-consumer"
         )
-        logger.info("Heuristic decision consumer started")
 
     async def stop_consumer(self):
         """Stop the consumer task"""
@@ -49,7 +46,6 @@ class HeuristicDecisionConsumer:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Heuristic decision consumer stopped")
 
     async def consume_heuristic_decision_events(self):
         """Main consumer loop for heuristic decision events"""
@@ -59,28 +55,20 @@ class HeuristicDecisionConsumer:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
-        logger.info(f"Starting heuristic decision consumer: {consumer_name}")
-
         while not self._shutdown_event.is_set():
             try:
                 # Consume events from heuristic decision requested stream
                 events = await streams_manager.consume_events(
-                    stream_name=settings.HEURISTIC_DECISION_REQUESTED_STREAM,
-                    consumer_group="heuristic-decision-processors",
+                    stream_name=settings.HEURISTIC_DECISION_STREAM,
+                    consumer_group=settings.HEURISTIC_DECISION_GROUP,
                     consumer_name=consumer_name,
-                    count=1,
-                    block=5000,  # 5 seconds
+                    count=settings.CONSUMER_BATCH_SIZE,
+                    block=10000,  # 10 seconds (increased from 5 seconds)
                 )
 
                 if events:
                     for event in events:
                         try:
-                            logger.info(
-                                "Processing heuristic decision event",
-                                message_id=event.get("_message_id"),
-                                job_id=event.get("job_id"),
-                                shop_id=event.get("shop_id"),
-                            )
 
                             # Process the heuristic decision
                             await self._process_heuristic_decision(event)
@@ -127,8 +115,6 @@ class HeuristicDecisionConsumer:
                 consecutive_failures += 1
                 await asyncio.sleep(5)
 
-        logger.info("Heuristic decision consumer loop ended")
-
     async def _process_heuristic_decision(self, event: Dict[str, Any]):
         """Process a single heuristic decision event"""
         try:
@@ -137,27 +123,12 @@ class HeuristicDecisionConsumer:
             shop_domain = event.get("shop_domain")
             training_result = event.get("training_result")
 
-            logger.info(
-                "🧠 Making heuristic decision for next analysis",
-                job_id=job_id,
-                shop_id=shop_id,
-                shop_domain=shop_domain,
-            )
-
             # Make heuristic decision about next analysis timing
             heuristic_result = await heuristic_service.calculate_next_analysis_time(
                 shop_id, training_result
             )
 
             if heuristic_result:
-                logger.info(
-                    "✅ Heuristic decision calculated successfully",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    next_analysis_hours=heuristic_result.next_analysis_hours,
-                    confidence=heuristic_result.confidence,
-                    reasoning=heuristic_result.reasoning,
-                )
 
                 # Publish heuristic decision made event
                 await self._publish_heuristic_decision_made(
@@ -202,13 +173,6 @@ class HeuristicDecisionConsumer:
                 settings.HEURISTIC_DECISION_MADE_STREAM, heuristic_event
             )
 
-            logger.info(
-                "🧠 Heuristic decision made event published",
-                message_id=message_id,
-                job_id=job_id,
-                shop_id=shop_id,
-            )
-
         except Exception as e:
             logger.error("Error publishing heuristic decision made event", error=str(e))
 
@@ -218,7 +182,6 @@ class HeuristicDecisionConsumer:
 
     async def shutdown(self):
         """Gracefully shutdown the consumer"""
-        logger.info("Shutting down heuristic decision consumer")
         self._shutdown_event.set()
 
         if self._consumer_task and not self._consumer_task.done():
@@ -227,8 +190,6 @@ class HeuristicDecisionConsumer:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
-
-        logger.info("Heuristic decision consumer shutdown complete")
 
 
 # Global instance

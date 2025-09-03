@@ -1,187 +1,343 @@
 """
-Centralized logging system for BetterBundle Python Worker
+Core logging module for the Python Worker
+
+This module provides a flexible logging system that can be easily extended
+to support different logging backends like Grafana, Telemetry, GCP, or AWS.
 """
 
 import logging
+import logging.handlers
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
+
+from app.core.config import settings
 
 
-class BetterBundleLogger:
-    """Centralized logger for BetterBundle with clean, readable formatting"""
+class StructuredLogger:
+    """Wrapper around standard Python logger that supports structured logging with keyword arguments."""
 
-    def __init__(self, name: str = "betterbundle"):
-        self.name = name
+    def __init__(self, logger: logging.Logger):
+        self._logger = logger
 
-        # Create logs directory if it doesn't exist
-        self.logs_dir = Path("logs")
-        self.logs_dir.mkdir(exist_ok=True)
+    def _format_message(self, message: str, **kwargs) -> str:
+        """Format message with structured data as key=value pairs."""
+        if not kwargs:
+            return message
 
-        # Create logger instance
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
+        # Convert kwargs to structured format
+        structured_parts = []
+        for key, value in kwargs.items():
+            if value is not None:
+                # Handle different value types
+                if isinstance(value, (dict, list)):
+                    structured_parts.append(f"{key}={str(value)}")
+                elif isinstance(value, str) and " " in value:
+                    # Quote strings with spaces
+                    structured_parts.append(f'{key}="{value}"')
+                else:
+                    structured_parts.append(f"{key}={value}")
 
-        # Prevent duplicate handlers
-        if not self.logger.handlers:
-            self._setup_handlers()
-
-    def _setup_handlers(self):
-        """Setup handlers for different log levels with clean formatting"""
-
-        # Console handler for development
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)-15s | %(message)s",
-            datefmt="%H:%M:%S",
-        )
-        console_handler.setFormatter(console_formatter)
-
-        # Main application log - clean, readable format
-        app_handler = logging.FileHandler(self.logs_dir / "app.log")
-        app_handler.setLevel(logging.INFO)
-        app_formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)-15s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        app_handler.setFormatter(app_formatter)
-
-        # Error log - detailed format for debugging
-        error_handler = logging.FileHandler(self.logs_dir / "errors.log")
-        error_handler.setLevel(logging.ERROR)
-        error_formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)-15s | %(funcName)s:%(lineno)d | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        error_handler.setFormatter(error_formatter)
-
-        # Consumer-specific log - focused on Redis operations
-        consumer_handler = logging.FileHandler(self.logs_dir / "consumer.log")
-        consumer_handler.setLevel(logging.INFO)
-        consumer_formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)-15s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        consumer_handler.setFormatter(consumer_formatter)
-
-        # Add handlers to this specific logger (not root)
-        self.logger.addHandler(console_handler)
-        self.logger.addHandler(app_handler)
-        self.logger.addHandler(error_handler)
-        self.logger.addHandler(consumer_handler)
-
-        # Prevent propagation to root logger to avoid duplication
-        self.logger.propagate = False
-
-    def info(self, message: str, **kwargs):
-        """Log info message with structured data"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.info(message)
+        if structured_parts:
+            return f"{message} | {' | '.join(structured_parts)}"
+        return message
 
     def debug(self, message: str, **kwargs):
-        """Log debug message with structured data"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.debug(message)
+        """Log debug message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.debug(formatted_message)
+
+    def info(self, message: str, **kwargs):
+        """Log info message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.info(formatted_message)
 
     def warning(self, message: str, **kwargs):
-        """Log warning message with structured data"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.warning(message)
+        """Log warning message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.warning(formatted_message)
 
     def error(self, message: str, **kwargs):
-        """Log error message with structured data"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.error(message)
+        """Log error message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.error(formatted_message)
 
     def critical(self, message: str, **kwargs):
-        """Log critical message with structured data"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.critical(message)
+        """Log critical message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.critical(formatted_message)
 
     def exception(self, message: str, **kwargs):
-        """Log exception with traceback"""
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.exception(message)
+        """Log exception message with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.exception(formatted_message)
 
-    def _format_kwargs(self, kwargs: Dict[str, Any]) -> str:
-        """Format keyword arguments into a readable string"""
-        formatted = []
-        for key, value in kwargs.items():
-            if isinstance(value, (dict, list)):
-                formatted.append(f"{key}={str(value)[:100]}...")
-            else:
-                formatted.append(f"{key}={value}")
-        return " | ".join(formatted)
-
-    def log_consumer_event(self, event_type: str, **kwargs):
-        """Log consumer-specific events with structured data"""
-        message = f"CONSUMER: {event_type}"
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.info(message)
-
-    def log_redis_operation(self, operation: str, **kwargs):
-        """Log Redis operations with structured data"""
-        message = f"REDIS: {operation}"
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.info(message)
-
-    def log_job_processing(self, job_id: str, stage: str, **kwargs):
-        """Log job processing stages with structured data"""
-        message = f"JOB[{job_id}]: {stage}"
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.info(message)
-
-    def log_performance(self, operation: str, duration_ms: float, **kwargs):
-        """Log performance metrics with structured data"""
-        message = f"PERF: {operation} ({duration_ms:.2f}ms)"
-        if kwargs:
-            message = f"{message} | {self._format_kwargs(kwargs)}"
-        self.logger.info(message)
+    def log(self, level: int, message: str, **kwargs):
+        """Log message at specified level with structured data."""
+        formatted_message = self._format_message(message, **kwargs)
+        self._logger.log(level, formatted_message)
 
 
-# Global logger instance
-logger = BetterBundleLogger()
+class StructuredFormatter(logging.Formatter):
+    """Custom formatter that outputs structured logs in a consistent format."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Create structured log entry
+        log_entry = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Add extra fields if they exist
+        if hasattr(record, "extra_fields"):
+            log_entry.update(record.extra_fields)
+
+        # Add exception info if present
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+
+        # Format as pipe-separated key-value pairs for readability
+        formatted_parts = []
+        for key, value in log_entry.items():
+            if value is not None:
+                formatted_parts.append(f"{key}={value}")
+
+        return " | ".join(formatted_parts)
 
 
-def get_logger(name: str = None) -> BetterBundleLogger:
-    """Get a logger instance"""
-    if name:
-        return BetterBundleLogger(name)
-    return logger
+class BaseLogHandler:
+    """Base class for different logging backends."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.handler = None
+
+    def get_handler(self) -> logging.Handler:
+        """Return the configured logging handler."""
+        raise NotImplementedError
+
+    def is_enabled(self) -> bool:
+        """Check if this handler is enabled."""
+        return self.config.get("enabled", False)
 
 
-# Convenience functions for backward compatibility
-def log_info(message: str, **kwargs):
-    """Log info message"""
-    logger.info(message, **kwargs)
+class FileLogHandler(BaseLogHandler):
+    """File-based logging handler."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.log_dir = Path(config.get("log_dir", "logs"))
+        self.log_dir.mkdir(exist_ok=True)
+
+        # Configure different log files for different levels
+        self.handlers = {}
+
+        # Main application log
+        if config.get("app_log_enabled", True):
+            app_handler = logging.handlers.RotatingFileHandler(
+                self.log_dir / "app.log",
+                maxBytes=config.get("max_file_size", 10 * 1024 * 1024),  # 10MB
+                backupCount=config.get("backup_count", 5),
+            )
+            app_handler.setLevel(logging.INFO)
+            self.handlers["app"] = app_handler
+
+        # Error log
+        if config.get("error_log_enabled", True):
+            error_handler = logging.handlers.RotatingFileHandler(
+                self.log_dir / "errors.log",
+                maxBytes=config.get("max_file_size", 10 * 1024 * 1024),  # 10MB
+                backupCount=config.get("backup_count", 5),
+            )
+            error_handler.setLevel(logging.ERROR)
+            self.handlers["error"] = error_handler
+
+        # Consumer log
+        if config.get("consumer_log_enabled", True):
+            consumer_handler = logging.handlers.RotatingFileHandler(
+                self.log_dir / "consumer.log",
+                maxBytes=config.get("max_file_size", 10 * 1024 * 1024),  # 10MB
+                backupCount=config.get("backup_count", 5),
+            )
+            consumer_handler.setLevel(logging.INFO)
+            self.handlers["consumer"] = consumer_handler
+
+    def get_handlers(self) -> Dict[str, logging.Handler]:
+        """Return all configured file handlers."""
+        return self.handlers
 
 
-def log_debug(message: str, **kwargs):
-    """Log debug message"""
-    logger.debug(message, **kwargs)
+class ConsoleLogHandler(BaseLogHandler):
+    """Console/terminal logging handler."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.handler = logging.StreamHandler(sys.stdout)
+        self.handler.setLevel(config.get("level", logging.INFO))
+
+    def get_handler(self) -> logging.Handler:
+        return self.handler
 
 
-def log_warning(message: str, **kwargs):
-    """Log warning message"""
-    logger.warning(message, **kwargs)
+class PrometheusLogHandler(BaseLogHandler):
+    """Prometheus metrics logging handler."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # This handler will integrate with prometheus-client
+        # for metrics collection
+        self.handler = None  # Prometheus doesn't need a traditional handler
+
+    def get_handler(self) -> logging.Handler:
+        # Return a no-op handler since Prometheus uses counters
+        return logging.NullHandler()
 
 
-def log_error(message: str, **kwargs):
-    """Log error message"""
-    logger.error(message, **kwargs)
+class GrafanaLogHandler(BaseLogHandler):
+    """Grafana Loki logging handler (placeholder for future implementation)."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Future: Implement Grafana Loki client
+        self.handler = None
+
+    def get_handler(self) -> logging.Handler:
+        # Placeholder - will implement actual Grafana integration
+        return logging.NullHandler()
 
 
-def log_exception(message: str, **kwargs):
-    """Log exception with traceback"""
-    logger.exception(message, **kwargs)
+class TelemetryLogHandler(BaseLogHandler):
+    """OpenTelemetry logging handler (placeholder for future implementation)."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Future: Implement OpenTelemetry client
+        self.handler = None
+
+    def get_handler(self) -> logging.Handler:
+        # Placeholder - will implement actual OpenTelemetry integration
+        return logging.NullHandler()
+
+
+class GCPLogHandler(BaseLogHandler):
+    """Google Cloud Logging handler (placeholder for future implementation)."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Future: Implement Google Cloud Logging client
+        self.handler = None
+
+    def get_handler(self) -> logging.Handler:
+        # Placeholder - will implement actual GCP integration
+        return logging.NullHandler()
+
+
+class AWSLogHandler(BaseLogHandler):
+    """AWS CloudWatch logging handler (placeholder for future implementation)."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Future: Implement AWS CloudWatch client
+        self.handler = None
+
+    def get_handler(self) -> logging.Handler:
+        # Placeholder - will implement actual AWS integration
+        return logging.NullHandler()
+
+
+class LoggerFactory:
+    """Factory class for creating and configuring loggers."""
+
+    def __init__(self):
+        self.loggers = {}
+        self._setup_logging()
+
+    def _setup_logging(self):
+        """Setup the logging configuration based on settings."""
+        # Get logging configuration from settings
+        log_config = getattr(settings, "LOGGING", {})
+
+        # Create handlers
+        handlers = []
+
+        # File logging
+        if log_config.get("file", {}).get("enabled", True):
+            file_handler = FileLogHandler(log_config.get("file", {}))
+            if file_handler.is_enabled():
+                for name, handler in file_handler.get_handlers().items():
+                    handler.setFormatter(StructuredFormatter())
+                    handlers.append(handler)
+
+        # Console logging
+        if log_config.get("console", {}).get("enabled", True):
+            console_handler = ConsoleLogHandler(log_config.get("console", {}))
+            if console_handler.is_enabled():
+                console_handler.get_handler().setFormatter(StructuredFormatter())
+                handlers.append(console_handler.get_handler())
+
+        # Prometheus logging
+        if log_config.get("prometheus", {}).get("enabled", True):
+            prometheus_handler = PrometheusLogHandler(log_config.get("prometheus", {}))
+            if prometheus_handler.is_enabled():
+                handlers.append(prometheus_handler.get_handler())
+
+        # Future backends (currently disabled by default)
+        future_handlers = [
+            ("grafana", GrafanaLogHandler),
+            ("telemetry", TelemetryLogHandler),
+            ("gcp", GCPLogHandler),
+            ("aws", AWSLogHandler),
+        ]
+
+        for name, handler_class in future_handlers:
+            if log_config.get(name, {}).get("enabled", False):
+                handler = handler_class(log_config.get(name, {}))
+                if handler.is_enabled():
+                    handlers.append(handler.get_handler())
+
+        # Configure root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_config.get("level", logging.INFO))
+
+        # Remove existing handlers to avoid duplicates
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+
+        # Add new handlers
+        for handler in handlers:
+            root_logger.addHandler(handler)
+
+    def get_logger(self, name: str) -> StructuredLogger:
+        """Get or create a logger with the specified name."""
+        if name not in self.loggers:
+            logger = logging.getLogger(name)
+            self.loggers[name] = logger
+        return StructuredLogger(logger)
+
+
+# Global logger factory instance
+_logger_factory = None
+
+
+def get_logger(name: str) -> StructuredLogger:
+    """Get a logger instance with the specified name."""
+    global _logger_factory
+    if _logger_factory is None:
+        _logger_factory = LoggerFactory()
+    return _logger_factory.get_logger(name)
+
+
+def configure_logging(config: Optional[Dict[str, Any]] = None):
+    """Reconfigure logging with new configuration."""
+    global _logger_factory
+    if config:
+        # Update settings if config provided
+        if hasattr(settings, "LOGGING"):
+            settings.LOGGING.update(config)
+
+    # Recreate logger factory with new configuration
+    _logger_factory = LoggerFactory()

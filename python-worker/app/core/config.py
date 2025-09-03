@@ -57,6 +57,10 @@ class Settings(BaseSettings):
         default="betterbundle:heuristic-decision-made",
         env="HEURISTIC_DECISION_MADE_STREAM",
     )
+    HEURISTIC_DECISION_STREAM: str = Field(
+        default="betterbundle:heuristic-decision-requested",
+        env="HEURISTIC_DECISION_STREAM",
+    )
     NEXT_ANALYSIS_SCHEDULED_STREAM: str = Field(
         default="betterbundle:next-analysis-scheduled",
         env="NEXT_ANALYSIS_SCHEDULED_STREAM",
@@ -64,10 +68,26 @@ class Settings(BaseSettings):
     COMPLETION_RESULTS_STREAM: str = Field(
         default="betterbundle:completion-results", env="COMPLETION_RESULTS_STREAM"
     )
+    COMPLETION_EVENTS_STREAM: str = Field(
+        default="betterbundle:ml-training-complete",
+        env="COMPLETION_EVENTS_STREAM",
+    )
 
     # Consumer Group Names
     DATA_PROCESSOR_GROUP: str = Field(
         default="data-processors", env="DATA_PROCESSOR_GROUP"
+    )
+    FEATURES_CONSUMER_GROUP: str = Field(
+        default="data-processors", env="FEATURES_CONSUMER_GROUP"
+    )
+    ML_TRAINING_GROUP: str = Field(
+        default="ml-training-consumers", env="ML_TRAINING_GROUP"
+    )
+    HEURISTIC_DECISION_GROUP: str = Field(
+        default="heuristic-decision-processors", env="HEURISTIC_DECISION_GROUP"
+    )
+    COMPLETION_HANDLER_GROUP: str = Field(
+        default="completion-handlers", env="COMPLETION_HANDLER_GROUP"
     )
 
     # External Services
@@ -111,6 +131,52 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_FORMAT: str = Field(default="json", env="LOG_FORMAT")  # json or console
 
+    # Comprehensive Logging Configuration
+    LOGGING: dict = Field(
+        default={
+            "level": "INFO",
+            "file": {
+                "enabled": True,
+                "log_dir": "logs",
+                "max_file_size": 10485760,  # 10MB
+                "backup_count": 5,
+                "app_log_enabled": True,
+                "error_log_enabled": True,
+                "consumer_log_enabled": True,
+            },
+            "console": {
+                "enabled": True,
+                "level": "INFO",
+            },
+            "prometheus": {
+                "enabled": True,
+            },
+            "grafana": {
+                "enabled": False,
+                "url": "",
+                "username": "",
+                "password": "",
+            },
+            "telemetry": {
+                "enabled": False,
+                "endpoint": "",
+                "service_name": "betterbundle-python-worker",
+            },
+            "gcp": {
+                "enabled": False,
+                "project_id": "",
+                "log_name": "betterbundle-python-worker",
+            },
+            "aws": {
+                "enabled": False,
+                "region": "",
+                "log_group": "betterbundle-python-worker",
+                "log_stream": "",
+            },
+        },
+        env="LOGGING",
+    )
+
     # Worker Configuration
     WORKER_ID: str = Field(default="python-worker-1", env="WORKER_ID")
     WORKER_CONCURRENCY: int = Field(default=4, env="WORKER_CONCURRENCY")
@@ -150,21 +216,21 @@ class Settings(BaseSettings):
     # Resource Optimization Settings
     CONSUMER_POLLING_INTERVAL_MS: int = Field(
         default=30000, env="CONSUMER_POLLING_INTERVAL_MS"
-    )  # 30 seconds
+    )  # 30 seconds (reduced from 60 to reduce timeout pressure)
     CONSUMER_BATCH_SIZE: int = Field(
         default=3, env="CONSUMER_BATCH_SIZE"
     )  # Process 3 events at once
     CONSUMER_IDLE_SLEEP_SECONDS: int = Field(
         default=10, env="CONSUMER_IDLE_SLEEP_SECONDS"
-    )  # 10 seconds
+    )  # 10 seconds (reduced from 15 for faster recovery)
     CONSUMER_ERROR_SLEEP_SECONDS: int = Field(
         default=15, env="CONSUMER_ERROR_SLEEP_SECONDS"
-    )  # 15 seconds
+    )  # 15 seconds (reduced from 30 for faster recovery)
 
     # Redis Timeout Settings
     REDIS_TIMEOUT_BUFFER_SECONDS: int = Field(
-        default=5, env="REDIS_TIMEOUT_BUFFER_SECONDS"
-    )  # 5 second buffer for Redis operations
+        default=30, env="REDIS_TIMEOUT_BUFFER_SECONDS"
+    )  # 30 second buffer for Redis operations (increased from 15)
 
     class Config:
         env_file = ".env"

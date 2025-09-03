@@ -63,13 +63,6 @@ async def train_gorse_model(request: GorseTrainingRequest) -> Dict[str, Any]:
             stream_name=settings.ML_TRAINING_STREAM, event_data=training_event
         )
 
-        logger.info(
-            "Gorse training event published",
-            job_id=job_id,
-            shop_id=request.shop_id,
-            stream=settings.ML_TRAINING_STREAM,
-        )
-
         return {
             "success": True,
             "message": "Gorse training event published successfully",

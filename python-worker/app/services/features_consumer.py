@@ -71,7 +71,8 @@ class FeaturesConsumer:
         """Main consumer loop for features computation events"""
         consumer_name = f"{settings.WORKER_ID}-features"
         consecutive_failures = 0
-        max_consecutive_failures = 3
+        # Circuit breaker configuration - less aggressive for better recovery
+        max_consecutive_failures = 10  # Increased from 3 to 10 for better resilience
 
         # Sleep intervals - configurable for resource optimization
         idle_sleep_interval = settings.CONSUMER_IDLE_SLEEP_SECONDS
@@ -80,7 +81,7 @@ class FeaturesConsumer:
         # Circuit breaker state
         circuit_breaker_open = False
         circuit_breaker_open_time = 0
-        circuit_breaker_timeout = 300  # 5 minutes
+        circuit_breaker_timeout = 600  # 10 minutes (increased from 5 minutes)
 
         loop_iteration = 0
 

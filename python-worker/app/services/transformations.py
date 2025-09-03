@@ -17,7 +17,7 @@ import json
 from prisma import Json
 from app.core.config import settings
 from app.core.database import get_database
-from app.core.logging import get_logger, log_error, log_performance
+from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -53,6 +53,21 @@ async def _batch_create_many(db, model, data, batch_size=100):
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _convert_datetime_to_iso(obj: Any) -> Any:
+    """
+    Recursively convert all datetime objects to ISO strings for JSON serialization.
+    This function handles nested dictionaries, lists, and other data structures.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: _convert_datetime_to_iso(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_datetime_to_iso(item) for item in obj]
+    else:
+        return obj
 
 
 async def _check_customer_data_availability(shop_id: str) -> Dict[str, Any]:
@@ -101,8 +116,6 @@ async def _compute_user_features(
         orders = await db.orderdata.find_many(
             where={"shopId": shop_id, "customerId": {"not": None}},
         )
-
-        logger.info(f"Fetched {len(orders)} orders for user features")
 
         if not orders:
             logger.warning(f"No orders found for shop {shop_id}")
@@ -163,9 +176,7 @@ async def _compute_user_features(
         if bulk_data:
             try:
                 await db.userfeatures.create_many(data=bulk_data, skip_duplicates=True)
-                logger.info(
-                    f"Successfully bulk inserted {len(bulk_data)} user features"
-                )
+
             except Exception as e:
                 logger.warning(
                     f"Bulk insert failed, falling back to individual upserts: {e}"
@@ -190,16 +201,12 @@ async def _compute_user_features(
                         },
                     )
 
-        logger.info(
-            f"Successfully processed {len(bulk_data)} customers for shop {shop_id}"
-        )
-
     except Exception as e:
         logger.error(f"Error computing user features for shop {shop_id}: {e}")
         raise
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_user_features", dur, shop_id=shop_id)
+
     return {"user_features_ms": dur}
 
 
@@ -215,10 +222,6 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
 
         products = await db.productdata.find_many(
             where={"shopId": shop_id},
-        )
-
-        logger.info(
-            f"Fetched {len(orders)} orders and {len(products)} products for shop {shop_id}"
         )
 
         if not orders:
@@ -237,10 +240,6 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
                 "price": product.price,
             }
             product_lookup[product.productId] = product
-
-        logger.info(
-            f"Initialized {len(product_stats)} products for feature computation"
-        )
 
         # Process line items to extract order data and update popularity
         for order in orders:
@@ -293,9 +292,7 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
                 await db.productfeatures.create_many(
                     data=bulk_data, skip_duplicates=True
                 )
-                logger.info(
-                    f"Successfully bulk inserted {len(bulk_data)} product features"
-                )
+
             except Exception as e:
                 logger.warning(
                     f"Bulk insert failed, falling back to individual upserts: {e}"
@@ -321,16 +318,11 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
                         },
                     )
 
-        logger.info(
-            f"Successfully processed {len(bulk_data)} products for shop {shop_id}"
-        )
-
     except Exception as e:
         logger.error(f"Error computing product features for shop {shop_id}: {e}")
         raise
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_product_features", dur, shop_id=shop_id)
     return {"product_features_ms": dur}
 
 
@@ -376,8 +368,6 @@ async def _compute_interaction_features(
             )
 
         orders_df = pd.DataFrame(orders_data)
-
-        logger.info(f"Fetched {len(orders_df)} orders for interaction features")
 
         # Convert orderDate to datetime
         orders_df["orderDate"] = pd.to_datetime(orders_df["orderDate"])
@@ -444,9 +434,7 @@ async def _compute_interaction_features(
                 await db.interactionfeatures.create_many(
                     data=bulk_data, skip_duplicates=True
                 )
-                logger.info(
-                    f"Successfully bulk inserted {len(bulk_data)} interaction features"
-                )
+
             except Exception as e:
                 logger.warning(
                     f"Bulk insert failed, falling back to individual upserts: {e}"
@@ -472,16 +460,12 @@ async def _compute_interaction_features(
                         },
                     )
 
-        logger.info(
-            f"Successfully processed {len(bulk_data)} interactions for shop {shop_id}"
-        )
-
     except Exception as e:
         logger.error(f"Error computing interaction features for shop {shop_id}: {e}")
         raise
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_interaction_features", dur, shop_id=shop_id)
+
     return {"interaction_features_ms": dur}
 
 
@@ -512,8 +496,6 @@ async def _compute_anonymous_features(shop_id: str) -> Dict[str, Any]:
             )
 
         orders_df = pd.DataFrame(orders_data)
-
-        logger.info(f"Fetched {len(orders_df)} orders for anonymous features")
 
         # Calculate shop-level metrics
         total_orders = len(orders_df)
@@ -574,14 +556,11 @@ async def _compute_anonymous_features(shop_id: str) -> Dict[str, Any]:
             },
         )
 
-        logger.info(f"Successfully computed anonymous features for shop {shop_id}")
-
     except Exception as e:
         logger.error(f"Error computing anonymous features for shop {shop_id}: {e}")
         raise
 
     dur = (asyncio.get_event_loop().time() - start) * 1000
-    log_performance("compute_anonymous_features", dur, shop_id=shop_id)
     return {"anonymous_features_ms": dur}
 
 
@@ -618,6 +597,7 @@ async def _should_skip_computation(shop_id: str) -> Dict[str, Any]:
 
         # Determine if we need to recompute
         skip_reason = None
+        hours_since_computation = None  # Initialize variable
 
         if (
             not last_user_features
@@ -652,9 +632,7 @@ async def _should_skip_computation(shop_id: str) -> Dict[str, Any]:
             ),
             "last_order_date": last_order.orderDate if last_order else None,
             "last_product_update": last_product.updatedAt if last_product else None,
-            "hours_since_computation": (
-                hours_since_computation if last_user_features else None
-            ),
+            "hours_since_computation": hours_since_computation,
         }
 
     except Exception as e:
@@ -673,9 +651,6 @@ async def run_transformations_for_shop(
         skip_check = await _should_skip_computation(shop_id)
 
         if skip_check["should_skip"]:
-            logger.info(
-                f"Skipping computation for shop {shop_id}: {skip_check['reason']}"
-            )
 
             # Convert datetime objects to ISO strings for JSON serialization
             last_computation = skip_check["last_computation"]
@@ -698,15 +673,9 @@ async def run_transformations_for_shop(
                 "message": "Features recently computed, no new data to process",
             }
 
-        logger.info(
-            f"Proceeding with computation for shop {shop_id}. Reason: {skip_check['reason']}"
-        )
-
         # Check data availability first
         data_status = await _check_customer_data_availability(shop_id)
         customer_data_available = data_status["has_customer_data"]
-
-        logger.info(f"Shop {shop_id} data status: {data_status}")
 
         if not customer_data_available:
             logger.warning(
@@ -748,8 +717,10 @@ async def run_transformations_for_shop(
                     stats["hours_since_computation"].total_seconds() / 3600
                 )
 
-        return stats
+        return _convert_datetime_to_iso(stats)
 
     except Exception as e:
-        log_error(e, {"operation": "run_transformations_for_shop", "shop_id": shop_id})
+        logger.error(
+            f"Transformations error | operation=run_transformations_for_shop | shop_id={shop_id} | error={str(e)}"
+        )
         raise

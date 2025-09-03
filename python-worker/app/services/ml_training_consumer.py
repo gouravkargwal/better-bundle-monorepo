@@ -26,15 +26,12 @@ class MLTrainingConsumer:
 
     async def initialize(self):
         """Initialize the consumer"""
-        logger.info("Initializing ML training consumer")
         await streams_manager.initialize()
         await gorse_service.initialize()
         await gorse_training_monitor.initialize()
-        logger.info("ML training consumer initialized")
 
     async def shutdown(self):
         """Gracefully shutdown the consumer"""
-        logger.info("Shutting down ML training consumer")
         self._shutdown_event.set()
 
         if self._consumer_task and not self._consumer_task.done():
@@ -46,8 +43,6 @@ class MLTrainingConsumer:
 
         # Shutdown the training monitor
         await gorse_training_monitor.shutdown()
-
-        logger.info("ML training consumer shutdown complete")
 
     def is_shutdown_requested(self) -> bool:
         """Check if shutdown has been requested"""
@@ -62,7 +57,6 @@ class MLTrainingConsumer:
         self._consumer_task = asyncio.create_task(
             self.consume_ml_training_events(), name="ml-training-consumer"
         )
-        logger.info("ML training consumer started")
 
     async def stop_consumer(self):
         """Stop the consumer task"""
@@ -72,7 +66,6 @@ class MLTrainingConsumer:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
-            logger.info("ML training consumer stopped")
 
     async def consume_ml_training_events(self):
         """Main consumer loop for ML training events"""
@@ -82,17 +75,15 @@ class MLTrainingConsumer:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
-        logger.info(f"Starting ML training consumer: {consumer_name}")
-
         while not self.is_shutdown_requested():
             try:
                 # Consume events from ML training stream
                 events = await streams_manager.consume_events(
                     stream_name=settings.ML_TRAINING_STREAM,
-                    consumer_group="ml-training-consumers",
+                    consumer_group=settings.ML_TRAINING_GROUP,
                     consumer_name=consumer_name,
-                    count=1,
-                    block=5000,  # 5 seconds
+                    count=settings.CONSUMER_BATCH_SIZE,
+                    block=10000,  # 10 seconds (increased from 5 seconds)
                 )
 
                 if events:
@@ -100,7 +91,6 @@ class MLTrainingConsumer:
 
                     for event in events:
                         if self.is_shutdown_requested():
-                            logger.info("Shutdown requested during event processing")
                             return
 
                         try:
@@ -147,8 +137,6 @@ class MLTrainingConsumer:
                 consecutive_failures += 1
                 await asyncio.sleep(5)
 
-        logger.info("ML training consumer loop ended")
-
     async def _process_ml_training_event(self, event: Dict[str, Any]):
         """Process a single ML training event"""
         try:
@@ -157,14 +145,6 @@ class MLTrainingConsumer:
             shop_id = event.get("shop_id")
             shop_domain = event.get("shop_domain")
             training_type = event.get("training_type")
-
-            logger.info(
-                "Processing ML training event",
-                event_type=event_type,
-                job_id=job_id,
-                shop_id=shop_id,
-                training_type=training_type,
-            )
 
             if (
                 event_type == "ML_TRAINING_REQUESTED"
@@ -188,12 +168,6 @@ class MLTrainingConsumer:
     ):
         """Process Gorse training for a shop"""
         try:
-            logger.info(
-                "Starting Gorse training",
-                job_id=job_id,
-                shop_id=shop_id,
-                shop_domain=shop_domain,
-            )
 
             # Create MLTrainingLog record to reflect in-progress status
             try:
@@ -206,11 +180,7 @@ class MLTrainingConsumer:
                         "startedAt": datetime.now(timezone.utc),
                     }
                 )
-                logger.info(
-                    "MLTrainingLog record created successfully",
-                    log_id=training_log.id,
-                    shop_id=shop_id,
-                )
+
             except Exception as e:
                 logger.warning(
                     "Failed to create MLTrainingLog record at start",
@@ -221,7 +191,6 @@ class MLTrainingConsumer:
             # Start monitoring Gorse training progress (resource-efficient)
             async def training_progress_callback(progress: Dict[str, Any]):
                 """Callback for training progress updates"""
-                logger.info(f"Training progress for shop {shop_id}: {progress}")
 
             await gorse_training_monitor.start_monitoring_shop(
                 shop_id=shop_id, job_id=job_id, callback=training_progress_callback
@@ -234,13 +203,6 @@ class MLTrainingConsumer:
 
             if result["success"]:
                 if result.get("skipped", False):
-                    logger.info(
-                        "Gorse training skipped - no data changes",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                        reason=result.get("reason"),
-                        hours_since_training=result.get("hours_since_training"),
-                    )
 
                     # Publish completion event for skipped training
                     completion_event = {
@@ -254,12 +216,6 @@ class MLTrainingConsumer:
                         "skipped_reason": result.get("reason"),
                     }
                 else:
-                    logger.info(
-                        "Gorse training completed successfully",
-                        job_id=job_id,
-                        shop_id=shop_id,
-                        result=result,
-                    )
 
                     # Publish completion event for successful training
                     completion_event = {
@@ -275,12 +231,6 @@ class MLTrainingConsumer:
                 await streams_manager.publish_event(
                     stream_name=settings.ML_TRAINING_COMPLETE_STREAM,
                     event_data=completion_event,
-                )
-
-                logger.info(
-                    "ML training completion event published",
-                    job_id=job_id,
-                    stream=settings.ML_TRAINING_COMPLETE_STREAM,
                 )
 
             else:
@@ -300,6 +250,8 @@ class MLTrainingConsumer:
                     "training_type": "gorse_recommendations",
                     "error": result.get("error"),
                     "failed_at": datetime.now().isoformat(),
+                    "success": False,  # Add success field
+                    "skipped": False,  # Add skipped field
                 }
 
                 await streams_manager.publish_event(

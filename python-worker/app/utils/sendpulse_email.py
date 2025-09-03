@@ -2,13 +2,13 @@
 SendPulse email service for sending analysis completion notifications
 """
 
-import structlog
+from app.core.logger import get_logger
 import httpx
 from typing import Dict, Any, Optional
 
 from app.core.config import settings
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class SendPulseEmailService:
@@ -139,11 +139,7 @@ class SendPulseEmailService:
                 )
 
                 if response.status_code == 200:
-                    logger.info(
-                        "Analysis completion email sent successfully",
-                        to_email=to_email,
-                        shop_domain=shop_domain,
-                    )
+
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
                     logger.error(
@@ -241,11 +237,7 @@ class SendPulseEmailService:
                 )
 
                 if response.status_code == 200:
-                    logger.info(
-                        "Analysis failure email sent successfully",
-                        to_email=to_email,
-                        shop_domain=shop_domain,
-                    )
+
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
                     logger.error(
@@ -350,11 +342,7 @@ class SendPulseEmailService:
                 )
 
                 if response.status_code == 200:
-                    logger.info(
-                        "Analysis started email sent successfully",
-                        to_email=to_email,
-                        shop_domain=shop_domain,
-                    )
+
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
                     logger.error(

@@ -45,8 +45,6 @@ def start_consumer_process():
         )
         _consumer_process.start()
 
-        logger.info(f"Consumer process started with PID: {_consumer_process.pid}")
-
     except Exception as e:
         logger.error(f"Failed to start consumer process: {e}")
         raise
@@ -117,7 +115,6 @@ def stop_consumer_process():
     global _consumer_process
 
     if _consumer_process and _consumer_process.is_alive():
-        logger.info(f"Stopping consumer process (PID: {_consumer_process.pid})")
         _consumer_process.terminate()
         _consumer_process.join(timeout=5)
 
@@ -127,12 +124,10 @@ def stop_consumer_process():
             _consumer_process.join()
 
         _consumer_process = None
-        logger.info("Consumer process stopped")
 
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
-    logger.info(f"Received signal {signum}, shutting down...")
     stop_consumer_process()
     sys.exit(0)
 
