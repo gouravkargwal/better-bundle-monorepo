@@ -10,7 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Raw data models for data collection
 model RawOrder {
   id           String   @id @default(cuid())
   shopId       String
@@ -108,6 +107,7 @@ model OrderData {
   @@unique([shopId, orderId])
   @@index([shopId, orderDate])
   @@index([shopId, customerId])
+  @@map("OrderData")
 }
 
 model ProductData {
@@ -137,6 +137,7 @@ model ProductData {
   @@index([shopId, category])
   @@index([shopId, price])
   @@index([shopId, isActive])
+  @@map("ProductData")
 }
 
 model CustomerData {
@@ -162,6 +163,7 @@ model CustomerData {
   @@index([shopId, email])
   @@index([shopId, totalSpent])
   @@index([shopId, lastOrderDate])
+  @@map("CustomerData")
 }
 
 model BundleAnalysisResult {
@@ -187,6 +189,7 @@ model BundleAnalysisResult {
   @@index([shopId, isActive])
   @@index([shopId, bundleSize])
   @@index([shopId, analysisDate])
+  @@map("BundleAnalysisResult")
 }
 
 model TrackedSale {
@@ -203,6 +206,7 @@ model TrackedSale {
   @@unique([shopId, shopifyOrderId])
   @@index([shopId, billingPeriod])
   @@index([shopId, status])
+  @@map("TrackedSale")
 }
 
 model WidgetEvent {
@@ -218,6 +222,7 @@ model WidgetEvent {
   @@index([shopId, sessionId])
   @@index([shopId, action])
   @@index([shopId, timestamp])
+  @@map("WidgetEvent")
 }
 
 model WidgetConfiguration {
@@ -234,6 +239,7 @@ model WidgetConfiguration {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  @@map("WidgetConfiguration")
 }
 
 model AnalysisJob {
@@ -253,6 +259,7 @@ model AnalysisJob {
   @@index([shopId, status])
   @@index([shopId, createdAt])
   @@index([status, createdAt])
+  @@map("AnalysisJob")
 }
 
 model ShopAnalysisConfig {
@@ -267,16 +274,34 @@ model ShopAnalysisConfig {
 }
 
 model HeuristicDecision {
-  id        String   @id @default(cuid())
-  shopId    String
-  decision  String
-  reason    String
-  metadata  Json?
-  createdAt DateTime @default(now())
-  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                    String   @id @default(cuid())
+  shopId                String
+  decision              String   // Human-readable decision
+  reason                String   // Detailed reasoning
+  nextAnalysisHours     Int      // Next analysis interval in hours
+  confidence            Float    // Confidence score (0.0 to 1.0)
+  
+  // Key heuristic factors as individual fields
+  orderVolume           Float    // Orders per day
+  revenueVelocity       Float    // Revenue per day
+  bundleEffectiveness   Float    // Bundle performance score (0.0 to 1.0)
+  dataChangeRate        Float    // Data change percentage
+  shopActivityLevel     String   // 'low', 'medium', 'high'
+  userEngagement        Float    // User engagement score (0.0 to 1.0)
+  
+  // Additional metadata
+  reasoningSummary      String?  // Summary of reasoning
+  analysisTimestamp     DateTime @default(now())
+  createdAt             DateTime @default(now())
+  
+  // Relations
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, decision])
   @@index([shopId, createdAt])
+  @@index([nextAnalysisHours])
+  @@index([confidence])
+  @@map("HeuristicDecision")
 }
 
 model IncrementalAnalysisLog {
@@ -329,6 +354,7 @@ model ShopAnalytics {
 
   @@index([shopId, totalRevenue])
   @@index([shopId, totalOrders])
+  @@map("ShopAnalytics")
 }
 
 // Billing models
@@ -391,7 +417,10 @@ model MLTrainingLog {
   @@index([shopId, status])
   @@index([shopId, createdAt])
   @@index([status, createdAt])
+  @@map("MLTrainingLog")
 }
+
+
 
 model FeatureComputation {
   id          String   @id @default(cuid())
@@ -406,6 +435,7 @@ model FeatureComputation {
 
   @@index([shopId, status])
   @@index([shopId, createdAt])
+  @@map("FeatureComputation")
 }
 
 model UserFeatures {
@@ -423,6 +453,7 @@ model UserFeatures {
   @@unique([shopId, customerId])
   @@index([shopId, totalSpent])
   @@index([shopId, recencyDays])
+  @@map("UserFeatures")
 }
 
 model ProductFeatures {
@@ -441,6 +472,7 @@ model ProductFeatures {
   @@index([shopId, popularity])
   @@index([shopId, priceTier])
   @@index([shopId, category])
+  @@map("ProductFeatures")
 }
 
 model InteractionFeatures {
@@ -458,4 +490,5 @@ model InteractionFeatures {
   @@index([shopId, customerId])
   @@index([shopId, productId])
   @@index([shopId, timeDecayedWeight])
+  @@map("InteractionFeatures")
 }

@@ -56,11 +56,26 @@ class CompletionHandler:
             job_id = event_data.get("job_id")
             shop_id = event_data.get("shop_id")
             shop_domain = event_data.get("shop_domain")
+            event_type = event_data.get("event_type")
             success = event_data.get("success", False)
             error = event_data.get("error")
             analysis_result = event_data.get("analysis_result")
             skipped = event_data.get("skipped", False)
             skipped_reason = event_data.get("skipped_reason")
+            
+            # Handle different event types
+            if event_type == "GORSE_TRAINING_TIMEOUT":
+                return await self._handle_training_timeout(event_data)
+            elif event_type == "GORSE_TRAINING_FAILED":
+                return await self._handle_training_failure(event_data)
+            elif event_type == "GORSE_TRAINING_COMPLETED":
+                return await self._handle_training_success(event_data)
+            elif event_type in ["ML_TRAINING_COMPLETED", "ML_TRAINING_SKIPPED", "ML_TRAINING_FAILED"]:
+                # Handle legacy ML training events
+                pass
+            else:
+                logger.warning(f"Unknown event type: {event_type}")
+                return {"success": False, "error": f"Unknown event type: {event_type}"}
 
             # Step 1: Update job status
             await self._update_job_status(job_id, success, error)
@@ -153,6 +168,141 @@ class CompletionHandler:
 
         except Exception as e:
             logger.error("Error handling ML training completion", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def _handle_training_timeout(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle training timeout event"""
+        try:
+            job_id = event_data.get("job_id")
+            shop_id = event_data.get("shop_id")
+            shop_domain = event_data.get("shop_domain")
+            monitoring_duration = event_data.get("monitoring_duration")
+            reason = event_data.get("reason", "Monitoring timeout")
+
+            logger.warning(
+                "⏰ ML training monitoring timeout",
+                job_id=job_id,
+                shop_id=shop_id,
+                monitoring_duration=monitoring_duration,
+                reason=reason,
+            )
+
+            # Update job status to indicate timeout
+            await self._update_job_status(job_id, False, f"Monitoring timeout: {reason}")
+
+            # Update shop's last analysis timestamp
+            await self._update_shop_analysis_timestamp(shop_id)
+
+            # Schedule next analysis using heuristic
+            schedule_result = await self._schedule_next_analysis(shop_id, None)
+
+            # Publish heuristic decision requested event
+            await self._publish_heuristic_decision_requested(
+                event_data, schedule_result
+            )
+
+            return {
+                "success": False,
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "error": f"Monitoring timeout: {reason}",
+                "monitoring_duration": monitoring_duration,
+                "schedule_result": schedule_result,
+                "message": "Training monitoring timed out, but training may still be in progress",
+            }
+
+        except Exception as e:
+            logger.error("Error handling training timeout", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def _handle_training_failure(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle training failure event"""
+        try:
+            job_id = event_data.get("job_id")
+            shop_id = event_data.get("shop_id")
+            shop_domain = event_data.get("shop_domain")
+            error = event_data.get("error")
+            monitoring_duration = event_data.get("monitoring_duration")
+
+            logger.error(
+                "❌ Gorse training failed",
+                job_id=job_id,
+                shop_id=shop_id,
+                error=error,
+                monitoring_duration=monitoring_duration,
+            )
+
+            # Update job status
+            await self._update_job_status(job_id, False, error)
+
+            # Update shop's last analysis timestamp
+            await self._update_shop_analysis_timestamp(shop_id)
+
+            # Schedule next analysis using heuristic
+            schedule_result = await self._schedule_next_analysis(shop_id, None)
+
+            # Publish heuristic decision requested event
+            await self._publish_heuristic_decision_requested(
+                event_data, schedule_result
+            )
+
+            return {
+                "success": False,
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "error": error,
+                "monitoring_duration": monitoring_duration,
+                "schedule_result": schedule_result,
+                "message": "Gorse training failed, scheduled next analysis",
+            }
+
+        except Exception as e:
+            logger.error("Error handling training failure", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def _handle_training_success(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle training success event"""
+        try:
+            job_id = event_data.get("job_id")
+            shop_id = event_data.get("shop_id")
+            shop_domain = event_data.get("shop_domain")
+            progress = event_data.get("progress", {})
+            monitoring_duration = event_data.get("monitoring_duration")
+
+            logger.info(
+                "✅ Gorse training completed successfully",
+                job_id=job_id,
+                shop_id=shop_id,
+                monitoring_duration=monitoring_duration,
+                completion_score=progress.get("completion_score"),
+            )
+
+            # Update job status
+            await self._update_job_status(job_id, True, None)
+
+            # Update shop's last analysis timestamp
+            await self._update_shop_analysis_timestamp(shop_id)
+
+            # Schedule next analysis using heuristic
+            schedule_result = await self._schedule_next_analysis(shop_id, None)
+
+            # Publish heuristic decision requested event
+            await self._publish_heuristic_decision_requested(
+                event_data, schedule_result
+            )
+
+            return {
+                "success": True,
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "monitoring_duration": monitoring_duration,
+                "progress": progress,
+                "schedule_result": schedule_result,
+                "message": "Gorse training completed successfully",
+            }
+
+        except Exception as e:
+            logger.error("Error handling training success", error=str(e))
             return {"success": False, "error": str(e)}
 
     async def _update_job_status(
@@ -295,7 +445,11 @@ class CompletionHandler:
                 "shop_domain": event_data.get("shop_domain"),
                 "training_result": event_data.get("result"),
                 "requested_at": datetime.now(timezone.utc).isoformat(),
-                "schedule_result": schedule_result,
+                "schedule_result": {
+                    "success": schedule_result.get("success") if schedule_result else False,
+                    "next_scheduled_time": schedule_result.get("next_scheduled_time").isoformat() if schedule_result and schedule_result.get("next_scheduled_time") else None,
+                    "error": schedule_result.get("error") if schedule_result else None,
+                } if schedule_result else None,
             }
 
             message_id = await streams_manager.publish_event(

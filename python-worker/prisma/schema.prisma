@@ -272,16 +272,34 @@ model ShopAnalysisConfig {
 }
 
 model HeuristicDecision {
-  id        String   @id @default(cuid())
-  shopId    String
-  decision  String
-  reason    String
-  metadata  Json?
-  createdAt DateTime @default(now())
-  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                    String   @id @default(cuid())
+  shopId                String
+  decision              String   // Human-readable decision
+  reason                String   // Detailed reasoning
+  nextAnalysisHours     Int      // Next analysis interval in hours
+  confidence            Float    // Confidence score (0.0 to 1.0)
+  
+  // Key heuristic factors as individual fields
+  orderVolume           Float    // Orders per day
+  revenueVelocity       Float    // Revenue per day
+  bundleEffectiveness   Float    // Bundle performance score (0.0 to 1.0)
+  dataChangeRate        Float    // Data change percentage
+  shopActivityLevel     String   // 'low', 'medium', 'high'
+  userEngagement        Float    // User engagement score (0.0 to 1.0)
+  
+  // Additional metadata
+  reasoningSummary      String?  // Summary of reasoning
+  analysisTimestamp     DateTime @default(now())
+  createdAt             DateTime @default(now())
+  
+  // Relations
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, decision])
   @@index([shopId, createdAt])
+  @@index([nextAnalysisHours])
+  @@index([confidence])
+  @@map("HeuristicDecision")
 }
 
 model IncrementalAnalysisLog {
@@ -399,6 +417,8 @@ model MLTrainingLog {
   @@index([status, createdAt])
   @@map("MLTrainingLog")
 }
+
+
 
 model FeatureComputation {
   id          String   @id @default(cuid())

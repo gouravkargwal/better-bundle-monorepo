@@ -214,6 +214,8 @@ class MLTrainingConsumer:
                         "result": result,
                         "completed_at": datetime.now().isoformat(),
                         "skipped_reason": result.get("reason"),
+                        "success": True,  # Add success field
+                        "skipped": True,  # Add skipped field
                     }
                 else:
 
@@ -226,6 +228,8 @@ class MLTrainingConsumer:
                         "training_type": "gorse_recommendations",
                         "result": result,
                         "completed_at": datetime.now().isoformat(),
+                        "success": True,  # Add success field
+                        "skipped": False,  # Add skipped field
                     }
 
                 await streams_manager.publish_event(

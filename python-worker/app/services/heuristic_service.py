@@ -169,7 +169,6 @@ class AnalysisHeuristicService:
             # Sum revenue in last 30 days
             orders = await self.db.orderdata.find_many(
                 where={"shopId": shop_id, "orderDate": {"gte": thirty_days_ago}},
-                select={"totalAmount": True},
             )
 
             total_revenue = sum(order.totalAmount for order in orders)
@@ -230,14 +229,20 @@ class AnalysisHeuristicService:
             latest_order = await self.db.orderdata.find_first(
                 where={"shopId": shop_id},
                 order={"orderDate": "desc"},
-                select={"orderDate": True},
             )
 
             if not latest_order:
                 return 0.0
 
             # Calculate days since last order
-            days_since_order = (datetime.now() - latest_order.orderDate).days
+            # Ensure both datetimes are timezone-aware
+            now = datetime.now().replace(tzinfo=None)
+            order_date = (
+                latest_order.orderDate.replace(tzinfo=None)
+                if latest_order.orderDate.tzinfo
+                else latest_order.orderDate
+            )
+            days_since_order = (now - order_date).days
 
             # Higher change rate for more recent activity
             if days_since_order <= 1:
@@ -431,43 +436,63 @@ class AnalysisHeuristicService:
         heuristic_result: HeuristicResult,
         analysis_result: Optional[Dict[str, Any]],
     ):
-        """Store heuristic decision for learning"""
+        """Store heuristic decision for learning - Using individual fields for reliability"""
         try:
+            # Store key heuristic values as individual fields (more reliable than JSON metadata)
             await self.db.heuristicdecision.create(
                 data={
                     "shopId": shop_id,
-                    "predictedInterval": heuristic_result.next_analysis_hours,
-                    "factors": heuristic_result.factors.__dict__,
-                    "reasoning": heuristic_result.reasoning,
-                    "confidence": heuristic_result.confidence,
-                    "analysisResult": analysis_result or {},
+                    "decision": f"Next analysis in {heuristic_result.next_analysis_hours} hours",
+                    "reason": f"Based on heuristic factors: order_volume={heuristic_result.factors.order_volume:.2f}, revenue_velocity={heuristic_result.factors.revenue_velocity:.2f}, confidence={heuristic_result.confidence:.2f}",
+                    "nextAnalysisHours": int(heuristic_result.next_analysis_hours),
+                    "confidence": float(heuristic_result.confidence),
+                    "orderVolume": float(heuristic_result.factors.order_volume),
+                    "revenueVelocity": float(heuristic_result.factors.revenue_velocity),
+                    "bundleEffectiveness": float(
+                        heuristic_result.factors.bundle_effectiveness
+                    ),
+                    "dataChangeRate": float(heuristic_result.factors.data_change_rate),
+                    "shopActivityLevel": str(
+                        heuristic_result.factors.shop_activity_level
+                    ),
+                    "userEngagement": float(heuristic_result.factors.user_engagement),
+                    "reasoningSummary": (
+                        str(heuristic_result.reasoning[0])
+                        if heuristic_result.reasoning
+                        else "No reasoning provided"
+                    ),
+                    "analysisTimestamp": datetime.now(),
                 }
             )
+
+            logger.info(
+                "Heuristic decision stored successfully",
+                shop_id=shop_id,
+                next_analysis_hours=heuristic_result.next_analysis_hours,
+                confidence=heuristic_result.confidence,
+            )
+
         except Exception as e:
             logger.error(
                 "Error storing heuristic decision", shop_id=shop_id, error=str(e)
             )
+            # Don't fail the main flow - heuristic storage is not critical
 
     async def get_shops_due_for_analysis(self) -> List[Dict[str, Any]]:
         """Get all shops that are due for analysis"""
         try:
             now = datetime.now()
 
-            # Get all shops with analysis configs
-            shops = await self.db.shopanalysisconfig.find_many(
+            # Get all shops that haven't been analyzed recently (default to 7 days)
+            default_analysis_interval = timedelta(days=7)
+
+            shops = await self.db.shop.find_many(
                 where={
-                    "autoAnalysisEnabled": True,
-                    "nextScheduledAnalysis": {"lte": now},
-                },
-                include={
-                    "shop": {
-                        "select": {
-                            "id": True,
-                            "shopId": True,
-                            "shopDomain": True,
-                            "accessToken": True,
-                        }
-                    }
+                    "isActive": True,
+                    "OR": [
+                        {"lastAnalysisAt": None},
+                        {"lastAnalysisAt": {"lte": now - default_analysis_interval}},
+                    ],
                 },
             )
 
@@ -492,32 +517,11 @@ class AnalysisHeuristicService:
                 hours=heuristic_result.next_analysis_hours
             )
 
-            # Update or create shop analysis config
-            await self.db.shopanalysisconfig.upsert(
-                where={"shopId": shop_id},
+            # Update shop's last analysis timestamp
+            await self.db.shop.update(
+                where={"id": shop_id},
                 data={
-                    "update": {
-                        "lastAnalysisAt": datetime.now(),
-                        "nextScheduledAnalysis": next_scheduled_time,
-                        "heuristicFactors": heuristic_result.factors.__dict__,
-                        "lastHeuristicResult": {
-                            "nextAnalysisHours": heuristic_result.next_analysis_hours,
-                            "reasoning": heuristic_result.reasoning,
-                            "confidence": heuristic_result.confidence,
-                        },
-                    },
-                    "create": {
-                        "shopId": shop_id,
-                        "lastAnalysisAt": datetime.now(),
-                        "nextScheduledAnalysis": next_scheduled_time,
-                        "heuristicFactors": heuristic_result.factors.__dict__,
-                        "lastHeuristicResult": {
-                            "nextAnalysisHours": heuristic_result.next_analysis_hours,
-                            "reasoning": heuristic_result.reasoning,
-                            "confidence": heuristic_result.confidence,
-                        },
-                        "autoAnalysisEnabled": True,
-                    },
+                    "lastAnalysisAt": datetime.now(),
                 },
             )
 

@@ -765,8 +765,8 @@ class GorseService:
                             if existing_log.startedAt
                             else None
                         ),
-                        "productsCount": gorse_result.get("items_inserted", 0),
-                        "usersCount": gorse_result.get("users_inserted", 0),
+                        "productsCount": int(gorse_result.get("items_inserted", 0)),
+                        "usersCount": int(gorse_result.get("users_inserted", 0)),
                         "error": (
                             None if gorse_result.get("items_inserted") else "failed"
                         ),
@@ -797,8 +797,8 @@ class GorseService:
                             else None
                         ),
                         "durationMs": 0,  # No duration for immediate completion
-                        "productsCount": gorse_result.get("items_inserted", 0),
-                        "usersCount": gorse_result.get("users_inserted", 0),
+                        "productsCount": int(gorse_result.get("items_inserted", 0)),
+                        "usersCount": int(gorse_result.get("users_inserted", 0)),
                         "error": (
                             None
                             if gorse_result.get("items_inserted")
