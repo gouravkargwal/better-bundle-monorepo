@@ -258,11 +258,6 @@ async def _compute_product_features(shop_id: str) -> Dict[str, Any]:
                     # Update popularity for products that were ordered
                     if product_id in product_stats:
                         product_stats[product_id]["popularity"] += quantity
-                    else:
-                        # Handle case where product in order doesn't exist in our product data
-                        logger.warning(
-                            f"Product {product_id} in order not found in product data"
-                        )
 
             except Exception as e:
                 logger.warning(f"Error processing line items: {e}")
@@ -681,13 +676,25 @@ async def run_transformations_for_shop(
             logger.info(
                 f"Skipping computation for shop {shop_id}: {skip_check['reason']}"
             )
+
+            # Convert datetime objects to ISO strings for JSON serialization
+            last_computation = skip_check["last_computation"]
+            if last_computation and hasattr(last_computation, "isoformat"):
+                last_computation = last_computation.isoformat()
+
+            hours_since_computation = skip_check["hours_since_computation"]
+            if hours_since_computation and hasattr(
+                hours_since_computation, "total_seconds"
+            ):
+                hours_since_computation = hours_since_computation.total_seconds() / 3600
+
             return {
                 "success": True,
                 "shop_id": shop_id,
                 "skipped": True,
                 "reason": skip_check["reason"],
-                "last_computation": skip_check["last_computation"],
-                "hours_since_computation": skip_check["hours_since_computation"],
+                "last_computation": last_computation,
+                "hours_since_computation": hours_since_computation,
                 "message": "Features recently computed, no new data to process",
             }
 
@@ -727,6 +734,20 @@ async def run_transformations_for_shop(
 
         stats["data_availability"] = data_status
         stats["computation_info"] = skip_check
+        stats["success"] = True
+        stats["shop_id"] = shop_id
+
+        # Convert datetime objects to ISO strings for JSON serialization
+        if "last_computation" in stats and stats["last_computation"]:
+            if hasattr(stats["last_computation"], "isoformat"):
+                stats["last_computation"] = stats["last_computation"].isoformat()
+
+        if "hours_since_computation" in stats and stats["hours_since_computation"]:
+            if hasattr(stats["hours_since_computation"], "total_seconds"):
+                stats["hours_since_computation"] = (
+                    stats["hours_since_computation"].total_seconds() / 3600
+                )
+
         return stats
 
     except Exception as e:

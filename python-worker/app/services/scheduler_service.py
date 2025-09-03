@@ -75,7 +75,7 @@ class SchedulerService:
                         shop_id=shop.id,
                         shop_domain=shop.shopDomain,
                         access_token=shop.accessToken,
-                        job_type="scheduled"
+                        job_type="scheduled",
                     )
 
                     logger.info(
@@ -158,10 +158,10 @@ class SchedulerService:
                     "jobId": job_id,
                     "shopId": shop.id,
                     "status": "queued",
-                        "progress": 0,
-                        "createdAt": datetime.now(),
-                    }
-                )
+                    "progress": 0,
+                    "createdAt": datetime.now(),
+                }
+            )
 
             # Publish to Redis Streams
             message_id = await streams_manager.publish_data_job_event(
@@ -169,7 +169,7 @@ class SchedulerService:
                 shop_id=shop.id,
                 shop_domain=shop.shopDomain,
                 access_token=shop.accessToken,
-                job_type="manual"
+                job_type="manual",
             )
 
             logger.info(

@@ -23,11 +23,6 @@ async def get_redis_client() -> Redis:
     global _redis_instance
 
     if _redis_instance is None:
-        logger.log_redis_operation(
-            "initializing_connection",
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-        )
 
         # Simplified Redis configuration for local development
         redis_config = {
@@ -71,11 +66,9 @@ async def close_redis_client() -> None:
     global _redis_instance
 
     if _redis_instance:
-        logger.log_redis_operation("closing_connection")
         try:
             await _redis_instance.close()
             _redis_instance = None
-            logger.log_redis_operation("connection_closed")
         except Exception as e:
             logger.log_redis_operation("connection_close_error", error=str(e))
 
@@ -189,7 +182,8 @@ class RedisStreamsManager:
                             count=count,
                             block=block,
                         ),
-                        timeout=(block / 1000) + 1,  # Add 1 second buffer
+                        timeout=(block / 1000)
+                        + settings.REDIS_TIMEOUT_BUFFER_SECONDS,  # Configurable buffer
                     )
 
             except asyncio.TimeoutError:

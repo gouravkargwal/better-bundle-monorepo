@@ -37,6 +37,7 @@ def start_consumer_process():
         from app.services.ml_training_consumer import ml_training_consumer
         from app.services.completion_handler import completion_handler
         from app.services.heuristic_decision_consumer import heuristic_decision_consumer
+        from app.services.features_consumer import features_consumer
 
         # Start consumer in separate process
         _consumer_process = multiprocessing.Process(
@@ -59,6 +60,7 @@ def run_consumer_worker():
         from app.services.ml_training_consumer import ml_training_consumer
         from app.services.completion_handler import completion_handler
         from app.services.heuristic_decision_consumer import heuristic_decision_consumer
+        from app.services.features_consumer import features_consumer
 
         # Setup logging for the worker process
         from app.core.logger import get_logger
@@ -66,28 +68,40 @@ def run_consumer_worker():
         worker_logger = get_logger("consumer-worker")
         worker_logger.info("Starting consumer worker process")
 
-        # Run all consumers
+        # Run all consumers with resource optimization
         async def run_consumers():
-            # Start all consumers
+            # Initialize only enabled consumers
             await data_processor.initialize()
-            await ml_training_consumer.initialize()
-            await completion_handler.initialize()
-            await heuristic_decision_consumer.initialize()
 
-            # Start consumer tasks
+            if settings.ENABLE_FEATURES_CONSUMER:
+                await features_consumer.initialize()
+            if settings.ENABLE_ML_TRAINING_CONSUMER:
+                await ml_training_consumer.initialize()
+            if settings.ENABLE_COMPLETION_HANDLER:
+                await completion_handler.initialize()
+            if settings.ENABLE_HEURISTIC_DECISION_CONSUMER:
+                await heuristic_decision_consumer.initialize()
+
+            # Start only enabled consumers
             await data_processor.start_consumer()
-            await ml_training_consumer.start_consumer()
-            await completion_handler.start_consumer()
-            await heuristic_decision_consumer.start_consumer()
 
-            # Wait for all to complete (they run indefinitely)
-            await asyncio.gather(
-                data_processor._consumer_task,
-                ml_training_consumer._consumer_task,
-                completion_handler._consumer_task,
-                heuristic_decision_consumer._consumer_task,
-                return_exceptions=True,
-            )
+            consumer_tasks = [data_processor._consumer_task]
+
+            if settings.ENABLE_FEATURES_CONSUMER:
+                await features_consumer.start_consumer()
+                consumer_tasks.append(features_consumer._consumer_task)
+            if settings.ENABLE_ML_TRAINING_CONSUMER:
+                await ml_training_consumer.start_consumer()
+                consumer_tasks.append(ml_training_consumer._consumer_task)
+            if settings.ENABLE_COMPLETION_HANDLER:
+                await completion_handler.start_consumer()
+                consumer_tasks.append(completion_handler._consumer_task)
+            if settings.ENABLE_HEURISTIC_DECISION_CONSUMER:
+                await heuristic_decision_consumer.start_consumer()
+                consumer_tasks.append(heuristic_decision_consumer._consumer_task)
+
+            # Wait for all enabled consumers to complete
+            await asyncio.gather(*consumer_tasks, return_exceptions=True)
 
         asyncio.run(run_consumers())
 
@@ -126,32 +140,24 @@ def signal_handler(signum, frame):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    # Startup
-    logger.info("Starting Python Worker application")
 
-    # Initialize database connection
     await get_database()
-    logger.info("Database connection initialized")
 
     # Initialize Redis connection
     await get_redis_client()
-    logger.info("Redis connection initialized")
 
     # Start Redis stream consumer in separate process
     start_consumer_process()
-    logger.info("Redis stream consumer started in separate process")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down Python Worker application")
 
     # Stop consumer process
     stop_consumer_process()
 
     await close_database()
     await close_redis_client()
-    logger.info("Application shutdown complete")
 
 
 # Register signal handlers

@@ -163,9 +163,18 @@ class DataCollectionService:
                 }
                 order_data.append(order_record)
 
-            # Save to database
-            if is_incremental:
-                # For incremental saves, use upsert for each order
+            # Save to database - always use batch operations for better performance
+            try:
+                # Use create_many with skip_duplicates for better performance
+                # This handles both new and existing records efficiently
+                await self.db.orderdata.create_many(
+                    data=order_data, skip_duplicates=True
+                )
+            except Exception as batch_error:
+                logger.warning(
+                    f"Batch insert failed, falling back to individual upserts: {batch_error}"
+                )
+                # Fallback to individual upserts if batch fails
                 for order_record in order_data:
                     await self.db.orderdata.upsert(
                         where={
@@ -183,11 +192,6 @@ class DataCollectionService:
                             },
                         },
                     )
-            else:
-                # For complete saves, use create_many for better performance
-                await self.db.orderdata.create_many(
-                    data=order_data, skip_duplicates=False
-                )
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             log_performance(
@@ -264,32 +268,63 @@ class DataCollectionService:
                 is_incremental=is_incremental,
             )
 
-            if is_incremental:
-                # For incremental saves, use upsert to update existing or create new
-                for product in products:
-                    product_record = {
-                        "shopId": shop_db_id,
-                        "productId": str(product["id"]),
-                        "title": product["title"],
-                        "handle": product["handle"],
-                        "category": product.get("product_type"),
-                        "price": float(
-                            product.get("variants", [{}])[0].get("price", 0)
-                        ),
-                        "inventory": product.get("variants", [{}])[0].get(
-                            "inventory_quantity", 0
-                        ),
-                        "tags": Json(product.get("tags", [])),
-                        "imageUrl": product.get("image", {}).get("src"),
-                        "imageAlt": product.get("image", {}).get("alt"),
-                        "isActive": True,
-                    }
+            # Always use batch operations for better performance
+            # First, save raw data to RawProduct table
+            await self.save_raw_products(shop_db_id, products)
 
+            # Prepare product data for batch insert
+            product_data = []
+            for product in products:
+                product_record = {
+                    "shopId": shop_db_id,
+                    "productId": str(product["id"]),
+                    "title": product["title"],
+                    "handle": product["handle"],
+                    "description": product.get("description"),
+                    "category": product.get("product_type"),
+                    "vendor": product.get("vendor"),
+                    "price": float(product.get("variants", [{}])[0].get("price", 0)),
+                    "compareAtPrice": (
+                        float(product["variants"][0]["compareAtPrice"])
+                        if product.get("variants")
+                        and product["variants"][0].get("compareAtPrice")
+                        else None
+                    ),
+                    "inventory": product.get("variants", [{}])[0].get(
+                        "inventory_quantity", 0
+                    ),
+                    "tags": Json(product.get("tags", [])),
+                    "imageUrl": product.get("image", {}).get("src"),
+                    "imageAlt": product.get("image", {}).get("alt"),
+                    "productCreatedAt": (
+                        datetime.fromisoformat(
+                            product["created_at"].replace("Z", "+00:00")
+                        )
+                        if product.get("created_at")
+                        else None
+                    ),
+                    "variants": Json(product.get("variants")),
+                    "metafields": Json(product.get("metafields")),
+                    "isActive": True,
+                }
+                product_data.append(product_record)
+
+            # Use create_many with skip_duplicates for better performance
+            try:
+                await self.db.productdata.create_many(
+                    data=product_data, skip_duplicates=True
+                )
+            except Exception as batch_error:
+                logger.warning(
+                    f"Batch insert failed, falling back to individual upserts: {batch_error}"
+                )
+                # Fallback to individual upserts if batch fails
+                for product_record in product_data:
                     await self.db.productdata.upsert(
                         where={
                             "shopId_productId": {
-                                "shopId": shop_db_id,
-                                "productId": str(product["id"]),
+                                "shopId": product_record["shopId"],
+                                "productId": product_record["productId"],
                             }
                         },
                         data={
@@ -301,50 +336,6 @@ class DataCollectionService:
                             },
                         },
                     )
-            else:
-                # First, save raw data to RawProduct table
-                await self.save_raw_products(shop_db_id, products)
-
-                # For complete saves, use create_many for better performance
-                product_data = []
-                for product in products:
-                    product_record = {
-                        "shopId": shop_db_id,
-                        "productId": str(product["id"]),
-                        "title": product["title"],
-                        "handle": product["handle"],
-                        "description": product.get("description"),
-                        "category": product.get("product_type"),
-                        "vendor": product.get("vendor"),
-                        "price": float(
-                            product.get("variants", [{}])[0].get("price", 0)
-                        ),
-                        "compareAtPrice": (
-                            float(product["variants"][0]["compareAtPrice"])
-                            if product.get("variants")
-                            and product["variants"][0].get("compareAtPrice")
-                            else None
-                        ),
-                        "inventory": product.get("variants", [{}])[0].get(
-                            "inventory_quantity", 0
-                        ),
-                        "tags": Json(product.get("tags", [])),
-                        "imageUrl": product.get("image", {}).get("src"),
-                        "imageAlt": product.get("image", {}).get("alt"),
-                        "productCreatedAt": (
-                            datetime.fromisoformat(
-                                product["created_at"].replace("Z", "+00:00")
-                            )
-                            if product.get("created_at")
-                            else None
-                        ),
-                        "variants": Json(product.get("variants")),
-                        "metafields": Json(product.get("metafields")),
-                        "isActive": True,
-                    }
-                    product_data.append(product_record)
-
-                await self.db.productdata.create_many(data=product_data)
 
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             log_performance(

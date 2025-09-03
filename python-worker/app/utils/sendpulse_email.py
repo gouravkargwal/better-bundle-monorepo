@@ -13,14 +13,14 @@ logger = structlog.get_logger(__name__)
 
 class SendPulseEmailService:
     """Service for sending emails via SendPulse"""
-    
+
     def __init__(self):
         self.api_url = "https://api.sendpulse.com"
         self.api_user_id = settings.SENDPULSE_USER_ID
         self.api_secret = settings.SENDPULSE_SECRET
         self.sender_email = settings.SENDPULSE_SENDER_EMAIL
         self.sender_name = settings.SENDPULSE_SENDER_NAME
-    
+
     async def _get_access_token(self) -> Optional[str]:
         """Get SendPulse access token"""
         try:
@@ -30,42 +30,45 @@ class SendPulseEmailService:
                     data={
                         "grant_type": "client_credentials",
                         "client_id": self.api_user_id,
-                        "client_secret": self.api_secret
-                    }
+                        "client_secret": self.api_secret,
+                    },
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     return data.get("access_token")
                 else:
-                    logger.error("Failed to get SendPulse access token", status_code=response.status_code)
+                    logger.error(
+                        "Failed to get SendPulse access token",
+                        status_code=response.status_code,
+                    )
                     return None
-                    
+
         except Exception as e:
             logger.error("Error getting SendPulse access token", error=str(e))
             return None
-    
+
     async def send_analysis_complete_email(
-        self, 
-        to_email: str, 
-        shop_domain: str, 
+        self,
+        to_email: str,
+        shop_domain: str,
         job_id: str,
-        analysis_result: Optional[Dict[str, Any]] = None
+        analysis_result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Send analysis completion success email"""
         try:
             access_token = await self._get_access_token()
             if not access_token:
                 return {"success": False, "error": "Failed to get access token"}
-            
+
             # Prepare email content
             subject = "🎉 Your Bundle Analysis is Complete!"
-            
+
             # Extract bundle count from analysis result
             bundle_count = 0
             if analysis_result and analysis_result.get("bundles"):
                 bundle_count = len(analysis_result["bundles"])
-            
+
             html_content = f"""
             <!DOCTYPE html>
             <html>
@@ -115,7 +118,7 @@ class SendPulseEmailService:
             </body>
             </html>
             """
-            
+
             # Send email via SendPulse
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -128,45 +131,47 @@ class SendPulseEmailService:
                             "subject": subject,
                             "from": {
                                 "name": self.sender_name,
-                                "email": self.sender_email
+                                "email": self.sender_email,
                             },
-                            "to": [
-                                {
-                                    "name": shop_domain,
-                                    "email": to_email
-                                }
-                            ]
+                            "to": [{"name": shop_domain, "email": to_email}],
                         }
-                    }
+                    },
                 )
-                
+
                 if response.status_code == 200:
-                    logger.info("Analysis completion email sent successfully", to_email=to_email, shop_domain=shop_domain)
+                    logger.info(
+                        "Analysis completion email sent successfully",
+                        to_email=to_email,
+                        shop_domain=shop_domain,
+                    )
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
-                    logger.error("Failed to send analysis completion email", status_code=response.status_code, response=response.text)
-                    return {"success": False, "error": f"SendPulse API error: {response.status_code}"}
-                    
+                    logger.error(
+                        "Failed to send analysis completion email",
+                        status_code=response.status_code,
+                        response=response.text,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"SendPulse API error: {response.status_code}",
+                    }
+
         except Exception as e:
             logger.error("Error sending analysis completion email", error=str(e))
             return {"success": False, "error": str(e)}
-    
+
     async def send_analysis_failed_email(
-        self, 
-        to_email: str, 
-        shop_domain: str, 
-        job_id: str,
-        error: Optional[str] = None
+        self, to_email: str, shop_domain: str, job_id: str, error: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send analysis failure email"""
         try:
             access_token = await self._get_access_token()
             if not access_token:
                 return {"success": False, "error": "Failed to get access token"}
-            
+
             # Prepare email content
             subject = "❌ Bundle Analysis Failed"
-            
+
             html_content = f"""
             <!DOCTYPE html>
             <html>
@@ -215,7 +220,7 @@ class SendPulseEmailService:
             </body>
             </html>
             """
-            
+
             # Send email via SendPulse
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -228,39 +233,47 @@ class SendPulseEmailService:
                             "subject": subject,
                             "from": {
                                 "name": self.sender_name,
-                                "email": self.sender_email
+                                "email": self.sender_email,
                             },
-                            "to": [
-                                {
-                                    "name": shop_domain,
-                                    "email": to_email
-                                }
-                            ]
+                            "to": [{"name": shop_domain, "email": to_email}],
                         }
-                    }
+                    },
                 )
-                
+
                 if response.status_code == 200:
-                    logger.info("Analysis failure email sent successfully", to_email=to_email, shop_domain=shop_domain)
+                    logger.info(
+                        "Analysis failure email sent successfully",
+                        to_email=to_email,
+                        shop_domain=shop_domain,
+                    )
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
-                    logger.error("Failed to send analysis failure email", status_code=response.status_code, response=response.text)
-                    return {"success": False, "error": f"SendPulse API error: {response.status_code}"}
-                    
+                    logger.error(
+                        "Failed to send analysis failure email",
+                        status_code=response.status_code,
+                        response=response.text,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"SendPulse API error: {response.status_code}",
+                    }
+
         except Exception as e:
             logger.error("Error sending analysis failure email", error=str(e))
             return {"success": False, "error": str(e)}
-    
-    async def send_analysis_started_email(self, to_email: str, shop_domain: str, job_id: str) -> Dict[str, Any]:
+
+    async def send_analysis_started_email(
+        self, to_email: str, shop_domain: str, job_id: str
+    ) -> Dict[str, Any]:
         """Send analysis started email"""
         try:
             access_token = await self._get_access_token()
             if not access_token:
                 return {"success": False, "error": "Failed to get access token"}
-            
+
             # Prepare email content
             subject = "🔄 Bundle Analysis Started"
-            
+
             html_content = f"""
             <!DOCTYPE html>
             <html>
@@ -316,7 +329,7 @@ class SendPulseEmailService:
             </body>
             </html>
             """
-            
+
             # Send email via SendPulse
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -329,25 +342,31 @@ class SendPulseEmailService:
                             "subject": subject,
                             "from": {
                                 "name": self.sender_name,
-                                "email": self.sender_email
+                                "email": self.sender_email,
                             },
-                            "to": [
-                                {
-                                    "name": shop_domain,
-                                    "email": to_email
-                                }
-                            ]
+                            "to": [{"name": shop_domain, "email": to_email}],
                         }
-                    }
+                    },
                 )
-                
+
                 if response.status_code == 200:
-                    logger.info("Analysis started email sent successfully", to_email=to_email, shop_domain=shop_domain)
+                    logger.info(
+                        "Analysis started email sent successfully",
+                        to_email=to_email,
+                        shop_domain=shop_domain,
+                    )
                     return {"success": True, "message_id": response.json().get("id")}
                 else:
-                    logger.error("Failed to send analysis started email", status_code=response.status_code, response=response.text)
-                    return {"success": False, "error": f"SendPulse API error: {response.status_code}"}
-                    
+                    logger.error(
+                        "Failed to send analysis started email",
+                        status_code=response.status_code,
+                        response=response.text,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"SendPulse API error: {response.status_code}",
+                    }
+
         except Exception as e:
             logger.error("Error sending analysis started email", error=str(e))
             return {"success": False, "error": str(e)}

@@ -195,30 +195,25 @@ class MLTrainingConsumer:
                 shop_domain=shop_domain,
             )
 
-            # Create MLTrainingJob record to reflect in-progress status
+            # Create MLTrainingLog record to reflect in-progress status
             try:
                 db = await get_database()
-                # Create MLTrainingJob record using Prisma's native relation handling
-                await db.mltrainingjob.create(
+                # Create MLTrainingLog record using Prisma's native relation handling
+                training_log = await db.mltraininglog.create(
                     data={
-                        "jobId": job_id,
-                        "shopId": shop_id,  # Set the foreign key directly
-                        "status": "training",
-                        "progress": 0,
+                        "shopId": shop_id,
+                        "status": "started",
                         "startedAt": datetime.now(timezone.utc),
-                        # Note: metadata field removed due to Prisma client bug
-                        # that requires shop relation when metadata is present
                     }
                 )
                 logger.info(
-                    "MLTrainingJob record created successfully",
-                    job_id=job_id,
+                    "MLTrainingLog record created successfully",
+                    log_id=training_log.id,
                     shop_id=shop_id,
                 )
             except Exception as e:
                 logger.warning(
-                    "Failed to create MLTrainingJob record at start",
-                    job_id=job_id,
+                    "Failed to create MLTrainingLog record at start",
                     shop_id=shop_id,
                     error=str(e),
                 )

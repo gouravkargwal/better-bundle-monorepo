@@ -189,7 +189,11 @@ class HeuristicDecisionConsumer:
                     "next_analysis_hours": heuristic_result.next_analysis_hours,
                     "confidence": heuristic_result.confidence,
                     "reasoning": heuristic_result.reasoning,
-                    "factors": heuristic_result.factors.__dict__ if hasattr(heuristic_result, 'factors') else {},
+                    "factors": (
+                        heuristic_result.factors.__dict__
+                        if hasattr(heuristic_result, "factors")
+                        else {}
+                    ),
                 },
                 "decision_made_at": datetime.now().isoformat(),
             }

@@ -332,7 +332,7 @@ class CompletionHandler:
             }
 
             from app.core.config import settings
-            
+
             message_id = await streams_manager.publish_event(
                 settings.COMPLETION_RESULTS_STREAM, completion_event
             )

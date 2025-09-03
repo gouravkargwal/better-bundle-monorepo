@@ -122,9 +122,9 @@ class DataProcessor:
         consecutive_failures = 0
         max_consecutive_failures = 3  # Reduced from 5
 
-        # CRITICAL FIX: Add configurable sleep intervals to prevent resource exhaustion
-        idle_sleep_interval = 2.0  # Sleep 2 seconds when idle
-        error_sleep_interval = 5.0  # Sleep 5 seconds after errors
+        # Resource optimization: Use configurable sleep intervals
+        idle_sleep_interval = settings.CONSUMER_IDLE_SLEEP_SECONDS
+        error_sleep_interval = settings.CONSUMER_ERROR_SLEEP_SECONDS
 
         # Circuit breaker state
         circuit_breaker_open = False
@@ -181,13 +181,13 @@ class DataProcessor:
                 # SIMPLE FIX: Always sleep between iterations to prevent resource exhaustion
                 await asyncio.sleep(idle_sleep_interval)  # Sleep when idle
 
-                # Consume events with reasonable timeout
+                # Consume events with resource-optimized settings
                 events = await self.streams_manager.consume_events(
                     stream_name=settings.DATA_JOB_STREAM,
                     consumer_group=settings.DATA_PROCESSOR_GROUP,
                     consumer_name=consumer_name,
-                    count=1,
-                    block=1000,  # 1 second block time
+                    count=settings.CONSUMER_BATCH_SIZE,  # Configurable batch size
+                    block=settings.CONSUMER_POLLING_INTERVAL_MS,  # Configurable polling interval
                 )
 
                 # Reset failure counter on successful consumption
@@ -517,7 +517,7 @@ class DataProcessor:
     async def _send_data_collection_notification(
         self, shop_id: str, results: Dict[str, Any], overall_success: bool
     ):
-        """Send notification about data collection results"""
+        """Send notification about data collection results and trigger features computation"""
         try:
             from app.core.redis_client import streams_manager
 
@@ -540,6 +540,7 @@ class DataProcessor:
                 message = "❌ Data collection failed for all data types. Please check app permissions and try again."
                 notification_type = "data_collection_failed"
 
+            # Send user notification
             await streams_manager.publish_user_notification_event(
                 shop_id=shop_id,
                 notification_type=notification_type,
@@ -553,9 +554,44 @@ class DataProcessor:
                 },
             )
 
+            # If data collection was successful, trigger features computation
+            if overall_success:
+                await self._trigger_features_computation(shop_id, results)
+
         except Exception as e:
             logger.error(
                 f"Failed to send data collection notification: {e}", shop_id=shop_id
+            )
+
+    async def _trigger_features_computation(
+        self, shop_id: str, results: Dict[str, Any]
+    ):
+        """Trigger features computation after successful data collection"""
+        try:
+            from app.core.redis_client import streams_manager
+
+            # Publish features computation event
+            event_data = {
+                "event_type": "DATA_COLLECTION_COMPLETED",
+                "shop_id": shop_id,
+                "data_collection_results": results,
+                "timestamp": time.time(),
+            }
+
+            await streams_manager.publish_event(
+                stream_name=settings.FEATURES_COMPUTED_STREAM,
+                event_data=event_data,
+            )
+
+            logger.info(
+                "Features computation event published",
+                shop_id=shop_id,
+                stream=settings.FEATURES_COMPUTED_STREAM,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger features computation: {e}", shop_id=shop_id
             )
 
 

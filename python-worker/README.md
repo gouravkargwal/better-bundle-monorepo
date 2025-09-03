@@ -20,6 +20,32 @@ Shopify App → Redis Streams → Python Worker → ML API
   Request     Stream         & Save         & Results
 ```
 
+### Complete Data Processing Pipeline
+
+1. **Data Collection** (`data_processor`)
+
+   - Collects products, orders, and customers from Shopify
+   - Publishes completion events to `betterbundle:features-computed` stream
+
+2. **Feature Transformations** (`features_consumer`)
+
+   - Automatically triggered after data collection
+   - Computes UserFeatures, ProductFeatures, and InteractionFeatures
+   - Publishes ML training events to `betterbundle:ml-training` stream
+
+3. **ML Training** (`ml_training_consumer`)
+
+   - Receives training requests and trains Gorse recommendation models
+   - Updates training status and metrics
+
+4. **Completion Handling** (`completion_handler`)
+
+   - Processes training completion events
+   - Updates job status and shop analysis timestamps
+
+5. **Heuristic Decisions** (`heuristic_decision_consumer`)
+   - Handles business logic decisions based on analysis results
+
 ## Quick Start
 
 ### 1. Install Dependencies
@@ -95,6 +121,14 @@ curl -X POST http://localhost:8001/api/v1/data-jobs/start-consumer
 ### Consumer Groups
 
 - `data-processors` - Data collection processors
+
+### Services
+
+- **Data Processor** - Orchestrates data collection workflow
+- **Features Consumer** - Automatically triggers feature transformations
+- **ML Training Consumer** - Handles ML model training
+- **Completion Handler** - Processes training completion events
+- **Heuristic Decision Consumer** - Handles business logic decisions
 
 ## Configuration
 

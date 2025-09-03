@@ -50,7 +50,15 @@ class GorseService:
                     "data_summary": data_check,
                 }
 
-                # Step 1.5: Check if training should be skipped - first check ML table, then event streams
+                # Step 1.5: Check if training should be skipped using two-tier approach
+            # 1. Primary: Check ML table for recent training and data changes
+            #    - More accurate: directly checks when we last trained and if data changed since then
+            #    - Faster: single database query instead of complex event stream analysis
+            #    - More reliable: based on actual training history, not external events
+            # 2. Fallback: Check event streams for analysis completion and data changes
+            #    - Useful when no ML training history exists
+            #    - Provides backup detection method
+            #    - Handles edge cases where ML table might be incomplete
             logger.info(f"🔍 Checking if training should be skipped for shop {shop_id}")
 
             # First, check ML table for recent training (primary method)
@@ -69,6 +77,12 @@ class GorseService:
                         "hours_since_training"
                     ),
                 )
+
+                # Record the skipped training attempt in ML table for tracking and analytics
+                # This helps us understand training patterns and optimize the skip logic
+                # It also provides a complete audit trail of all training decisions
+                await self._record_skipped_training(shop_id, ml_table_skip_check)
+
                 return {
                     "success": True,
                     "shop_id": shop_id,
@@ -84,6 +98,8 @@ class GorseService:
                 }
 
             # If ML table check doesn't indicate skip, fall back to event stream check
+            # This is useful when we don't have ML training history but want to check
+            # if data has changed since the last analysis completion
             logger.info(f"🔍 ML table check passed, falling back to event stream check")
             event_stream_skip_check = await self._should_skip_ml_training_fallback(
                 shop_id
@@ -104,6 +120,12 @@ class GorseService:
                     hours_since_last_order=skip_check.get("hours_since_last_order"),
                     hours_since_last_product=skip_check.get("hours_since_last_product"),
                 )
+
+                # Record the skipped training attempt in ML table for tracking and analytics
+                # This helps us understand training patterns and optimize the skip logic
+                # It also provides a complete audit trail of all training decisions
+                await self._record_skipped_training(shop_id, skip_check)
+
                 return {
                     "success": True,
                     "shop_id": shop_id,
@@ -200,10 +222,16 @@ class GorseService:
             return {"can_train": False, "reason": f"Error checking data: {str(e)}"}
 
     async def _should_skip_ml_training(self, shop_id: str) -> Dict[str, Any]:
-        """Check if ML training should be skipped due to no data changes"""
+        """Check if ML training should be skipped due to no data changes
+
+        This is the primary method that checks the MLTrainingLog table to see if we've
+        recently trained the model and if there have been any data changes since then.
+        """
         try:
-            # Get last successful training timestamp
-            last_training = await self.db.mltrainingjob.find_first(
+            # Get last successful training timestamp (exclude failed jobs)
+            # We only consider completed training logs as valid "last training" references
+            # Failed jobs are just for tracking purposes and don't represent actual training
+            last_training = await self.db.mltraininglog.find_first(
                 where={"shopId": shop_id, "status": "completed"},
                 order={"completedAt": "desc"},
             )
@@ -610,79 +638,78 @@ class GorseService:
     ):
         """Update training metadata in database"""
         try:
-            # Create or update MLTrainingJob record
-            job_id = f"gorse_training_{shop_id}_{int(datetime.now(timezone.utc).timestamp())}"
-
-            # Check if there's an existing training job for this shop
-            existing_job = await self.db.mltrainingjob.find_first(
-                where={"shopId": shop_id, "status": {"in": ["queued", "training"]}},
+            # Check if there's an existing training log for this shop
+            existing_log = await self.db.mltraininglog.find_first(
+                where={"shopId": shop_id, "status": "started"},
                 order={"createdAt": "desc"},
             )
 
-            if existing_job:
-                # Update existing job
-                await self.db.mltrainingjob.update(
-                    where={"id": existing_job.id},
+            if existing_log:
+                # Update existing log
+                await self.db.mltraininglog.update(
+                    where={"id": existing_log.id},
                     data={
                         "status": (
                             "completed"
                             if gorse_result.get("items_inserted")
                             else "failed"
                         ),
-                        "progress": 100 if gorse_result.get("items_inserted") else 0,
                         "completedAt": (
                             datetime.now(timezone.utc)
                             if gorse_result.get("items_inserted")
                             else None
                         ),
+                        "durationMs": (
+                            int((datetime.now(timezone.utc) - existing_log.startedAt).total_seconds() * 1000)
+                            if existing_log.startedAt
+                            else None
+                        ),
+                        "productsCount": gorse_result.get("items_inserted", 0),
+                        "usersCount": gorse_result.get("users_inserted", 0),
                         "error": (
                             None
                             if gorse_result.get("items_inserted")
-                            else "Data insertion failed"
+                            else "failed"
                         ),
-                        "metadata": gorse_result,
-                        "updatedAt": datetime.now(timezone.utc),
                     },
                 )
                 logger.info(
-                    "Training job updated",
+                    "Training log updated",
                     shop_id=shop_id,
-                    job_id=existing_job.id,
+                    log_id=existing_log.id,
                     status=(
                         "completed" if gorse_result.get("items_inserted") else "failed"
                     ),
                 )
             else:
-                # Create new completed job
-                await self.db.mltrainingjob.create(
+                # Create new completed log
+                await self.db.mltraininglog.create(
                     data={
-                        "jobId": job_id,
+                        "shopId": shop_id,
                         "status": (
                             "completed"
                             if gorse_result.get("items_inserted")
                             else "failed"
                         ),
-                        "progress": 100 if gorse_result.get("items_inserted") else 0,
                         "startedAt": datetime.now(timezone.utc),
                         "completedAt": (
                             datetime.now(timezone.utc)
                             if gorse_result.get("items_inserted")
                             else None
                         ),
+                        "durationMs": 0,  # No duration for immediate completion
+                        "productsCount": gorse_result.get("items_inserted", 0),
+                        "usersCount": gorse_result.get("users_inserted", 0),
                         "error": (
                             None
                             if gorse_result.get("items_inserted")
                             else "Data insertion failed"
                         ),
-                        "shopId": shop_id,  # Set the foreign key directly
-                        # Note: metadata field removed due to Prisma client bug
-                        # that requires shop relation when metadata is present
                     }
                 )
                 logger.info(
-                    "Training job created",
+                    "Training log created",
                     shop_id=shop_id,
-                    job_id=job_id,
                     status=(
                         "completed" if gorse_result.get("items_inserted") else "failed"
                     ),
@@ -691,6 +718,45 @@ class GorseService:
         except Exception as e:
             logger.error(
                 "Error updating training metadata", shop_id=shop_id, error=str(e)
+            )
+
+    async def _record_skipped_training(self, shop_id: str, skip_check: Dict[str, Any]):
+        """Record a skipped training attempt in the ML table for tracking purposes
+
+        This method creates a record in the MLTrainingLog table with status 'skipped' to track
+        when and why training was skipped. This helps with:
+        - Analytics on training patterns
+        - Debugging skip logic
+        - Understanding shop behavior
+        - Optimizing the skip thresholds
+        """
+        try:
+            # Create a record for the skipped training
+            await self.db.mltraininglog.create(
+                data={
+                    "shopId": shop_id,
+                    "status": "skipped",
+                    "startedAt": datetime.now(timezone.utc),
+                    "completedAt": datetime.now(timezone.utc),  # Same as started since it's skipped
+                    "durationMs": 0,  # No duration since training was skipped
+                    "productsCount": 0,  # No products processed
+                    "usersCount": 0,  # No users processed
+                    "error": f"Skipped: {skip_check.get('reason', 'unknown')}",
+                }
+            )
+
+            logger.info(
+                "Skipped training recorded in ML table",
+                shop_id=shop_id,
+                reason=skip_check.get("reason"),
+                method=skip_check.get("method", "unknown"),
+            )
+
+        except Exception as e:
+            # Log error but don't fail the main training flow
+            # Recording skipped training is not critical for the main functionality
+            logger.error(
+                "Error recording skipped training", shop_id=shop_id, error=str(e)
             )
 
     async def get_recommendations(
@@ -819,14 +885,14 @@ class GorseService:
     async def get_model_status(self, shop_id: str) -> Dict[str, Any]:
         """Get model training status for a shop"""
         try:
-            # Query the MLTrainingJob table for this shop
-            training_jobs = await self.db.mltrainingjob.find_many(
+            # Query the MLTrainingLog table for this shop
+            training_logs = await self.db.mltraininglog.find_many(
                 where={"shopId": shop_id},
                 order={"createdAt": "desc"},
-                take=5,  # Get last 5 training jobs
+                take=5,  # Get last 5 training logs
             )
 
-            if not training_jobs:
+            if not training_logs:
                 return {
                     "success": True,
                     "shop_id": shop_id,
@@ -837,51 +903,52 @@ class GorseService:
                     "message": "No training jobs found for this shop",
                 }
 
-            # Get the most recent training job
-            latest_job = training_jobs[0]
+            # Get the most recent training log
+            latest_log = training_logs[0]
 
-            # Check if there are any completed jobs
-            completed_jobs = [job for job in training_jobs if job.status == "completed"]
-            failed_jobs = [job for job in training_jobs if job.status == "failed"]
+            # Check if there are any completed logs
+            completed_logs = [log for log in training_logs if log.status == "completed"]
+            failed_logs = [log for log in training_logs if log.status == "failed"]
 
             # Determine overall status
-            if latest_job.status == "training":
+            if latest_log.status == "started":
                 model_status = "training_in_progress"
-            elif latest_job.status == "completed":
+            elif latest_log.status == "completed":
                 model_status = "trained"
-            elif latest_job.status == "failed":
+            elif latest_log.status == "failed":
                 model_status = "training_failed"
             else:
-                model_status = "queued"
+                model_status = "unknown"
 
             return {
                 "success": True,
                 "shop_id": shop_id,
                 "model_status": model_status,
-                "latest_job": {
-                    "id": latest_job.id,
-                    "status": latest_job.status,
-                    "progress": latest_job.progress,
+                "latest_log": {
+                    "id": latest_log.id,
+                    "status": latest_log.status,
                     "started_at": (
-                        latest_job.startedAt.isoformat()
-                        if latest_job.startedAt
+                        latest_log.startedAt.isoformat()
+                        if latest_log.startedAt
                         else None
                     ),
                     "completed_at": (
-                        latest_job.completedAt.isoformat()
-                        if latest_job.completedAt
+                        latest_log.completedAt.isoformat()
+                        if latest_log.completedAt
                         else None
                     ),
-                    "error": latest_job.error,
-                    "metadata": latest_job.metadata,
+                    "duration_ms": latest_log.durationMs,
+                    "products_count": latest_log.productsCount,
+                    "users_count": latest_log.usersCount,
+                    "error": latest_log.error,
                 },
-                "training_count": len(training_jobs),
-                "completed_count": len(completed_jobs),
-                "failed_count": len(failed_jobs),
+                "training_count": len(training_logs),
+                "completed_count": len(completed_logs),
+                "failed_count": len(failed_logs),
                 "recommendations_available": model_status == "trained",
                 "last_training": (
-                    latest_job.completedAt.isoformat()
-                    if latest_job.completedAt
+                    latest_log.completedAt.isoformat()
+                    if latest_log.completedAt
                     else None
                 ),
             }

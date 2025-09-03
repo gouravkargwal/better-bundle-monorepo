@@ -50,13 +50,16 @@ class Settings(BaseSettings):
         default="betterbundle:ml-training-complete", env="ML_TRAINING_COMPLETE_STREAM"
     )
     HEURISTIC_DECISION_REQUESTED_STREAM: str = Field(
-        default="betterbundle:heuristic-decision-requested", env="HEURISTIC_DECISION_REQUESTED_STREAM"
+        default="betterbundle:heuristic-decision-requested",
+        env="HEURISTIC_DECISION_REQUESTED_STREAM",
     )
     HEURISTIC_DECISION_MADE_STREAM: str = Field(
-        default="betterbundle:heuristic-decision-made", env="HEURISTIC_DECISION_MADE_STREAM"
+        default="betterbundle:heuristic-decision-made",
+        env="HEURISTIC_DECISION_MADE_STREAM",
     )
     NEXT_ANALYSIS_SCHEDULED_STREAM: str = Field(
-        default="betterbundle:next-analysis-scheduled", env="NEXT_ANALYSIS_SCHEDULED_STREAM"
+        default="betterbundle:next-analysis-scheduled",
+        env="NEXT_ANALYSIS_SCHEDULED_STREAM",
     )
     COMPLETION_RESULTS_STREAM: str = Field(
         default="betterbundle:completion-results", env="COMPLETION_RESULTS_STREAM"
@@ -131,6 +134,37 @@ class Settings(BaseSettings):
         "SENDPULSE_SENDER_EMAIL", "noreply@betterbundle.com"
     )
     SENDPULSE_SENDER_NAME: str = os.getenv("SENDPULSE_SENDER_NAME", "BetterBundle")
+
+    # Consumer Configuration (Resource Optimization)
+    ENABLE_FEATURES_CONSUMER: bool = Field(default=True, env="ENABLE_FEATURES_CONSUMER")
+    ENABLE_ML_TRAINING_CONSUMER: bool = Field(
+        default=True, env="ENABLE_ML_TRAINING_CONSUMER"
+    )
+    ENABLE_COMPLETION_HANDLER: bool = Field(
+        default=True, env="ENABLE_COMPLETION_HANDLER"
+    )
+    ENABLE_HEURISTIC_DECISION_CONSUMER: bool = Field(
+        default=True, env="ENABLE_HEURISTIC_DECISION_CONSUMER"
+    )
+
+    # Resource Optimization Settings
+    CONSUMER_POLLING_INTERVAL_MS: int = Field(
+        default=30000, env="CONSUMER_POLLING_INTERVAL_MS"
+    )  # 30 seconds
+    CONSUMER_BATCH_SIZE: int = Field(
+        default=3, env="CONSUMER_BATCH_SIZE"
+    )  # Process 3 events at once
+    CONSUMER_IDLE_SLEEP_SECONDS: int = Field(
+        default=10, env="CONSUMER_IDLE_SLEEP_SECONDS"
+    )  # 10 seconds
+    CONSUMER_ERROR_SLEEP_SECONDS: int = Field(
+        default=15, env="CONSUMER_ERROR_SLEEP_SECONDS"
+    )  # 15 seconds
+
+    # Redis Timeout Settings
+    REDIS_TIMEOUT_BUFFER_SECONDS: int = Field(
+        default=5, env="REDIS_TIMEOUT_BUFFER_SECONDS"
+    )  # 5 second buffer for Redis operations
 
     class Config:
         env_file = ".env"

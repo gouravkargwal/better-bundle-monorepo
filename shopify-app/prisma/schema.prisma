@@ -84,8 +84,8 @@ model Shop {
   widgetEvents       WidgetEvent[]
   trackingEvents     TrackingEvent[]
   shopAnalytics      ShopAnalytics?
-  mlTrainingJobs     MLTrainingJob[]
   featureComputations FeatureComputation[]
+  mlTrainingLogs      MLTrainingLog[]
   billingSubscriptions BillingSubscription[]
   billingCharges    BillingCharge[]
   userFeatures       UserFeatures[]
@@ -374,19 +374,18 @@ model BillingCharge {
   @@index([dueDate])
 }
 
-// ML Training and Features models
-model MLTrainingJob {
+// ML Training Logs - Simple and Clean
+model MLTrainingLog {
   id          String   @id @default(cuid())
   shopId      String
-  jobId       String   @unique
-  status      String   @default("queued") // "queued", "training", "completed", "failed"
-  progress    Int      @default(0)
-  startedAt   DateTime?
+  status      String   @default("started") // "started", "completed", "failed", "skipped"
+  startedAt   DateTime @default(now())
   completedAt DateTime?
+  durationMs  Int?     // Training duration in milliseconds
+  productsCount Int    @default(0)
+  usersCount   Int     @default(0)
   error       String?
-  metadata    Json?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, status])

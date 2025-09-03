@@ -42,45 +42,48 @@ async def train_gorse_model(request: GorseTrainingRequest) -> Dict[str, Any]:
     try:
         # Generate unique job ID
         import uuid
+
         job_id = str(uuid.uuid4())
-        
+
         # Publish training event to Redis Stream
         from app.core.redis_client import streams_manager
+
         await streams_manager.initialize()
-        
+
         training_event = {
             "event_type": "ML_TRAINING_REQUESTED",
             "job_id": job_id,
             "shop_id": request.shop_id,
             "shop_domain": request.shop_domain,
             "timestamp": datetime.now().isoformat(),
-            "training_type": "gorse_recommendations"
+            "training_type": "gorse_recommendations",
         }
-        
+
         await streams_manager.publish_event(
-            stream_name=settings.ML_TRAINING_STREAM,
-            event_data=training_event
+            stream_name=settings.ML_TRAINING_STREAM, event_data=training_event
         )
-        
+
         logger.info(
             "Gorse training event published",
             job_id=job_id,
             shop_id=request.shop_id,
-            stream=settings.ML_TRAINING_STREAM
+            stream=settings.ML_TRAINING_STREAM,
         )
-        
+
         return {
             "success": True,
             "message": "Gorse training event published successfully",
             "job_id": job_id,
             "shop_id": request.shop_id,
             "status": "queued",
-            "note": "Training will be processed asynchronously. Check status endpoint for updates."
+            "note": "Training will be processed asynchronously. Check status endpoint for updates.",
         }
 
     except Exception as e:
         logger.error(f"Failed to publish training event: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to publish training event: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to publish training event: {str(e)}"
+        )
 
 
 @router.get("/recommendations/{shop_id}")
