@@ -44,6 +44,10 @@ async def get_redis_client() -> Redis:
             redis_config["ssl"] = True
             redis_config["ssl_cert_reqs"] = None
 
+        # Add health check interval for better connection stability
+        if "health_check_interval" in redis_config:
+            redis_config["health_check_interval"] = 30
+
         try:
             _redis_instance = Redis(**redis_config)
             # Test connection with shorter timeout

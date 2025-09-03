@@ -24,11 +24,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = Field(..., env="DATABASE_URL")
 
     # Redis Configuration (Upstash)
-    REDIS_HOST: str = Field(..., env="REDIS_HOST")
+    REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
     REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
-    REDIS_PASSWORD: str = Field(..., env="REDIS_PASSWORD")
+    REDIS_PASSWORD: str = Field(default="", env="REDIS_PASSWORD")
     REDIS_DB: int = Field(default=0, env="REDIS_DB")
-    REDIS_TLS: bool = Field(default=True, env="REDIS_TLS")
+    REDIS_TLS: bool = Field(default=False, env="REDIS_TLS")
 
     # Redis Stream Names
     DATA_JOB_STREAM: str = Field(

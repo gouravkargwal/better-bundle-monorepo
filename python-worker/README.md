@@ -1,252 +1,348 @@
 # BetterBundle Python Worker
 
-A FastAPI-based worker service for data collection, processing, and event-driven ML training using Redis Streams.
+An AI-powered Shopify analytics and machine learning platform that transforms raw Shopify data into actionable business insights and ML-powered recommendations.
 
-## Features
+## 🚀 Overview
 
-- **Data Collection**: Efficient Shopify GraphQL API integration for orders, products, and customers
-- **Event-Driven Architecture**: Redis Streams for async job processing and ML training coordination
-- **Database Integration**: Prisma Python client for PostgreSQL operations
-- **Health Monitoring**: Comprehensive health checks for database and Redis connections
-- **Error Handling**: Robust retry logic and error recovery mechanisms
-- **Structured Logging**: JSON-structured logging with performance metrics
+BetterBundle Python Worker is a comprehensive backend system that provides:
 
-## Architecture
+- **Shopify Data Collection**: Automated collection and processing of Shopify store data
+- **Machine Learning Services**: Feature engineering, ML training, and prediction pipelines
+- **Business Analytics**: Comprehensive business metrics, performance analytics, and insights
+- **Gorse ML Integration**: Seamless integration with Gorse recommendation engine
+- **RESTful API**: Clean, documented API endpoints for all services
+
+## 🏗️ Architecture
+
+The system follows a clean, domain-driven architecture with clear separation of concerns:
 
 ```
-Shopify App → Redis Streams → Python Worker → ML API
-     ↓              ↓             ↓           ↓
-  Analysis    Data Job       Process Data   Train Model
-  Request     Stream         & Save         & Results
+┌─────────────────────────────────────────────────────────────┐
+│                    Main Application                        │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │   Shopify   │  │      ML     │  │ Analytics   │        │
+│  │   Domain    │  │   Domain    │  │   Domain    │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Complete Data Processing Pipeline
+### Domain Structure
 
-1. **Data Collection** (`data_processor`)
+- **Shopify Domain**: Data collection, processing, and storage
+- **ML Domain**: Feature engineering, model training, and predictions
+- **Analytics Domain**: Business metrics, performance analysis, and insights
 
-   - Collects products, orders, and customers from Shopify
-   - Publishes completion events to `betterbundle:features-computed` stream
+## 🛠️ Technology Stack
 
-2. **Feature Transformations** (`features_consumer`)
+- **Framework**: FastAPI (Python 3.9+)
+- **Async Runtime**: asyncio
+- **ML Engine**: Gorse (recommendation engine)
+- **Data Processing**: Custom feature engineering pipeline
+- **Logging**: Structured logging with correlation IDs
+- **API Documentation**: Auto-generated OpenAPI/Swagger docs
 
-   - Automatically triggered after data collection
-   - Computes UserFeatures, ProductFeatures, and InteractionFeatures
-   - Publishes ML training events to `betterbundle:ml-training` stream
+## 📁 Project Structure
 
-3. **ML Training** (`ml_training_consumer`)
+```
+python-worker/
+├── app/
+│   ├── core/                    # Core configuration and utilities
+│   ├── domains/                 # Domain-specific modules
+│   │   ├── shopify/            # Shopify data collection
+│   │   ├── ml/                 # Machine learning services
+│   │   └── analytics/          # Business analytics
+│   ├── shared/                  # Shared utilities and decorators
+│   └── main.py                 # Main FastAPI application
+├── requirements.txt             # Python dependencies
+└── README.md                   # This file
+```
 
-   - Receives training requests and trains Gorse recommendation models
-   - Updates training status and metrics
+## 🚀 Getting Started
 
-4. **Completion Handling** (`completion_handler`)
+### Prerequisites
 
-   - Processes training completion events
-   - Updates job status and shop analysis timestamps
+- Python 3.9+
+- Gorse ML engine running
+- Shopify Partner account
+- Redis (for caching and job queues)
 
-5. **Heuristic Decisions** (`heuristic_decision_consumer`)
-   - Handles business logic decisions based on analysis results
+### Installation
 
-## Quick Start
+1. **Clone the repository**
 
-### 1. Install Dependencies
+   ```bash
+   git clone <repository-url>
+   cd BetterBundle/python-worker
+   ```
+
+2. **Create virtual environment**
+
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment**
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+5. **Run the application**
+   ```bash
+   python -m app.main
+   ```
+
+The API will be available at `http://localhost:8000`
+
+## 📊 API Endpoints
+
+### Health Check
+
+- `GET /health` - System health status
+
+### Shopify Data
+
+- `POST /api/shopify/collect-data` - Start data collection
+- `GET /api/shopify/data-status/{shop_id}` - Get collection status
+
+### Machine Learning
+
+- `POST /api/ml/pipeline/run` - Run ML pipeline
+- `GET /api/ml/pipeline/status/{shop_id}` - Get pipeline status
+
+### Analytics
+
+- `GET /api/analytics/business-metrics/{shop_id}` - Business metrics
+- `GET /api/analytics/kpi-dashboard/{shop_id}` - KPI dashboard
+- `GET /api/analytics/customer-insights/{shop_id}` - Customer insights
+- `GET /api/analytics/product-insights/{shop_id}` - Product insights
+- `GET /api/analytics/revenue-insights/{shop_id}` - Revenue insights
+- `GET /api/analytics/performance/{shop_id}` - Performance analytics
+- `GET /api/analytics/performance/recommendations/{shop_id}` - Optimization recommendations
+
+## 🔧 Configuration
+
+### Environment Variables
 
 ```bash
-pip install -r requirements.txt
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+DEBUG=false
+
+# Shopify Configuration
+SHOPIFY_API_KEY=your_api_key
+SHOPIFY_API_SECRET=your_api_secret
+SHOPIFY_SCOPES=read_products,read_orders,read_customers
+
+# Gorse ML Configuration
+GORSE_API_URL=http://localhost:8088
+GORSE_API_KEY=your_gorse_api_key
+
+# Database Configuration
+DATABASE_URL=postgresql://user:password@localhost:5432/betterbundle
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379
+
+# CORS Configuration
+ALLOWED_ORIGINS=["http://localhost:3000", "https://yourdomain.com"]
 ```
 
-### 2. Setup Environment
+## 🧠 Machine Learning Features
+
+### Feature Engineering
+
+The system automatically extracts and computes features from Shopify data:
+
+- **Product Features**: Price, inventory, sales history, category, tags
+- **Customer Features**: Purchase history, behavior patterns, demographics
+- **Order Features**: Order value, frequency, payment methods, shipping
+- **Shop Features**: Aggregate metrics, performance indicators
+- **Cross-Entity Features**: Product-customer interactions, collection performance
+
+### ML Models
+
+- **Recommendation Models**: Product recommendations, customer recommendations
+- **Classification Models**: Customer segmentation, product categorization
+- **Regression Models**: Sales forecasting, customer lifetime value prediction
+
+### ML Pipeline
+
+End-to-end ML workflow including:
+
+1. Feature Engineering
+2. Model Training
+3. Model Evaluation
+4. Model Deployment
+5. Predictions and Recommendations
+
+## 📈 Analytics Capabilities
+
+### Business Metrics
+
+- Revenue analysis and forecasting
+- Order metrics and trends
+- Customer acquisition and retention
+- Product performance and inventory
+- Conversion funnel analysis
+- Growth metrics and comparisons
+
+### Performance Analytics
+
+- Shop performance scoring
+- Bottleneck identification
+- Optimization recommendations
+- Performance benchmarking
+- Trend analysis and forecasting
+
+### Customer Analytics
+
+- Customer segmentation
+- Lifetime value analysis
+- Behavior pattern analysis
+- Churn prediction
+- Acquisition cost analysis
+
+### Product Analytics
+
+- Product performance scoring
+- Sales analysis and trends
+- Inventory optimization
+- Category performance
+- Product recommendations
+
+### Revenue Analytics
+
+- Revenue trend analysis
+- Source/channel analysis
+- Profit margin analysis
+- Seasonal pattern analysis
+- Revenue forecasting
+
+## 🔄 Data Flow
+
+```
+Shopify Store → Data Collection → Feature Engineering → ML Pipeline → Analytics → Insights
+     ↓              ↓                    ↓              ↓           ↓         ↓
+  Raw Data    Structured Data    ML Features    Models    Metrics   Dashboard
+```
+
+## 🚀 Deployment
+
+### Docker Deployment
 
 ```bash
-cp env.example .env
-# Edit .env with your configuration
+# Build the image
+docker build -t betterbundle-worker .
+
+# Run the container
+docker run -p 8000:8000 --env-file .env betterbundle-worker
 ```
 
-### 3. Setup Database
+### Production Considerations
+
+- Use production-grade database (PostgreSQL)
+- Configure Redis for caching and job queues
+- Set up proper logging and monitoring
+- Configure CORS for production domains
+- Use environment-specific configuration files
+- Set up health checks and monitoring
+
+## 🧪 Testing
+
+### Run Tests
 
 ```bash
-# Generate Prisma client
-prisma generate
-
-# Run migrations (if needed)
-prisma db push
-```
-
-### 4. Run the Worker
-
-```bash
-# Development
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-
-# Production
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 1
-```
-
-### 5. Start Consumer (Optional)
-
-```bash
-# Start Redis Streams consumer
-curl -X POST http://localhost:8001/api/v1/data-jobs/start-consumer
-```
-
-## API Endpoints
-
-### Health Checks
-
-- `GET /health/` - Basic health check
-- `GET /health/detailed` - Detailed health with DB and Redis status
-- `GET /health/ready` - Readiness probe
-- `GET /health/live` - Liveness probe
-
-### Data Jobs
-
-- `POST /api/v1/data-jobs/queue` - Queue a data collection job
-- `POST /api/v1/data-jobs/process` - Process a job directly (sync)
-- `GET /api/v1/data-jobs/status/{job_id}` - Get job status
-- `POST /api/v1/data-jobs/start-consumer` - Start stream consumer
-
-### Streams
-
-- `POST /api/v1/data-jobs/streams/ml-training` - Publish ML training event
-- `POST /api/v1/data-jobs/streams/user-notification` - Publish notification
-
-## Redis Streams
-
-### Stream Names
-
-- `betterbundle:data-jobs` - Data collection jobs
-- `betterbundle:ml-training` - ML training requests
-- `betterbundle:analysis-results` - Analysis results
-- `betterbundle:user-notifications` - User notifications
-
-### Consumer Groups
-
-- `data-processors` - Data collection processors
-
-### Services
-
-- **Data Processor** - Orchestrates data collection workflow
-- **Features Consumer** - Automatically triggers feature transformations
-- **ML Training Consumer** - Handles ML model training
-- **Completion Handler** - Processes training completion events
-- **Heuristic Decision Consumer** - Handles business logic decisions
-
-## Configuration
-
-Key environment variables:
-
-```bash
-# Database
-DATABASE_URL=postgresql://...
-
-# Redis (Upstash)
-REDIS_HOST=your-host.upstash.io
-REDIS_PASSWORD=your-password
-REDIS_TLS=true
-
-# Worker Settings
-WORKER_ID=python-worker-1
-SHOPIFY_API_RATE_LIMIT=40
-MAX_RETRIES=3
-```
-
-## Docker
-
-```bash
-# Build image
-docker build -t betterbundle-python-worker .
-
-# Run container
-docker run -p 8001:8001 --env-file .env betterbundle-python-worker
-```
-
-## Development
-
-### Project Structure
-
-```
-app/
-├── main.py                 # FastAPI application
-├── core/
-│   ├── config.py          # Settings and configuration
-│   ├── database.py        # Database connection and utilities
-│   ├── redis_client.py    # Redis Streams client
-│   └── logging.py         # Structured logging
-├── services/
-│   ├── shopify_api.py     # Shopify GraphQL client
-│   ├── data_collection.py # Data collection service
-│   └── data_processor.py  # Main data processor
-└── api/
-    └── v1/
-        ├── health.py      # Health check endpoints
-        └── data_jobs.py   # Data job endpoints
-```
-
-### Code Quality
-
-```bash
-# Format code
-black app/
-
-# Sort imports
-isort app/
-
-# Lint code
-flake8 app/
+# Install test dependencies
+pip install -r requirements-test.txt
 
 # Run tests
 pytest
+
+# Run with coverage
+pytest --cov=app --cov-report=html
 ```
 
-## Monitoring
+### Test Structure
 
-### Logs
+- Unit tests for individual services
+- Integration tests for domain workflows
+- API tests for endpoint functionality
+- Performance tests for ML pipelines
 
-- Structured JSON logging
-- Performance metrics
-- Error tracking with context
-- Request/response logging
+## 📚 API Documentation
 
-### Health Checks
+Once the application is running, you can access:
 
-- Database connection health
-- Redis connection health
-- Service readiness/liveness
+- **Interactive API Docs**: `http://localhost:8000/docs`
+- **ReDoc Documentation**: `http://localhost:8000/redoc`
+- **OpenAPI Schema**: `http://localhost:8000/openapi.json`
 
-### Metrics
+## 🤝 Contributing
 
-- Job processing duration
-- API response times
-- Data collection counts
-- Stream event processing
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
 
-## Deployment
+## 📄 License
 
-### Environment Setup
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-1. Set up PostgreSQL database
-2. Configure Upstash Redis
-3. Set environment variables
-4. Deploy using Docker or direct Python
+## 🆘 Support
 
-### Scaling
+For support and questions:
 
-- Horizontal scaling with multiple worker instances
-- Redis Streams consumer groups for load distribution
-- Database connection pooling
-- Rate limiting for Shopify API
+- Create an issue in the repository
+- Check the API documentation
+- Review the code examples
+- Contact the development team
 
-## Event Flow
+## 🔮 Roadmap
 
-1. **Job Request**: Shopify app publishes data job to `data-jobs` stream
-2. **Data Collection**: Worker consumes job, collects Shopify data
-3. **Data Processing**: Clean and save data to PostgreSQL
-4. **ML Training**: Publish ML training event to `ml-training` stream
-5. **Notifications**: Publish user notifications for status updates
+### Phase 1: Core Infrastructure ✅
 
-## Error Handling
+- [x] Shopify data collection
+- [x] Basic ML services
+- [x] Analytics foundation
 
-- Exponential backoff retry logic
-- Dead letter queue handling
-- Database reconnection on failures
-- Graceful degradation for external API failures
-- Comprehensive error logging and monitoring
+### Phase 2: Advanced ML ✅
+
+- [x] Feature engineering pipeline
+- [x] Gorse ML integration
+- [x] ML pipeline orchestration
+
+### Phase 3: Analytics Platform ✅
+
+- [x] Business metrics service
+- [x] Performance analytics
+- [x] Customer and product insights
+
+### Phase 4: Production Ready
+
+- [ ] Advanced monitoring and alerting
+- [ ] A/B testing framework
+- [ ] Real-time analytics
+- [ ] Advanced ML model management
+
+### Phase 5: Enterprise Features
+
+- [ ] Multi-tenant architecture
+- [ ] Advanced security features
+- [ ] Custom ML model support
+- [ ] Advanced reporting and dashboards
+
+---
+
+**BetterBundle Python Worker** - Transforming Shopify data into actionable intelligence through AI and machine learning.

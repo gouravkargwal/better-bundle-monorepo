@@ -10,3 +10,4 @@
     "read_metafields"
      "read_customer_events",  // Real-time behavior (requires special permission)
     "read_analytics" 
+
