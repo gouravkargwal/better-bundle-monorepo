@@ -38,6 +38,26 @@ model RawCustomer {
   @@map("RawCustomer")
 }
 
+model RawCollection {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawCollection")
+}
+
+model RawCustomerEvent {
+  id           String   @id @default(cuid())
+  shopId       String
+  payload      Json
+  extractedAt  DateTime @default(now())
+
+  @@index([shopId])
+  @@map("RawCustomerEvent")
+}
+
 model Session {
   id            String    @id
   shop          String
@@ -75,6 +95,8 @@ model Shop {
   orderData          OrderData[]
   productData        ProductData[]
   customerData       CustomerData[]
+  collectionData     CollectionData[]
+  customerEventData  CustomerEventData[]
   analysisConfig     ShopAnalysisConfig?
   trackedSales       TrackedSale[]
   widgetConfig       WidgetConfiguration?
@@ -88,23 +110,59 @@ model Shop {
   userFeatures       UserFeatures[]
   productFeatures    ProductFeatures[]
   interactionFeatures InteractionFeatures[]
+  productAnalytics   ProductAnalytics[]
+  customerAnalytics  CustomerAnalytics[]
+  
+  // Enhanced feature models
+  collectionFeatures        CollectionFeatures[]
+  productCollectionFeatures ProductCollectionFeatures[]
+  customerBehaviorFeatures  CustomerBehaviorFeatures[]
+  advancedMLFeatures        AdvancedMLFeatures?
+  collectionAnalytics       CollectionAnalytics?
+  customerBehaviorAnalytics CustomerBehaviorAnalytics?
 }
 
 model OrderData {
   id        String   @id @default(cuid())
   shopId    String
   orderId   String
+  orderName String?  // Shopify order name (e.g., "#1001")
   customerId String?
+  customerEmail String?
+  customerPhone String?
   totalAmount Float
+  subtotalAmount Float?
+  totalTaxAmount Float?
+  totalShippingAmount Float?
+  totalRefundedAmount Float?
+  totalOutstandingAmount Float?
   orderDate  DateTime
+  processedAt DateTime?
+  cancelledAt DateTime?
+  cancelReason String?
   orderStatus String?
+  orderLocale String?
+  currencyCode String?
+  presentmentCurrencyCode String?
+  confirmed Boolean @default(false)
+  test Boolean @default(false)
+  tags Json?
+  note String?
   lineItems  Json
+  shippingAddress Json?
+  billingAddress Json?
+  discountApplications Json?
+  metafields Json?
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
   shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, orderId])
   @@index([shopId, orderDate])
   @@index([shopId, customerId])
+  @@index([shopId, customerEmail])
+  @@index([shopId, orderStatus])
+  @@index([shopId, currencyCode])
   @@map("OrderData")
 }
 
@@ -115,16 +173,23 @@ model ProductData {
   title     String
   handle    String
   description String?
-  category  String?
+  descriptionHtml String?
+  productType String?
   vendor    String?
+  tags      Json?
+  status    String?
+  totalInventory Int?
   price     Float
   compareAtPrice Float?
   inventory Int?
-  tags      Json?
   imageUrl  String?
   imageAlt  String?
   productCreatedAt DateTime?
+  productUpdatedAt DateTime?
   variants  Json?
+  images    Json?
+  options   Json?
+  collections Json?
   metafields Json?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -132,9 +197,12 @@ model ProductData {
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
-  @@index([shopId, category])
+  @@index([shopId, productType])
+  @@index([shopId, vendor])
   @@index([shopId, price])
+  @@index([shopId, status])
   @@index([shopId, isActive])
+  @@index([shopId, totalInventory])
   @@map("ProductData")
 }
 
@@ -153,6 +221,13 @@ model CustomerData {
   lastOrderId String?
   location Json?
   metafields Json?
+  state String?
+  verifiedEmail Boolean @default(false)
+  taxExempt Boolean @default(false)
+  defaultAddress Json?
+  addresses Json?
+  currencyCode String?
+  customerLocale String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -161,7 +236,64 @@ model CustomerData {
   @@index([shopId, email])
   @@index([shopId, totalSpent])
   @@index([shopId, lastOrderDate])
+  @@index([shopId, state])
+  @@index([shopId, verifiedEmail])
   @@map("CustomerData")
+}
+
+model CollectionData {
+  id              String   @id @default(cuid())
+  shopId          String
+  collectionId    String
+  title           String
+  handle          String
+  description     String?
+  sortOrder       String?
+  templateSuffix  String?
+  seoTitle        String?
+  seoDescription  String?
+  imageUrl        String?
+  imageAlt        String?
+  productCount    Int      @default(0)
+  isAutomated     Boolean  @default(false)
+  metafields      Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, collectionId])
+  @@index([shopId, title])
+  @@index([shopId, handle])
+  @@index([shopId, isAutomated])
+  @@map("CollectionData")
+}
+
+model CustomerEventData {
+  id                  String   @id @default(cuid())
+  shopId              String
+  customerId          String
+  eventId             String
+  eventType           String
+  customerEmail       String?
+  customerFirstName   String?
+  customerLastName    String?
+  customerTags        Json?
+  customerState       String?
+  customerOrdersCount Int      @default(0)
+  customerAmountSpent Float    @default(0)
+  customerCurrency    String   @default("USD")
+  eventTimestamp      DateTime @default(now())
+  rawEventData        Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, eventId])
+  @@index([shopId, customerId])
+  @@index([shopId, eventType])
+  @@index([shopId, eventTimestamp])
+  @@index([shopId, customerEmail])
+  @@map("CustomerEventData")
 }
 
 model BundleAnalysisResult {
@@ -408,6 +540,8 @@ model MLTrainingLog {
   durationMs  Int?     // Training duration in milliseconds
   productsCount Int    @default(0)
   usersCount   Int     @default(0)
+  collectionsCount Int @default(0)
+  customerEventsCount Int @default(0)
   error       String?
   createdAt   DateTime @default(now())
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -464,13 +598,179 @@ model ProductFeatures {
   category        String?
   tags            Json?
   lastComputedAt  DateTime @default(now())
+  
+  // Enhanced features for ML training
+  variantComplexity    Float?  // 0-1 normalized score
+  imageRichness        Float?  // 0-1 normalized score
+  tagDiversity         Float?  // 0-1 normalized score
+  metafieldUtilization Float?  // 0-1 normalized score
+  categoryEncoded      Int?    // 0 or 1 for ML
+  vendorScore          Int?    // 0 or 1 for ML
+  
   shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
   @@index([shopId, popularity])
   @@index([shopId, priceTier])
   @@index([shopId, category])
+  @@index([shopId, variantComplexity])
+  @@index([shopId, imageRichness])
+  @@index([shopId, tagDiversity])
   @@map("ProductFeatures")
+}
+
+model CollectionFeatures {
+  id                    String   @id @default(cuid())
+  shopId                String
+  collectionId          String
+  productCount          Int      @default(0)
+  isAutomated           Boolean  @default(false)
+  performanceScore      Float    @default(0)
+  seoScore              Int      @default(0)
+  imageScore            Int      @default(0)
+  lastComputedAt        DateTime @default(now())
+  
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, collectionId])
+  @@index([shopId, productCount])
+  @@index([shopId, isAutomated])
+  @@index([shopId, performanceScore])
+  @@map("CollectionFeatures")
+}
+
+model ProductCollectionFeatures {
+  id                      String   @id @default(cuid())
+  shopId                  String
+  productId               String
+  collectionCount         Int      @default(0)
+  collectionQualityScore  Float    @default(0)  // 0-1 normalized score
+  crossCollectionScore    Float    @default(0)  // 0-1 normalized score
+  isInManualCollections   Boolean  @default(false)
+  isInAutomatedCollections Boolean @default(false)
+  lastComputedAt          DateTime @default(now())
+  
+  shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, collectionCount])
+  @@index([shopId, collectionQualityScore])
+  @@index([shopId, crossCollectionScore])
+  @@map("ProductCollectionFeatures")
+}
+
+model CustomerBehaviorFeatures {
+  id                    String   @id @default(cuid())
+  shopId                String
+  customerId            String
+  eventDiversity        Int      @default(0)
+  eventFrequency        Int      @default(0)
+  daysSinceFirstEvent   Int      @default(0)
+  daysSinceLastEvent    Int      @default(0)
+  purchaseFrequency     Int      @default(0)
+  topCategories         Json?    // Top 3 preferred categories
+  engagementScore       Float    @default(0)  // 0-1 normalized score
+  recencyScore          Float    @default(0)  // 0-1 normalized score
+  diversityScore        Float    @default(0)  // 0-1 normalized score
+  behavioralScore       Float    @default(0)  // Combined behavioral score
+  lastComputedAt        DateTime @default(now())
+  
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, engagementScore])
+  @@index([shopId, recencyScore])
+  @@index([shopId, behavioralScore])
+  @@index([shopId, daysSinceLastEvent])
+  @@map("CustomerBehaviorFeatures")
+}
+
+model AdvancedMLFeatures {
+  id                    String   @id @default(cuid())
+  shopId                String
+  
+  // Time-based patterns
+  monthlyPatterns       Json?    // Monthly revenue/order patterns
+  dailyPatterns         Json?    // Day-of-week patterns
+  hourlyPatterns        Json?    // Hourly patterns
+  
+  // Customer segmentation
+  customerSegments      Json?    // High-value, frequent, recent, lapsed
+  
+  // Product relationships
+  productSimilarities   Json?    // Co-purchase similarity matrix
+  crossSellingOpportunities Json? // Frequent product combinations
+  
+  // Category and price analysis
+  categoryPerformance   Json?    // Category revenue/quantity analysis
+  priceElasticity       Json?    // Price range performance
+  
+  // Analytics summary
+  totalSegments         Int      @default(0)
+  totalSimilarities     Int      @default(0)
+  totalOpportunities    Int      @default(0)
+  lastComputedAt        DateTime @default(now())
+  
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId])
+  @@index([shopId, lastComputedAt])
+  @@map("AdvancedMLFeatures")
+}
+
+model CollectionAnalytics {
+  id                        String   @id @default(cuid())
+  shopId                    String
+  
+  // Collection counts
+  totalCollections          Int      @default(0)
+  manualCollections         Int      @default(0)
+  automatedCollections      Int      @default(0)
+  
+  // Performance metrics
+  avgProductsPerCollection  Float    @default(0)
+  collectionAutomationRatio Float    @default(0)
+  
+  // Top collections
+  topCollectionsByProducts  Json?    // Top 10 collections by product count
+  topCollectionsByRevenue   Json?    // Top 10 collections by revenue
+  
+  lastComputedAt            DateTime @default(now())
+  
+  shop                      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId])
+  @@index([shopId, totalCollections])
+  @@index([shopId, collectionAutomationRatio])
+  @@map("CollectionAnalytics")
+}
+
+model CustomerBehaviorAnalytics {
+  id                        String   @id @default(cuid())
+  shopId                    String
+  
+  // Customer counts
+  totalCustomersWithBehavior Int     @default(0)
+  highEngagementCustomers    Int     @default(0)
+  activeCustomers            Int     @default(0)
+  
+  // Average scores
+  avgEngagementScore         Float   @default(0)
+  avgRecencyScore           Float   @default(0)
+  avgDiversityScore         Float   @default(0)
+  
+  // Behavioral distribution
+  engagementDistribution     Json?   // Distribution of engagement scores
+  recencyDistribution        Json?   // Distribution of recency scores
+  
+  lastComputedAt            DateTime @default(now())
+  
+  shop                      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId])
+  @@index([shopId, totalCustomersWithBehavior])
+  @@index([shopId, avgEngagementScore])
+  @@map("CustomerBehaviorAnalytics")
 }
 
 model InteractionFeatures {
@@ -489,4 +789,46 @@ model InteractionFeatures {
   @@index([shopId, productId])
   @@index([shopId, timeDecayedWeight])
   @@map("InteractionFeatures")
+}
+
+model ProductAnalytics {
+  id              String   @id @default(cuid())
+  shopId          String
+  productId       String
+  viewCount       Int      @default(0)
+  addToCartCount  Int      @default(0)
+  purchaseCount   Int      @default(0)
+  revenue         Float    @default(0)
+  avgOrderValue   Float    @default(0)
+  lastViewedAt    DateTime?
+  lastPurchasedAt DateTime?
+  lastComputedAt  DateTime @default(now())
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, viewCount])
+  @@index([shopId, purchaseCount])
+  @@index([shopId, revenue])
+  @@index([shopId, lastViewedAt])
+  @@map("ProductAnalytics")
+}
+
+model CustomerAnalytics {
+  id                    String   @id @default(cuid())
+  shopId                String
+  customerId            String
+  totalSessions         Int      @default(0)
+  totalPageViews        Int      @default(0)
+  totalSearchQueries    Int      @default(0)
+  cartAbandonmentRate   Float    @default(0)
+  avgSessionDuration    Float    @default(0)
+  lastActivityAt        DateTime?
+  preferredCategories   Json?
+  lastComputedAt        DateTime @default(now())
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, totalSessions])
+  @@index([shopId, lastActivityAt])
+  @@map("CustomerAnalytics")
 }

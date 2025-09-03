@@ -1,21 +1,13 @@
-"""
-Data collection service for gathering and saving Shopify data
-"""
-
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.database import (
     get_database,
-    get_or_create_shop,
-    clear_shop_data,
-    update_shop_last_analysis,
-    get_latest_timestamps,
 )
-from app.services.shopify_api import ShopifyAPIClient, calculate_since_date
+from app.utils.shopify_client import ShopifyEnhancedAPIClient
 from app.core.logger import get_logger
 from prisma import Json
 
@@ -39,13 +31,16 @@ class DataCollectionResult(BaseModel):
     orders_count: int
     products_count: int
     customers_count: int
+    collections_count: int
+    customer_events_count: int
     duration_ms: float
     success: bool
     error: Optional[str] = None
+    permissions_status: Dict[str, bool] = {}
 
 
 class DataCollectionService:
-    """Service for collecting and saving Shopify data"""
+    """Enhanced service for collecting and saving Shopify data with all 5 APIs"""
 
     def __init__(self):
         self.db = None
@@ -107,6 +102,139 @@ class DataCollectionService:
         except Exception as e:
             logger.error(f"Failed to get or create shop: {e}", config=config)
             raise Exception(f"Failed to get or create shop: {str(e)}")
+
+    async def save_raw_orders(
+        self,
+        shop_db_id: str,
+        orders: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw order data to RawOrder table"""
+        try:
+
+            # Clear existing raw orders for this shop
+            await self.db.raworder.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw orders
+            raw_orders = []
+            for order in orders:
+                raw_orders.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(order),
+                    }
+                )
+
+            await self.db.raworder.create_many(data=raw_orders)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw orders: {e}")
+            # Don't fail the entire process if raw saving fails
+
+    async def save_raw_customers(
+        self,
+        shop_db_id: str,
+        customers: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw customer data to RawCustomer table"""
+        try:
+
+            # Clear existing raw customers for this shop
+            await self.db.rawcustomer.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw customers
+            raw_customers = []
+            for customer in customers:
+                raw_customers.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(customer),
+                    }
+                )
+
+            await self.db.rawcustomer.create_many(data=raw_customers)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw customers: {e}")
+            # Don't fail the entire process if raw saving fails
+
+    async def save_raw_products(
+        self,
+        shop_db_id: str,
+        products: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw product data to RawProduct table"""
+        try:
+
+            # Clear existing raw products for this shop
+            await self.db.rawproduct.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw products
+            raw_products = []
+            for product in products:
+                raw_products.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(product),
+                    }
+                )
+
+            await self.db.rawproduct.create_many(data=raw_products)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw products: {e}")
+            # Don't fail the entire process if raw saving fails
+
+    async def save_raw_collections(
+        self,
+        shop_db_id: str,
+        collections: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw collection data to RawCollection table"""
+        try:
+            # Clear existing raw collections for this shop
+            await self.db.rawcollection.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw collections
+            raw_collections = []
+            for collection in collections:
+                raw_collections.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(collection),
+                    }
+                )
+
+            await self.db.rawcollection.create_many(data=raw_collections)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw collections: {e}")
+            # Don't fail the entire process if raw saving fails
+
+    async def save_raw_customer_events(
+        self,
+        shop_db_id: str,
+        customer_events: List[Dict[str, Any]],
+    ) -> None:
+        """Save raw customer events data to RawCustomerEvent table"""
+        try:
+            # Clear existing raw customer events for this shop
+            await self.db.rawcustomerevent.delete_many(where={"shopId": shop_db_id})
+
+            # Save raw customer events
+            raw_events = []
+            for event in customer_events:
+                raw_events.append(
+                    {
+                        "shopId": shop_db_id,
+                        "payload": Json(event),
+                    }
+                )
+
+            await self.db.rawcustomerevent.create_many(data=raw_events)
+
+        except Exception as e:
+            logger.error(f"Failed to save raw customer events: {e}")
+            # Don't fail the entire process if raw saving fails
 
     async def save_orders(
         self,
@@ -193,87 +321,6 @@ class DataCollectionService:
                 f"Save orders error | operation=save_orders | shop_db_id={shop_db_id} | orders_count={len(orders)} | error={str(e)}"
             )
             raise
-
-    async def save_raw_orders(
-        self,
-        shop_db_id: str,
-        orders: List[Dict[str, Any]],
-    ) -> None:
-        """Save raw order data to RawOrder table"""
-        try:
-
-            # Clear existing raw orders for this shop
-            await self.db.raworder.delete_many(where={"shopId": shop_db_id})
-
-            # Save raw orders
-            raw_orders = []
-            for order in orders:
-                raw_orders.append(
-                    {
-                        "shopId": shop_db_id,
-                        "payload": Json(order),
-                    }
-                )
-
-            await self.db.raworder.create_many(data=raw_orders)
-
-        except Exception as e:
-            logger.error(f"Failed to save raw orders: {e}")
-            # Don't fail the entire process if raw saving fails
-
-    async def save_raw_customers(
-        self,
-        shop_db_id: str,
-        customers: List[Dict[str, Any]],
-    ) -> None:
-        """Save raw customer data to RawCustomer table"""
-        try:
-
-            # Clear existing raw customers for this shop
-            await self.db.rawcustomer.delete_many(where={"shopId": shop_db_id})
-
-            # Save raw customers
-            raw_customers = []
-            for customer in customers:
-                raw_customers.append(
-                    {
-                        "shopId": shop_db_id,
-                        "payload": Json(customer),
-                    }
-                )
-
-            await self.db.rawcustomer.create_many(data=raw_customers)
-
-        except Exception as e:
-            logger.error(f"Failed to save raw customers: {e}")
-            # Don't fail the entire process if raw saving fails
-
-    async def save_raw_products(
-        self,
-        shop_db_id: str,
-        products: List[Dict[str, Any]],
-    ) -> None:
-        """Save raw product data to RawProduct table"""
-        try:
-
-            # Clear existing raw products for this shop
-            await self.db.rawproduct.delete_many(where={"shopId": shop_db_id})
-
-            # Save raw products
-            raw_products = []
-            for product in products:
-                raw_products.append(
-                    {
-                        "shopId": shop_db_id,
-                        "payload": Json(product),
-                    }
-                )
-
-            await self.db.rawproduct.create_many(data=raw_products)
-
-        except Exception as e:
-            logger.error(f"Failed to save raw products: {e}")
-            # Don't fail the entire process if raw saving fails
 
     async def save_products(
         self,
@@ -469,321 +516,163 @@ class DataCollectionService:
             )
             raise
 
-    async def collect_and_save_complete_data(
-        self, config: DataCollectionConfig
-    ) -> DataCollectionResult:
-        """Collect and save complete shop data"""
+    async def save_collections(
+        self,
+        shop_db_id: str,
+        collections: List[Dict[str, Any]],
+        is_incremental: bool = False,
+    ) -> None:
+        """Save collections to database"""
+        if not collections:
+            return
+
         start_time = asyncio.get_event_loop().time()
 
         try:
-            # Ensure database is initialized
-            if not self.db:
-                await self.initialize()
+            # Always use batch operations for better performance
+            # First, save raw data to RawCollection table
+            await self.save_raw_collections(shop_db_id, collections)
 
-            # Get or create shop record
-            shop = await get_or_create_shop(
-                config.shop_id, config.shop_domain, config.access_token
-            )
-            shop_db_id = shop.id
+            # Transform collections data
+            collection_data = []
+            for collection in collections:
+                collection_record = {
+                    "shopId": shop_db_id,
+                    "collectionId": str(collection["id"]),
+                    "title": collection["title"],
+                    "handle": collection["handle"],
+                    "description": collection.get("description", ""),
+                    "sortOrder": collection.get("sortOrder", ""),
+                    "templateSuffix": collection.get("templateSuffix", ""),
+                    "seoTitle": collection.get("seo", {}).get("title"),
+                    "seoDescription": collection.get("seo", {}).get("description"),
+                    "imageUrl": collection.get("image", {}).get("url"),
+                    "imageAlt": collection.get("image", {}).get("altText"),
+                    "productCount": len(
+                        collection.get("products", {}).get("edges", [])
+                    ),
+                    "isAutomated": bool(collection.get("ruleSet", {}).get("rules")),
+                    "metafields": Json(collection.get("metafields", {})),
+                    "createdAt": datetime.now(),
+                    "updatedAt": datetime.now(),
+                }
+                collection_data.append(collection_record)
 
-            # Calculate since date
-            since_date = calculate_since_date(
-                config.days_back or settings.MAX_INITIAL_DAYS
-            )
-
-            # Create Shopify API client
-            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
-
+            # Save to database using batch operations
             try:
-                # Collect data in parallel for better performance
-
-                parallel_start = asyncio.get_event_loop().time()
-
-                # Collect data in parallel with timeout protection
-                try:
-                    async with asyncio.timeout(
-                        300
-                    ):  # 5 minute timeout for entire parallel operation
-                        orders, products, customers = await asyncio.gather(
-                            api_client.fetch_orders(since_date),
-                            api_client.fetch_products(),
-                            api_client.fetch_customers(since_date),
-                        )
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Data collection timed out after 5 minutes",
-                        shop_domain=config.shop_domain,
-                        since_date=since_date,
-                    )
-                    raise Exception(
-                        "Data collection timed out - Shopify API calls took too long"
-                    )
-
-                # Log what we collected
-
-                # If no customers, that's okay - we can still do analysis
-                if not customers:
-                    customers = []
-
-                # Clear existing data
-                await clear_shop_data(shop_db_id)
-
-                # Save data to database in parallel
-                try:
-                    async with asyncio.timeout(120):  # 2 minute timeout for saving data
-                        await asyncio.gather(
-                            self.save_products(shop_db_id, products, False),
-                            self.save_orders(shop_db_id, orders, False),
-                            self.save_customers(shop_db_id, customers, False),
-                        )
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Data saving timed out after 2 minutes",
-                        shop_domain=config.shop_domain,
-                        shop_db_id=shop_db_id,
-                    )
-                    raise Exception(
-                        "Data saving timed out - database operations took too long"
-                    )
-
-                # Update shop's last analysis timestamp
-                await update_shop_last_analysis(shop_db_id)
-
-                # Notify user about data collection results
-                try:
-                    from app.core.redis_client import streams_manager
-
-                    if customers:
-                        await streams_manager.publish_user_notification_event(
-                            shop_id=config.shop_id,
-                            notification_type="data_collection_completed",
-                            message=f"Data collection completed successfully! Collected {len(orders)} orders, {len(products)} products, and {len(customers)} customers.",
-                            data={
-                                "orders_count": len(orders),
-                                "products_count": len(products),
-                                "customers_count": len(customers),
-                                "has_full_data": True,
-                            },
-                        )
-                    else:
-                        await streams_manager.publish_user_notification_event(
-                            shop_id=config.shop_id,
-                            notification_type="data_collection_completed_limited",
-                            message=f"✅ Data collection completed! Collected {len(orders)} orders and {len(products)} products. We'll analyze product bundles and recommendations using this data.",
-                            data={
-                                "orders_count": len(orders),
-                                "products_count": len(products),
-                                "customers_count": 0,
-                                "has_full_data": False,
-                                "note": "Customer data access not available - using orders and products for analysis",
-                            },
-                        )
-                except Exception as notification_error:
-                    logger.warning(
-                        "Failed to send data collection notification",
-                        error=str(notification_error),
-                        shop_id=config.shop_id,
-                    )
-
-                total_duration_ms = (
-                    asyncio.get_event_loop().time() - start_time
-                ) * 1000
-
-                logger.info(
-                    f"Data collection: complete_data_collection | shop_id={config.shop_id} | operation=complete_data_collection | duration_ms={total_duration_ms:.2f}"
+                await self.db.collectiondata.create_many(
+                    data=collection_data, skip_duplicates=True
                 )
-
-                # Log success with data availability info
-                if customers:
-                    logger.info(
-                        "Data collection and saving completed successfully with full data",
-                        shop_id=config.shop_id,
-                        shop_domain=config.shop_domain,
-                        products_saved=len(products),
-                        orders_saved=len(orders),
-                        customers_saved=len(customers),
-                        total_duration_ms=total_duration_ms,
-                    )
-                else:
-                    logger.info(
-                        "Data collection completed with limited data (no customer access)",
-                        shop_id=config.shop_id,
-                        shop_domain=config.shop_domain,
-                        products_saved=len(products),
-                        orders_saved=len(orders),
-                        customers_saved=0,
-                        total_duration_ms=total_duration_ms,
-                        note="Customer data access denied by Shopify - analysis will use orders and products only",
-                    )
-
-                return DataCollectionResult(
-                    shop_db_id=shop_db_id,
-                    orders_count=len(orders),
-                    products_count=len(products),
-                    customers_count=len(customers),
-                    duration_ms=total_duration_ms,
-                    success=True,
+            except Exception as batch_error:
+                logger.warning(
+                    f"Batch insert failed for collections, falling back to individual upserts: {batch_error}"
                 )
-
-            finally:
-                await api_client.close()
+                # Fallback to individual upserts if batch fails
+                for collection_record in collection_data:
+                    await self.db.collectiondata.upsert(
+                        where={
+                            "shopId_collectionId": {
+                                "shopId": collection_record["shopId"],
+                                "collectionId": collection_record["collectionId"],
+                            }
+                        },
+                        data={
+                            "create": collection_record,
+                            "update": {
+                                key: value
+                                for key, value in collection_record.items()
+                                if key not in ["shopId", "collectionId"]
+                            },
+                        },
+                    )
 
         except Exception as e:
-            total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
             logger.error(
-                f"Complete data collection error | operation=complete_data_collection | shop_id={config.shop_id} | shop_domain={config.shop_domain} | total_duration_ms={total_duration_ms:.2f} | error={str(e)}"
+                f"Save collections error | operation=save_collections | shop_db_id={shop_db_id} | collections_count={len(collections)} | error={str(e)}"
             )
+            raise
 
-            return DataCollectionResult(
-                shop_db_id="",
-                orders_count=0,
-                products_count=0,
-                customers_count=0,
-                duration_ms=total_duration_ms,
-                success=False,
-                error=str(e),
-            )
+    async def save_customer_events(
+        self,
+        shop_db_id: str,
+        customer_events: List[Dict[str, Any]],
+        is_incremental: bool = False,
+    ) -> None:
+        """Save customer events to database"""
+        if not customer_events:
+            return
 
-    async def collect_and_save_incremental_data(
-        self, config: DataCollectionConfig
-    ) -> DataCollectionResult:
-        """Collect and save incremental shop data"""
         start_time = asyncio.get_event_loop().time()
 
-        logger.info(
-            "Starting incremental data collection",
-            shop_id=config.shop_id,
-            shop_domain=config.shop_domain,
-        )
-
         try:
-            # Ensure database is initialized
-            if not self.db:
-                await self.initialize()
+            # Always use batch operations for better performance
+            # First, save raw data to RawCustomerEvent table
+            await self.save_raw_customer_events(shop_db_id, customer_events)
 
-            # Get or create shop record
-            shop = await get_or_create_shop(
-                config.shop_id, config.shop_domain, config.access_token
-            )
-            shop_db_id = shop.id
+            # Transform customer events data
+            event_data = []
+            for customer in customer_events:
+                # Extract events from customer
+                events = customer.get("events", {}).get("edges", [])
+                for event_edge in events:
+                    event = event_edge["node"]
+                    event_record = {
+                        "shopId": shop_db_id,
+                        "customerId": str(customer["id"]),
+                        "eventId": str(event["id"]),
+                        "eventType": event.get("__typename", "Unknown"),
+                        "customerEmail": customer.get("email"),
+                        "customerFirstName": customer.get("firstName"),
+                        "customerLastName": customer.get("lastName"),
+                        "customerTags": Json(customer.get("tags", [])),
+                        "customerState": customer.get("state"),
+                        "customerOrdersCount": customer.get("numberOfOrders", 0),
+                        "customerAmountSpent": float(
+                            customer.get("amountSpent", {}).get("amount", 0)
+                        ),
+                        "customerCurrency": customer.get("amountSpent", {}).get(
+                            "currencyCode", "USD"
+                        ),
+                        "eventTimestamp": datetime.now(),
+                        "rawEventData": Json(event),
+                        "createdAt": datetime.now(),
+                        "updatedAt": datetime.now(),
+                    }
+                    event_data.append(event_record)
 
-            # Determine since date for incremental collection
-            since_date = None
-            collection_type = ""
-
-            # Get the latest timestamps from database
-            timestamps = await get_latest_timestamps(shop_db_id)
-
-            if shop.lastAnalysisAt:
-                # Use last analysis timestamp as starting point
-                since_date = shop.lastAnalysisAt.isoformat()
-                collection_type = "incremental_since_last_analysis"
-            elif timestamps["latest_order_date"] or timestamps["latest_product_date"]:
-                # Use the latest data timestamp as starting point
-                latest_timestamp = max(
-                    filter(
-                        None,
-                        [
-                            timestamps["latest_order_date"],
-                            timestamps["latest_product_date"],
-                        ],
-                    )
-                )
-                since_date = latest_timestamp.isoformat()
-                collection_type = "incremental_since_latest_data"
-            else:
-                # Fallback to configured days if no timestamps exist
-                since_date = calculate_since_date(settings.FALLBACK_DAYS)
-                collection_type = "incremental_fallback"
-
-            logger.info(
-                f"Collecting incremental data since {collection_type}",
-                since_date=since_date,
-                collection_type=collection_type,
-            )
-
-            # Create Shopify API client
-            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
-
+            # Save to database using batch operations
             try:
-                # Collect incremental data in parallel
-                logger.info(
-                    "Fetching incremental orders, products, and customers in parallel"
+                await self.db.customereventdata.create_many(
+                    data=event_data, skip_duplicates=True
                 )
-
-                parallel_start = asyncio.get_event_loop().time()
-
-                orders, products, customers = await asyncio.gather(
-                    api_client.fetch_orders(since_date),
-                    api_client.fetch_products(since_date),
-                    api_client.fetch_customers(since_date),
+            except Exception as batch_error:
+                logger.warning(
+                    f"Batch insert failed for customer events, falling back to individual upserts: {batch_error}"
                 )
-
-                parallel_duration_ms = (
-                    asyncio.get_event_loop().time() - parallel_start
-                ) * 1000
-
-                logger.info(
-                    f"Performance: parallel_incremental_collection | duration_ms={parallel_duration_ms:.2f} | shop_domain={config.shop_domain} | orders_count={len(orders)} | products_count={len(products)} | customers_count={len(customers)}"
-                )
-
-                # Save incremental data to database in parallel
-                await asyncio.gather(
-                    self.save_products(shop_db_id, products, True),
-                    self.save_orders(shop_db_id, orders, True),
-                    self.save_customers(shop_db_id, customers, True),
-                )
-
-                # Update shop's last analysis timestamp
-                await update_shop_last_analysis(shop_db_id)
-
-                total_duration_ms = (
-                    asyncio.get_event_loop().time() - start_time
-                ) * 1000
-
-                logger.info(
-                    f"Data collection: incremental_data_collection | shop_id={config.shop_id} | operation=incremental_data_collection | duration_ms={total_duration_ms:.2f}"
-                )
-
-                logger.info(
-                    "Incremental data collection and saving completed successfully",
-                    shop_id=config.shop_id,
-                    shop_domain=config.shop_domain,
-                    products_saved=len(products),
-                    orders_saved=len(orders),
-                    customers_saved=len(customers),
-                    total_duration_ms=total_duration_ms,
-                )
-
-                return DataCollectionResult(
-                    shop_db_id=shop_db_id,
-                    orders_count=len(orders),
-                    products_count=len(products),
-                    customers_count=len(customers),
-                    duration_ms=total_duration_ms,
-                    success=True,
-                )
-
-            finally:
-                await api_client.close()
+                # Fallback to individual upserts if batch fails
+                for event_record in event_data:
+                    await self.db.customereventdata.upsert(
+                        where={
+                            "shopId_eventId": {
+                                "shopId": event_record["shopId"],
+                                "eventId": event_record["eventId"],
+                            }
+                        },
+                        data={
+                            "create": event_record,
+                            "update": {
+                                key: value
+                                for key, value in event_record.items()
+                                if key not in ["shopId", "eventId"]
+                            },
+                        },
+                    )
 
         except Exception as e:
-            total_duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-
             logger.error(
-                f"Incremental data collection error | operation=incremental_data_collection | shop_id={config.shop_id} | shop_domain={config.shop_domain} | total_duration_ms={total_duration_ms:.2f} | error={str(e)}"
+                f"Save customer events error | operation=save_customer_events | shop_db_id={shop_db_id} | events_count={len(event_data)} | error={str(e)}"
             )
-
-            return DataCollectionResult(
-                shop_db_id="",
-                orders_count=0,
-                products_count=0,
-                customers_count=0,
-                duration_ms=total_duration_ms,
-                success=False,
-                error=str(e),
-            )
+            raise
 
     async def get_existing_products_count(self, shop_db_id: str) -> int:
         """Get count of existing products for a shop"""
@@ -1032,7 +921,9 @@ class DataCollectionService:
             )
 
             # Create Shopify API client
-            api_client = ShopifyAPIClient(config.shop_domain, config.access_token)
+            api_client = ShopifyEnhancedAPIClient(
+                config.shop_domain, config.access_token
+            )
 
             try:
                 # Collect only customers
@@ -1067,5 +958,163 @@ class DataCollectionService:
                 "success": False,
                 "message": f"Customers collection failed: {str(e)}",
                 "customers_count": 0,
+                "skipped": False,
+            }
+
+    async def collect_collections_only(
+        self, shop_id: str, shop_config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Collect only collections data - idempotent operation"""
+        try:
+            logger.info("Starting collections-only data collection", shop_id=shop_id)
+
+            # Use provided shop config or get from database
+            if shop_config:
+                config = shop_config
+            else:
+                config = await self.get_shop_config(shop_id)
+                if not config:
+                    raise Exception(
+                        f"Shop configuration not found for shop_id: {shop_id}"
+                    )
+
+            shop_db_id = await self.get_or_create_shop_db_id(config)
+
+            # Create enhanced Shopify API client
+            api_client = ShopifyEnhancedAPIClient(
+                config.shop_domain, config.access_token
+            )
+
+            try:
+                # Check permissions first
+                permissions = await api_client.check_api_permissions()
+                if not permissions.get("collections", False):
+                    logger.warning("Collections API access denied, skipping")
+                    return {
+                        "success": False,
+                        "message": "Collections API access denied",
+                        "collections_count": 0,
+                        "skipped": True,
+                    }
+
+                # Collect collections
+                logger.info("Fetching collections data")
+                collections, success = await api_client.fetch_collections()
+
+                if not success:
+                    logger.warning("Collections collection failed")
+                    return {
+                        "success": False,
+                        "message": "Collections collection failed",
+                        "collections_count": 0,
+                        "skipped": False,
+                    }
+
+                logger.info(
+                    "Collections collection completed",
+                    shop_domain=config.shop_domain,
+                    collections_count=len(collections),
+                )
+
+                # Save collections to database
+                await self.save_collections(shop_db_id, collections, True)
+
+                return {
+                    "success": True,
+                    "message": "Collections collected successfully",
+                    "collections_count": len(collections),
+                    "skipped": False,
+                }
+
+            finally:
+                await api_client.close()
+
+        except Exception as e:
+            logger.error("Collections collection failed", shop_id=shop_id, error=str(e))
+            return {
+                "success": False,
+                "message": f"Collections collection failed: {str(e)}",
+                "collections_count": 0,
+                "skipped": False,
+            }
+
+    async def collect_customer_events_only(
+        self, shop_id: str, shop_config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Collect only customer events data - idempotent operation"""
+        try:
+            logger.info(
+                "Starting customer events-only data collection", shop_id=shop_id
+            )
+
+            # Use provided shop config or get from database
+            if shop_config:
+                config = shop_config
+            else:
+                config = await self.get_shop_config(shop_id)
+                if not config:
+                    raise Exception(
+                        f"Shop configuration not found for shop_id: {shop_id}"
+                    )
+
+            shop_db_id = await self.get_or_create_shop_db_id(config)
+
+            # Create enhanced Shopify API client
+            api_client = ShopifyEnhancedAPIClient(
+                config.shop_domain, config.access_token
+            )
+
+            try:
+                # Check permissions first
+                permissions = await api_client.check_api_permissions()
+                if not permissions.get("customer_events", False):
+                    logger.warning("Customer Events API access denied, skipping")
+                    return {
+                        "success": False,
+                        "message": "Customer Events API access denied",
+                        "customer_events_count": 0,
+                        "skipped": True,
+                    }
+
+                # Collect customer events
+                logger.info("Fetching customer events data")
+                customer_events, success = await api_client.fetch_customer_events()
+
+                if not success:
+                    logger.warning("Customer events collection failed")
+                    return {
+                        "success": False,
+                        "message": "Customer events collection failed",
+                        "customer_events_count": 0,
+                        "skipped": False,
+                    }
+
+                logger.info(
+                    "Customer events collection completed",
+                    shop_domain=config.shop_domain,
+                    customer_events_count=len(customer_events),
+                )
+
+                # Save customer events to database
+                await self.save_customer_events(shop_db_id, customer_events, True)
+
+                return {
+                    "success": True,
+                    "message": "Customer events collected successfully",
+                    "customer_events_count": len(customer_events),
+                    "skipped": False,
+                }
+
+            finally:
+                await api_client.close()
+
+        except Exception as e:
+            logger.error(
+                "Customer events collection failed", shop_id=shop_id, error=str(e)
+            )
+            return {
+                "success": False,
+                "message": f"Customer events collection failed: {str(e)}",
+                "customer_events_count": 0,
                 "skipped": False,
             }

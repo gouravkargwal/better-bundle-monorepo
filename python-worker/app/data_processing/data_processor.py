@@ -185,7 +185,7 @@ class DataProcessor:
 
                 # Check if it's a Redis timeout error
                 is_redis_timeout = "Timeout" in str(e) or "timeout" in str(e).lower()
-                
+
                 logger.error(
                     f"Consumer event: consumer_error | iteration={loop_iteration} | consecutive_failures={consecutive_failures} | error={str(e)} | error_type={type(e).__name__} | duration_ms={error_duration_ms:.2f} | is_redis_timeout={is_redis_timeout}"
                 )
@@ -201,11 +201,11 @@ class DataProcessor:
                     circuit_breaker_open_time = time.time()
 
                     # Wait longer when circuit breaker is triggered
-                    wait_time = min(60, 2 ** consecutive_failures)  # Cap at 60 seconds
+                    wait_time = min(60, 2**consecutive_failures)  # Cap at 60 seconds
                     logger.warning(
                         f"Consumer event: circuit_breaker_wait | wait_time_seconds={wait_time}"
                     )
-                    
+
                     # Check shutdown every 5 seconds during circuit breaker wait
                     for i in range(wait_time // 5):
                         if self.is_shutdown_requested():
@@ -213,11 +213,11 @@ class DataProcessor:
                         await asyncio.sleep(5)
                 else:
                     # Implement exponential backoff for non-circuit breaker failures
-                    wait_time = min(30, 2 ** consecutive_failures)  # Cap at 30 seconds
+                    wait_time = min(30, 2**consecutive_failures)  # Cap at 30 seconds
                     logger.info(
                         f"Consumer event: waiting_before_retry | wait_seconds={wait_time}"
                     )
-                    
+
                     # Check shutdown every 5 seconds during backoff wait
                     for i in range(wait_time // 5):
                         if self.is_shutdown_requested():
@@ -260,8 +260,6 @@ class DataProcessor:
                 message_id=event["_message_id"],
             )
 
-          
-
         except asyncio.TimeoutError:
             logger.error(f"Job processing timed out: {event.get('job_id', 'unknown')}")
             await self._acknowledge_event_safely(event)
@@ -301,7 +299,7 @@ class DataProcessor:
             )
 
             # Create shop config from job data
-            from app.services.data_collection import DataCollectionConfig
+            from app.data_processing.data_collection import DataCollectionConfig
 
             shop_config = DataCollectionConfig(
                 shop_id=shop_id,
@@ -381,12 +379,75 @@ class DataProcessor:
                     f"Job processing: customers_collection_failed | job_id={job_id} | error={str(e)}"
                 )
 
-            # 4. Determine overall success and send notification
+            # 4. Try to collect Collections Data
+            logger.info(
+                f"Job processing: collections_data_collection_start | job_id={job_id} | shop_id={shop_id}"
+            )
+            try:
+                collections_result = (
+                    await self.data_collection_service.collect_collections_only(
+                        shop_id, shop_config
+                    )
+                )
+                results["collections"] = collections_result
+
+                if collections_result["success"]:
+                    logger.info(
+                        f"Job processing: collections_data_collection_completed | job_id={job_id} | shop_id={shop_id} | collections_count={collections_result.get('collections_count', 0)}"
+                    )
+                else:
+                    logger.error(
+                        f"Job processing: collections_data_collection_failed | job_id={job_id} | shop_id={shop_id} | error={collections_result.get('message', 'Unknown error')}"
+                    )
+            except Exception as e:
+                collections_result = {
+                    "success": False,
+                    "message": str(e),
+                    "collections_count": 0,
+                }
+                results["collections"] = collections_result
+                logger.error(
+                    f"Job processing: customer_events_data_collection_failed | job_id={job_id} | error={str(e)}"
+                )
+
+            # 5. Try to collect Customer Events Data
+            logger.info(
+                f"Job processing: customer_events_data_collection_start | job_id={job_id} | shop_id={shop_id}"
+            )
+            try:
+                customer_events_result = (
+                    await self.data_collection_service.collect_customer_events_only(
+                        shop_id, shop_config
+                    )
+                )
+                results["customer_events"] = customer_events_result
+
+                if customer_events_result["success"]:
+                    logger.info(
+                        f"Job processing: customer_events_data_collection_completed | job_id={job_id} | shop_id={shop_id} | customer_events_count={customer_events_result.get('customer_events_count', 0)}"
+                    )
+                else:
+                    logger.error(
+                        f"Job processing: customer_events_data_collection_failed | job_id={job_id} | shop_id={shop_id} | error={customer_events_result.get('message', 'Unknown error')}"
+                    )
+            except Exception as e:
+                customer_events_result = {
+                    "success": False,
+                    "message": str(e),
+                    "customer_events_count": 0,
+                }
+                results["customer_events"] = customer_events_result
+                logger.error(
+                    f"Job processing: customer_events_data_collection_failed | job_id={job_id} | error={str(e)}"
+                )
+            # 6. Determine overall success and send notification
             overall_success = any(
                 [
                     products_result.get("success", False),
                     orders_result.get("success", False),
                     customers_result.get("success", False),
+                    collections_result.get("success", False),
+                    customer_events_result.get("success", False),
                 ]
             )
 

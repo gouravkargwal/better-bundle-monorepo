@@ -1,0 +1,12 @@
+ "read_customers",        // Customer profiles & behavior
+    "read_products",         // Product details & categories  
+    "read_orders",           // Purchase patterns & history
+    "read_inventory",        // Stock levels & availability
+    "read_collections",      // Product groupings & rules
+    "read_reports",          // Sales insights & performance
+    "read_marketing_events", // Campaign effectiveness
+    "read_discounts",        // Promotional impact
+    "read_channels",         // Sales channel performance
+    "read_metafields"
+     "read_customer_events",  // Real-time behavior (requires special permission)
+    "read_analytics" 

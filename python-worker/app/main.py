@@ -33,7 +33,7 @@ def start_consumer_process():
         return
 
     try:
-        from app.services.data_processor import data_processor
+        from app.data_processing.data_processor import data_processor
         from app.services.ml_training_consumer import ml_training_consumer
         from app.services.completion_handler import completion_handler
         from app.services.heuristic_decision_consumer import heuristic_decision_consumer
@@ -54,7 +54,7 @@ def run_consumer_worker():
     """Run the consumer in a separate process"""
     try:
         import asyncio
-        from app.services.data_processor import data_processor
+        from app.data_processing.data_processor import data_processor
         from app.services.ml_training_consumer import ml_training_consumer
         from app.services.completion_handler import completion_handler
         from app.services.heuristic_decision_consumer import heuristic_decision_consumer
