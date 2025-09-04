@@ -21,12 +21,14 @@ class ShopifyOrderLineItem(BaseModel):
     variant_id: Optional[str] = Field(None, description="Variant ID")
     variant_title: Optional[str] = Field(None, description="Variant title")
     sku: Optional[str] = Field(None, description="SKU")
+    barcode: Optional[str] = Field(None, description="Barcode")
 
     # Product information
     product_id: Optional[str] = Field(None, description="Product ID")
     product_title: Optional[str] = Field(None, description="Product title")
     vendor: Optional[str] = Field(None, description="Product vendor")
     product_type: Optional[str] = Field(None, description="Product type")
+    product_tags: List[str] = Field(default_factory=list, description="Product tags")
 
     # Pricing
     price: float = Field(..., description="Unit price")
@@ -105,6 +107,38 @@ class ShopifyOrder(BaseModel):
     customer_last_name: Optional[str] = Field(None, description="Customer last name")
     customer_email: Optional[str] = Field(None, description="Customer email")
     customer_phone: Optional[str] = Field(None, description="Customer phone")
+    customer_tags: List[str] = Field(default_factory=list, description="Customer tags")
+
+    # Addresses
+    shipping_address: Optional[Dict[str, Any]] = Field(
+        None, description="Shipping address"
+    )
+    billing_address: Optional[Dict[str, Any]] = Field(
+        None, description="Billing address"
+    )
+
+    # Order metadata
+    tags: List[str] = Field(default_factory=list, description="Order tags")
+    note: Optional[str] = Field(None, description="Order note")
+    confirmed: bool = Field(False, description="Order confirmed")
+    test: bool = Field(False, description="Test order")
+
+    # Financial details
+    total_refunded: float = Field(0.0, description="Total refunded amount")
+    total_outstanding: float = Field(0.0, description="Total outstanding amount")
+    customer_locale: Optional[str] = Field(None, description="Customer locale")
+    currency_code: str = Field("USD", description="Order currency code")
+    presentment_currency_code: Optional[str] = Field(
+        None, description="Presentment currency code"
+    )
+
+    # Discounts and metafields
+    discount_applications: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Discount applications"
+    )
+    metafields: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Order metafields"
+    )
 
     # Line items
     line_items: List[ShopifyOrderLineItem] = Field(
@@ -195,11 +229,14 @@ class ShopifyOrder(BaseModel):
         """Get ML-relevant features for this order"""
         return {
             "order_id": self.id,
+            "order_name": self.name or "",
             "total_price": self.total_price,
             "subtotal_price": self.subtotal_price,
             "total_tax": self.total_tax,
             "total_shipping_price": self.total_shipping_price,
             "total_discounts": self.total_discounts,
+            "total_refunded": self.total_refunded,
+            "total_outstanding": self.total_outstanding,
             "total_items": self.total_items,
             "unique_products": self.unique_products,
             "average_item_price": self.average_item_price,
@@ -212,10 +249,44 @@ class ShopifyOrder(BaseModel):
             "is_processed": self.is_processed,
             "is_fulfilled": self.is_fulfilled,
             "is_paid": self.is_paid,
+            "is_confirmed": self.confirmed,
+            "is_test": self.test,
             "status": self.status,
             "financial_status": self.financial_status,
             "fulfillment_status": self.fulfillment_status or "none",
             "currency": self.currency,
+            "currency_code": self.currency_code,
+            "presentment_currency_code": self.presentment_currency_code or "",
+            "customer_locale": self.customer_locale or "",
+            "customer_tags": self.customer_tags,
+            "order_tags": self.tags,
+            "order_note": self.note or "",
+            "discount_applications_count": len(self.discount_applications),
+            "metafields_count": len(self.metafields),
+            # Address features
+            "shipping_city": (
+                self.shipping_address.get("city", "") if self.shipping_address else ""
+            ),
+            "shipping_province": (
+                self.shipping_address.get("province", "")
+                if self.shipping_address
+                else ""
+            ),
+            "shipping_country": (
+                self.shipping_address.get("country", "")
+                if self.shipping_address
+                else ""
+            ),
+            "shipping_province_code": (
+                self.shipping_address.get("provinceCode", "")
+                if self.shipping_address
+                else ""
+            ),
+            "shipping_country_code": (
+                self.shipping_address.get("countryCodeV2", "")
+                if self.shipping_address
+                else ""
+            ),
         }
 
     def update_from_raw_data(self, raw_data: Dict[str, Any]) -> None:

@@ -10,26 +10,20 @@ This domain handles all Shopify-related operations including:
 
 from .models import *
 from .services import *
-from .repositories import *
 from .interfaces import *
 
 __all__ = [
     # Models
     "ShopifyShop",
-    "ShopifyProduct", 
+    "ShopifyProduct",
     "ShopifyOrder",
     "ShopifyCustomer",
     "ShopifyCollection",
     "ShopifyCustomerEvent",
-    
     # Services
     "ShopifyDataCollectionService",
     "ShopifyAPIClient",
     "ShopifyPermissionService",
-    
-    # Repositories
-    "ShopifyDataRepository",
-    
     # Interfaces
     "IShopifyDataCollector",
     "IShopifyAPIClient",

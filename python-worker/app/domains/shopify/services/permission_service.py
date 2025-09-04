@@ -2,14 +2,9 @@
 Shopify permission service implementation for BetterBundle Python Worker
 """
 
-import asyncio
 from typing import Dict, Any, List, Optional
-from datetime import datetime
-import time
 
 from app.core.logging import get_logger
-from app.core.exceptions import ConfigurationError
-from app.shared.decorators import async_timing
 from app.shared.helpers import now_utc
 from app.shared.services.redis_cache import create_cache_service
 
@@ -63,17 +58,11 @@ class ShopifyPermissionService(IShopifyPermissionService):
         self, shop_domain: str, access_token: str = None
     ) -> Dict[str, bool]:
         """Check what permissions the app has for a shop"""
-        logger.info(f"Starting permission check for shop: {shop_domain}")
-        logger.debug(f"Access token provided: {'Yes' if access_token else 'No'}")
-
         # Simple recursion guard - return basic permissions to avoid infinite loops
         if not hasattr(self, "_checking_permissions"):
             self._checking_permissions = set()
 
         if shop_domain in self._checking_permissions:
-            logger.warning(
-                f"Recursion detected for {shop_domain}, returning basic permissions"
-            )
             return {
                 "products": True,
                 "orders": True,
@@ -89,57 +78,29 @@ class ShopifyPermissionService(IShopifyPermissionService):
             # Check cache first
             cached = await self._get_cached_permissions(shop_domain)
             if cached:
-                logger.info(f"Using cached permissions for {shop_domain}")
-                logger.debug(f"Cached permissions: {cached}")
                 return cached
-
-            logger.info(f"Checking permissions for shop: {shop_domain}")
-            logger.debug(f"No cache hit, proceeding with scopes API call")
 
             # Get actual granted scopes from Shopify
             scopes = await self._get_shopify_scopes(shop_domain, access_token)
-            logger.debug(f"Granted scopes for {shop_domain}: {scopes}")
 
             # Check permissions based on granted scopes
-            logger.info(f"Checking permissions against granted scopes: {scopes}")
-
-            # Check each permission individually with detailed logging
             products_permission = any(
                 scope in ["read_products", "write_products"] for scope in scopes
             )
-            logger.info(
-                f"Products permission check: {products_permission} (looking for: read_products, write_products)"
-            )
-
             orders_permission = any(
                 scope in ["read_orders", "write_orders"] for scope in scopes
             )
-            logger.info(
-                f"Orders permission check: {orders_permission} (looking for: read_orders, write_orders)"
-            )
-
             customers_permission = any(
                 scope in ["read_customers", "write_customers"] for scope in scopes
             )
-            logger.info(
-                f"Customers permission check: {customers_permission} (looking for: read_customers, write_customers)"
-            )
-
             # Collections are part of read_products scope
             collections_permission = any(
                 scope in ["read_products", "write_products"] for scope in scopes
             )
-            logger.info(
-                f"Collections permission check: {collections_permission} (collections are part of read_products scope)"
-            )
-
             # Customer events use read_customer_events scope
             customer_events_permission = any(
                 scope in ["read_customer_events", "write_customer_events"]
                 for scope in scopes
-            )
-            logger.info(
-                f"Customer events permission check: {customer_events_permission} (looking for: read_customer_events, write_customer_events)"
             )
 
             permissions = {
@@ -152,10 +113,8 @@ class ShopifyPermissionService(IShopifyPermissionService):
 
             # Check overall access
             permissions["has_access"] = any(permissions.values())
-            logger.debug(f"Overall access result: {permissions['has_access']}")
 
             # Cache the results
-            logger.debug(f"Caching permission results for {shop_domain}")
             await self._cache_permissions(shop_domain, permissions)
 
             # Log the results
@@ -249,21 +208,10 @@ class ShopifyPermissionService(IShopifyPermissionService):
 
             # Use the API client to get scopes
             scopes = await self.api_client.get_app_installation_scopes(shop_domain)
-
-            logger.info(f"Retrieved {len(scopes)} scopes for {shop_domain}: {scopes}")
-
-            # Log each scope individually for debugging
-            for i, scope in enumerate(scopes):
-                logger.debug(f"Scope {i+1}: {scope}")
-
             return scopes
 
         except Exception as e:
-            logger.error(f"Error getting scopes for {shop_domain}: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
-            import traceback
-
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Failed to get scopes for {shop_domain}: {e}")
             return []
 
     async def get_collection_strategy(
@@ -313,81 +261,32 @@ class ShopifyPermissionService(IShopifyPermissionService):
         """Log permission check results for monitoring"""
         missing_scopes = await self.get_missing_scopes(shop_domain)
 
-        log_data = {
-            "shop_domain": shop_domain,
-            "permissions": permissions,
-            "missing_scopes": missing_scopes,
-            "total_scopes": len(self.required_scopes),
-            "available_scopes": len(self.required_scopes) - len(missing_scopes),
-            "coverage_percentage": (
-                (len(self.required_scopes) - len(missing_scopes))
-                / len(self.required_scopes)
-            )
-            * 100,
-        }
-
         if missing_scopes:
-            logger.warning(
-                f"Permission check completed with missing scopes", **log_data
-            )
+            logger.warning(f"Missing scopes for {shop_domain}: {missing_scopes}")
         else:
-            logger.info(
-                f"Permission check completed - all scopes available", **log_data
-            )
+            logger.info(f"All permissions granted for {shop_domain}")
 
     async def _get_cached_permissions(
         self, shop_domain: str
     ) -> Optional[Dict[str, bool]]:
         """Get cached permissions if still valid"""
         await self._ensure_cache_service()
-
-        logger.debug(f"Checking Redis cache for {shop_domain}")
-
         cached = await self.cache_service.get(shop_domain)
-        if cached:
-            logger.debug(f"Cache hit for {shop_domain}: {cached}")
-            return cached
-
-        logger.debug(f"Cache miss for {shop_domain}")
-        return None
+        return cached
 
     async def _cache_permissions(self, shop_domain: str, permissions: Dict[str, bool]):
         """Cache permission results"""
         await self._ensure_cache_service()
-
-        logger.debug(f"Caching permissions for {shop_domain}: {permissions}")
-        success = await self.cache_service.set(shop_domain, permissions, self.cache_ttl)
-        if success:
-            logger.debug(f"Successfully cached permissions for {shop_domain}")
-        else:
-            logger.warning(f"Failed to cache permissions for {shop_domain}")
+        await self.cache_service.set(shop_domain, permissions, self.cache_ttl)
 
     async def clear_permission_cache(self, shop_domain: Optional[str] = None):
         """Clear permission cache for a specific shop or all shops"""
         await self._ensure_cache_service()
 
-        logger.debug(
-            f"Clearing permission cache for: {shop_domain if shop_domain else 'all shops'}"
-        )
-
         if shop_domain:
-            # Clear specific shop cache
-            success = await self.cache_service.delete(shop_domain)
-            if success:
-                logger.info(f"Cleared permission cache for {shop_domain}")
-            else:
-                logger.debug(f"No cache entry found for {shop_domain}")
+            await self.cache_service.delete(shop_domain)
         else:
-            # Clear all permission cache
-            success = await self.cache_service.clear_namespace()
-            if success:
-                logger.info("Cleared all permission cache")
-            else:
-                logger.warning("Failed to clear all permission cache")
-
-        # Get current cache keys for debugging
-        current_keys = await self.cache_service.get_keys()
-        logger.debug(f"Cache after clearing: {current_keys}")
+            await self.cache_service.clear_namespace()
 
     def _get_scope_recommendations(self, missing_scopes: List[str]) -> List[str]:
         """Get recommendations for missing scopes"""

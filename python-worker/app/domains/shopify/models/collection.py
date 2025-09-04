@@ -34,8 +34,7 @@ class ShopifyCollection(BaseModel):
     )
     template_suffix: Optional[str] = Field(None, description="Template suffix")
 
-    # Collection status
-    published_at: Optional[datetime] = Field(None, description="Publication date")
+    # Collection status (removed published_at as it doesn't exist in GraphQL)
     published_scope: str = Field("web", description="Publication scope")
 
     # Collection statistics
@@ -73,8 +72,8 @@ class ShopifyCollection(BaseModel):
 
     @property
     def is_published(self) -> bool:
-        """Check if collection is published"""
-        return self.published_at is not None
+        """Check if collection is published (always true for GraphQL collections)"""
+        return True  # GraphQL collections are always published
 
     @property
     def has_description(self) -> bool:
@@ -108,10 +107,8 @@ class ShopifyCollection(BaseModel):
 
     @property
     def days_since_publication(self) -> Optional[int]:
-        """Get days since publication"""
-        if not self.published_at:
-            return None
-        return (now_utc() - self.published_at).days
+        """Get days since publication (use creation date for GraphQL collections)"""
+        return (now_utc() - self.created_at).days
 
     @property
     def collection_type(self) -> str:

@@ -112,7 +112,6 @@ class ShopifyDataStorageService:
             await self._initialize_performance_cache()
 
             self._is_initialized = True
-            logger.info("Data storage service initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize data storage service: {e}")
@@ -135,7 +134,6 @@ class ShopifyDataStorageService:
                     # Try to count records to verify table exists
                     if hasattr(db, table):
                         await getattr(db, table).count()
-                        logger.debug(f"Table {table} verified")
                     else:
                         raise DataStorageError(f"Required table {table} not found")
 
@@ -156,8 +154,6 @@ class ShopifyDataStorageService:
                     "last_analysis": shop.lastAnalysisAt,
                     "cached_at": now_utc(),
                 }
-
-            logger.info(f"Performance cache initialized with {len(shops)} shops")
 
         except Exception as e:
             logger.warning(f"Performance cache initialization failed: {e}")
@@ -199,9 +195,7 @@ class ShopifyDataStorageService:
                             },
                         )
                         metrics.updated_items = 1
-                        logger.info(f"Shop updated: {shop.domain}")
                     else:
-                        logger.info(f"Shop data unchanged: {shop.domain}")
                         metrics.total_items = 1
                 else:
                     # Force update
@@ -236,7 +230,6 @@ class ShopifyDataStorageService:
                     }
                 )
                 metrics.new_items = 1
-                logger.info(f"New shop created: {shop.domain}")
 
             metrics.total_items = 1
             metrics.end_time = now_utc()
@@ -302,9 +295,6 @@ class ShopifyDataStorageService:
             # Update metrics
             self.storage_metrics[f"{shop_id}_{DataType.PRODUCTS.value}"] = metrics
 
-            logger.info(
-                f"Products storage completed: {metrics.new_items} new, {metrics.updated_items} updated"
-            )
             return metrics
 
         except Exception as e:
@@ -366,7 +356,6 @@ class ShopifyDataStorageService:
 
                 await db_client.rawproduct.create_many(data=batch_data)
                 batch_metrics["new"] = len(products)
-                logger.info(f"Full refresh: {len(products)} products stored")
             else:
                 # Incremental: timestamp-based approach
                 current_time = now_utc()
@@ -409,7 +398,6 @@ class ShopifyDataStorageService:
                 if new_products:
                     await db_client.rawproduct.create_many(data=new_products)
                     batch_metrics["new"] = len(new_products)
-                    logger.info(f"Incremental: {len(new_products)} new products stored")
 
                 # Update existing products
                 if updated_products:
@@ -426,9 +414,6 @@ class ShopifyDataStorageService:
                             },
                         )
                     batch_metrics["updated"] = len(updated_products)
-                    logger.info(
-                        f"Incremental: {len(updated_products)} products updated"
-                    )
 
         except Exception as e:
             logger.error(f"Fast batch processing failed: {e}")
@@ -719,7 +704,6 @@ class ShopifyDataStorageService:
 
                 await self.db.raworder.create_many(data=batch_data)
                 metrics.new_items = len(orders)
-                logger.info(f"Full refresh: {len(orders)} orders stored")
             else:
                 # Incremental: timestamp-based approach
                 current_time = now_utc()
@@ -765,7 +749,6 @@ class ShopifyDataStorageService:
                 if new_orders:
                     await self.db.raworder.create_many(data=new_orders)
                     metrics.new_items = len(new_orders)
-                    logger.info(f"Incremental: {len(new_orders)} new orders stored")
 
                 # Update existing orders
                 if updated_orders:
@@ -782,7 +765,6 @@ class ShopifyDataStorageService:
                             },
                         )
                     metrics.updated_items = len(updated_orders)
-                    logger.info(f"Incremental: {len(updated_orders)} orders updated")
 
         except Exception as e:
             logger.error(f"Timestamp-based processing failed: {e}")
@@ -1221,9 +1203,6 @@ class ShopifyDataStorageService:
             # Update metrics
             self.storage_metrics[f"{shop_id}_{DataType.ORDERS.value}"] = metrics
 
-            logger.info(
-                f"Orders storage completed: {metrics.new_items} new, {metrics.updated_items} updated"
-            )
             return metrics
 
         except Exception as e:
@@ -1260,9 +1239,6 @@ class ShopifyDataStorageService:
             # Update metrics
             self.storage_metrics[f"{shop_id}_{DataType.CUSTOMERS.value}"] = metrics
 
-            logger.info(
-                f"Customers storage completed: {metrics.new_items} new, {metrics.updated_items} updated"
-            )
             return metrics
 
         except Exception as e:
@@ -1299,9 +1275,6 @@ class ShopifyDataStorageService:
             # Update metrics
             self.storage_metrics[f"{shop_id}_{DataType.COLLECTIONS.value}"] = metrics
 
-            logger.info(
-                f"Collections storage completed: {metrics.new_items} new, {metrics.updated_items} updated"
-            )
             return metrics
 
         except Exception as e:
@@ -1340,9 +1313,6 @@ class ShopifyDataStorageService:
                 metrics
             )
 
-            logger.info(
-                f"Customer events storage completed: {metrics.new_items} new, {metrics.updated_items} updated"
-            )
             return metrics
 
         except Exception as e:
@@ -1374,7 +1344,6 @@ class ShopifyDataStorageService:
                         where={"extractedAt": {"lt": cutoff_date}}
                     )
                     deleted_count += deleted
-                    logger.info(f"Cleaned up {deleted} old records from {table}")
 
             # Clean up performance cache
             await self._cleanup_performance_cache()
@@ -1400,16 +1369,12 @@ class ShopifyDataStorageService:
         for key in expired_keys:
             del self._performance_cache[key]
 
-        if expired_keys:
-            logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
-
     async def close(self) -> None:
         """Close database connection and cleanup resources"""
         try:
             if self.db and self._is_initialized:
                 await self.db.disconnect()
                 self._is_initialized = False
-                logger.info("Data storage service closed")
         except Exception as e:
             logger.error(f"Error closing data storage service: {e}")
 

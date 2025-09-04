@@ -5,7 +5,6 @@ Consumer manager for orchestrating all Redis consumers
 import asyncio
 import signal
 from typing import Dict, List, Optional
-from datetime import datetime
 
 from app.consumers.base_consumer import BaseConsumer
 from app.consumers.data_collection_consumer import DataCollectionConsumer
@@ -35,7 +34,6 @@ class ConsumerManager:
         """Setup signal handlers for graceful shutdown"""
 
         def signal_handler(signum, frame):
-            self.logger.info(f"Received signal {signum}, initiating shutdown")
             asyncio.create_task(self.shutdown())
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -55,8 +53,6 @@ class ConsumerManager:
         if analytics_consumer:
             self.consumers["analytics"] = analytics_consumer
 
-        self.logger.info(f"Registered {len(self.consumers)} consumers")
-
     async def start_all_consumers(self):
         """Start all registered consumers"""
         if self.is_running:
@@ -64,8 +60,6 @@ class ConsumerManager:
             return
 
         try:
-            self.logger.info("Starting all consumers...")
-
             # Start each consumer
             start_tasks = []
             for name, consumer in self.consumers.items():
@@ -75,7 +69,7 @@ class ConsumerManager:
             await asyncio.gather(*start_tasks)
 
             self.is_running = True
-            self.logger.info("All consumers started successfully")
+            self.logger.info("All consumers started")
 
         except Exception as e:
             self.logger.error(f"Failed to start consumers: {e}")
@@ -88,8 +82,6 @@ class ConsumerManager:
             return
 
         try:
-            self.logger.info("Stopping all consumers...")
-
             # Stop each consumer
             stop_tasks = []
             for name, consumer in self.consumers.items():
@@ -99,7 +91,7 @@ class ConsumerManager:
             await asyncio.gather(*stop_tasks, return_exceptions=True)
 
             self.is_running = False
-            self.logger.info("All consumers stopped successfully")
+            self.logger.info("All consumers stopped")
 
         except Exception as e:
             self.logger.error(f"Failed to stop consumers: {e}")
@@ -109,7 +101,6 @@ class ConsumerManager:
         """Start a single consumer"""
         try:
             await consumer.start()
-            self.logger.info(f"Consumer {name} started successfully")
         except Exception as e:
             self.logger.error(f"Failed to start consumer {name}: {e}")
             raise
@@ -118,7 +109,6 @@ class ConsumerManager:
         """Stop a single consumer"""
         try:
             await consumer.stop()
-            self.logger.info(f"Consumer {name} stopped successfully")
         except Exception as e:
             self.logger.error(f"Failed to stop consumer {name}: {e}")
             # Don't raise - we want to stop other consumers even if one fails
@@ -138,7 +128,7 @@ class ConsumerManager:
                 self._manager_loop(), name="consumer-manager-loop"
             )
 
-            self.logger.info("Consumer manager started successfully")
+            self.logger.info("Consumer manager started")
 
         except Exception as e:
             self.logger.error(f"Failed to start consumer manager: {e}")
@@ -147,8 +137,6 @@ class ConsumerManager:
     async def stop(self):
         """Stop the consumer manager"""
         try:
-            self.logger.info("Stopping consumer manager...")
-
             # Signal shutdown
             self._shutdown_event.set()
 
@@ -159,7 +147,7 @@ class ConsumerManager:
             if self._manager_task and not self._manager_task.done():
                 await asyncio.wait_for(self._manager_task, timeout=30.0)
 
-            self.logger.info("Consumer manager stopped successfully")
+            self.logger.info("Consumer manager stopped")
 
         except Exception as e:
             self.logger.error(f"Failed to stop consumer manager: {e}")
@@ -171,8 +159,6 @@ class ConsumerManager:
 
     async def _manager_loop(self):
         """Main manager loop for monitoring consumers"""
-        self.logger.info("Starting consumer manager loop")
-
         while not self._shutdown_event.is_set():
             try:
                 # Monitor consumer health
@@ -182,13 +168,10 @@ class ConsumerManager:
                 await asyncio.sleep(30)  # Check every 30 seconds
 
             except asyncio.CancelledError:
-                self.logger.info("Consumer manager loop cancelled")
                 break
             except Exception as e:
                 self.logger.error(f"Error in consumer manager loop: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-
-        self.logger.info("Consumer manager loop stopped")
 
     async def _monitor_consumers(self):
         """Monitor health of all consumers"""
@@ -197,15 +180,14 @@ class ConsumerManager:
                 # Get consumer metrics
                 metrics = consumer.get_metrics()
 
-                # Log health status
-                self.logger.info(
-                    f"Consumer {name} health check",
-                    status=metrics["status"],
-                    messages_processed=metrics["metrics"]["messages_processed"],
-                    messages_failed=metrics["metrics"]["messages_failed"],
-                    success_rate=metrics["metrics"]["success_rate"],
-                    uptime_seconds=metrics["metrics"]["uptime_seconds"],
-                )
+                # Only log if there are issues
+                if (
+                    metrics["status"] == "error"
+                    or metrics["metrics"]["messages_failed"] > 0
+                ):
+                    self.logger.warning(
+                        f"Consumer {name} issues: {metrics['status']}, failed: {metrics['metrics']['messages_failed']}"
+                    )
 
                 # Check if consumer needs restart
                 if metrics["status"] == "error":
@@ -230,8 +212,6 @@ class ConsumerManager:
 
             # Start the consumer
             await consumer.start()
-
-            self.logger.info(f"Consumer {name} restarted successfully")
 
         except Exception as e:
             self.logger.error(f"Failed to restart consumer {name}: {e}")

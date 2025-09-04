@@ -8,6 +8,6 @@ from .analytics_consumer import AnalyticsConsumer
 
 __all__ = [
     "DataCollectionConsumer",
-    "MLTrainingConsumer", 
+    "MLTrainingConsumer",
     "AnalyticsConsumer",
 ]

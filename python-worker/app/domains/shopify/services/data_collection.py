@@ -22,6 +22,7 @@ from ..models.customer import ShopifyCustomer, ShopifyCustomerAddress
 from ..models.collection import ShopifyCollection
 from ..models.customer_event import ShopifyCustomerEvent
 from .data_storage import ShopifyDataStorageService
+from .main_table_storage import MainTableStorageService
 
 logger = get_logger(__name__)
 
@@ -65,8 +66,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self.api_client = api_client
         self.permission_service = permission_service
 
-        # Initialize data storage service
+        # Initialize data storage services
         self.data_storage = ShopifyDataStorageService()
+        # Main table storage will use the connection pool directly
+        self.main_table_storage = None
 
         # Collection settings
         self.default_batch_size = 250  # Increased from 50 to 250 for faster API calls
@@ -84,7 +87,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     ) -> Optional[ShopifyShop]:
         """Collect shop data from Shopify API"""
         try:
-            logger.info(f"Starting shop data collection", shop_domain=shop_domain)
 
             # Connect API client if not already connected
             await self.api_client.connect()
@@ -160,13 +162,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 raw_data={"shop": shop_info},
             )
 
-            logger.info(
-                f"Shop data collected successfully",
-                shop_domain=shop_domain,
-                shop_name=shop.name,
-                plan=shop.plan_name,
-            )
-
             return shop
 
         except Exception as e:
@@ -198,17 +193,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if last_updated_at:
                 # Use the later of: last collection time or 90 days ago
                 query_since = max(last_updated_at, max_days_back)
-                logger.info(
-                    f"Starting incremental products collection since {query_since}",
-                    shop_domain=shop_domain,
-                )
             else:
                 # No previous data, collect last 90 days
                 query_since = max_days_back
-                logger.info(
-                    f"Starting full products collection (last 90 days)",
-                    shop_domain=shop_domain,
-                )
 
             products = []
             cursor = since_id
@@ -283,12 +270,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             progress.last_update = now_utc()
             self._update_progress(shop_domain, "products", progress)
 
-            logger.info(
-                f"Products collection completed",
-                shop_domain=shop_domain,
-                total_products=len(products),
-            )
-
             return products
 
         except Exception as e:
@@ -321,17 +302,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if last_updated_at:
                 # Use the later of: last collection time or 90 days ago
                 query_since = max(last_updated_at, max_days_back)
-                logger.info(
-                    f"Starting incremental orders collection since {query_since}",
-                    shop_domain=shop_domain,
-                )
             else:
                 # No previous data, collect last 90 days
                 query_since = max_days_back
-                logger.info(
-                    f"Starting full orders collection (last 90 days)",
-                    shop_domain=shop_domain,
-                )
 
             # Build query filter for orders (use created_at for orders)
             query_filter = f"created_at:>={query_since.strftime('%Y-%m-%dT%H:%M:%S')}"
@@ -529,9 +502,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     ) -> Dict[str, Any]:
         """Collect all available data from Shopify API"""
         try:
-            logger.info(
-                f"Starting comprehensive data collection", shop_domain=shop_domain
-            )
 
             # Connect API client if not already connected
             await self.api_client.connect()
@@ -598,15 +568,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     shop_metrics = await self.data_storage.store_shop_data(
                         shop, shop.id
                     )
-                    logger.info(
-                        f"Shop data stored: {shop_metrics.new_items} new, {shop_metrics.updated_items} updated"
-                    )
 
                     # Get the internal shop ID from the database
                     db_shop = await self.data_storage.get_shop_by_domain(shop.domain)
                     if db_shop:
                         internal_shop_id = db_shop.id
-                        logger.info(f"Retrieved internal shop ID: {internal_shop_id}")
                     else:
                         logger.error(
                             f"Failed to retrieve internal shop ID for domain: {shop.domain}"
@@ -693,17 +659,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                                             result, internal_shop_id
                                         )
                                     )
-                                    logger.info(
-                                        f"Products data stored: {storage_result.new_items} new, {storage_result.updated_items} updated"
-                                    )
                                 elif data_type == "orders":
                                     storage_result = (
                                         await self.data_storage.store_orders_data(
                                             result, internal_shop_id
                                         )
-                                    )
-                                    logger.info(
-                                        f"Orders data stored: {storage_result.new_items} new, {storage_result.updated_items} updated"
                                     )
                                 elif data_type == "customers":
                                     storage_result = (
@@ -711,24 +671,15 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                                             result, internal_shop_id
                                         )
                                     )
-                                    logger.info(
-                                        f"Customers data stored: {storage_result.new_items} new, {storage_result.updated_items} updated"
-                                    )
                                 elif data_type == "collections":
                                     storage_result = (
                                         await self.data_storage.store_collections_data(
                                             result, internal_shop_id
                                         )
                                     )
-                                    logger.info(
-                                        f"Collections data stored: {storage_result.new_items} new, {storage_result.updated_items} updated"
-                                    )
                                 elif data_type == "customer_events":
                                     storage_result = await self.data_storage.store_customer_events_data(
                                         result, internal_shop_id
-                                    )
-                                    logger.info(
-                                        f"Customer events data stored: {storage_result.new_items} new, {storage_result.updated_items} updated"
                                     )
                             except Exception as storage_error:
                                 logger.error(
@@ -760,11 +711,36 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             # Update collection statistics
             self._update_collection_stats(shop_domain, collection_results)
 
-            logger.info(
-                f"Comprehensive data collection completed",
-                shop_domain=shop_domain,
-                total_items=collection_results["total_items"],
-            )
+            # Store data in main tables after raw storage is complete
+            try:
+
+                # Initialize main table storage with connection pool
+                from app.core.database.connection_pool import get_connection_pool
+                from app.core.database.simple_client import SimpleDatabaseClient
+
+                connection_pool = await get_connection_pool()
+                db_client = SimpleDatabaseClient(connection_pool)
+                main_table_storage = MainTableStorageService(db_client)
+
+                main_storage_result = await main_table_storage.store_all_data(
+                    shop_domain
+                )
+                logger.info(
+                    f"Main table storage completed: {main_storage_result.processed_count} processed, "
+                    f"{main_storage_result.error_count} errors, {main_storage_result.duration_ms}ms"
+                )
+
+                # Add main storage results to collection results
+                collection_results["main_storage"] = {
+                    "success": main_storage_result.success,
+                    "processed_count": main_storage_result.processed_count,
+                    "error_count": main_storage_result.error_count,
+                    "duration_ms": main_storage_result.duration_ms,
+                    "errors": main_storage_result.errors,
+                }
+            except Exception as e:
+                logger.error(f"Failed to store data in main tables: {str(e)}")
+                collection_results["main_storage"] = {"success": False, "error": str(e)}
 
             return collection_results
 
@@ -964,49 +940,69 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         product = ShopifyProduct(
             id=product_data.get("id", ""),
             title=product_data.get("title", ""),
-            body_html=product_data.get("bodyHtml"),
+            description=product_data.get("description"),
+            body_html=product_data.get("bodyHtml"),  # Keep legacy field
             vendor=product_data.get("vendor", ""),
             product_type=product_data.get("productType", ""),
             handle=product_data.get("handle", ""),
-            seo_title=product_data.get(
-                "seoTitle"
-            ),  # May be None if field doesn't exist
-            seo_description=product_data.get(
-                "seoDescription"
-            ),  # May be None if field doesn't exist
-            meta_description=product_data.get(
-                "metaDescription"
-            ),  # May be None if field doesn't exist
+            seo_title=(
+                product_data.get("seo", {}).get("title")
+                if product_data.get("seo")
+                else None
+            ),
+            seo_description=(
+                product_data.get("seo", {}).get("description")
+                if product_data.get("seo")
+                else None
+            ),
+            meta_description=(
+                product_data.get("seo", {}).get("description")
+                if product_data.get("seo")
+                else None
+            ),
             status=(product_data.get("status", "active") or "active").lower(),
             published_at=(
                 datetime.fromisoformat(product_data.get("publishedAt"))
                 if product_data.get("publishedAt")
                 else None
             ),
-            published_scope=product_data.get(
-                "publishedScope", "web"
-            ),  # May be None if field doesn't exist
+            published_scope=product_data.get("publishedScope", "web"),
             tags=product_data.get("tags", []),
-            template_suffix=product_data.get(
-                "templateSuffix"
-            ),  # May be None if field doesn't exist
+            template_suffix=product_data.get("templateSuffix"),
+            total_inventory=product_data.get("totalInventory"),
+            metafields=(
+                product_data.get("metafields", {}).get("edges", [])
+                if product_data.get("metafields")
+                else []
+            ),
             created_at=(
                 datetime.fromisoformat(product_data.get("createdAt"))
                 if product_data.get("createdAt")
-                else None
+                else now_utc()
             ),
             updated_at=(
                 datetime.fromisoformat(product_data.get("updatedAt"))
                 if product_data.get("updatedAt")
-                else None
+                else now_utc()
             ),
             raw_data={"product": product_data},
         )
 
-        # Extract image IDs
+        # Extract image IDs and full image data
         images = product_data.get("images", {}).get("edges", [])
         product.image_ids = [
             edge["node"]["id"] for edge in images if edge.get("node", {}).get("id")
+        ]
+        product.images = [
+            {
+                "id": edge["node"]["id"],
+                "url": edge["node"].get("url"),
+                "altText": edge["node"].get("altText"),
+                "width": edge["node"].get("width"),
+                "height": edge["node"].get("height"),
+            }
+            for edge in images
+            if edge.get("node", {}).get("id")
         ]
 
         # Extract variants
@@ -1047,15 +1043,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     "requiresShipping", True
                 ),  # May be None if field doesn't exist
                 taxable=variant_data.get("taxable", True),
-                option1=variant_data.get(
-                    "option1"
-                ),  # May be None if field doesn't exist
-                option2=variant_data.get(
-                    "option2"
-                ),  # May be None if field doesn't exist
-                option3=variant_data.get(
-                    "option3"
-                ),  # May be None if field doesn't exist
+                selected_options=variant_data.get("selectedOptions", []),
+                # Keep legacy fields for backward compatibility
+                option1=variant_data.get("option1"),
+                option2=variant_data.get("option2"),
+                option3=variant_data.get("option3"),
                 created_at=(
                     datetime.fromisoformat(variant_data.get("createdAt"))
                     if variant_data.get("createdAt")
@@ -1070,6 +1062,17 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
             product.add_variant(variant)
 
+        # Extract product options
+        options = product_data.get("options", [])
+        product.options = [
+            {
+                "id": option.get("id"),
+                "name": option.get("name"),
+                "values": option.get("values", []),
+            }
+            for option in options
+        ]
+
         # Extract collection IDs
         collections = product_data.get("collections", {}).get("edges", [])
         product.collection_ids = [
@@ -1083,18 +1086,18 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         # Extract basic order info
         order = ShopifyOrder(
             id=order_data.get("id", ""),
-            order_number=order_data.get("orderNumber", 0),
+            name=order_data.get("name"),
             email=order_data.get("email"),
             phone=order_data.get("phone"),
             created_at=(
                 datetime.fromisoformat(order_data.get("createdAt"))
                 if order_data.get("createdAt")
-                else None
+                else now_utc()
             ),
             updated_at=(
                 datetime.fromisoformat(order_data.get("updatedAt"))
                 if order_data.get("updatedAt")
-                else None
+                else now_utc()
             ),
             processed_at=(
                 datetime.fromisoformat(order_data.get("processedAt"))
@@ -1106,20 +1109,85 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 if order_data.get("cancelledAt")
                 else None
             ),
-            closed_at=(
-                datetime.fromisoformat(order_data.get("closedAt"))
-                if order_data.get("closedAt")
+            cancel_reason=order_data.get("cancelReason"),
+            # Financial information from price sets
+            total_price=float(
+                order_data.get("totalPriceSet", {})
+                .get("shopMoney", {})
+                .get("amount", 0)
+            ),
+            subtotal_price=float(
+                order_data.get("subtotalPriceSet", {})
+                .get("shopMoney", {})
+                .get("amount", 0)
+            ),
+            total_tax=float(
+                order_data.get("totalTaxSet", {}).get("shopMoney", {}).get("amount", 0)
+            ),
+            total_shipping_price=float(
+                order_data.get("totalShippingPriceSet", {})
+                .get("shopMoney", {})
+                .get("amount", 0)
+            ),
+            total_refunded=float(
+                order_data.get("totalRefundedSet", {})
+                .get("shopMoney", {})
+                .get("amount", 0)
+            ),
+            total_outstanding=float(
+                order_data.get("totalOutstandingSet", {})
+                .get("shopMoney", {})
+                .get("amount", 0)
+            ),
+            currency=order_data.get("currencyCode", "USD"),
+            currency_code=order_data.get("currencyCode", "USD"),
+            presentment_currency_code=order_data.get("presentmentCurrencyCode"),
+            # Customer information
+            customer_id=(
+                order_data.get("customer", {}).get("id")
+                if order_data.get("customer")
                 else None
             ),
-            total_price=float(order_data.get("totalPrice", 0)),
-            subtotal_price=float(order_data.get("subtotalPrice", 0)),
-            total_tax=float(order_data.get("totalTax", 0)),
-            currency=order_data.get("currencyCode", "USD"),
-            financial_status=order_data.get("financialStatus", "pending"),
-            fulfillment_status=order_data.get("fulfillmentStatus"),
+            customer_first_name=(
+                order_data.get("customer", {}).get("firstName")
+                if order_data.get("customer")
+                else None
+            ),
+            customer_last_name=(
+                order_data.get("customer", {}).get("lastName")
+                if order_data.get("customer")
+                else None
+            ),
+            customer_email=(
+                order_data.get("customer", {}).get("email")
+                if order_data.get("customer")
+                else None
+            ),
+            customer_tags=(
+                order_data.get("customer", {}).get("tags", [])
+                if order_data.get("customer")
+                else []
+            ),
+            # Addresses
+            shipping_address=order_data.get("shippingAddress"),
+            billing_address=order_data.get("billingAddress"),
+            # Order metadata
             tags=order_data.get("tags", []),
             note=order_data.get("note"),
+            confirmed=order_data.get("confirmed", False),
             test=order_data.get("test", False),
+            customer_locale=order_data.get("customerLocale"),
+            # Discounts and metafields
+            discount_applications=(
+                order_data.get("discountApplications", {}).get("edges", [])
+                if order_data.get("discountApplications")
+                else []
+            ),
+            metafields=(
+                order_data.get("metafields", {}).get("edges", [])
+                if order_data.get("metafields")
+                else []
+            ),
             raw_data={"order": order_data},
         )
 
@@ -1129,45 +1197,28 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         for item_edge in line_items:
             item_data = item_edge.get("node", {})
             if item_data:
+                variant_data = item_data.get("variant", {})
+                product_data = variant_data.get("product", {}) if variant_data else {}
+
                 line_item = ShopifyOrderLineItem(
                     id=item_data.get("id", ""),
                     order_id=order.id,
                     quantity=int(item_data.get("quantity", 0)),
                     title=item_data.get("title", ""),
-                    variant_id=item_data.get("variant", {}).get("id"),
-                    variant_title=item_data.get("variant", {}).get("title"),
-                    sku=item_data.get("variant", {}).get("sku"),
-                    product_id=item_data.get("variant", {})
-                    .get("product", {})
-                    .get("id"),
-                    product_title=item_data.get("variant", {})
-                    .get("product", {})
-                    .get("title"),
-                    vendor=item_data.get("vendor"),
-                    product_type=item_data.get("productType"),
-                    price=float(item_data.get("price", 0)),
-                    total_discount=float(item_data.get("totalDiscount", 0)),
-                    fulfillment_status=item_data.get("fulfillmentStatus"),
-                    requires_shipping=item_data.get("requiresShipping", True),
-                    taxable=item_data.get("taxable", True),
-                    gift_card=item_data.get("giftCard", False),
-                    name=item_data.get("name", ""),
-                    variant_inventory_management=item_data.get("variant", {}).get(
-                        "inventoryManagement"
-                    ),
-                    properties=item_data.get("properties", []),
-                    product_exists=item_data.get("variant", {})
-                    .get("product", {})
-                    .get("id")
-                    is not None,
-                    fulfillable_quantity=int(item_data.get("fulfillableQuantity", 0)),
-                    grams=int(item_data.get("grams", 0)),
-                    price_set=item_data.get("priceSet", {}),
-                    total_discount_set=item_data.get("totalDiscountSet", {}),
-                    discount_allocations=item_data.get("discountAllocations", []),
-                    duties=item_data.get("duties", []),
-                    admin_graphql_api_id=item_data.get("adminGraphqlApiId"),
-                    tax_lines=item_data.get("taxLines", []),
+                    variant_id=variant_data.get("id"),
+                    variant_title=variant_data.get("title"),
+                    sku=variant_data.get("sku"),
+                    barcode=variant_data.get("barcode"),
+                    product_id=product_data.get("id"),
+                    product_title=product_data.get("title"),
+                    vendor=product_data.get("vendor"),
+                    product_type=product_data.get("productType"),
+                    product_tags=product_data.get("tags", []),
+                    price=float(variant_data.get("price", 0)),
+                    total_discount=0.0,  # Will be calculated from discount applications
+                    created_at=now_utc(),
+                    updated_at=now_utc(),
+                    raw_data={"line_item": item_data},
                 )
                 order.line_items.append(line_item)
 
@@ -1331,31 +1382,50 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, collection_data: Dict[str, Any]
     ) -> ShopifyCollection:
         """Create ShopifyCollection from API data"""
+        # Extract image data
+        image_data = collection_data.get("image", {})
+        image_id = image_data.get("id") if image_data else None
+        image_url = image_data.get("url") if image_data else None
+        image_alt_text = image_data.get("altText") if image_data else None
+
+        # Extract SEO data
+        seo_data = collection_data.get("seo", {})
+        seo_title = seo_data.get("title") if seo_data else None
+        seo_description = seo_data.get("description") if seo_data else None
+
+        # Extract product IDs from products
+        product_ids = []
+        products = collection_data.get("products", {}).get("edges", [])
+        for product_edge in products:
+            product_node = product_edge.get("node", {})
+            if product_node.get("id"):
+                product_ids.append(product_node["id"])
+
         return ShopifyCollection(
             id=collection_data.get("id", ""),
             title=collection_data.get("title", ""),
             handle=collection_data.get("handle", ""),
             description=collection_data.get("description"),
-            image=collection_data.get("image"),
+            description_html=collection_data.get("descriptionHtml"),
+            seo_title=seo_title,
+            seo_description=seo_description,
+            sort_order=collection_data.get("sortOrder", "manual"),
+            template_suffix=collection_data.get("templateSuffix"),
+            products_count=len(product_ids),
+            image_id=image_id,
+            image_url=image_url,
+            image_alt_text=image_alt_text,
+            product_ids=product_ids,
             created_at=(
                 datetime.fromisoformat(collection_data.get("createdAt"))
                 if collection_data.get("createdAt")
-                else None
+                else now_utc()
             ),
             updated_at=(
                 datetime.fromisoformat(collection_data.get("updatedAt"))
                 if collection_data.get("updatedAt")
-                else None
+                else now_utc()
             ),
-            published_at=(
-                datetime.fromisoformat(collection_data.get("publishedAt"))
-                if collection_data.get("publishedAt")
-                else None
-            ),
-            sort_order=collection_data.get("sortOrder"),
-            template_suffix=collection_data.get("templateSuffix"),
-            disjunctive=collection_data.get("disjunctive", False),
-            rules=collection_data.get("rules", []),
             raw_data={"collection": collection_data},
         )
 
@@ -1363,26 +1433,22 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, event_data: Dict[str, Any]
     ) -> ShopifyCustomerEvent:
         """Create ShopifyCustomerEvent from API data"""
+        # Since we're now using customers with events, the event_data structure is different
+        # We need to extract event information from the customer's events
         return ShopifyCustomerEvent(
             id=event_data.get("id", ""),
-            customer_id=event_data.get("customerId", ""),
-            event_type=event_data.get("eventType", ""),
-            subject=event_data.get("subject"),
-            verb=event_data.get("verb"),
+            event_type=event_data.get("__typename", "CustomerEvent"),
+            description=f"Customer event: {event_data.get('__typename', 'Unknown')}",
             created_at=(
                 datetime.fromisoformat(event_data.get("createdAt"))
                 if event_data.get("createdAt")
-                else None
+                else now_utc()
             ),
             updated_at=(
                 datetime.fromisoformat(event_data.get("updatedAt"))
                 if event_data.get("updatedAt")
-                else None
+                else now_utc()
             ),
-            arguments=event_data.get("arguments", []),
-            description=event_data.get("description"),
-            message=event_data.get("message"),
-            path=event_data.get("path"),
             raw_data={"customer_event": event_data},
         )
 

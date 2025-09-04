@@ -3,20 +3,16 @@ Shopify API client implementation for BetterBundle Python Worker
 """
 
 import asyncio
-import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from urllib.parse import urljoin
 
 import httpx
-from pydantic import ValidationError
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.exceptions import ConfigurationError
 from app.shared.decorators import retry, async_timing
-from app.shared.helpers import now_utc
 
 from ..interfaces.api_client import IShopifyAPIClient
 
@@ -63,7 +59,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
 
     async def connect(self):
         """Initialize HTTP client"""
-        logger.info("Attempting to connect Shopify API client")
         if self.http_client is None:
             self.http_client = httpx.AsyncClient(
                 timeout=self.timeout,
@@ -72,16 +67,12 @@ class ShopifyAPIClient(IShopifyAPIClient):
                     "User-Agent": "BetterBundle-PythonWorker/1.0",
                 },
             )
-            logger.info("Shopify API client initialized successfully")
-        else:
-            logger.info("Shopify API client already connected")
 
     async def close(self):
         """Close HTTP client"""
         if self.http_client:
             await self.http_client.aclose()
             self.http_client = None
-            logger.info("Shopify API client closed")
 
     def _get_shop_url(self, shop_domain: str) -> str:
         """Get full shop URL"""
@@ -115,7 +106,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
     async def set_access_token(self, shop_domain: str, access_token: str):
         """Set access token for a shop"""
         self.access_tokens[shop_domain] = access_token
-        logger.info(f"Access token set for shop: {shop_domain}")
 
     @retry(max_attempts=3, delay=1.0, backoff=2.0)
     @async_timing(threshold_ms=5000)
@@ -250,47 +240,68 @@ class ShopifyAPIClient(IShopifyAPIClient):
                     node {
                         id
                         title
-                        bodyHtml
-                        vendor
-                        productType
+                        description
                         handle
-                        status
-                        publishedAt
-                        tags
                         createdAt
                         updatedAt
-                        images(first: 10) {
+                        publishedAt
+                        status
+                        tags
+                        productType
+                        vendor
+                        totalInventory
+                        images(first: 5) {
                             edges {
                                 node {
                                     id
                                     url
                                     altText
+                                    width
+                                    height
                                 }
                             }
                         }
-                        variants(first: 100) {
+                        options(first: 5) {
+                            id
+                            name
+                            position
+                            values
+                        }
+                        variants(first: 10) {
                             edges {
                                 node {
                                     id
                                     title
-                                    sku
-                                    barcode
                                     price
                                     compareAtPrice
                                     inventoryQuantity
-                                    inventoryPolicy
-                                    taxable
-                                    createdAt
-                                    updatedAt
+                                    sku
+                                    barcode
+                                    selectedOptions {
+                                        name
+                                        value
+                                    }
                                 }
                             }
                         }
-                        collections(first: 10) {
+                        collections(first: 5) {
                             edges {
                                 node {
                                     id
                                     title
                                     handle
+                                    description
+                                }
+                            }
+                        }
+                        metafields(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    namespace
+                                    key
+                                    value
+                                    type
                                 }
                             }
                         }
@@ -381,39 +392,98 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                 currencyCode
                             }
                         }
-                        totalDiscountsSet {
-                            shopMoney {
-                                amount
-                                currencyCode
-                            }
-                        }
                         customer {
                             id
                             firstName
                             lastName
                             email
-                            phone
-                            createdAt
-                            updatedAt
+                            tags
                         }
-                        lineItems(first: 100) {
+                        lineItems(first: 10) {
                             edges {
                                 node {
                                     id
-                                    quantity
                                     title
+                                    quantity
                                     variant {
                                         id
                                         title
                                         price
                                         sku
+                                        barcode
                                         product {
                                             id
                                             title
-                                            vendor
                                             productType
+                                            vendor
+                                            tags
                                         }
                                     }
+                                }
+                            }
+                        }
+                        shippingAddress {
+                            address1
+                            city
+                            province
+                            country
+                            zip
+                            phone
+                            provinceCode
+                            countryCodeV2
+                        }
+                        billingAddress {
+                            address1
+                            city
+                            province
+                            country
+                            zip
+                            phone
+                            provinceCode
+                            countryCodeV2
+                        }
+                        tags
+                        note
+                        confirmed
+                        test
+                        totalRefundedSet {
+                            shopMoney {
+                                amount
+                                currencyCode
+                            }
+                        }
+                        totalOutstandingSet {
+                            shopMoney {
+                                amount
+                                currencyCode
+                            }
+                        }
+                        customerLocale
+                        currencyCode
+                        presentmentCurrencyCode
+                        discountApplications(first: 5) {
+                            edges {
+                                node {
+                                    value {
+                                        ... on MoneyV2 {
+                                            amount
+                                            currencyCode
+                                        }
+                                        ... on PricingPercentageValue {
+                                            percentage
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        metafields(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    namespace
+                                    key
+                                    value
+                                    type
                                 }
                             }
                         }
@@ -516,14 +586,18 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         description
                         descriptionHtml
                         updatedAt
-                        publishedAt
                         sortOrder
                         templateSuffix
-                        productsCount
+                        seo {
+                            title
+                            description
+                        }
                         image {
                             id
                             url
                             altText
+                            width
+                            height
                         }
                         products(first: 10) {
                             edges {
@@ -531,7 +605,42 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     id
                                     title
                                     handle
+                                    productType
+                                    vendor
+                                    tags
+                                    priceRangeV2 {
+                                        minVariantPrice {
+                                            amount
+                                            currencyCode
+                                        }
+                                        maxVariantPrice {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
                                 }
+                            }
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                            }
+                        }
+                        metafields(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    namespace
+                                    key
+                                    value
+                                    type
+                                }
+                            }
+                        }
+                        ruleSet {
+                            rules {
+                                column
+                                relation
+                                condition
                             }
                         }
                     }
@@ -552,21 +661,18 @@ class ShopifyAPIClient(IShopifyAPIClient):
         created_at_min: Optional[datetime] = None,
         created_at_max: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Get customer events from shop"""
+        """Get customer events from shop using customers with events"""
         variables = {
             "first": limit or 250,  # Increased from 50 to 250
             "after": cursor,
-            "eventType": event_type,
-            "createdAtMin": created_at_min.isoformat() if created_at_min else None,
-            "createdAtMax": created_at_max.isoformat() if created_at_max else None,
         }
 
         # Remove None values
         variables = {k: v for k, v in variables.items() if v is not None}
 
         graphql_query = """
-        query($first: Int!, $after: String, $eventType: MarketingEventType, $createdAtMin: DateTime, $createdAtMax: DateTime) {
-            marketingEvents(first: $first, after: $after, eventType: $eventType, createdAtMin: $createdAtMin, createdAtMax: $createdAtMax) {
+        query($first: Int!, $after: String) {
+            customers(first: $first, after: $after) {
                 pageInfo {
                     hasNextPage
                     hasPreviousPage
@@ -577,25 +683,146 @@ class ShopifyAPIClient(IShopifyAPIClient):
                     cursor
                     node {
                         id
-                        eventType
-                        marketingChannel
-                        paid
-                        startedAt
-                        endedAt
-                        description
-                        manageUrl
-                        previewUrl
-                        utmCampaign
-                        utmSource
-                        utmMedium
-                        utmTerm
-                        utmContent
-                        budget
-                        budgetType
-                        currency
-                        customerId
-                        productId
-                        collectionId
+                        firstName
+                        lastName
+                        email
+                        createdAt
+                        updatedAt
+                        numberOfOrders
+                        amountSpent {
+                            amount
+                            currencyCode
+                        }
+                        tags
+                        state
+                        verifiedEmail
+                        taxExempt
+                        events(first: 20) {
+                            edges {
+                                node {
+                                    id
+                                    __typename
+                                }
+                            }
+                        }
+                        orders(first: 20) {
+                            edges {
+                                node {
+                                    id
+                                    name
+                                    createdAt
+                                    updatedAt
+                                    processedAt
+                                    cancelledAt
+                                    cancelReason
+                                    totalPriceSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                    subtotalPriceSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                    totalTaxSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                    totalShippingPriceSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                    confirmed
+                                    test
+                                    tags
+                                    note
+                                    customerLocale
+                                    currencyCode
+                                    lineItems(first: 15) {
+                                        edges {
+                                            node {
+                                                id
+                                                title
+                                                quantity
+                                                variant {
+                                                    id
+                                                    title
+                                                    price
+                                                    sku
+                                                    barcode
+                                                    product {
+                                                        id
+                                                        title
+                                                        productType
+                                                        vendor
+                                                        tags
+                                                        collections(first: 5) {
+                                                            edges {
+                                                                node {
+                                                                    id
+                                                                    title
+                                                                    handle
+                                                                    description
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    shippingAddress {
+                                        address1
+                                        city
+                                        province
+                                        country
+                                        zip
+                                        phone
+                                        provinceCode
+                                        countryCodeV2
+                                    }
+                                    billingAddress {
+                                        address1
+                                        city
+                                        province
+                                        country
+                                        zip
+                                        phone
+                                        provinceCode
+                                        countryCodeV2
+                                    }
+                                    metafields(first: 10) {
+                                        edges {
+                                            node {
+                                                id
+                                                namespace
+                                                key
+                                                value
+                                                type
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        metafields(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    namespace
+                                    key
+                                    value
+                                    type
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -603,7 +830,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """
 
         result = await self.execute_query(graphql_query, variables, shop_domain)
-        return result.get("marketingEvents", {})
+        return result.get("customers", {})
 
     async def check_rate_limit(self, shop_domain: str) -> Dict[str, Any]:
         """Check current rate limit status"""
@@ -630,9 +857,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
 
         if not rate_limit_info["can_make_request"]:
             wait_time = rate_limit_info["time_until_reset"]
-            logger.debug(
-                f"Rate limit reached, waiting {wait_time:.2f}s", shop_domain=shop_domain
-            )
             await asyncio.sleep(wait_time)
 
     def _update_rate_limit_tracking(self, shop_domain: str, headers: Dict[str, str]):
@@ -694,13 +918,8 @@ class ShopifyAPIClient(IShopifyAPIClient):
 
                 # Extract scope handles
                 scope_handles = [scope["handle"] for scope in scopes]
-                logger.info(
-                    f"Retrieved {len(scope_handles)} scopes for {shop_domain}: {scope_handles}"
-                )
-
                 return scope_handles
             else:
-                logger.warning(f"No app installation data found for {shop_domain}")
                 return []
 
         except Exception as e:

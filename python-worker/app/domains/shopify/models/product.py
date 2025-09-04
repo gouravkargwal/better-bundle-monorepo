@@ -36,7 +36,11 @@ class ShopifyProductVariant(BaseModel):
     requires_shipping: bool = Field(True, description="Requires shipping")
     taxable: bool = Field(True, description="Is taxable")
 
-    # Options
+    # Options (updated to match GraphQL selectedOptions structure)
+    selected_options: List[Dict[str, str]] = Field(
+        default_factory=list, description="Selected option values"
+    )
+    # Keep legacy fields for backward compatibility
     option1: Optional[str] = Field(None, description="Option 1 value")
     option2: Optional[str] = Field(None, description="Option 2 value")
     option3: Optional[str] = Field(None, description="Option 3 value")
@@ -104,7 +108,10 @@ class ShopifyProduct(BaseModel):
     # Core product information
     id: str = Field(..., description="Product ID")
     title: str = Field(..., description="Product title")
-    body_html: Optional[str] = Field(None, description="Product description HTML")
+    description: Optional[str] = Field(None, description="Product description HTML")
+    body_html: Optional[str] = Field(
+        None, description="Product description HTML (legacy)"
+    )
     vendor: str = Field(..., description="Product vendor")
     product_type: str = Field(..., description="Product type")
 
@@ -126,6 +133,9 @@ class ShopifyProduct(BaseModel):
     # Images
     image_ids: List[str] = Field(default_factory=list, description="Image IDs")
     main_image_url: Optional[str] = Field(None, description="Main image URL")
+    images: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Product images"
+    )
 
     # Collections
     collection_ids: List[str] = Field(
@@ -140,6 +150,14 @@ class ShopifyProduct(BaseModel):
     # Options
     options: List[Dict[str, Any]] = Field(
         default_factory=list, description="Product options"
+    )
+
+    # New fields from GraphQL
+    total_inventory: Optional[int] = Field(
+        None, description="Total inventory across all variants"
+    )
+    metafields: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Product metafields"
     )
 
     # Timestamps
@@ -200,8 +218,8 @@ class ShopifyProduct(BaseModel):
         }
 
     @property
-    def total_inventory(self) -> int:
-        """Get total inventory across all variants"""
+    def total_inventory_calculated(self) -> int:
+        """Get total inventory across all variants (calculated)"""
         return sum(v.inventory_quantity for v in self.variants)
 
     @property
@@ -240,7 +258,7 @@ class ShopifyProduct(BaseModel):
             "price_max": price_range["max"],
             "price_avg": price_range["avg"],
             "price_range": price_range["max"] - price_range["min"],
-            "total_inventory": self.total_inventory,
+            "total_inventory": self.total_inventory or self.total_inventory_calculated,
             "has_images": self.has_images,
             "image_count": self.image_count,
             "tag_count": self.tag_count,
