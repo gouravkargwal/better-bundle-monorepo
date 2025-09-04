@@ -3,6 +3,7 @@ Shopify API client implementation for BetterBundle Python Worker
 """
 
 import asyncio
+import random
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -27,10 +28,30 @@ class ShopifyAPIClient(IShopifyAPIClient):
         self.api_version = "2024-01"  # Latest stable version
         self.endpoint = "/admin/api/{version}/graphql.json"
 
-        # Rate limiting
+        # Rate limiting based on Shopify's official limits
         self.rate_limit_buckets: Dict[str, Dict[str, Any]] = {}
-        self.max_requests_per_second = 2  # Shopify's default limit
         self.retry_after_header = "Retry-After"
+
+        # Shopify GraphQL Admin API rate limits by plan (points per second)
+        self.rate_limits = {
+            "standard": 100,  # Standard Shopify
+            "advanced": 200,  # Advanced Shopify
+            "plus": 1000,  # Shopify Plus
+            "enterprise": 2000,  # Shopify for enterprise (Commerce Components)
+        }
+
+        # Default to standard plan if not specified
+        self.default_plan = "standard"
+
+        # Enhanced rate limiting with exponential backoff
+        self.max_retry_attempts = 5
+        self.base_retry_delay = 1.0  # Base delay in seconds
+        self.max_retry_delay = 300.0  # Maximum delay (5 minutes)
+        self.backoff_multiplier = 2.0
+        self.jitter_range = 0.1  # Add 10% jitter to prevent thundering herd
+
+        # Query cost tracking (GraphQL uses calculated query cost)
+        self.query_cost_tracking: Dict[str, Dict[str, Any]] = {}
 
         # HTTP client
         self.http_client: Optional[httpx.AsyncClient] = None
@@ -107,7 +128,88 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """Set access token for a shop"""
         self.access_tokens[shop_domain] = access_token
 
-    @retry(max_attempts=3, delay=1.0, backoff=2.0)
+    def set_shop_plan(self, shop_domain: str, plan: str):
+        """Set the Shopify plan for a shop to determine rate limits"""
+        if plan not in self.rate_limits:
+            logger.warning(
+                f"Unknown Shopify plan '{plan}', using default plan '{self.default_plan}'",
+                shop_domain=shop_domain,
+                plan=plan,
+            )
+            plan = self.default_plan
+
+        if shop_domain not in self.rate_limit_buckets:
+            self.rate_limit_buckets[shop_domain] = {}
+
+        self.rate_limit_buckets[shop_domain]["plan"] = plan
+        logger.info(
+            f"Set shop plan to '{plan}' with {self.rate_limits[plan]} points/second limit",
+            shop_domain=shop_domain,
+            plan=plan,
+            rate_limit=self.rate_limits[plan],
+        )
+
+    def get_shop_plan(self, shop_domain: str) -> str:
+        """Get the Shopify plan for a shop"""
+        return self.rate_limit_buckets.get(shop_domain, {}).get(
+            "plan", self.default_plan
+        )
+
+    def get_rate_limit_for_shop(self, shop_domain: str) -> int:
+        """Get the rate limit (points per second) for a shop based on its plan"""
+        plan = self.get_shop_plan(shop_domain)
+        return self.rate_limits[plan]
+
+    def _calculate_retry_delay(
+        self, attempt: int, response_headers: Optional[Dict[str, str]] = None
+    ) -> float:
+        """Calculate retry delay with exponential backoff and jitter"""
+        # If we have a Retry-After header, use that as the base delay
+        if response_headers and self.retry_after_header in response_headers:
+            base_delay = float(response_headers[self.retry_after_header])
+        else:
+            # Use exponential backoff: base_delay * (backoff_multiplier ^ attempt)
+            base_delay = self.base_retry_delay * (self.backoff_multiplier**attempt)
+
+        # Cap the delay at max_retry_delay
+        delay = min(base_delay, self.max_retry_delay)
+
+        # Add jitter to prevent thundering herd (random variation of ±jitter_range%)
+        jitter = random.uniform(-self.jitter_range, self.jitter_range)
+        jittered_delay = delay * (1 + jitter)
+
+        # Ensure delay is at least 0.1 seconds
+        return max(0.1, jittered_delay)
+
+    def _extract_query_cost(self, headers: Dict[str, str]) -> int:
+        """Extract query cost from Shopify response headers"""
+        # Shopify GraphQL API returns query cost in X-GraphQL-Cost-Include-Fields header
+        # or similar headers. For now, we'll use a default cost of 1 point per query
+        # In a production system, you'd want to parse the actual cost from headers
+
+        # Check for common Shopify rate limit headers
+        cost_headers = [
+            "X-GraphQL-Cost-Include-Fields",
+            "X-GraphQL-Query-Cost",
+            "X-Shopify-Shop-Api-Call-Limit",
+        ]
+
+        for header in cost_headers:
+            if header in headers:
+                try:
+                    # Parse the cost value (format may vary)
+                    cost_value = headers[header]
+                    if "/" in cost_value:
+                        # Format like "1/100" - extract the first number
+                        return int(cost_value.split("/")[0])
+                    else:
+                        return int(cost_value)
+                except (ValueError, IndexError):
+                    continue
+
+        # Default cost if no cost header is found
+        return 1
+
     @async_timing(threshold_ms=5000)
     async def execute_query(
         self,
@@ -115,69 +217,109 @@ class ShopifyAPIClient(IShopifyAPIClient):
         variables: Optional[Dict[str, Any]] = None,
         shop_domain: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute a GraphQL query against Shopify API"""
+        """Execute a GraphQL query against Shopify API with robust rate limiting and exponential backoff"""
         if not shop_domain:
             raise ValueError("shop_domain is required")
 
-        # Check rate limits
-        await self.wait_for_rate_limit(shop_domain)
+        last_exception = None
 
-        endpoint = self._get_graphql_endpoint(shop_domain)
-        headers = self._get_headers(shop_domain)
+        for attempt in range(self.max_retry_attempts):
+            try:
+                # Check rate limits before each attempt
+                await self.wait_for_rate_limit(shop_domain)
 
-        payload = {"query": query, "variables": variables or {}}
+                endpoint = self._get_graphql_endpoint(shop_domain)
+                headers = self._get_headers(shop_domain)
 
-        try:
-            response = await self.http_client.post(
-                endpoint, headers=headers, json=payload
-            )
+                payload = {"query": query, "variables": variables or {}}
 
-            # Handle rate limiting
-            if response.status_code == 429:
-                retry_after = int(response.headers.get(self.retry_after_header, 60))
+                response = await self.http_client.post(
+                    endpoint, headers=headers, json=payload
+                )
+
+                # Handle rate limiting with exponential backoff
+                if response.status_code == 429:
+                    retry_after = self._calculate_retry_delay(attempt, response.headers)
+                    logger.warning(
+                        f"Rate limited (attempt {attempt + 1}/{self.max_retry_attempts}), waiting {retry_after:.2f} seconds",
+                        shop_domain=shop_domain,
+                        attempt=attempt + 1,
+                        retry_after=retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue  # Retry the request
+
+                # Handle other HTTP errors
+                if response.status_code != 200:
+                    logger.error(
+                        f"HTTP error: {response.status_code}",
+                        shop_domain=shop_domain,
+                        response_text=response.text,
+                        attempt=attempt + 1,
+                    )
+                    raise Exception(f"HTTP error: {response.status_code}")
+
+                # Parse response
+                data = response.json()
+
+                # Check for GraphQL errors
+                if "errors" in data:
+                    errors = data["errors"]
+                    logger.error(
+                        f"GraphQL errors: {errors}",
+                        shop_domain=shop_domain,
+                        query=query[:100],
+                        attempt=attempt + 1,
+                    )
+                    raise Exception(f"GraphQL errors: {errors}")
+
+                # Extract query cost from response headers (if available)
+                query_cost = self._extract_query_cost(response.headers)
+
+                # Update rate limit tracking on successful request
+                self._update_rate_limit_tracking(
+                    shop_domain, response.headers, query_cost
+                )
+
+                # Log successful request
+                logger.debug(
+                    f"Query executed successfully",
+                    shop_domain=shop_domain,
+                    attempt=attempt + 1,
+                    query_cost=query_cost,
+                )
+
+                return data.get("data", {})
+
+            except Exception as e:
+                last_exception = e
+
+                # If this is the last attempt, don't retry
+                if attempt == self.max_retry_attempts - 1:
+                    logger.error(
+                        f"Query execution failed after {self.max_retry_attempts} attempts",
+                        shop_domain=shop_domain,
+                        error=str(e),
+                        query=query[:100],
+                    )
+                    raise e
+
+                # Calculate delay for next attempt (exponential backoff)
+                delay = self._calculate_retry_delay(attempt)
                 logger.warning(
-                    f"Rate limited, waiting {retry_after} seconds",
+                    f"Query execution failed (attempt {attempt + 1}/{self.max_retry_attempts}), retrying in {delay:.2f} seconds",
                     shop_domain=shop_domain,
+                    error=str(e),
+                    attempt=attempt + 1,
+                    delay=delay,
                 )
-                await asyncio.sleep(retry_after)
-                return await self.execute_query(query, variables, shop_domain)
+                await asyncio.sleep(delay)
 
-            # Handle other errors
-            response.raise_for_status()
-
-            # Parse response
-            data = response.json()
-
-            # Check for GraphQL errors
-            if "errors" in data:
-                errors = data["errors"]
-                logger.error(
-                    f"GraphQL errors: {errors}",
-                    shop_domain=shop_domain,
-                    query=query[:100],
-                )
-                raise Exception(f"GraphQL errors: {errors}")
-
-            # Update rate limit tracking
-            self._update_rate_limit_tracking(shop_domain, response.headers)
-
-            return data.get("data", {})
-
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"HTTP error: {e.response.status_code}",
-                shop_domain=shop_domain,
-                error=str(e),
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                f"Query execution failed",
-                shop_domain=shop_domain,
-                error=str(e),
-                query=query[:100],
-            )
-            raise
+        # This should never be reached, but just in case
+        if last_exception:
+            raise last_exception
+        else:
+            raise Exception("Query execution failed for unknown reason")
 
     async def execute_mutation(
         self,
@@ -667,63 +809,76 @@ class ShopifyAPIClient(IShopifyAPIClient):
             "after": cursor,
         }
 
+        # Build query filter for incremental collection using Shopify's query syntax
+        query_filter = None
+        if created_at_min:
+            # Use Shopify's updated_at filter for proper incremental collection
+            query_filter = (
+                f"updated_at:>={created_at_min.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+            )
+
+        if query_filter:
+            variables["query"] = query_filter
+
         # Remove None values
         variables = {k: v for k, v in variables.items() if v is not None}
 
+        # Use query with proper filtering
         graphql_query = """
-        query($first: Int!, $after: String) {
-            customers(first: $first, after: $after) {
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
-                }
-                edges {
-                    cursor
-                    node {
-                        id
-                        firstName
-                        lastName
-                        email
-                        createdAt
-                        updatedAt
-                        numberOfOrders
-                        amountSpent {
-                            amount
-                            currencyCode
-                        }
-                        tags
-                        state
-                        verifiedEmail
-                        orders(first: 20) {
-                            edges {
-                                node {
-                                    id
-                                    name
-                                    createdAt
-                                    totalPriceSet {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
+        query($first: Int!, $after: String, $query: String) {
+            customers(first: $first, after: $after, query: $query) {
+                    pageInfo {
+                        hasNextPage
+                        hasPreviousPage
+                        startCursor
+                        endCursor
+                    }
+                    edges {
+                        cursor
+                        node {
+                            id
+                            firstName
+                            lastName
+                            email
+                            createdAt
+                            updatedAt
+                            numberOfOrders
+                            amountSpent {
+                                amount
+                                currencyCode
+                            }
+                            tags
+                            state
+                            verifiedEmail
+                            orders(first: 20) {
+                                edges {
+                                    node {
+                                        id
+                                        name
+                                        createdAt
+                                        totalPriceSet {
+                                            shopMoney {
+                                                amount
+                                                currencyCode
+                                            }
                                         }
-                                    }
-                                    lineItems(first: 10) {
-                                        edges {
-                                            node {
-                                                id
-                                                title
-                                                quantity
-                                                variant {
+                                        lineItems(first: 10) {
+                                            edges {
+                                                node {
                                                     id
                                                     title
-                                                    price
-                                                    product {
+                                                    quantity
+                                                    variant {
                                                         id
                                                         title
-                                                        productType
-                                                        vendor
-                                                        tags
+                                                        price
+                                                        product {
+                                                            id
+                                                            title
+                                                            productType
+                                                            vendor
+                                                            tags
+                                                        }
                                                     }
                                                 }
                                             }
@@ -735,29 +890,31 @@ class ShopifyAPIClient(IShopifyAPIClient):
                     }
                 }
             }
-        }
-        """
+            """
 
         result = await self.execute_query(graphql_query, variables, shop_domain)
         return result.get("customers", {})
 
     async def check_rate_limit(self, shop_domain: str) -> Dict[str, Any]:
-        """Check current rate limit status"""
+        """Check current rate limit status based on GraphQL cost"""
         bucket = self.rate_limit_buckets.get(shop_domain, {})
+        cost_tracking = self.query_cost_tracking.get(shop_domain, {})
 
         current_time = time.time()
-        requests_this_second = bucket.get("requests_this_second", 0)
-        last_request_time = bucket.get("last_request_time", 0)
+        points_this_second = cost_tracking.get("points_this_second", 0)
+        last_request_time = cost_tracking.get("last_request_time", 0)
+        max_points_per_second = self.get_rate_limit_for_shop(shop_domain)
 
         # Reset counter if a second has passed
         if current_time - last_request_time >= 1.0:
-            requests_this_second = 0
+            points_this_second = 0
 
         return {
-            "requests_this_second": requests_this_second,
-            "max_requests_per_second": self.max_requests_per_second,
-            "can_make_request": requests_this_second < self.max_requests_per_second,
+            "points_this_second": points_this_second,
+            "max_points_per_second": max_points_per_second,
+            "can_make_request": points_this_second < max_points_per_second,
             "time_until_reset": max(0, 1.0 - (current_time - last_request_time)),
+            "plan": self.get_shop_plan(shop_domain),
         }
 
     async def wait_for_rate_limit(self, shop_domain: str) -> None:
@@ -768,22 +925,53 @@ class ShopifyAPIClient(IShopifyAPIClient):
             wait_time = rate_limit_info["time_until_reset"]
             await asyncio.sleep(wait_time)
 
-    def _update_rate_limit_tracking(self, shop_domain: str, headers: Dict[str, str]):
-        """Update rate limit tracking from response headers"""
+    def _update_rate_limit_tracking(
+        self, shop_domain: str, headers: Dict[str, str], query_cost: int = 1
+    ):
+        """Update rate limit tracking from response headers and query cost"""
         current_time = time.time()
 
+        # Initialize tracking structures
         if shop_domain not in self.rate_limit_buckets:
             self.rate_limit_buckets[shop_domain] = {}
+        if shop_domain not in self.query_cost_tracking:
+            self.query_cost_tracking[shop_domain] = {}
 
         bucket = self.rate_limit_buckets[shop_domain]
+        cost_tracking = self.query_cost_tracking[shop_domain]
 
-        # Update request count
+        # Update cost tracking (GraphQL uses calculated query cost)
+        if current_time - cost_tracking.get("last_request_time", 0) >= 1.0:
+            cost_tracking["points_this_second"] = query_cost
+        else:
+            cost_tracking["points_this_second"] = (
+                cost_tracking.get("points_this_second", 0) + query_cost
+            )
+
+        cost_tracking["last_request_time"] = current_time
+
+        # Update legacy request count for backward compatibility
         if current_time - bucket.get("last_request_time", 0) >= 1.0:
             bucket["requests_this_second"] = 1
         else:
             bucket["requests_this_second"] = bucket.get("requests_this_second", 0) + 1
 
         bucket["last_request_time"] = current_time
+
+        # Log rate limit status
+        max_points = self.get_rate_limit_for_shop(shop_domain)
+        current_points = cost_tracking["points_this_second"]
+        plan = self.get_shop_plan(shop_domain)
+
+        logger.debug(
+            f"Rate limit tracking updated",
+            shop_domain=shop_domain,
+            plan=plan,
+            current_points=current_points,
+            max_points=max_points,
+            query_cost=query_cost,
+            utilization_percent=(current_points / max_points) * 100,
+        )
 
     async def validate_access_token(self, shop_domain: str) -> bool:
         """Validate access token for shop"""

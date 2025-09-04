@@ -8,7 +8,7 @@ from prisma import Prisma
 from prisma.errors import PrismaError
 
 from app.core.config import settings
-from app.core.logger import get_logger
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 @dataclass
 class FileHandlerConfig:
     """File handler configuration"""
-    
+
     enabled: bool = True
     log_dir: str = "logs"
     max_file_size: int = 10485760  # 10MB
@@ -23,7 +23,7 @@ class FileHandlerConfig:
 @dataclass
 class ConsoleHandlerConfig:
     """Console handler configuration"""
-    
+
     enabled: bool = True
     level: str = "INFO"
 
@@ -31,7 +31,7 @@ class ConsoleHandlerConfig:
 @dataclass
 class PrometheusHandlerConfig:
     """Prometheus handler configuration"""
-    
+
     enabled: bool = True
     port: int = 9090
     metrics_path: str = "/metrics"
@@ -40,7 +40,7 @@ class PrometheusHandlerConfig:
 @dataclass
 class GrafanaConfig:
     """Grafana configuration"""
-    
+
     enabled: bool = False
     url: str = ""
     username: str = ""
@@ -50,7 +50,7 @@ class GrafanaConfig:
 @dataclass
 class TelemetryConfig:
     """Telemetry configuration"""
-    
+
     enabled: bool = False
     endpoint: str = ""
     service_name: str = "betterbundle-python-worker"
@@ -59,7 +59,7 @@ class TelemetryConfig:
 @dataclass
 class GCPConfig:
     """Google Cloud Platform logging configuration"""
-    
+
     enabled: bool = False
     project_id: str = ""
     log_name: str = "betterbundle-python-worker"
@@ -68,7 +68,7 @@ class GCPConfig:
 @dataclass
 class AWSConfig:
     """AWS CloudWatch logging configuration"""
-    
+
     enabled: bool = False
     region: str = ""
     log_group: str = "betterbundle-python-worker"
@@ -77,24 +77,24 @@ class AWSConfig:
 
 class LoggingConfig(BaseModel):
     """Complete logging configuration"""
-    
+
     level: str = "INFO"
-    format: str = "json"  # json or console
-    
+    format: str = "console"  # json or console
+
     # Handler configurations
     file: FileHandlerConfig = FileHandlerConfig()
     console: ConsoleHandlerConfig = ConsoleHandlerConfig()
     prometheus: PrometheusHandlerConfig = PrometheusHandlerConfig()
-    
+
     # External logging services
     grafana: GrafanaConfig = GrafanaConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     gcp: GCPConfig = GCPConfig()
     aws: AWSConfig = AWSConfig()
-    
+
     class Config:
         json_encoders = {"datetime": lambda v: v.isoformat()}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {

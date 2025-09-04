@@ -187,7 +187,7 @@ class LoggingSettings(BaseSettings):
     """Logging configuration settings"""
 
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
-    LOG_FORMAT: str = Field(default="json", env="LOG_FORMAT")
+    LOG_FORMAT: str = Field(default="console", env="LOG_FORMAT")
 
     # Comprehensive Logging Configuration
     LOGGING: dict = Field(

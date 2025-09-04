@@ -569,14 +569,18 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             internal_shop_id = None
             if shop:
                 try:
+                    # Store shop data - the method will create or update the shop
                     shop_metrics = await self.data_storage.store_shop_data(
-                        shop, shop.id
+                        shop, shop.domain  # Pass domain instead of shop.id
                     )
 
                     # Get the internal shop ID from the database
                     db_shop = await self.data_storage.get_shop_by_domain(shop.domain)
                     if db_shop:
                         internal_shop_id = db_shop.id
+                        logger.info(
+                            f"Retrieved internal shop ID: {internal_shop_id} for domain: {shop.domain}"
+                        )
                     else:
                         logger.error(
                             f"Failed to retrieve internal shop ID for domain: {shop.domain}"
@@ -657,6 +661,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         # Store collected data using enterprise-grade storage service
                         if result and len(result) > 0 and internal_shop_id:
                             try:
+                                logger.info(
+                                    f"Storing {len(result)} {data_type} items for shop {internal_shop_id}"
+                                )
                                 if data_type == "products":
                                     storage_result = (
                                         await self.data_storage.store_products_data(
@@ -685,6 +692,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                                     storage_result = await self.data_storage.store_customer_events_data(
                                         result, internal_shop_id
                                     )
+
+                                logger.info(
+                                    f"Successfully stored {data_type} data: {storage_result.new_items} new, {storage_result.updated_items} updated"
+                                )
                             except Exception as storage_error:
                                 logger.error(
                                     f"Failed to store {data_type} data",
@@ -698,6 +709,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                                 shop_domain=shop_domain,
                                 data_type=data_type,
                             )
+                        elif not result or len(result) == 0:
+                            logger.info(f"No {data_type} data to store (empty result)")
 
             # Finalize collection
             collection_results["completed_at"] = now_utc().isoformat()
@@ -716,35 +729,96 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             self._update_collection_stats(shop_domain, collection_results)
 
             # Store data in main tables after raw storage is complete
-            try:
+            if internal_shop_id:
+                try:
+                    logger.info(
+                        f"Starting main table storage for shop {internal_shop_id}"
+                    )
 
-                # Initialize main table storage with connection pool
-                from app.core.database.connection_pool import get_connection_pool
-                from app.core.database.simple_client import SimpleDatabaseClient
+                    # Initialize main table storage (now uses connection pool internally)
+                    main_table_storage = MainTableStorageService()
 
-                connection_pool = await get_connection_pool()
-                db_client = SimpleDatabaseClient(connection_pool)
-                main_table_storage = MainTableStorageService(db_client)
+                    main_storage_result = await main_table_storage.store_all_data(
+                        internal_shop_id
+                    )
+                    logger.info(
+                        f"Main table storage completed: {main_storage_result.processed_count} processed, "
+                        f"{main_storage_result.error_count} errors, {main_storage_result.duration_ms}ms"
+                    )
 
-                main_storage_result = await main_table_storage.store_all_data(
-                    shop_domain
+                    # Add main storage results to collection results
+                    collection_results["main_storage"] = {
+                        "success": main_storage_result.success,
+                        "processed_count": main_storage_result.processed_count,
+                        "error_count": main_storage_result.error_count,
+                        "duration_ms": main_storage_result.duration_ms,
+                        "errors": main_storage_result.errors,
+                    }
+
+                    # Fire event to trigger ML feature computation
+                    if (
+                        main_storage_result.success
+                        and main_storage_result.processed_count > 0
+                    ):
+                        try:
+                            from app.core.redis_client import streams_manager
+
+                            # Generate a unique job ID for feature computation
+                            feature_job_id = f"feature_compute_{internal_shop_id}_{int(now_utc().timestamp())}"
+
+                            # Publish ML training event to trigger feature computation
+                            event_id = await streams_manager.publish_ml_training_event(
+                                job_id=feature_job_id,
+                                shop_id=internal_shop_id,
+                                shop_domain=shop_domain,
+                                data_collection_completed=True,
+                            )
+
+                            logger.info(
+                                f"Published ML training event for feature computation",
+                                event_id=event_id,
+                                job_id=feature_job_id,
+                                shop_id=internal_shop_id,
+                                shop_domain=shop_domain,
+                            )
+
+                            # Add event info to collection results
+                            collection_results["ml_event"] = {
+                                "event_id": event_id,
+                                "job_id": feature_job_id,
+                                "status": "published",
+                            }
+
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to publish ML training event: {str(e)}"
+                            )
+                            collection_results["ml_event"] = {
+                                "success": False,
+                                "error": str(e),
+                            }
+                    else:
+                        logger.warning(
+                            "Skipping ML event: main table storage failed or no data processed"
+                        )
+                        collection_results["ml_event"] = {
+                            "success": False,
+                            "error": "No data processed",
+                        }
+                except Exception as e:
+                    logger.error(f"Failed to store data in main tables: {str(e)}")
+                    collection_results["main_storage"] = {
+                        "success": False,
+                        "error": str(e),
+                    }
+            else:
+                logger.warning(
+                    "Skipping main table storage: internal shop ID not available"
                 )
-                logger.info(
-                    f"Main table storage completed: {main_storage_result.processed_count} processed, "
-                    f"{main_storage_result.error_count} errors, {main_storage_result.duration_ms}ms"
-                )
-
-                # Add main storage results to collection results
                 collection_results["main_storage"] = {
-                    "success": main_storage_result.success,
-                    "processed_count": main_storage_result.processed_count,
-                    "error_count": main_storage_result.error_count,
-                    "duration_ms": main_storage_result.duration_ms,
-                    "errors": main_storage_result.errors,
+                    "success": False,
+                    "error": "Internal shop ID not available",
                 }
-            except Exception as e:
-                logger.error(f"Failed to store data in main tables: {str(e)}")
-                collection_results["main_storage"] = {"success": False, "error": str(e)}
 
             return collection_results
 
@@ -802,7 +876,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if not shop:
                 return None
 
-            # Get the most recent record for this data type
+            # Get the most recent record for this data type from RAW tables (not main tables)
             if data_type == "products":
                 latest_record = await self.data_storage.get_latest_product_update(
                     shop.id
@@ -890,6 +964,17 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             shop_info = await self.api_client.get_shop_info(shop_domain, access_token)
             if not shop_info:
                 raise Exception("Failed to get shop information")
+
+            # Set shop plan for rate limiting based on shop info
+            plan_name = shop_info.get("plan", {}).get("displayName", "").lower()
+            if "plus" in plan_name:
+                self.api_client.set_shop_plan(shop_domain, "plus")
+            elif "advanced" in plan_name:
+                self.api_client.set_shop_plan(shop_domain, "advanced")
+            elif "enterprise" in plan_name or "commerce components" in plan_name:
+                self.api_client.set_shop_plan(shop_domain, "enterprise")
+            else:
+                self.api_client.set_shop_plan(shop_domain, "standard")
 
             # Store shop data
             await self.storage_service.store_shop_data(shop_domain, shop_info)

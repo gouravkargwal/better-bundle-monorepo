@@ -9,10 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
-import logging
 
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging, get_logger
 from app.shared.helpers import now_utc
 
 # Domain imports
@@ -42,9 +41,8 @@ from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
 
-# Initialize logging
-setup_logging()
-logger = logging.getLogger(__name__)
+# Initialize logging (already configured in main.py)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager

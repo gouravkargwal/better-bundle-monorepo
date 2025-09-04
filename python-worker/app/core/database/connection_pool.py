@@ -79,25 +79,32 @@ class DatabaseConnectionPool:
         if self._is_initialized:
             return
 
+        start_time = time.time()
         logger.info(
             f"Initializing database connection pool (min: {self.min_connections}, max: {self.max_connections})"
         )
 
         try:
-            # Create minimum connections
-            for _ in range(self.min_connections):
-                await self._create_connection()
+            # Create minimum connections concurrently for faster initialization
+            connection_tasks = [
+                self._create_connection() for _ in range(self.min_connections)
+            ]
+            await asyncio.gather(*connection_tasks)
 
             # Start health check task
             self._health_check_task = asyncio.create_task(self._health_check_loop())
 
             self._is_initialized = True
+            init_time = time.time() - start_time
             logger.info(
-                f"Database connection pool initialized with {self.min_connections} connections"
+                f"Database connection pool initialized with {self.min_connections} connections in {init_time:.2f}s"
             )
 
         except Exception as e:
-            logger.error(f"Failed to initialize connection pool: {e}")
+            init_time = time.time() - start_time
+            logger.error(
+                f"Failed to initialize connection pool after {init_time:.2f}s: {e}"
+            )
             raise
 
     async def shutdown(self) -> None:
@@ -251,22 +258,36 @@ class DatabaseConnectionPool:
 
     async def _create_connection(self) -> Prisma:
         """Create a new database connection"""
+        start_time = time.time()
         try:
             connection = Prisma()
             await connection.connect()
 
-            # Test connection
-            await connection.query_raw("SELECT 1")
+            # Test connection with timeout
+            await asyncio.wait_for(
+                connection.query_raw("SELECT 1"),
+                timeout=5.0,  # 5 second timeout for health check
+            )
 
             self.metrics.total_connections += 1
+            connection_time = time.time() - start_time
             logger.debug(
-                f"Created new database connection (total: {self.metrics.total_connections})"
+                f"Created new database connection in {connection_time:.2f}s (total: {self.metrics.total_connections})"
             )
 
             return connection
 
+        except asyncio.TimeoutError:
+            connection_time = time.time() - start_time
+            logger.error(
+                f"Database connection health check timed out after {connection_time:.2f}s"
+            )
+            raise
         except Exception as e:
-            logger.error(f"Failed to create database connection: {e}")
+            connection_time = time.time() - start_time
+            logger.error(
+                f"Failed to create database connection after {connection_time:.2f}s: {e}"
+            )
             raise
 
     async def _health_check_loop(self) -> None:
@@ -347,7 +368,7 @@ async def get_connection_pool() -> DatabaseConnectionPool:
 
         _connection_pool = DatabaseConnectionPool(
             database_url=settings.database.DATABASE_URL,
-            min_connections=2,
+            min_connections=1,  # Reduced from 2 to 1 for faster startup
             max_connections=10,
         )
         await _connection_pool.initialize()

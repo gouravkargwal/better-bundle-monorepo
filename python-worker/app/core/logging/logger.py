@@ -109,6 +109,7 @@ def setup_logging(config: Optional[LoggingConfig] = None) -> None:
                 max_bytes=config.file.max_file_size,
                 backup_count=config.file.backup_count,
                 level=getattr(logging, config.level.upper()),
+                formatter_type=config.format,
             )
             root_logger.addHandler(app_handler)
 
@@ -117,6 +118,7 @@ def setup_logging(config: Optional[LoggingConfig] = None) -> None:
                 log_dir=config.file.log_dir,
                 max_bytes=config.file.max_file_size,
                 backup_count=config.file.backup_count,
+                formatter_type=config.format,
             )
             root_logger.addHandler(error_handler)
 
@@ -126,6 +128,7 @@ def setup_logging(config: Optional[LoggingConfig] = None) -> None:
                 max_bytes=config.file.max_file_size,
                 backup_count=config.file.backup_count,
                 level=getattr(logging, config.level.upper()),
+                formatter_type=config.format,
             )
             root_logger.addHandler(consumer_handler)
 

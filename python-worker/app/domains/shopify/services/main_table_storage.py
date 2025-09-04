@@ -6,15 +6,15 @@ in structured main tables for fast querying and feature computation.
 """
 
 import json
-import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
-from app.core.database.simple_client import SimpleDatabaseClient
+from app.core.database.connection_pool import get_connection_pool
+from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -31,9 +31,15 @@ class StorageResult:
 class MainTableStorageService:
     """Service for storing structured data in main tables"""
 
-    def __init__(self, db_client: SimpleDatabaseClient):
-        self.db_client = db_client
+    def __init__(self):
         self.logger = logger
+        self._connection_pool = None
+
+    async def _get_connection_pool(self):
+        """Get or initialize the connection pool"""
+        if self._connection_pool is None:
+            self._connection_pool = await get_connection_pool()
+        return self._connection_pool
 
     async def store_all_data(self, shop_id: str) -> StorageResult:
         """Store all raw data for a shop to main tables"""
@@ -99,16 +105,16 @@ class MainTableStorageService:
         errors = []
 
         try:
-            # Get all raw orders for the shop
-            raw_orders = await self.db_client.query(
-                'SELECT * FROM "RawOrder" WHERE "shopId" = $1 ORDER BY "extractedAt" DESC',
-                [shop_id],
-            )
+            # Get all raw orders for the shop using Prisma
+            connection_pool = await self._get_connection_pool()
+
+            async with connection_pool.get_connection() as db:
+                raw_orders = await db.raworder.find_many(where={"shopId": shop_id})
 
             for raw_order in raw_orders:
                 try:
                     # Parse the JSON payload
-                    payload = raw_order["payload"]
+                    payload = raw_order.payload
                     if isinstance(payload, str):
                         payload = json.loads(payload)
 
@@ -116,19 +122,69 @@ class MainTableStorageService:
                     order_data = self._extract_order_fields(payload, shop_id)
 
                     if order_data:
-                        # Upsert to OrderData table
-                        await self._upsert_order_data(order_data)
+                        # Use Prisma upsert instead of raw SQL
+                        await db.orderdata.upsert(
+                            where={
+                                "shopId_orderId": {
+                                    "shopId": shop_id,
+                                    "orderId": order_data["orderId"],
+                                }
+                            },
+                            data={
+                                "shopId": shop_id,
+                                "orderId": order_data["orderId"],
+                                "orderName": order_data["orderName"],
+                                "customerId": order_data["customerId"],
+                                "customerEmail": order_data["customerEmail"],
+                                "customerPhone": order_data["customerPhone"],
+                                "totalAmount": order_data["totalAmount"],
+                                "subtotalAmount": order_data["subtotalAmount"],
+                                "totalTaxAmount": order_data["totalTaxAmount"],
+                                "totalShippingAmount": order_data[
+                                    "totalShippingAmount"
+                                ],
+                                "totalRefundedAmount": order_data[
+                                    "totalRefundedAmount"
+                                ],
+                                "totalOutstandingAmount": order_data[
+                                    "totalOutstandingAmount"
+                                ],
+                                "orderDate": order_data["orderDate"],
+                                "processedAt": order_data["processedAt"],
+                                "cancelledAt": order_data["cancelledAt"],
+                                "cancelReason": order_data["cancelReason"],
+                                "orderStatus": order_data["orderStatus"],
+                                "orderLocale": order_data["orderLocale"],
+                                "currencyCode": order_data["currencyCode"],
+                                "presentmentCurrencyCode": order_data[
+                                    "presentmentCurrencyCode"
+                                ],
+                                "confirmed": order_data["confirmed"],
+                                "test": order_data["test"],
+                                "tags": order_data["tags"],
+                                "note": order_data["note"],
+                                "lineItems": order_data["lineItems"],
+                                "shippingAddress": order_data["shippingAddress"],
+                                "billingAddress": order_data["billingAddress"],
+                                "discountApplications": order_data[
+                                    "discountApplications"
+                                ],
+                                "metafields": order_data["metafields"],
+                            },
+                        )
                         processed_count += 1
                     else:
                         self.logger.warning(
-                            f"Could not extract order data from raw order {raw_order['id']}"
+                            f"Could not extract order data from raw order {raw_order.id}"
                         )
 
                 except Exception as e:
-                    error_msg = f"Failed to store order {raw_order['id']}: {str(e)}"
+                    error_msg = f"Failed to process order {raw_order.id}: {str(e)}"
                     self.logger.error(error_msg)
                     errors.append(error_msg)
                     error_count += 1
+
+            self.logger.info(f"Successfully processed {processed_count} orders")
 
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             return StorageResult(
@@ -159,36 +215,78 @@ class MainTableStorageService:
         errors = []
 
         try:
-            # Get all raw products for the shop
-            raw_products = await self.db_client.query(
-                'SELECT * FROM "RawProduct" WHERE "shopId" = $1 ORDER BY "extractedAt" DESC',
-                [shop_id],
-            )
+            # Get all raw products for the shop using Prisma
+            connection_pool = await self._get_connection_pool()
 
-            for raw_product in raw_products:
-                try:
-                    # Parse the JSON payload
-                    payload = raw_product["payload"]
-                    if isinstance(payload, str):
-                        payload = json.loads(payload)
+            async with connection_pool.get_connection() as db:
+                raw_products = await db.rawproduct.find_many(where={"shopId": shop_id})
 
-                    # Extract product data
-                    product_data = self._extract_product_fields(payload, shop_id)
+                # Process each product using Prisma upsert
+                for raw_product in raw_products:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_product.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
 
-                    if product_data:
-                        # Upsert to ProductData table
-                        await self._upsert_product_data(product_data)
-                        processed_count += 1
-                    else:
-                        self.logger.warning(
-                            f"Could not extract product data from raw product {raw_product['id']}"
+                        # Extract product data
+                        product_data = self._extract_product_fields(payload, shop_id)
+
+                        if product_data:
+                            # Use Prisma upsert instead of raw SQL
+                            await db.productdata.upsert(
+                                where={
+                                    "shopId_productId": {
+                                        "shopId": shop_id,
+                                        "productId": product_data["productId"],
+                                    }
+                                },
+                                data={
+                                    "shopId": shop_id,
+                                    "productId": product_data["productId"],
+                                    "title": product_data["title"],
+                                    "handle": product_data["handle"],
+                                    "description": product_data["description"],
+                                    "descriptionHtml": product_data["descriptionHtml"],
+                                    "productType": product_data["productType"],
+                                    "vendor": product_data["vendor"],
+                                    "tags": product_data["tags"],
+                                    "status": product_data["status"],
+                                    "totalInventory": product_data["totalInventory"],
+                                    "price": product_data["price"],
+                                    "compareAtPrice": product_data["compareAtPrice"],
+                                    "inventory": product_data["inventory"],
+                                    "imageUrl": product_data["imageUrl"],
+                                    "imageAlt": product_data["imageAlt"],
+                                    "productCreatedAt": product_data[
+                                        "productCreatedAt"
+                                    ],
+                                    "productUpdatedAt": product_data[
+                                        "productUpdatedAt"
+                                    ],
+                                    "variants": product_data["variants"],
+                                    "images": product_data["images"],
+                                    "options": product_data["options"],
+                                    "collections": product_data["collections"],
+                                    "metafields": product_data["metafields"],
+                                    "isActive": product_data["isActive"],
+                                },
+                            )
+                            processed_count += 1
+                        else:
+                            self.logger.warning(
+                                f"Could not extract product data from raw product {raw_product.id}"
+                            )
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process product {raw_product.id}: {str(e)}"
                         )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                except Exception as e:
-                    error_msg = f"Failed to store product {raw_product['id']}: {str(e)}"
-                    self.logger.error(error_msg)
-                    errors.append(error_msg)
-                    error_count += 1
+            self.logger.info(f"Successfully processed {processed_count} products")
 
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             return StorageResult(
@@ -219,38 +317,74 @@ class MainTableStorageService:
         errors = []
 
         try:
-            # Get all raw customers for the shop
-            raw_customers = await self.db_client.query(
-                'SELECT * FROM "RawCustomer" WHERE "shopId" = $1 ORDER BY "extractedAt" DESC',
-                [shop_id],
-            )
+            # Get all raw customers for the shop using Prisma
+            connection_pool = await self._get_connection_pool()
 
-            for raw_customer in raw_customers:
-                try:
-                    # Parse the JSON payload
-                    payload = raw_customer["payload"]
-                    if isinstance(payload, str):
-                        payload = json.loads(payload)
+            async with connection_pool.get_connection() as db:
+                raw_customers = await db.rawcustomer.find_many(
+                    where={"shopId": shop_id}
+                )
 
-                    # Extract customer data
-                    customer_data = self._extract_customer_fields(payload, shop_id)
+                # Process each customer using Prisma upsert
+                for raw_customer in raw_customers:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_customer.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
 
-                    if customer_data:
-                        # Upsert to CustomerData table
-                        await self._upsert_customer_data(customer_data)
-                        processed_count += 1
-                    else:
-                        self.logger.warning(
-                            f"Could not extract customer data from raw customer {raw_customer['id']}"
+                        # Extract customer data
+                        customer_data = self._extract_customer_fields(payload, shop_id)
+
+                        if customer_data:
+                            # Use Prisma upsert instead of raw SQL
+                            await db.customerdata.upsert(
+                                where={
+                                    "shopId_customerId": {
+                                        "shopId": shop_id,
+                                        "customerId": customer_data["customerId"],
+                                    }
+                                },
+                                data={
+                                    "shopId": shop_id,
+                                    "customerId": customer_data["customerId"],
+                                    "email": customer_data["email"],
+                                    "firstName": customer_data["firstName"],
+                                    "lastName": customer_data["lastName"],
+                                    "totalSpent": customer_data["totalSpent"],
+                                    "orderCount": customer_data["orderCount"],
+                                    "lastOrderDate": customer_data["lastOrderDate"],
+                                    "tags": customer_data["tags"],
+                                    "createdAtShopify": customer_data[
+                                        "createdAtShopify"
+                                    ],
+                                    "lastOrderId": customer_data["lastOrderId"],
+                                    "location": customer_data["location"],
+                                    "metafields": customer_data["metafields"],
+                                    "state": customer_data["state"],
+                                    "verifiedEmail": customer_data["verifiedEmail"],
+                                    "taxExempt": customer_data["taxExempt"],
+                                    "defaultAddress": customer_data["defaultAddress"],
+                                    "addresses": customer_data["addresses"],
+                                    "currencyCode": customer_data["currencyCode"],
+                                    "customerLocale": customer_data["customerLocale"],
+                                },
+                            )
+                            processed_count += 1
+                        else:
+                            self.logger.warning(
+                                f"Could not extract customer data from raw customer {raw_customer.id}"
+                            )
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process customer {raw_customer.id}: {str(e)}"
                         )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                except Exception as e:
-                    error_msg = (
-                        f"Failed to store customer {raw_customer['id']}: {str(e)}"
-                    )
-                    self.logger.error(error_msg)
-                    errors.append(error_msg)
-                    error_count += 1
+            self.logger.info(f"Successfully processed {processed_count} customers")
 
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             return StorageResult(
@@ -281,38 +415,65 @@ class MainTableStorageService:
         errors = []
 
         try:
-            # Get all raw collections for the shop
-            raw_collections = await self.db_client.query(
-                'SELECT * FROM "RawCollection" WHERE "shopId" = $1 ORDER BY "extractedAt" DESC',
-                [shop_id],
-            )
+            # Get all raw collections for the shop using Prisma
+            connection_pool = await self._get_connection_pool()
 
-            for raw_collection in raw_collections:
-                try:
-                    # Parse the JSON payload
-                    payload = raw_collection["payload"]
-                    if isinstance(payload, str):
-                        payload = json.loads(payload)
+            async with connection_pool.get_connection() as db:
+                raw_collections = await db.rawcollection.find_many(
+                    where={"shopId": shop_id}
+                )
 
-                    # Extract collection data
-                    collection_data = self._extract_collection_fields(payload, shop_id)
+                for raw_collection in raw_collections:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_collection.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
 
-                    if collection_data:
-                        # Upsert to CollectionData table
-                        await self._upsert_collection_data(collection_data)
-                        processed_count += 1
-                    else:
-                        self.logger.warning(
-                            f"Could not extract collection data from raw collection {raw_collection['id']}"
+                        # Extract collection data
+                        collection_data = self._extract_collection_fields(
+                            payload, shop_id
                         )
 
-                except Exception as e:
-                    error_msg = (
-                        f"Failed to store collection {raw_collection['id']}: {str(e)}"
-                    )
-                    self.logger.error(error_msg)
-                    errors.append(error_msg)
-                    error_count += 1
+                        if collection_data:
+                            # Use Prisma upsert instead of raw SQL
+                            await db.collectiondata.upsert(
+                                where={
+                                    "shopId_collectionId": {
+                                        "shopId": shop_id,
+                                        "collectionId": collection_data["collectionId"],
+                                    }
+                                },
+                                data={
+                                    "shopId": shop_id,
+                                    "collectionId": collection_data["collectionId"],
+                                    "title": collection_data["title"],
+                                    "handle": collection_data["handle"],
+                                    "description": collection_data["description"],
+                                    "sortOrder": collection_data["sortOrder"],
+                                    "templateSuffix": collection_data["templateSuffix"],
+                                    "seoTitle": collection_data["seoTitle"],
+                                    "seoDescription": collection_data["seoDescription"],
+                                    "imageUrl": collection_data["imageUrl"],
+                                    "imageAlt": collection_data["imageAlt"],
+                                    "productCount": collection_data["productCount"],
+                                    "isAutomated": collection_data["isAutomated"],
+                                    "metafields": collection_data["metafields"],
+                                },
+                            )
+                            processed_count += 1
+                        else:
+                            self.logger.warning(
+                                f"Could not extract collection data from raw collection {raw_collection.id}"
+                            )
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to store collection {raw_collection.id}: {str(e)}"
+                        )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             return StorageResult(
@@ -343,40 +504,80 @@ class MainTableStorageService:
         errors = []
 
         try:
-            # Get all raw customer events for the shop
-            raw_events = await self.db_client.query(
-                'SELECT * FROM "RawCustomerEvent" WHERE "shopId" = $1 ORDER BY "extractedAt" DESC',
-                [shop_id],
-            )
+            # Get all raw customer events for the shop using Prisma
+            connection_pool = await self._get_connection_pool()
 
-            for raw_event in raw_events:
-                try:
-                    # Parse the JSON payload
-                    payload = raw_event["payload"]
-                    if isinstance(payload, str):
-                        payload = json.loads(payload)
+            async with connection_pool.get_connection() as db:
+                raw_events = await db.rawcustomerevent.find_many(
+                    where={"shopId": shop_id}
+                )
 
-                    # Extract customer event data
-                    event_data_list = self._extract_customer_event_fields(
-                        payload, shop_id
-                    )
+                for raw_event in raw_events:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_event.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
 
-                    if event_data_list:
-                        # Upsert to CustomerEventData table
-                        await self._upsert_customer_event_data(event_data_list)
-                        processed_count += len(event_data_list)
-                    else:
-                        self.logger.warning(
-                            f"Could not extract customer event data from raw event {raw_event['id']}"
+                        # Extract customer event data
+                        event_data_list = self._extract_customer_event_fields(
+                            payload, shop_id
                         )
 
-                except Exception as e:
-                    error_msg = (
-                        f"Failed to store customer event {raw_event['id']}: {str(e)}"
-                    )
-                    self.logger.error(error_msg)
-                    errors.append(error_msg)
-                    error_count += 1
+                        if event_data_list:
+                            # Process each event using Prisma upsert
+                            for event_data in event_data_list:
+                                await db.customereventdata.upsert(
+                                    where={
+                                        "shopId_eventId": {
+                                            "shopId": shop_id,
+                                            "eventId": event_data["eventId"],
+                                        }
+                                    },
+                                    data={
+                                        "shopId": shop_id,
+                                        "eventId": event_data["eventId"],
+                                        "customerId": event_data["customerId"],
+                                        "eventType": event_data["eventType"],
+                                        "customerEmail": event_data["customerEmail"],
+                                        "customerFirstName": event_data[
+                                            "customerFirstName"
+                                        ],
+                                        "customerLastName": event_data[
+                                            "customerLastName"
+                                        ],
+                                        "customerTags": event_data["customerTags"],
+                                        "customerState": event_data["customerState"],
+                                        "customerOrdersCount": event_data[
+                                            "customerOrdersCount"
+                                        ],
+                                        "customerAmountSpent": event_data[
+                                            "customerAmountSpent"
+                                        ],
+                                        "customerCurrency": event_data[
+                                            "customerCurrency"
+                                        ],
+                                        "eventTimestamp": event_data["eventTimestamp"],
+                                        "rawEventData": event_data["rawEventData"],
+                                    },
+                                )
+                            processed_count += len(event_data_list)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract customer event data from raw event {raw_event.id}"
+                            )
+
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process customer event {raw_event.id}: {str(e)}"
+                        )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
+
+            self.logger.info(
+                f"Successfully processed {processed_count} customer events"
+            )
 
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             return StorageResult(
@@ -405,11 +606,23 @@ class MainTableStorageService:
         """Extract key order fields from payload"""
         try:
             # Handle different payload structures
-            order_data = (
-                payload.get("order") or payload.get("data", {}).get("order") or payload
-            )
+            if isinstance(payload, list):
+                # If payload is a list, take the first item
+                order_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                order_data = (
+                    payload.get("order")
+                    or payload.get("data", {}).get("order")
+                    or payload
+                )
+            else:
+                return None
 
-            if not order_data or not order_data.get("id"):
+            if (
+                not order_data
+                or not isinstance(order_data, dict)
+                or not order_data.get("id")
+            ):
                 return None
 
             # Extract order ID
@@ -501,13 +714,23 @@ class MainTableStorageService:
         """Extract key product fields from payload"""
         try:
             # Handle different payload structures
-            product_data = (
-                payload.get("product")
-                or payload.get("data", {}).get("product")
-                or payload
-            )
+            if isinstance(payload, list):
+                # If payload is a list, take the first item
+                product_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                product_data = (
+                    payload.get("product")
+                    or payload.get("data", {}).get("product")
+                    or payload
+                )
+            else:
+                return None
 
-            if not product_data or not product_data.get("id"):
+            if (
+                not product_data
+                or not isinstance(product_data, dict)
+                or not product_data.get("id")
+            ):
                 return None
 
             # Extract product ID
@@ -548,6 +771,14 @@ class MainTableStorageService:
                 main_image = images[0]
                 main_image_url = main_image.get("url")
 
+            # Process tags - convert string to array if needed
+            tags = product_data.get("tags", [])
+            if isinstance(tags, str):
+                # Split comma-separated tags and clean them
+                tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+            elif not isinstance(tags, list):
+                tags = []
+
             return {
                 "shopId": shop_id,
                 "productId": product_id,
@@ -557,7 +788,7 @@ class MainTableStorageService:
                 "descriptionHtml": product_data.get("bodyHtml"),
                 "productType": product_data.get("productType"),
                 "vendor": product_data.get("vendor"),
-                "tags": product_data.get("tags", []),
+                "tags": tags,
                 "status": product_data.get("status", "active"),
                 "totalInventory": product_data.get("totalInventory"),
                 "price": self._get_product_price(variants),
@@ -585,13 +816,23 @@ class MainTableStorageService:
         """Extract key customer fields from payload"""
         try:
             # Handle different payload structures
-            customer_data = (
-                payload.get("customer")
-                or payload.get("data", {}).get("customer")
-                or payload
-            )
+            if isinstance(payload, list):
+                # If payload is a list, take the first item
+                customer_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                customer_data = (
+                    payload.get("customer")
+                    or payload.get("data", {}).get("customer")
+                    or payload
+                )
+            else:
+                return None
 
-            if not customer_data or not customer_data.get("id"):
+            if (
+                not customer_data
+                or not isinstance(customer_data, dict)
+                or not customer_data.get("id")
+            ):
                 return None
 
             # Extract customer ID
@@ -616,22 +857,32 @@ class MainTableStorageService:
                     edge.get("node", {}) for edge in metafields.get("edges", [])
                 ]
 
+            # Process tags - convert string to array if needed
+            tags = customer_data.get("tags", [])
+            if isinstance(tags, str):
+                # Split comma-separated tags and clean them
+                tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+            elif not isinstance(tags, list):
+                tags = []
+
             return {
                 "shopId": shop_id,
                 "customerId": customer_id,
-                "email": customer_data.get("email"),
-                "firstName": customer_data.get("firstName"),
-                "lastName": customer_data.get("lastName"),
+                "email": customer_data.get("email") or "",  # Ensure email is never None
+                "firstName": customer_data.get("firstName")
+                or "",  # Ensure firstName is never None
+                "lastName": customer_data.get("lastName")
+                or "",  # Ensure lastName is never None
                 "totalSpent": float(customer_data.get("totalSpent", 0)),
                 "orderCount": int(customer_data.get("ordersCount", 0)),
                 "lastOrderDate": self._parse_datetime(
                     customer_data.get("lastOrderDate")
                 ),
-                "tags": customer_data.get("tags", []),
+                "tags": tags,
                 "createdAtShopify": self._parse_datetime(
                     customer_data.get("createdAt")
                 ),
-                "lastOrderId": customer_data.get("lastOrderId"),
+                "lastOrderId": customer_data.get("lastOrderId") or "",
                 "location": (
                     {
                         "city": default_address.get("city"),
@@ -643,13 +894,13 @@ class MainTableStorageService:
                     else None
                 ),
                 "metafields": metafields,
-                "state": customer_data.get("state"),
+                "state": customer_data.get("state") or "",
                 "verifiedEmail": customer_data.get("verifiedEmail", False),
                 "taxExempt": customer_data.get("taxExempt", False),
                 "defaultAddress": default_address,
                 "addresses": addresses,
-                "currencyCode": customer_data.get("currency"),
-                "customerLocale": customer_data.get("locale"),
+                "currencyCode": customer_data.get("currency") or "USD",
+                "customerLocale": customer_data.get("locale") or "",
             }
 
         except Exception as e:
@@ -662,13 +913,23 @@ class MainTableStorageService:
         """Extract key collection fields from payload"""
         try:
             # Handle different payload structures
-            collection_data = (
-                payload.get("collection")
-                or payload.get("data", {}).get("collection")
-                or payload
-            )
+            if isinstance(payload, list):
+                # If payload is a list, take the first item
+                collection_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                collection_data = (
+                    payload.get("collection")
+                    or payload.get("data", {}).get("collection")
+                    or payload
+                )
+            else:
+                return None
 
-            if not collection_data or not collection_data.get("id"):
+            if (
+                not collection_data
+                or not isinstance(collection_data, dict)
+                or not collection_data.get("id")
+            ):
                 return None
 
             # Extract collection ID
@@ -719,13 +980,23 @@ class MainTableStorageService:
         """Extract key customer event fields from payload"""
         try:
             # Handle different payload structures - customer events come from customers with events
-            customer_data = (
-                payload.get("customer")
-                or payload.get("data", {}).get("customer")
-                or payload
-            )
+            if isinstance(payload, list):
+                # If payload is a list, take the first item
+                customer_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                customer_data = (
+                    payload.get("customer")
+                    or payload.get("data", {}).get("customer")
+                    or payload
+                )
+            else:
+                return None
 
-            if not customer_data or not customer_data.get("id"):
+            if (
+                not customer_data
+                or not isinstance(customer_data, dict)
+                or not customer_data.get("id")
+            ):
                 return None
 
             # Extract customer ID
@@ -972,6 +1243,85 @@ class MainTableStorageService:
             ],
         )
 
+    async def _batch_upsert_product_data(
+        self, product_data_list: List[Dict[str, Any]]
+    ) -> None:
+        """Batch upsert product data to ProductData table"""
+        if not product_data_list:
+            return
+
+        # Prepare batch data
+        batch_values = []
+        for product_data in product_data_list:
+            batch_values.append(
+                [
+                    product_data["shopId"],
+                    product_data["productId"],
+                    product_data["title"],
+                    product_data["handle"],
+                    product_data["description"],
+                    product_data["descriptionHtml"],
+                    product_data["productType"],
+                    product_data["vendor"],
+                    json.dumps(product_data["tags"]),
+                    product_data["status"],
+                    product_data["totalInventory"],
+                    product_data["price"],
+                    product_data["compareAtPrice"],
+                    product_data["inventory"],
+                    product_data["imageUrl"],
+                    product_data["imageAlt"],
+                    product_data["productCreatedAt"],
+                    product_data["productUpdatedAt"],
+                    json.dumps(product_data["variants"]),
+                    json.dumps(product_data["images"]),
+                    json.dumps(product_data["options"]),
+                    json.dumps(product_data["collections"]),
+                    json.dumps(product_data["metafields"]),
+                    product_data["isActive"],
+                ]
+            )
+
+        # Use batch insert with ON CONFLICT
+        query = """
+        INSERT INTO "ProductData" (
+            "shopId", "productId", "title", "handle", "description", "descriptionHtml",
+            "productType", "vendor", "tags", "status", "totalInventory", "price",
+            "compareAtPrice", "inventory", "imageUrl", "imageAlt", "productCreatedAt",
+            "productUpdatedAt", "variants", "images", "options", "collections", "metafields", "isActive"
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+        )
+        ON CONFLICT ("shopId", "productId") DO UPDATE SET
+            "title" = EXCLUDED."title",
+            "handle" = EXCLUDED."handle",
+            "description" = EXCLUDED."description",
+            "descriptionHtml" = EXCLUDED."descriptionHtml",
+            "productType" = EXCLUDED."productType",
+            "vendor" = EXCLUDED."vendor",
+            "tags" = EXCLUDED."tags",
+            "status" = EXCLUDED."status",
+            "totalInventory" = EXCLUDED."totalInventory",
+            "price" = EXCLUDED."price",
+            "compareAtPrice" = EXCLUDED."compareAtPrice",
+            "inventory" = EXCLUDED."inventory",
+            "imageUrl" = EXCLUDED."imageUrl",
+            "imageAlt" = EXCLUDED."imageAlt",
+            "productCreatedAt" = EXCLUDED."productCreatedAt",
+            "productUpdatedAt" = EXCLUDED."productUpdatedAt",
+            "variants" = EXCLUDED."variants",
+            "images" = EXCLUDED."images",
+            "options" = EXCLUDED."options",
+            "collections" = EXCLUDED."collections",
+            "metafields" = EXCLUDED."metafields",
+            "isActive" = EXCLUDED."isActive",
+            "updatedAt" = NOW()
+        """
+
+        # Execute individual inserts (executemany not available in SimpleDatabaseClient)
+        for values in batch_values:
+            await self.db_client.execute(query, values)
+
     async def _upsert_customer_data(self, customer_data: Dict[str, Any]) -> None:
         """Upsert customer data to CustomerData table"""
         query = """
@@ -1030,6 +1380,77 @@ class MainTableStorageService:
                 customer_data["customerLocale"],
             ],
         )
+
+    async def _batch_upsert_customer_data(
+        self, customer_data_list: List[Dict[str, Any]]
+    ) -> None:
+        """Batch upsert customer data to CustomerData table"""
+        if not customer_data_list:
+            return
+
+        # Prepare batch data
+        batch_values = []
+        for customer_data in customer_data_list:
+            batch_values.append(
+                [
+                    customer_data["shopId"],
+                    customer_data["customerId"],
+                    customer_data["email"],
+                    customer_data["firstName"],
+                    customer_data["lastName"],
+                    customer_data["totalSpent"],
+                    customer_data["orderCount"],
+                    customer_data["lastOrderDate"],
+                    json.dumps(customer_data["tags"]),
+                    customer_data["createdAtShopify"],
+                    customer_data["lastOrderId"],
+                    json.dumps(customer_data["location"]),
+                    json.dumps(customer_data["metafields"]),
+                    customer_data["state"],
+                    customer_data["verifiedEmail"],
+                    customer_data["taxExempt"],
+                    json.dumps(customer_data["defaultAddress"]),
+                    json.dumps(customer_data["addresses"]),
+                    customer_data["currencyCode"],
+                    customer_data["customerLocale"],
+                ]
+            )
+
+        # Use batch insert with ON CONFLICT
+        query = """
+        INSERT INTO "CustomerData" (
+            "shopId", "customerId", "email", "firstName", "lastName", "totalSpent",
+            "orderCount", "lastOrderDate", "tags", "createdAtShopify", "lastOrderId",
+            "location", "metafields", "state", "verifiedEmail", "taxExempt",
+            "defaultAddress", "addresses", "currencyCode", "customerLocale"
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+        )
+        ON CONFLICT ("shopId", "customerId") DO UPDATE SET
+            "email" = EXCLUDED."email",
+            "firstName" = EXCLUDED."firstName",
+            "lastName" = EXCLUDED."lastName",
+            "totalSpent" = EXCLUDED."totalSpent",
+            "orderCount" = EXCLUDED."orderCount",
+            "lastOrderDate" = EXCLUDED."lastOrderDate",
+            "tags" = EXCLUDED."tags",
+            "createdAtShopify" = EXCLUDED."createdAtShopify",
+            "lastOrderId" = EXCLUDED."lastOrderId",
+            "location" = EXCLUDED."location",
+            "metafields" = EXCLUDED."metafields",
+            "state" = EXCLUDED."state",
+            "verifiedEmail" = EXCLUDED."verifiedEmail",
+            "taxExempt" = EXCLUDED."taxExempt",
+            "defaultAddress" = EXCLUDED."defaultAddress",
+            "addresses" = EXCLUDED."addresses",
+            "currencyCode" = EXCLUDED."currencyCode",
+            "customerLocale" = EXCLUDED."customerLocale",
+            "updatedAt" = NOW()
+        """
+
+        # Execute individual inserts (executemany not available in SimpleDatabaseClient)
+        for values in batch_values:
+            await self.db_client.execute(query, values)
 
     async def _upsert_collection_data(self, collection_data: Dict[str, Any]) -> None:
         """Upsert collection data to CollectionData table"""
