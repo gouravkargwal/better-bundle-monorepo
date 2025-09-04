@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
+from prisma import Json
 from app.core.database.connection_pool import get_connection_pool
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -705,6 +706,45 @@ class MainTableStorageService:
             # Extract customer information
             customer = order_data.get("customer", {})
 
+            # Extract line items (keep as JSON for complex data)
+            line_items = order_data.get("lineItems", {})
+            if isinstance(line_items, dict) and "edges" in line_items:
+                line_items = [
+                    edge.get("node", {}) for edge in line_items.get("edges", [])
+                ]
+
+            # Extract shipping address
+            shipping_address = order_data.get("shippingAddress")
+
+            # Extract billing address
+            billing_address = order_data.get("billingAddress")
+
+            # Extract discount applications (keep as JSON for complex data)
+            discount_applications = order_data.get("discountApplications", {})
+            if (
+                isinstance(discount_applications, dict)
+                and "edges" in discount_applications
+            ):
+                discount_applications = [
+                    edge.get("node", {})
+                    for edge in discount_applications.get("edges", [])
+                ]
+
+            # Extract metafields (keep as JSON for complex data)
+            metafields = order_data.get("metafields", {})
+            if isinstance(metafields, dict) and "edges" in metafields:
+                metafields = [
+                    edge.get("node", {}) for edge in metafields.get("edges", [])
+                ]
+
+            # Process tags - ensure it's a proper JSON array
+            tags = order_data.get("tags", [])
+            if isinstance(tags, str):
+                # Split comma-separated tags and clean them
+                tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+            elif not isinstance(tags, list):
+                tags = []
+
             return {
                 "shopId": shop_id,
                 "orderId": order_id,
@@ -759,8 +799,13 @@ class MainTableStorageService:
                 "presentmentCurrencyCode": order_data.get("presentmentCurrencyCode"),
                 "confirmed": order_data.get("confirmed", False),
                 "test": order_data.get("test", False),
-                "tags": order_data.get("tags", []),
+                "tags": tags,
                 "note": order_data.get("note"),
+                "lineItems": line_items,
+                "shippingAddress": shipping_address,
+                "billingAddress": billing_address,
+                "discountApplications": discount_applications,
+                "metafields": metafields,
             }
 
         except Exception as e:
@@ -1213,39 +1258,56 @@ class MainTableStorageService:
                 await self._batch_upsert_product_data(product_data_list, db)
             return
 
+        # Prepare data for both batch insert and individual upserts
+        def prepare_product_data(product_data):
+            """Prepare product data for database insertion"""
+            return {
+                "shopId": product_data["shopId"],
+                "productId": product_data["productId"],
+                "title": product_data["title"],
+                "handle": product_data["handle"],
+                "description": product_data["description"],
+                "descriptionHtml": product_data["descriptionHtml"],
+                "productType": product_data["productType"],
+                "vendor": product_data["vendor"],
+                "tags": Json(product_data["tags"]),
+                "status": product_data["status"],
+                "totalInventory": product_data["totalInventory"],
+                "price": product_data["price"],
+                "compareAtPrice": product_data["compareAtPrice"],
+                "inventory": product_data["inventory"],
+                "imageUrl": product_data["imageUrl"],
+                "imageAlt": product_data["imageAlt"],
+                "productCreatedAt": product_data["productCreatedAt"],
+                "productUpdatedAt": product_data["productUpdatedAt"],
+                "variants": (
+                    Json(product_data["variants"]) if product_data["variants"] else None
+                ),
+                "images": (
+                    Json(product_data["images"]) if product_data["images"] else None
+                ),
+                "options": (
+                    Json(product_data["options"]) if product_data["options"] else None
+                ),
+                "collections": (
+                    Json(product_data["collections"])
+                    if product_data["collections"]
+                    else None
+                ),
+                "metafields": (
+                    Json(product_data["metafields"])
+                    if product_data["metafields"]
+                    else None
+                ),
+                "isActive": product_data["isActive"],
+            }
+
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
             # Prepare data for create_many
-            create_data = []
-            for product_data in product_data_list:
-                create_data.append(
-                    {
-                        "shopId": product_data["shopId"],
-                        "productId": product_data["productId"],
-                        "title": product_data["title"],
-                        "handle": product_data["handle"],
-                        "description": product_data["description"],
-                        "descriptionHtml": product_data["descriptionHtml"],
-                        "productType": product_data["productType"],
-                        "vendor": product_data["vendor"],
-                        "tags": product_data["tags"],
-                        "status": product_data["status"],
-                        "totalInventory": product_data["totalInventory"],
-                        "price": product_data["price"],
-                        "compareAtPrice": product_data["compareAtPrice"],
-                        "inventory": product_data["inventory"],
-                        "imageUrl": product_data["imageUrl"],
-                        "imageAlt": product_data["imageAlt"],
-                        "productCreatedAt": product_data["productCreatedAt"],
-                        "productUpdatedAt": product_data["productUpdatedAt"],
-                        "variants": product_data["variants"],
-                        "images": product_data["images"],
-                        "options": product_data["options"],
-                        "collections": product_data["collections"],
-                        "metafields": product_data["metafields"],
-                        "isActive": product_data["isActive"],
-                    }
-                )
+            create_data = [
+                prepare_product_data(product_data) for product_data in product_data_list
+            ]
 
             # Use create_many with skipDuplicates for batch insert
             await db.productdata.create_many(data=create_data, skip_duplicates=True)
@@ -1256,6 +1318,7 @@ class MainTableStorageService:
                 f"Batch insert failed, falling back to individual upserts: {str(e)}"
             )
             for product_data in product_data_list:
+                prepared_data = prepare_product_data(product_data)
                 await db.productdata.upsert(
                     where={
                         "shopId_productId": {
@@ -1263,32 +1326,7 @@ class MainTableStorageService:
                             "productId": product_data["productId"],
                         }
                     },
-                    data={
-                        "shopId": product_data["shopId"],
-                        "productId": product_data["productId"],
-                        "title": product_data["title"],
-                        "handle": product_data["handle"],
-                        "description": product_data["description"],
-                        "descriptionHtml": product_data["descriptionHtml"],
-                        "productType": product_data["productType"],
-                        "vendor": product_data["vendor"],
-                        "tags": product_data["tags"],
-                        "status": product_data["status"],
-                        "totalInventory": product_data["totalInventory"],
-                        "price": product_data["price"],
-                        "compareAtPrice": product_data["compareAtPrice"],
-                        "inventory": product_data["inventory"],
-                        "imageUrl": product_data["imageUrl"],
-                        "imageAlt": product_data["imageAlt"],
-                        "productCreatedAt": product_data["productCreatedAt"],
-                        "productUpdatedAt": product_data["productUpdatedAt"],
-                        "variants": product_data["variants"],
-                        "images": product_data["images"],
-                        "options": product_data["options"],
-                        "collections": product_data["collections"],
-                        "metafields": product_data["metafields"],
-                        "isActive": product_data["isActive"],
-                    },
+                    data=prepared_data,
                 )
 
     async def _batch_upsert_order_data(
@@ -1305,46 +1343,57 @@ class MainTableStorageService:
                 await self._batch_upsert_order_data(order_data_list, db)
             return
 
+        # Prepare data for both batch insert and individual upserts
+        def prepare_order_data(order_data):
+            """Prepare order data for database insertion"""
+            return {
+                "shopId": order_data["shopId"],
+                "orderId": order_data["orderId"],
+                "orderName": order_data.get("orderName"),
+                "customerId": order_data.get("customerId"),
+                "customerEmail": order_data.get("customerEmail"),
+                "customerPhone": order_data.get("customerPhone"),
+                "totalAmount": order_data["totalAmount"],
+                "subtotalAmount": order_data.get("subtotalAmount"),
+                "totalTaxAmount": order_data.get("totalTaxAmount"),
+                "totalShippingAmount": order_data.get("totalShippingAmount"),
+                "totalRefundedAmount": order_data.get("totalRefundedAmount"),
+                "totalOutstandingAmount": order_data.get("totalOutstandingAmount"),
+                "orderDate": order_data["orderDate"],
+                "processedAt": order_data.get("processedAt"),
+                "cancelledAt": order_data.get("cancelledAt"),
+                "cancelReason": order_data.get("cancelReason"),
+                "orderStatus": order_data.get("orderStatus"),
+                "orderLocale": order_data.get("orderLocale"),
+                "currencyCode": order_data.get("currencyCode"),
+                "presentmentCurrencyCode": order_data.get("presentmentCurrencyCode"),
+                "confirmed": order_data.get("confirmed", False),
+                "test": order_data.get("test", False),
+                "tags": Json(order_data.get("tags", [])),
+                "note": order_data.get("note"),
+                "lineItems": Json(order_data.get("lineItems", [])),
+                "shippingAddress": (
+                    Json(order_data.get("shippingAddress"))
+                    if order_data.get("shippingAddress")
+                    else Json({})
+                ),
+                "billingAddress": (
+                    Json(order_data.get("billingAddress"))
+                    if order_data.get("billingAddress")
+                    else Json({})
+                ),
+                "discountApplications": Json(
+                    order_data.get("discountApplications", [])
+                ),
+                "metafields": Json(order_data.get("metafields", [])),
+            }
+
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
             # Prepare data for create_many
-            create_data = []
-            for order_data in order_data_list:
-                create_data.append(
-                    {
-                        "shopId": order_data["shopId"],
-                        "orderId": order_data["orderId"],
-                        "orderName": order_data["orderName"],
-                        "customerId": order_data["customerId"],
-                        "customerEmail": order_data["customerEmail"],
-                        "customerPhone": order_data["customerPhone"],
-                        "totalAmount": order_data["totalAmount"],
-                        "subtotalAmount": order_data["subtotalAmount"],
-                        "totalTaxAmount": order_data["totalTaxAmount"],
-                        "totalShippingAmount": order_data["totalShippingAmount"],
-                        "totalRefundedAmount": order_data["totalRefundedAmount"],
-                        "totalOutstandingAmount": order_data["totalOutstandingAmount"],
-                        "orderDate": order_data["orderDate"],
-                        "processedAt": order_data["processedAt"],
-                        "cancelledAt": order_data["cancelledAt"],
-                        "cancelReason": order_data["cancelReason"],
-                        "orderStatus": order_data["orderStatus"],
-                        "orderLocale": order_data["orderLocale"],
-                        "currencyCode": order_data["currencyCode"],
-                        "presentmentCurrencyCode": order_data[
-                            "presentmentCurrencyCode"
-                        ],
-                        "confirmed": order_data["confirmed"],
-                        "test": order_data["test"],
-                        "tags": order_data["tags"],
-                        "note": order_data["note"],
-                        "lineItems": order_data["lineItems"],
-                        "shippingAddress": order_data["shippingAddress"],
-                        "billingAddress": order_data["billingAddress"],
-                        "discountApplications": order_data["discountApplications"],
-                        "metafields": order_data["metafields"],
-                    }
-                )
+            create_data = [
+                prepare_order_data(order_data) for order_data in order_data_list
+            ]
 
             # Use create_many with skipDuplicates for batch insert
             await db.orderdata.create_many(data=create_data, skip_duplicates=True)
@@ -1355,6 +1404,7 @@ class MainTableStorageService:
                 f"Batch insert failed, falling back to individual upserts: {str(e)}"
             )
             for order_data in order_data_list:
+                prepared_data = prepare_order_data(order_data)
                 await db.orderdata.upsert(
                     where={
                         "shopId_orderId": {
@@ -1362,39 +1412,7 @@ class MainTableStorageService:
                             "orderId": order_data["orderId"],
                         }
                     },
-                    data={
-                        "shopId": order_data["shopId"],
-                        "orderId": order_data["orderId"],
-                        "orderName": order_data["orderName"],
-                        "customerId": order_data["customerId"],
-                        "customerEmail": order_data["customerEmail"],
-                        "customerPhone": order_data["customerPhone"],
-                        "totalAmount": order_data["totalAmount"],
-                        "subtotalAmount": order_data["subtotalAmount"],
-                        "totalTaxAmount": order_data["totalTaxAmount"],
-                        "totalShippingAmount": order_data["totalShippingAmount"],
-                        "totalRefundedAmount": order_data["totalRefundedAmount"],
-                        "totalOutstandingAmount": order_data["totalOutstandingAmount"],
-                        "orderDate": order_data["orderDate"],
-                        "processedAt": order_data["processedAt"],
-                        "cancelledAt": order_data["cancelledAt"],
-                        "cancelReason": order_data["cancelReason"],
-                        "orderStatus": order_data["orderStatus"],
-                        "orderLocale": order_data["orderLocale"],
-                        "currencyCode": order_data["currencyCode"],
-                        "presentmentCurrencyCode": order_data[
-                            "presentmentCurrencyCode"
-                        ],
-                        "confirmed": order_data["confirmed"],
-                        "test": order_data["test"],
-                        "tags": order_data["tags"],
-                        "note": order_data["note"],
-                        "lineItems": order_data["lineItems"],
-                        "shippingAddress": order_data["shippingAddress"],
-                        "billingAddress": order_data["billingAddress"],
-                        "discountApplications": order_data["discountApplications"],
-                        "metafields": order_data["metafields"],
-                    },
+                    data=prepared_data,
                 )
 
     async def _batch_upsert_customer_data(
@@ -1411,35 +1429,55 @@ class MainTableStorageService:
                 await self._batch_upsert_customer_data(customer_data_list, db)
             return
 
+        # Prepare data for both batch insert and individual upserts
+        def prepare_customer_data(customer_data):
+            """Prepare customer data for database insertion"""
+            return {
+                "shopId": customer_data["shopId"],
+                "customerId": customer_data["customerId"],
+                "email": customer_data["email"],
+                "firstName": customer_data["firstName"],
+                "lastName": customer_data["lastName"],
+                "totalSpent": customer_data["totalSpent"],
+                "orderCount": customer_data["orderCount"],
+                "lastOrderDate": customer_data["lastOrderDate"],
+                "tags": Json(customer_data["tags"]),
+                "createdAtShopify": customer_data["createdAtShopify"],
+                "lastOrderId": customer_data["lastOrderId"],
+                "location": (
+                    Json(customer_data["location"])
+                    if customer_data["location"]
+                    else None
+                ),
+                "metafields": (
+                    Json(customer_data["metafields"])
+                    if customer_data["metafields"]
+                    else Json({})
+                ),
+                "state": customer_data["state"],
+                "verifiedEmail": customer_data["verifiedEmail"],
+                "taxExempt": customer_data["taxExempt"],
+                "defaultAddress": (
+                    Json(customer_data["defaultAddress"])
+                    if customer_data["defaultAddress"]
+                    else None
+                ),
+                "addresses": (
+                    Json(customer_data["addresses"])
+                    if customer_data["addresses"]
+                    else None
+                ),
+                "currencyCode": customer_data["currencyCode"],
+                "customerLocale": customer_data["customerLocale"],
+            }
+
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
             # Prepare data for create_many
-            create_data = []
-            for customer_data in customer_data_list:
-                create_data.append(
-                    {
-                        "shopId": customer_data["shopId"],
-                        "customerId": customer_data["customerId"],
-                        "email": customer_data["email"],
-                        "firstName": customer_data["firstName"],
-                        "lastName": customer_data["lastName"],
-                        "totalSpent": customer_data["totalSpent"],
-                        "orderCount": customer_data["orderCount"],
-                        "lastOrderDate": customer_data["lastOrderDate"],
-                        "tags": customer_data["tags"],
-                        "createdAtShopify": customer_data["createdAtShopify"],
-                        "lastOrderId": customer_data["lastOrderId"],
-                        "location": customer_data["location"],
-                        "metafields": customer_data["metafields"],
-                        "state": customer_data["state"],
-                        "verifiedEmail": customer_data["verifiedEmail"],
-                        "taxExempt": customer_data["taxExempt"],
-                        "defaultAddress": customer_data["defaultAddress"],
-                        "addresses": customer_data["addresses"],
-                        "currencyCode": customer_data["currencyCode"],
-                        "customerLocale": customer_data["customerLocale"],
-                    }
-                )
+            create_data = [
+                prepare_customer_data(customer_data)
+                for customer_data in customer_data_list
+            ]
 
             # Use create_many with skipDuplicates for batch insert
             await db.customerdata.create_many(data=create_data, skip_duplicates=True)
@@ -1450,6 +1488,7 @@ class MainTableStorageService:
                 f"Batch insert failed, falling back to individual upserts: {str(e)}"
             )
             for customer_data in customer_data_list:
+                prepared_data = prepare_customer_data(customer_data)
                 await db.customerdata.upsert(
                     where={
                         "shopId_customerId": {
@@ -1457,28 +1496,7 @@ class MainTableStorageService:
                             "customerId": customer_data["customerId"],
                         }
                     },
-                    data={
-                        "shopId": customer_data["shopId"],
-                        "customerId": customer_data["customerId"],
-                        "email": customer_data["email"],
-                        "firstName": customer_data["firstName"],
-                        "lastName": customer_data["lastName"],
-                        "totalSpent": customer_data["totalSpent"],
-                        "orderCount": customer_data["orderCount"],
-                        "lastOrderDate": customer_data["lastOrderDate"],
-                        "tags": customer_data["tags"],
-                        "createdAtShopify": customer_data["createdAtShopify"],
-                        "lastOrderId": customer_data["lastOrderId"],
-                        "location": customer_data["location"],
-                        "metafields": customer_data["metafields"],
-                        "state": customer_data["state"],
-                        "verifiedEmail": customer_data["verifiedEmail"],
-                        "taxExempt": customer_data["taxExempt"],
-                        "defaultAddress": customer_data["defaultAddress"],
-                        "addresses": customer_data["addresses"],
-                        "currencyCode": customer_data["currencyCode"],
-                        "customerLocale": customer_data["customerLocale"],
-                    },
+                    data=prepared_data,
                 )
 
     async def _batch_upsert_collection_data(
@@ -1495,29 +1513,37 @@ class MainTableStorageService:
                 await self._batch_upsert_collection_data(collection_data_list, db)
             return
 
+        # Prepare data for both batch insert and individual upserts
+        def prepare_collection_data(collection_data):
+            """Prepare collection data for database insertion"""
+            return {
+                "shopId": collection_data["shopId"],
+                "collectionId": collection_data["collectionId"],
+                "title": collection_data["title"],
+                "handle": collection_data["handle"],
+                "description": collection_data["description"],
+                "sortOrder": collection_data["sortOrder"],
+                "templateSuffix": collection_data["templateSuffix"],
+                "seoTitle": collection_data["seoTitle"],
+                "seoDescription": collection_data["seoDescription"],
+                "imageUrl": collection_data["imageUrl"],
+                "imageAlt": collection_data["imageAlt"],
+                "productCount": collection_data["productCount"],
+                "isAutomated": collection_data["isAutomated"],
+                "metafields": (
+                    Json(collection_data["metafields"])
+                    if collection_data["metafields"]
+                    else None
+                ),
+            }
+
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
             # Prepare data for create_many
-            create_data = []
-            for collection_data in collection_data_list:
-                create_data.append(
-                    {
-                        "shopId": collection_data["shopId"],
-                        "collectionId": collection_data["collectionId"],
-                        "title": collection_data["title"],
-                        "handle": collection_data["handle"],
-                        "description": collection_data["description"],
-                        "sortOrder": collection_data["sortOrder"],
-                        "templateSuffix": collection_data["templateSuffix"],
-                        "seoTitle": collection_data["seoTitle"],
-                        "seoDescription": collection_data["seoDescription"],
-                        "imageUrl": collection_data["imageUrl"],
-                        "imageAlt": collection_data["imageAlt"],
-                        "productCount": collection_data["productCount"],
-                        "isAutomated": collection_data["isAutomated"],
-                        "metafields": collection_data["metafields"],
-                    }
-                )
+            create_data = [
+                prepare_collection_data(collection_data)
+                for collection_data in collection_data_list
+            ]
 
             # Use create_many with skipDuplicates for batch insert
             await db.collectiondata.create_many(data=create_data, skip_duplicates=True)
@@ -1528,6 +1554,7 @@ class MainTableStorageService:
                 f"Batch insert failed, falling back to individual upserts: {str(e)}"
             )
             for collection_data in collection_data_list:
+                prepared_data = prepare_collection_data(collection_data)
                 await db.collectiondata.upsert(
                     where={
                         "shopId_collectionId": {
@@ -1535,22 +1562,7 @@ class MainTableStorageService:
                             "collectionId": collection_data["collectionId"],
                         }
                     },
-                    data={
-                        "shopId": collection_data["shopId"],
-                        "collectionId": collection_data["collectionId"],
-                        "title": collection_data["title"],
-                        "handle": collection_data["handle"],
-                        "description": collection_data["description"],
-                        "sortOrder": collection_data["sortOrder"],
-                        "templateSuffix": collection_data["templateSuffix"],
-                        "seoTitle": collection_data["seoTitle"],
-                        "seoDescription": collection_data["seoDescription"],
-                        "imageUrl": collection_data["imageUrl"],
-                        "imageAlt": collection_data["imageAlt"],
-                        "productCount": collection_data["productCount"],
-                        "isAutomated": collection_data["isAutomated"],
-                        "metafields": collection_data["metafields"],
-                    },
+                    data=prepared_data,
                 )
 
     async def _batch_upsert_customer_event_data(
@@ -1567,29 +1579,37 @@ class MainTableStorageService:
                 await self._batch_upsert_customer_event_data(event_data_list, db)
             return
 
+        # Prepare data for both batch insert and individual upserts
+        def prepare_customer_event_data(event_data):
+            """Prepare customer event data for database insertion"""
+            return {
+                "shopId": event_data["shopId"],
+                "customerId": event_data["customerId"],
+                "eventId": event_data["eventId"],
+                "eventType": event_data["eventType"],
+                "customerEmail": event_data["customerEmail"],
+                "customerFirstName": event_data["customerFirstName"],
+                "customerLastName": event_data["customerLastName"],
+                "customerTags": Json(event_data["customerTags"]),
+                "customerState": event_data["customerState"],
+                "customerOrdersCount": event_data["customerOrdersCount"],
+                "customerAmountSpent": event_data["customerAmountSpent"],
+                "customerCurrency": event_data["customerCurrency"],
+                "eventTimestamp": event_data["eventTimestamp"],
+                "rawEventData": (
+                    Json(event_data["rawEventData"])
+                    if event_data["rawEventData"]
+                    else None
+                ),
+            }
+
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
             # Prepare data for create_many
-            create_data = []
-            for event_data in event_data_list:
-                create_data.append(
-                    {
-                        "shopId": event_data["shopId"],
-                        "customerId": event_data["customerId"],
-                        "eventId": event_data["eventId"],
-                        "eventType": event_data["eventType"],
-                        "customerEmail": event_data["customerEmail"],
-                        "customerFirstName": event_data["customerFirstName"],
-                        "customerLastName": event_data["customerLastName"],
-                        "customerTags": event_data["customerTags"],
-                        "customerState": event_data["customerState"],
-                        "customerOrdersCount": event_data["customerOrdersCount"],
-                        "customerAmountSpent": event_data["customerAmountSpent"],
-                        "customerCurrency": event_data["customerCurrency"],
-                        "eventTimestamp": event_data["eventTimestamp"],
-                        "rawEventData": event_data["rawEventData"],
-                    }
-                )
+            create_data = [
+                prepare_customer_event_data(event_data)
+                for event_data in event_data_list
+            ]
 
             # Use create_many with skipDuplicates for batch insert
             await db.customereventdata.create_many(
@@ -1602,6 +1622,7 @@ class MainTableStorageService:
                 f"Batch insert failed, falling back to individual upserts: {str(e)}"
             )
             for event_data in event_data_list:
+                prepared_data = prepare_customer_event_data(event_data)
                 await db.customereventdata.upsert(
                     where={
                         "shopId_eventId": {
@@ -1609,20 +1630,5 @@ class MainTableStorageService:
                             "eventId": event_data["eventId"],
                         }
                     },
-                    data={
-                        "shopId": event_data["shopId"],
-                        "customerId": event_data["customerId"],
-                        "eventId": event_data["eventId"],
-                        "eventType": event_data["eventType"],
-                        "customerEmail": event_data["customerEmail"],
-                        "customerFirstName": event_data["customerFirstName"],
-                        "customerLastName": event_data["customerLastName"],
-                        "customerTags": event_data["customerTags"],
-                        "customerState": event_data["customerState"],
-                        "customerOrdersCount": event_data["customerOrdersCount"],
-                        "customerAmountSpent": event_data["customerAmountSpent"],
-                        "customerCurrency": event_data["customerCurrency"],
-                        "eventTimestamp": event_data["eventTimestamp"],
-                        "rawEventData": event_data["rawEventData"],
-                    },
+                    data=prepared_data,
                 )
