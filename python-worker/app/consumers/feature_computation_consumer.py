@@ -9,7 +9,7 @@ from datetime import datetime
 
 from app.consumers.base_consumer import BaseConsumer
 from app.shared.constants.redis import FEATURES_COMPUTED_STREAM, FEATURES_CONSUMER_GROUP
-from app.domains.ml.services.feature_engineering import FeatureEngineeringService
+from app.domains.ml.services import FeatureEngineeringService
 from app.core.logging import get_logger
 
 
@@ -29,6 +29,9 @@ class FeatureComputationConsumer(BaseConsumer):
             circuit_breaker_timeout=120,  # 2 minutes recovery
         )
 
+        self.logger.info(
+            "FeatureComputationConsumer: Using FeatureEngineeringService (refactored architecture)"
+        )
         self.feature_service = FeatureEngineeringService()
         self.logger = get_logger(__name__)
 

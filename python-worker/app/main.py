@@ -130,6 +130,7 @@ async def get_service(service_name: str):
         logger.info(f"Lazy loading service: {service_name}")
 
         if service_name == "feature_engineering":
+            logger.info("Using FeatureEngineeringService (refactored architecture)")
             services["feature_engineering"] = FeatureEngineeringService()
         elif service_name == "gorse_ml":
             services["gorse_ml"] = GorseMLService()
@@ -317,6 +318,92 @@ async def compute_features(
 
     except Exception as e:
         logger.error(f"Failed to compute features: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/features/architecture/status")
+async def get_feature_architecture_status():
+    """Get current feature engineering architecture status"""
+    try:
+        return {
+            "architecture": "refactored",
+            "use_refactored": True,
+            "components": {
+                "generators": [
+                    "ProductFeatureGenerator",
+                    "CustomerFeatureGenerator",
+                    "OrderFeatureGenerator",
+                    "CollectionFeatureGenerator",
+                    "ShopFeatureGenerator",
+                ],
+                "repository": "FeatureRepository",
+                "pipeline": "FeaturePipeline",
+            },
+            "benefits": [
+                "Single Responsibility Principle",
+                "Separation of Concerns",
+                "Improved Testability",
+                "Better Maintainability",
+                "SQL Injection Security Fixes",
+                "Configurable Parameters",
+                "Modular Architecture",
+                "Independent Component Testing",
+            ],
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get architecture status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/features/compute/batch")
+async def compute_features_batch(
+    shop_id: str,
+    entity_types: List[str] = ["products", "customers", "collections"],
+    batch_size: int = 100,
+    background_tasks: BackgroundTasks = None,
+):
+    """Compute features for specific entity types using the new architecture"""
+    try:
+        # Lazy load feature engineering service
+        feature_service = await get_service("feature_engineering")
+
+        # Using refactored architecture by default
+
+        if background_tasks:
+            # Start feature computation in background
+            background_tasks.add_task(
+                feature_service.pipeline.run_feature_pipeline_for_shop,
+                shop_id,
+                batch_size,
+            )
+
+            return {
+                "message": "Batch feature computation started",
+                "shop_id": shop_id,
+                "entity_types": entity_types,
+                "batch_size": batch_size,
+                "architecture": "refactored",
+                "status": "processing",
+                "timestamp": now_utc().isoformat(),
+            }
+        else:
+            # Run synchronously
+            result = await feature_service.pipeline.run_feature_pipeline_for_shop(
+                shop_id, batch_size
+            )
+
+            return {
+                "message": "Batch feature computation completed",
+                "shop_id": shop_id,
+                "entity_types": entity_types,
+                "result": result,
+                "architecture": "refactored",
+                "timestamp": now_utc().isoformat(),
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to compute batch features: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
