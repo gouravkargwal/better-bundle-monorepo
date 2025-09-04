@@ -322,6 +322,25 @@ class ShopifyDataStorageService:
             logger.error(f"Batch processing failed: {e}")
             raise
 
+    async def _process_orders_batch(
+        self, orders: List[Any], shop_id: str, incremental: bool
+    ) -> Dict[str, int]:
+        """Process a batch of orders with transaction support"""
+        batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
+        try:
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_orders_in_transaction(
+                self.db, orders, shop_id, incremental
+            )
+
+            return batch_metrics
+
+        except Exception as e:
+            logger.error(f"Batch processing failed: {e}")
+            raise
+
     async def _process_products_in_transaction(
         self,
         db_client: Union[Prisma, Any],
@@ -671,16 +690,20 @@ class ShopifyDataStorageService:
 
     async def _process_orders_in_transaction(
         self,
+        db_client: Union[Prisma, Any],
         orders: List[Any],
         shop_id: str,
         incremental: bool,
-        metrics: StorageMetrics,
-    ) -> None:
+        batch_metrics: Dict[str, int] = None,
+    ) -> Dict[str, int]:
         """Process orders using timestamp-based incremental logic"""
+        if batch_metrics is None:
+            batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
         try:
             if not incremental:
                 # Full refresh: delete existing and insert all
-                await self.db.raworder.delete_many(where={"shopId": shop_id})
+                await db_client.raworder.delete_many(where={"shopId": shop_id})
                 batch_data = []
                 current_time = now_utc()
 
@@ -702,8 +725,8 @@ class ShopifyDataStorageService:
                         }
                     )
 
-                await self.db.raworder.create_many(data=batch_data)
-                metrics.new_items = len(orders)
+                await db_client.raworder.create_many(data=batch_data)
+                batch_metrics["new"] = len(orders)
             else:
                 # Incremental: timestamp-based approach
                 current_time = now_utc()
@@ -718,7 +741,7 @@ class ShopifyDataStorageService:
                         continue
 
                     # Check if order exists
-                    existing_order = await self.db.raworder.find_first(
+                    existing_order = await db_client.raworder.find_first(
                         where={"shopId": shop_id, "shopifyId": order_id}
                     )
 
@@ -747,13 +770,13 @@ class ShopifyDataStorageService:
 
                 # Insert new orders
                 if new_orders:
-                    await self.db.raworder.create_many(data=new_orders)
-                    metrics.new_items = len(new_orders)
+                    await db_client.raworder.create_many(data=new_orders)
+                    batch_metrics["new"] = len(new_orders)
 
                 # Update existing orders
                 if updated_orders:
                     for order_data in updated_orders:
-                        await self.db.raworder.update_many(
+                        await db_client.raworder.update_many(
                             where={
                                 "shopId": shop_id,
                                 "shopifyId": order_data["shopifyId"],
@@ -764,47 +787,72 @@ class ShopifyDataStorageService:
                                 "shopifyUpdatedAt": order_data["shopifyUpdatedAt"],
                             },
                         )
-                    metrics.updated_items = len(updated_orders)
+                    batch_metrics["updated"] = len(updated_orders)
 
         except Exception as e:
             logger.error(f"Timestamp-based processing failed: {e}")
             # Fallback to individual inserts if batch fails
-        for order in orders:
-            try:
-                order_id = self._extract_order_id(order)
-                created_at, updated_at = self._extract_shopify_timestamps(order)
+            for order in orders:
+                try:
+                    order_id = self._extract_order_id(order)
+                    created_at, updated_at = self._extract_shopify_timestamps(order)
 
-                await self.db.raworder.create(
-                    data={
-                        "shopId": shop_id,
-                        "payload": json.dumps(
-                            order.dict() if hasattr(order, "dict") else order,
-                            default=str,
-                        ),
-                        "extractedAt": now_utc(),
-                        "shopifyId": order_id,
-                        "shopifyCreatedAt": created_at,
-                        "shopifyUpdatedAt": updated_at,
-                    }
-                )
-                metrics.new_items += 1
-            except Exception as individual_error:
-                logger.error(f"Failed to process order: {individual_error}")
-                metrics.failed_items += 1
-                continue
+                    await db_client.raworder.create(
+                        data={
+                            "shopId": shop_id,
+                            "payload": json.dumps(
+                                order.dict() if hasattr(order, "dict") else order,
+                                default=str,
+                            ),
+                            "extractedAt": now_utc(),
+                            "shopifyId": order_id,
+                            "shopifyCreatedAt": created_at,
+                            "shopifyUpdatedAt": updated_at,
+                        }
+                    )
+                    batch_metrics["new"] += 1
+                except Exception as individual_error:
+                    logger.error(f"Failed to process order: {individual_error}")
+                    batch_metrics["failed"] = batch_metrics.get("failed", 0) + 1
+                    continue
+
+        return batch_metrics
+
+    async def _process_customers_batch(
+        self, customers: List[Any], shop_id: str, incremental: bool
+    ) -> Dict[str, int]:
+        """Process a batch of customers with transaction support"""
+        batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
+        try:
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_customers_in_transaction(
+                self.db, customers, shop_id, incremental
+            )
+
+            return batch_metrics
+
+        except Exception as e:
+            logger.error(f"Batch processing failed: {e}")
+            raise
 
     async def _process_customers_in_transaction(
         self,
+        db_client: Union[Prisma, Any],
         customers: List[Any],
         shop_id: str,
         incremental: bool,
-        metrics: StorageMetrics,
-    ) -> None:
+        batch_metrics: Dict[str, int] = None,
+    ) -> Dict[str, int]:
         """Process customers using fast batch operations with duplicate prevention"""
+        if batch_metrics is None:
+            batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
         try:
             if not incremental:
                 # Full refresh: delete existing and insert all
-                await self.db.rawcustomer.delete_many(where={"shopId": shop_id})
+                await db_client.rawcustomer.delete_many(where={"shopId": shop_id})
                 batch_data = []
                 current_time = now_utc()
 
@@ -830,8 +878,8 @@ class ShopifyDataStorageService:
                         }
                     )
 
-                await self.db.rawcustomer.create_many(data=batch_data)
-                metrics.new_items = len(customers)
+                await db_client.rawcustomer.create_many(data=batch_data)
+                batch_metrics["new"] = len(customers)
                 logger.info(f"Full refresh: {len(customers)} customers stored")
             else:
                 # Incremental: timestamp-based approach
@@ -847,7 +895,7 @@ class ShopifyDataStorageService:
                         continue
 
                     # Check if customer exists
-                    existing_customer = await self.db.rawcustomer.find_first(
+                    existing_customer = await db_client.rawcustomer.find_first(
                         where={"shopId": shop_id, "shopifyId": customer_id}
                     )
 
@@ -876,8 +924,8 @@ class ShopifyDataStorageService:
 
                 # Insert new customers
                 if new_customers:
-                    await self.db.rawcustomer.create_many(data=new_customers)
-                    metrics.new_items = len(new_customers)
+                    await db_client.rawcustomer.create_many(data=new_customers)
+                    batch_metrics["new"] = len(new_customers)
                     logger.info(
                         f"Incremental: {len(new_customers)} new customers stored"
                     )
@@ -885,7 +933,7 @@ class ShopifyDataStorageService:
                 # Update existing customers
                 if updated_customers:
                     for customer_data in updated_customers:
-                        await self.db.rawcustomer.update_many(
+                        await db_client.rawcustomer.update_many(
                             where={
                                 "shopId": shop_id,
                                 "shopifyId": customer_data["shopifyId"],
@@ -896,7 +944,7 @@ class ShopifyDataStorageService:
                                 "shopifyUpdatedAt": customer_data["shopifyUpdatedAt"],
                             },
                         )
-                    metrics.updated_items = len(updated_customers)
+                    batch_metrics["updated"] = len(updated_customers)
                     logger.info(
                         f"Incremental: {len(updated_customers)} customers updated"
                     )
@@ -904,29 +952,35 @@ class ShopifyDataStorageService:
         except Exception as e:
             logger.error(f"Timestamp-based processing failed: {e}")
             # Fallback to individual inserts if batch fails
-        for customer in customers:
-            try:
-                customer_id = self._extract_customer_id(customer)
-                created_at, updated_at = self._extract_shopify_timestamps(customer)
+            for customer in customers:
+                try:
+                    customer_id = self._extract_customer_id(customer)
+                    created_at, updated_at = self._extract_shopify_timestamps(customer)
 
-                await self.db.rawcustomer.create(
-                    data={
-                        "shopId": shop_id,
-                        "payload": json.dumps(
-                            customer.dict() if hasattr(customer, "dict") else customer,
-                            default=str,
-                        ),
-                        "extractedAt": now_utc(),
-                        "shopifyId": customer_id,
-                        "shopifyCreatedAt": created_at,
-                        "shopifyUpdatedAt": updated_at,
-                    }
-                )
-                metrics.new_items += 1
-            except Exception as individual_error:
-                logger.error(f"Failed to process customer: {individual_error}")
-                metrics.failed_items += 1
-                continue
+                    await db_client.rawcustomer.create(
+                        data={
+                            "shopId": shop_id,
+                            "payload": json.dumps(
+                                (
+                                    customer.dict()
+                                    if hasattr(customer, "dict")
+                                    else customer
+                                ),
+                                default=str,
+                            ),
+                            "extractedAt": now_utc(),
+                            "shopifyId": customer_id,
+                            "shopifyCreatedAt": created_at,
+                            "shopifyUpdatedAt": updated_at,
+                        }
+                    )
+                    batch_metrics["new"] += 1
+                except Exception as individual_error:
+                    logger.error(f"Failed to process customer: {individual_error}")
+                    batch_metrics["failed"] = batch_metrics.get("failed", 0) + 1
+                    continue
+
+        return batch_metrics
 
     async def _process_collections_in_transaction(
         self,
@@ -963,60 +1017,76 @@ class ShopifyDataStorageService:
                 metrics.new_items = len(collections)
                 logger.info(f"Full refresh: {len(collections)} collections stored")
             else:
-                # Incremental: efficient batch approach
+                # Incremental: efficient batch approach using shopifyId
                 current_time = now_utc()
-
-                # Extract all collection IDs in one pass
-                collection_ids = []
-                collection_data_map = {}
+                new_collections = []
+                updated_collections = []
 
                 for collection in collections:
                     collection_id = self._extract_collection_id(collection)
-                    if collection_id:
-                        collection_ids.append(collection_id)
-                        collection_data_map[collection_id] = {
-                            "shopId": shop_id,
-                            "payload": json.dumps(
-                                (
-                                    collection.dict()
-                                    if hasattr(collection, "dict")
-                                    else collection
-                                ),
-                                default=str,
-                            ),
-                            "extractedAt": current_time,
-                        }
+                    created_at, updated_at = self._extract_shopify_timestamps(
+                        collection
+                    )
 
-                if not collection_ids:
-                    return
-
-                # Single query to get all existing collections for this shop
-                existing_collections = await self.db.rawcollection.find_many(
-                    where={"shopId": shop_id}
-                )
-
-                # Extract existing collection IDs from payload
-                existing_ids = set()
-                for existing in existing_collections:
-                    try:
-                        payload = json.loads(existing.payload)
-                        if "id" in payload:
-                            existing_ids.add(str(payload["id"]))
-                    except (json.JSONDecodeError, KeyError):
+                    if not collection_id:
                         continue
 
-                # Find new collections (not in existing set)
-                new_collections = []
-                for collection_id in collection_ids:
-                    if collection_id not in existing_ids:
-                        new_collections.append(collection_data_map[collection_id])
+                    # Check if collection exists using shopifyId
+                    existing_collection = await self.db.rawcollection.find_first(
+                        where={"shopId": shop_id, "shopifyId": collection_id}
+                    )
 
+                    collection_data = {
+                        "shopId": shop_id,
+                        "payload": json.dumps(
+                            (
+                                collection.dict()
+                                if hasattr(collection, "dict")
+                                else collection
+                            ),
+                            default=str,
+                        ),
+                        "extractedAt": current_time,
+                        "shopifyId": collection_id,
+                        "shopifyCreatedAt": created_at,
+                        "shopifyUpdatedAt": updated_at,
+                    }
+
+                    if not existing_collection:
+                        # New collection
+                        new_collections.append(collection_data)
+                    elif updated_at and existing_collection.shopifyUpdatedAt:
+                        # Check if collection was updated
+                        if updated_at > existing_collection.shopifyUpdatedAt:
+                            updated_collections.append(collection_data)
+                    elif not existing_collection.shopifyUpdatedAt and updated_at:
+                        # Existing collection without timestamp, add timestamp
+                        updated_collections.append(collection_data)
+
+                # Insert new collections
                 if new_collections:
                     await self.db.rawcollection.create_many(data=new_collections)
                     metrics.new_items = len(new_collections)
-                    logger.info(
-                        f"Incremental: {len(new_collections)} new collections stored"
-                    )
+
+                # Update existing collections
+                if updated_collections:
+                    for collection_data in updated_collections:
+                        await self.db.rawcollection.update_many(
+                            where={
+                                "shopId": shop_id,
+                                "shopifyId": collection_data["shopifyId"],
+                            },
+                            data={
+                                "payload": collection_data["payload"],
+                                "extractedAt": collection_data["extractedAt"],
+                                "shopifyUpdatedAt": collection_data["shopifyUpdatedAt"],
+                            },
+                        )
+                    metrics.updated_items = len(updated_collections)
+
+                logger.info(
+                    f"Incremental: {len(new_collections)} new, {len(updated_collections)} updated collections"
+                )
 
         except Exception as e:
             logger.error(f"Timestamp-based processing failed: {e}")
@@ -1051,16 +1121,20 @@ class ShopifyDataStorageService:
 
     async def _process_customer_events_in_transaction(
         self,
+        db_client: Union[Prisma, Any],
         events: List[Any],
         shop_id: str,
         incremental: bool,
-        metrics: StorageMetrics,
-    ) -> None:
+        batch_metrics: Dict[str, int] = None,
+    ) -> Dict[str, int]:
         """Process customer events using fast batch operations with duplicate prevention"""
+        if batch_metrics is None:
+            batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
         try:
             if not incremental:
                 # Full refresh: delete existing and insert all
-                await self.db.rawcustomerevent.delete_many(where={"shopId": shop_id})
+                await db_client.rawcustomerevent.delete_many(where={"shopId": shop_id})
                 batch_data = []
                 current_time = now_utc()
 
@@ -1076,87 +1150,124 @@ class ShopifyDataStorageService:
                         }
                     )
 
-                await self.db.rawcustomerevent.create_many(data=batch_data)
-                metrics.new_items = len(events)
+                await db_client.rawcustomerevent.create_many(data=batch_data)
+                batch_metrics["new"] = len(events)
                 logger.info(f"Full refresh: {len(events)} customer events stored")
             else:
-                # Incremental: efficient batch approach
+                # Incremental: efficient batch approach using shopifyId
                 current_time = now_utc()
-
-                # Extract all event IDs in one pass
-                event_ids = []
-                event_data_map = {}
+                new_events = []
+                updated_events = []
 
                 for event in events:
                     event_id = self._extract_customer_event_id(event)
-                    if event_id:
-                        event_ids.append(event_id)
-                        event_data_map[event_id] = {
-                            "shopId": shop_id,
-                            "payload": json.dumps(
-                                event.dict() if hasattr(event, "dict") else event,
-                                default=str,
-                            ),
-                            "extractedAt": current_time,
-                        }
+                    created_at, updated_at = self._extract_shopify_timestamps(event)
 
-                if not event_ids:
-                    return
-
-                # Single query to get all existing customer events for this shop
-                existing_events = await self.db.rawcustomerevent.find_many(
-                    where={"shopId": shop_id}
-                )
-
-                # Extract existing event IDs from payload
-                existing_ids = set()
-                for existing in existing_events:
-                    try:
-                        payload = json.loads(existing.payload)
-                        if "id" in payload:
-                            existing_ids.add(str(payload["id"]))
-                    except (json.JSONDecodeError, KeyError):
+                    if not event_id:
                         continue
 
-                # Find new events (not in existing set)
-                new_events = []
-                for event_id in event_ids:
-                    if event_id not in existing_ids:
-                        new_events.append(event_data_map[event_id])
-
-                if new_events:
-                    await self.db.rawcustomerevent.create_many(data=new_events)
-                    metrics.new_items = len(new_events)
-                    logger.info(
-                        f"Incremental: {len(new_events)} new customer events stored"
+                    # Check if event exists using shopifyId
+                    existing_event = await db_client.rawcustomerevent.find_first(
+                        where={"shopId": shop_id, "shopifyId": event_id}
                     )
 
-        except Exception as e:
-            logger.error(f"Timestamp-based processing failed: {e}")
-            # Fallback to individual inserts if batch fails
-        for event in events:
-            try:
-                event_id = self._extract_customer_event_id(event)
-                created_at, updated_at = self._extract_shopify_timestamps(event)
-
-                await self.db.rawcustomerevent.create(
-                    data={
+                    event_data = {
                         "shopId": shop_id,
                         "payload": json.dumps(
                             event.dict() if hasattr(event, "dict") else event,
                             default=str,
                         ),
-                        "extractedAt": now_utc(),
+                        "extractedAt": current_time,
                         "shopifyId": event_id,
                         "shopifyCreatedAt": created_at,
                         "shopifyUpdatedAt": updated_at,
                     }
+
+                    if not existing_event:
+                        # New event
+                        new_events.append(event_data)
+                    elif updated_at and existing_event.shopifyUpdatedAt:
+                        # Check if event was updated
+                        if updated_at > existing_event.shopifyUpdatedAt:
+                            updated_events.append(event_data)
+                    elif not existing_event.shopifyUpdatedAt and updated_at:
+                        # Existing event without timestamp, add timestamp
+                        updated_events.append(event_data)
+
+                # Insert new events
+                if new_events:
+                    await db_client.rawcustomerevent.create_many(data=new_events)
+                    batch_metrics["new"] = len(new_events)
+
+                # Update existing events
+                if updated_events:
+                    for event_data in updated_events:
+                        await db_client.rawcustomerevent.update_many(
+                            where={
+                                "shopId": shop_id,
+                                "shopifyId": event_data["shopifyId"],
+                            },
+                            data={
+                                "payload": event_data["payload"],
+                                "extractedAt": event_data["extractedAt"],
+                                "shopifyUpdatedAt": event_data["shopifyUpdatedAt"],
+                            },
+                        )
+                    batch_metrics["updated"] = len(updated_events)
+
+                logger.info(
+                    f"Incremental: {len(new_events)} new, {len(updated_events)} updated customer events"
                 )
-                metrics.new_items += 1
-            except Exception as individual_error:
-                logger.error(f"Failed to process customer event: {individual_error}")
-                metrics.failed_items += 1
-                continue
+
+        except Exception as e:
+            logger.error(f"Timestamp-based processing failed: {e}")
+            # Fallback to individual inserts if batch fails
+            for event in events:
+                try:
+                    event_id = self._extract_customer_event_id(event)
+                    created_at, updated_at = self._extract_shopify_timestamps(event)
+
+                    await db_client.rawcustomerevent.create(
+                        data={
+                            "shopId": shop_id,
+                            "payload": json.dumps(
+                                event.dict() if hasattr(event, "dict") else event,
+                                default=str,
+                            ),
+                            "extractedAt": now_utc(),
+                            "shopifyId": event_id,
+                            "shopifyCreatedAt": created_at,
+                            "shopifyUpdatedAt": updated_at,
+                        }
+                    )
+                    batch_metrics["new"] += 1
+                except Exception as individual_error:
+                    logger.error(
+                        f"Failed to process customer event: {individual_error}"
+                    )
+                    batch_metrics["failed"] = batch_metrics.get("failed", 0) + 1
+                    continue
+
+        return batch_metrics
+
+    async def _process_customer_events_batch(
+        self, events: List[Any], shop_id: str, incremental: bool
+    ) -> Dict[str, int]:
+        """Process a batch of customer events with transaction support"""
+        batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
+
+        try:
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_customer_events_in_transaction(
+                self.db, events, shop_id, incremental
+            )
+
+            return batch_metrics
+
+        except Exception as e:
+            logger.error(f"Batch processing failed: {e}")
+            raise
 
     async def _update_performance_cache(self, shop_id: str, domain: str) -> None:
         """Update performance cache with latest shop information"""
@@ -1189,10 +1300,28 @@ class ShopifyDataStorageService:
         try:
             await self.initialize()
 
-            # Use incremental processing for efficiency
-            await self._process_orders_in_transaction(
-                orders, shop_id, incremental, metrics
-            )
+            if not orders:
+                return metrics
+
+            # Process in batches for performance
+            batches = self._create_batches(orders, self.config.batch_size)
+
+            # Process batches in parallel for maximum efficiency
+            batch_tasks = [
+                self._process_orders_batch(batch, shop_id, incremental)
+                for batch in batches
+            ]
+
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+            # Aggregate results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Batch processing failed: {result}")
+                    metrics.failed_items += len(batch_results)
+                else:
+                    metrics.new_items += result.get("new", 0)
+                    metrics.updated_items += result.get("updated", 0)
 
             metrics.end_time = now_utc()
             metrics.processing_time = (
@@ -1225,10 +1354,28 @@ class ShopifyDataStorageService:
         try:
             await self.initialize()
 
-            # Use incremental processing for efficiency
-            await self._process_customers_in_transaction(
-                customers, shop_id, incremental, metrics
-            )
+            if not customers:
+                return metrics
+
+            # Process in batches for performance
+            batches = self._create_batches(customers, self.config.batch_size)
+
+            # Process batches in parallel for maximum efficiency
+            batch_tasks = [
+                self._process_customers_batch(batch, shop_id, incremental)
+                for batch in batches
+            ]
+
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+            # Aggregate results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Batch processing failed: {result}")
+                    metrics.failed_items += len(batch_results)
+                else:
+                    metrics.new_items += result.get("new", 0)
+                    metrics.updated_items += result.get("updated", 0)
 
             metrics.end_time = now_utc()
             metrics.processing_time = (
@@ -1297,10 +1444,28 @@ class ShopifyDataStorageService:
         try:
             await self.initialize()
 
-            # Use incremental processing for efficiency
-            await self._process_customer_events_in_transaction(
-                events, shop_id, incremental, metrics
-            )
+            if not events:
+                return metrics
+
+            # Process in batches for performance
+            batches = self._create_batches(events, self.config.batch_size)
+
+            # Process batches in parallel for maximum efficiency
+            batch_tasks = [
+                self._process_customer_events_batch(batch, shop_id, incremental)
+                for batch in batches
+            ]
+
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+            # Aggregate results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Batch processing failed: {result}")
+                    metrics.failed_items += len(batch_results)
+                else:
+                    metrics.new_items += result.get("new", 0)
+                    metrics.updated_items += result.get("updated", 0)
 
             metrics.end_time = now_utc()
             metrics.processing_time = (

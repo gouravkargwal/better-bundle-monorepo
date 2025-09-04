@@ -663,7 +663,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
     ) -> Dict[str, Any]:
         """Get customer events from shop using customers with events"""
         variables = {
-            "first": limit or 250,  # Increased from 50 to 250
+            "first": limit or 50,  # Further reduced to stay under cost limits
             "after": cursor,
         }
 
@@ -696,56 +696,19 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         tags
                         state
                         verifiedEmail
-                        taxExempt
-                        events(first: 20) {
-                            edges {
-                                node {
-                                    id
-                                    __typename
-                                }
-                            }
-                        }
                         orders(first: 20) {
                             edges {
                                 node {
                                     id
                                     name
                                     createdAt
-                                    updatedAt
-                                    processedAt
-                                    cancelledAt
-                                    cancelReason
                                     totalPriceSet {
                                         shopMoney {
                                             amount
                                             currencyCode
                                         }
                                     }
-                                    subtotalPriceSet {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
-                                        }
-                                    }
-                                    totalTaxSet {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
-                                        }
-                                    }
-                                    totalShippingPriceSet {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
-                                        }
-                                    }
-                                    confirmed
-                                    test
-                                    tags
-                                    note
-                                    customerLocale
-                                    currencyCode
-                                    lineItems(first: 15) {
+                                    lineItems(first: 10) {
                                         edges {
                                             node {
                                                 id
@@ -755,71 +718,17 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                                     id
                                                     title
                                                     price
-                                                    sku
-                                                    barcode
                                                     product {
                                                         id
                                                         title
                                                         productType
                                                         vendor
                                                         tags
-                                                        collections(first: 5) {
-                                                            edges {
-                                                                node {
-                                                                    id
-                                                                    title
-                                                                    handle
-                                                                    description
-                                                                }
-                                                            }
-                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                    shippingAddress {
-                                        address1
-                                        city
-                                        province
-                                        country
-                                        zip
-                                        phone
-                                        provinceCode
-                                        countryCodeV2
-                                    }
-                                    billingAddress {
-                                        address1
-                                        city
-                                        province
-                                        country
-                                        zip
-                                        phone
-                                        provinceCode
-                                        countryCodeV2
-                                    }
-                                    metafields(first: 10) {
-                                        edges {
-                                            node {
-                                                id
-                                                namespace
-                                                key
-                                                value
-                                                type
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        metafields(first: 10) {
-                            edges {
-                                node {
-                                    id
-                                    namespace
-                                    key
-                                    value
-                                    type
                                 }
                             }
                         }

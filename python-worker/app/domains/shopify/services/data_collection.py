@@ -201,8 +201,12 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             cursor = since_id
             batch_size = min(limit or self.default_batch_size, self.max_batch_size)
 
-            # Build query for incremental collection (always use updated_at filter)
-            query_filter = f"updated_at:>={query_since.strftime('%Y-%m-%dT%H:%M:%S')}"
+            # Build query for incremental collection (use created_at for products)
+            query_filter = f"created_at:>={query_since.strftime('%Y-%m-%dT%H:%M:%S')}"
+            logger.info(
+                f"Starting incremental products collection since {query_since}",
+                shop_domain=shop_domain,
+            )
 
             # Initialize progress tracking
             progress = CollectionProgress(
@@ -1051,12 +1055,12 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 created_at=(
                     datetime.fromisoformat(variant_data.get("createdAt"))
                     if variant_data.get("createdAt")
-                    else None
+                    else now_utc()
                 ),
                 updated_at=(
                     datetime.fromisoformat(variant_data.get("updatedAt"))
                     if variant_data.get("updatedAt")
-                    else None
+                    else now_utc()
                 ),
                 raw_data={"variant": variant_data},
             )

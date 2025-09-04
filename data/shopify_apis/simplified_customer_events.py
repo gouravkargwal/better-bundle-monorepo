@@ -28,7 +28,7 @@ class SimplifiedCustomerEventsAPI:
             "Content-Type": "application/json",
         }
 
-    async def get_customer_behavior_data(self, first: int = 20):
+    async def get_customer_behavior_data(self, first: int = 250):
         """Get customer behavior data using working fields"""
 
         query = """
@@ -51,15 +51,7 @@ class SimplifiedCustomerEventsAPI:
                         state
                         verifiedEmail
                         taxExempt
-                        events(first: 20) {
-                            edges {
-                                node {
-                                    id
-                                    __typename
-                                }
-                            }
-                        }
-                        orders(first: 20) {
+                        orders(first: 40) {
                             edges {
                                 node {
                                     id
@@ -117,7 +109,7 @@ class SimplifiedCustomerEventsAPI:
                                                         productType
                                                         vendor
                                                         tags
-                                                        collections(first: 5) {
+                                                        collections(first: 3) {
                                                             edges {
                                                                 node {
                                                                     id
@@ -216,7 +208,7 @@ class SimplifiedCustomerEventsAPI:
             print(f"❌ Query execution failed: {e}")
             return {}
 
-    async def get_general_events(self, first: int = 50):
+    async def get_general_events(self, first: int = 250):
         """Get general events from the store"""
 
         query = """
