@@ -6,14 +6,25 @@ import asyncio
 import time
 from typing import Optional
 from datetime import datetime
+from dataclasses import dataclass
 
 from app.core.config import settings
 from app.core.exceptions import DatabaseConnectionError
 from app.core.logging import get_logger
-from .client import get_database_client
-from .models import DatabaseHealthStatus
+from .simple_db_client import get_database
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class DatabaseHealthStatus:
+    """Database health status information"""
+
+    is_healthy: bool
+    connection_count: int
+    last_check: str
+    response_time_ms: float
+    error_message: Optional[str] = None
 
 
 async def check_database_health() -> DatabaseHealthStatus:
@@ -21,20 +32,16 @@ async def check_database_health() -> DatabaseHealthStatus:
     start_time = time.time()
 
     try:
-        db_client = get_database_client()
-        client = await db_client.get_client()
+        db = await get_database()
 
         # Test connection with a simple query
-        await client.query_raw("SELECT 1")
+        await db.query_raw("SELECT 1")
 
         response_time = (time.time() - start_time) * 1000
 
-        # Get metrics
-        metrics = db_client.get_metrics()
-
         return DatabaseHealthStatus(
             is_healthy=True,
-            connection_count=1,  # Simplified for now
+            connection_count=1,  # Simplified for single connection
             last_check=datetime.now().isoformat(),
             response_time_ms=response_time,
         )
@@ -60,16 +67,16 @@ async def reconnect_database() -> bool:
     logger.info("Attempting database reconnection")
 
     try:
-        db_client = get_database_client()
+        from .simple_db_client import close_database
 
         # Close existing connection
-        await db_client.disconnect()
+        await close_database()
 
         # Wait before reconnecting
         await asyncio.sleep(1)
 
         # Create new connection
-        await db_client.connect()
+        await get_database()
 
         # Test connection
         health_status = await check_database_health()

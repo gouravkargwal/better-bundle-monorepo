@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
 from prisma import Json
-from app.core.database.connection_pool import get_connection_pool
+from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
@@ -35,16 +35,95 @@ class MainTableStorageService:
 
     def __init__(self):
         self.logger = logger
-        self._connection_pool = None
+        self._db_client = None
 
-    async def _get_connection_pool(self):
-        """Get or initialize the connection pool"""
-        if self._connection_pool is None:
-            self._connection_pool = await get_connection_pool()
-        return self._connection_pool
+    async def _get_database(self):
+        """Get or initialize the database client"""
+        if self._db_client is None:
+            self._db_client = await get_database()
+        return self._db_client
 
-    async def store_all_data(self, shop_id: str) -> StorageResult:
-        """Store all raw data for a shop to main tables concurrently"""
+    async def _get_processed_shopify_ids(self, shop_id: str, data_type: str) -> set:
+        """Get all Shopify IDs that have already been processed in the main table"""
+        try:
+            db = await self._get_database()
+
+            # Get all processed Shopify IDs from the main table
+            if data_type == "orders":
+                records = await db.orderdata.find_many(
+                    where={"shopId": shop_id}, select={"shopifyId": True}
+                )
+            elif data_type == "products":
+                records = await db.productdata.find_many(
+                    where={"shopId": shop_id}, select={"shopifyId": True}
+                )
+            elif data_type == "customers":
+                records = await db.customerdata.find_many(
+                    where={"shopId": shop_id}, select={"shopifyId": True}
+                )
+            elif data_type == "collections":
+                records = await db.collectiondata.find_many(
+                    where={"shopId": shop_id}, select={"shopifyId": True}
+                )
+            elif data_type == "customer_events":
+                records = await db.customereventdata.find_many(
+                    where={"shopId": shop_id}, select={"shopifyId": True}
+                )
+            else:
+                return set()
+
+            # Extract Shopify IDs and return as a set for fast lookup
+            return {record.shopifyId for record in records if record.shopifyId}
+
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to get processed Shopify IDs for {data_type}: {e}"
+            )
+            return set()
+
+    def _extract_order_id(self, order_data: Dict[str, Any]) -> Optional[str]:
+        """Extract Shopify order ID from order data"""
+        try:
+            return str(order_data.get("id", ""))
+        except Exception:
+            return None
+
+    def _extract_product_id(self, product_data: Dict[str, Any]) -> Optional[str]:
+        """Extract Shopify product ID from product data"""
+        try:
+            return str(product_data.get("id", ""))
+        except Exception:
+            return None
+
+    def _extract_customer_id(self, customer_data: Dict[str, Any]) -> Optional[str]:
+        """Extract Shopify customer ID from customer data"""
+        try:
+            return str(customer_data.get("id", ""))
+        except Exception:
+            return None
+
+    def _extract_collection_id(self, collection_data: Dict[str, Any]) -> Optional[str]:
+        """Extract Shopify collection ID from collection data"""
+        try:
+            return str(collection_data.get("id", ""))
+        except Exception:
+            return None
+
+    def _extract_customer_event_id(self, event_data: Dict[str, Any]) -> Optional[str]:
+        """Extract Shopify customer event ID from event data"""
+        try:
+            # Customer events might not have a direct ID, use a combination of fields
+            customer_id = event_data.get("customer_id", "")
+            event_type = event_data.get("event_type", "")
+            timestamp = event_data.get("timestamp", "")
+            return f"{customer_id}_{event_type}_{timestamp}"
+        except Exception:
+            return None
+
+    async def store_all_data(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store raw data for a shop to main tables with incremental processing"""
         start_time = now_utc()
         total_processed = 0
         total_errors = 0
@@ -53,16 +132,16 @@ class MainTableStorageService:
         try:
             # Store all data types concurrently using asyncio.gather
             self.logger.info(
-                f"Starting concurrent storage for all data types for shop {shop_id}"
+                f"Starting {'incremental' if incremental else 'full'} storage for all data types for shop {shop_id}"
             )
 
             # Run all storage operations concurrently
             results = await asyncio.gather(
-                self.store_orders(shop_id),
-                self.store_products(shop_id),
-                self.store_customers(shop_id),
-                self.store_collections(shop_id),
-                self.store_customer_events(shop_id),
+                self.store_orders(shop_id, incremental=incremental),
+                self.store_products(shop_id, incremental=incremental),
+                self.store_customers(shop_id, incremental=incremental),
+                self.store_collections(shop_id, incremental=incremental),
+                self.store_customer_events(shop_id, incremental=incremental),
                 return_exceptions=True,  # Don't fail if one operation fails
             )
 
@@ -117,8 +196,10 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_orders(self, shop_id: str) -> StorageResult:
-        """Store orders from raw table to OrderData table"""
+    async def store_orders(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store orders from raw table to OrderData table with memory-efficient incremental processing"""
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -126,80 +207,109 @@ class MainTableStorageService:
         batch_size = 1000  # Process 1000 orders at a time to avoid memory issues
 
         try:
-            connection_pool = await self._get_connection_pool()
+            db = await self._get_database()
 
-            async with connection_pool.get_connection() as db:
-                # Get total count for progress tracking
-                total_count = await db.raworder.count(where={"shopId": shop_id})
-                self.logger.info(
-                    f"Processing {total_count} orders for shop {shop_id} in batches of {batch_size} using cursor-based pagination"
+            # Step 1: Get all raw order IDs (lightweight query - only IDs, not full data)
+            raw_orders = await db.raworder.find_many(
+                where={"shopId": shop_id},
+                order={"extractedAt": "asc"},
+            )
+            raw_order_ids = [order.shopifyId for order in raw_orders if order.shopifyId]
+
+            total_raw_count = len(raw_order_ids)
+            self.logger.info(f"Found {total_raw_count} raw orders for shop {shop_id}")
+
+            if total_raw_count == 0:
+                self.logger.info(f"No raw orders found for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-                # Process orders in batches using cursor-based pagination
-                cursor_id = None
-                processed_total = 0
+            # Step 2: Get already processed Shopify IDs (lightweight query)
+            processed_shopify_ids = set()
+            if incremental:
+                processed_shopify_ids = await self._get_processed_shopify_ids(
+                    shop_id, "orders"
+                )
+                self.logger.info(
+                    f"Found {len(processed_shopify_ids)} already processed orders for shop {shop_id}"
+                )
 
-                while True:
-                    # Get batch of raw orders using proper cursor-based pagination
-                    raw_orders = await db.raworder.find_many(
-                        where={"shopId": shop_id},
-                        take=batch_size,
-                        skip=1 if cursor_id else 0,
-                        cursor={"id": cursor_id} if cursor_id else None,
-                        order={"id": "asc"},
-                    )
+            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
+            raw_shopify_ids = set(raw_order_ids)
+            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
-                    if not raw_orders:
-                        break
+            total_new_count = len(new_shopify_ids)
+            self.logger.info(
+                f"Processing {total_new_count} new orders for shop {shop_id} in batches of {batch_size}"
+            )
 
-                    # Collect order data for batch processing
-                    batch_order_data = []
+            if total_new_count == 0:
+                self.logger.info(f"No new orders to process for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
+                )
 
-                    for raw_order in raw_orders:
-                        try:
-                            # Parse the JSON payload
-                            payload = raw_order.payload
-                            if isinstance(payload, str):
-                                payload = json.loads(payload)
+            # Step 4: Process new orders in batches by fetching only needed records
+            new_shopify_ids_list = list(new_shopify_ids)
+            for i in range(0, total_new_count, batch_size):
+                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
 
-                            # Extract order data
-                            order_data = self._extract_order_fields(payload, shop_id)
+                # Fetch only the raw records we need to process (database does the filtering)
+                raw_orders = await db.raworder.find_many(
+                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
+                )
 
-                            if order_data:
-                                batch_order_data.append(order_data)
-                            else:
-                                self.logger.warning(
-                                    f"Could not extract order data from raw order {raw_order.id}"
-                                )
+                # Collect order data for batch processing
+                batch_order_data = []
 
-                        except Exception as e:
-                            error_msg = (
-                                f"Failed to process order {raw_order.id}: {str(e)}"
+                for raw_order in raw_orders:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_order.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+
+                        # Extract order data
+                        order_data = self._extract_order_fields(payload, shop_id)
+
+                        if order_data:
+                            batch_order_data.append(order_data)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract order data from raw order {raw_order.id}"
                             )
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += 1
 
-                    # Batch upsert all orders in this batch
-                    if batch_order_data:
-                        try:
-                            await self._batch_upsert_order_data(batch_order_data, db)
-                            processed_count += len(batch_order_data)
-                        except Exception as e:
-                            error_msg = f"Failed to batch upsert orders: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += len(batch_order_data)
+                    except Exception as e:
+                        error_msg = f"Failed to process order {raw_order.id}: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                    # Update cursor to the last processed record's ID
-                    cursor_id = raw_orders[-1].id
-                    processed_total += len(raw_orders)
+                # Batch upsert all orders in this batch
+                if batch_order_data:
+                    try:
+                        await self._batch_upsert_order_data(batch_order_data, db)
+                        processed_count += len(batch_order_data)
+                    except Exception as e:
+                        error_msg = f"Failed to batch upsert orders: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += len(batch_order_data)
 
-                    # Log progress
-                    progress_percent = min(100, (processed_total / total_count) * 100)
-                    self.logger.info(
-                        f"Processed {processed_total}/{total_count} orders ({progress_percent:.1f}%)"
-                    )
+                # Log progress
+                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                self.logger.info(
+                    f"Processed {processed_count}/{total_new_count} orders ({progress_percent:.1f}%)"
+                )
 
             self.logger.info(f"Successfully processed {processed_count} orders")
 
@@ -224,8 +334,10 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_products(self, shop_id: str) -> StorageResult:
-        """Store products from raw table to ProductData table"""
+    async def store_products(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store products from raw table to ProductData table with memory-efficient incremental processing"""
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -233,84 +345,113 @@ class MainTableStorageService:
         batch_size = 1000  # Process 1000 products at a time to avoid memory issues
 
         try:
-            connection_pool = await self._get_connection_pool()
+            db = await self._get_database()
 
-            async with connection_pool.get_connection() as db:
-                # Get total count for progress tracking
-                total_count = await db.rawproduct.count(where={"shopId": shop_id})
-                self.logger.info(
-                    f"Processing {total_count} products for shop {shop_id} in batches of {batch_size} using cursor-based pagination"
+            # Step 1: Get all raw product IDs (lightweight query - only IDs, not full data)
+            raw_products = await db.rawproduct.find_many(
+                where={"shopId": shop_id},
+                order={"extractedAt": "asc"},
+            )
+            raw_product_ids = [
+                product.shopifyId for product in raw_products if product.shopifyId
+            ]
+
+            total_raw_count = len(raw_product_ids)
+            self.logger.info(f"Found {total_raw_count} raw products for shop {shop_id}")
+
+            if total_raw_count == 0:
+                self.logger.info(f"No raw products found for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-                # Process products in batches using cursor-based pagination
-                cursor_id = None
-                processed_total = 0
+            # Step 2: Get already processed Shopify IDs (lightweight query)
+            processed_shopify_ids = set()
+            if incremental:
+                processed_shopify_ids = await self._get_processed_shopify_ids(
+                    shop_id, "products"
+                )
+                self.logger.info(
+                    f"Found {len(processed_shopify_ids)} already processed products for shop {shop_id}"
+                )
 
-                while True:
-                    # Get batch of raw products using proper cursor-based pagination
-                    raw_products = await db.rawproduct.find_many(
-                        where={"shopId": shop_id},
-                        take=batch_size,
-                        skip=1 if cursor_id else 0,
-                        cursor={"id": cursor_id} if cursor_id else None,
-                        order={"id": "asc"},
-                    )
+            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
+            raw_shopify_ids = set(raw_product_ids)
+            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
-                    if not raw_products:
-                        break
+            total_new_count = len(new_shopify_ids)
+            self.logger.info(
+                f"Processing {total_new_count} new products for shop {shop_id} in batches of {batch_size}"
+            )
 
-                    # Collect product data for batch processing
-                    batch_product_data = []
+            if total_new_count == 0:
+                self.logger.info(f"No new products to process for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
+                )
 
-                    for raw_product in raw_products:
-                        try:
-                            # Parse the JSON payload
-                            payload = raw_product.payload
-                            if isinstance(payload, str):
-                                payload = json.loads(payload)
+            # Step 4: Process new products in batches by fetching only needed records
+            new_shopify_ids_list = list(new_shopify_ids)
+            for i in range(0, total_new_count, batch_size):
+                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
 
-                            # Extract product data
-                            product_data = self._extract_product_fields(
-                                payload, shop_id
+                # Fetch only the raw records we need to process (database does the filtering)
+                raw_products = await db.rawproduct.find_many(
+                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
+                )
+
+                # Collect product data for batch processing
+                batch_product_data = []
+
+                for raw_product in raw_products:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_product.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+
+                        # Extract product data
+                        product_data = self._extract_product_fields(payload, shop_id)
+
+                        if product_data:
+                            batch_product_data.append(product_data)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract product data from raw product {raw_product.id}"
                             )
 
-                            if product_data:
-                                batch_product_data.append(product_data)
-                            else:
-                                self.logger.warning(
-                                    f"Could not extract product data from raw product {raw_product.id}"
-                                )
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process product {raw_product.id}: {str(e)}"
+                        )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                        except Exception as e:
-                            error_msg = (
-                                f"Failed to process product {raw_product.id}: {str(e)}"
-                            )
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += 1
+                # Batch upsert all products in this batch
+                if batch_product_data:
+                    try:
+                        await self._batch_upsert_product_data(batch_product_data, db)
+                        processed_count += len(batch_product_data)
+                    except Exception as e:
+                        error_msg = f"Failed to batch upsert products: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += len(batch_product_data)
 
-                    # Batch upsert all products in this batch
-                    if batch_product_data:
-                        try:
-                            await self._batch_upsert_product_data(
-                                batch_product_data, db
-                            )
-                            processed_count += len(batch_product_data)
-                        except Exception as e:
-                            error_msg = f"Failed to batch upsert products: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += len(batch_product_data)
-
-                    # Update cursor to the last processed record's ID
-                    cursor_id = raw_products[-1].id
-                    processed_total += len(raw_products)
-
-                    # Log progress
-                    progress_percent = min(100, (processed_total / total_count) * 100)
-                    self.logger.info(
-                        f"Processed {processed_total}/{total_count} products ({progress_percent:.1f}%)"
-                    )
+                # Log progress
+                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                self.logger.info(
+                    f"Processed {processed_count}/{total_new_count} products ({progress_percent:.1f}%)"
+                )
 
             self.logger.info(f"Successfully processed {processed_count} products")
 
@@ -335,8 +476,10 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_customers(self, shop_id: str) -> StorageResult:
-        """Store customers from raw table to CustomerData table"""
+    async def store_customers(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store customers from raw table to CustomerData table with memory-efficient incremental processing"""
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -344,82 +487,115 @@ class MainTableStorageService:
         batch_size = 1000  # Process 1000 customers at a time to avoid memory issues
 
         try:
-            connection_pool = await self._get_connection_pool()
+            db = await self._get_database()
 
-            async with connection_pool.get_connection() as db:
-                # Get total count for progress tracking
-                total_count = await db.rawcustomer.count(where={"shopId": shop_id})
-                self.logger.info(
-                    f"Processing {total_count} customers for shop {shop_id} in batches of {batch_size} using cursor-based pagination"
+            # Step 1: Get all raw customer IDs (lightweight query - only IDs, not full data)
+            raw_customers = await db.rawcustomer.find_many(
+                where={"shopId": shop_id},
+                order={"extractedAt": "asc"},
+            )
+            raw_customer_ids = [
+                customer.shopifyId for customer in raw_customers if customer.shopifyId
+            ]
+
+            total_raw_count = len(raw_customer_ids)
+            self.logger.info(
+                f"Found {total_raw_count} raw customers for shop {shop_id}"
+            )
+
+            if total_raw_count == 0:
+                self.logger.info(f"No raw customers found for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-                # Process customers in batches using cursor-based pagination
-                cursor_id = None
-                processed_total = 0
+            # Step 2: Get already processed Shopify IDs (lightweight query)
+            processed_shopify_ids = set()
+            if incremental:
+                processed_shopify_ids = await self._get_processed_shopify_ids(
+                    shop_id, "customers"
+                )
+                self.logger.info(
+                    f"Found {len(processed_shopify_ids)} already processed customers for shop {shop_id}"
+                )
 
-                while True:
-                    # Get batch of raw customers using proper cursor-based pagination
-                    raw_customers = await db.rawcustomer.find_many(
-                        where={"shopId": shop_id},
-                        take=batch_size,
-                        skip=1 if cursor_id else 0,
-                        cursor={"id": cursor_id} if cursor_id else None,
-                        order={"id": "asc"},
-                    )
+            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
+            raw_shopify_ids = set(raw_customer_ids)
+            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
-                    if not raw_customers:
-                        break
+            total_new_count = len(new_shopify_ids)
+            self.logger.info(
+                f"Processing {total_new_count} new customers for shop {shop_id} in batches of {batch_size}"
+            )
 
-                    # Collect customer data for batch processing
-                    batch_customer_data = []
+            if total_new_count == 0:
+                self.logger.info(f"No new customers to process for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
+                )
 
-                    for raw_customer in raw_customers:
-                        try:
-                            # Parse the JSON payload
-                            payload = raw_customer.payload
-                            if isinstance(payload, str):
-                                payload = json.loads(payload)
+            # Step 4: Process new customers in batches by fetching only needed records
+            new_shopify_ids_list = list(new_shopify_ids)
+            for i in range(0, total_new_count, batch_size):
+                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
 
-                            # Extract customer data
-                            customer_data = self._extract_customer_fields(
-                                payload, shop_id
+                # Fetch only the raw records we need to process (database does the filtering)
+                raw_customers = await db.rawcustomer.find_many(
+                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
+                )
+
+                # Collect customer data for batch processing
+                batch_customer_data = []
+
+                for raw_customer in raw_customers:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_customer.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+
+                        # Extract customer data
+                        customer_data = self._extract_customer_fields(payload, shop_id)
+
+                        if customer_data:
+                            batch_customer_data.append(customer_data)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract customer data from raw customer {raw_customer.id}"
                             )
 
-                            if customer_data:
-                                batch_customer_data.append(customer_data)
-                            else:
-                                self.logger.warning(
-                                    f"Could not extract customer data from raw customer {raw_customer.id}"
-                                )
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process customer {raw_customer.id}: {str(e)}"
+                        )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                        except Exception as e:
-                            error_msg = f"Failed to process customer {raw_customer.id}: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += 1
+                # Batch upsert all customers in this batch
+                if batch_customer_data:
+                    try:
+                        await self._batch_upsert_customer_data(batch_customer_data, db)
+                        processed_count += len(batch_customer_data)
+                    except Exception as e:
+                        error_msg = f"Failed to batch upsert customers: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += len(batch_customer_data)
 
-                    # Batch upsert all customers in this batch
-                    if batch_customer_data:
-                        try:
-                            await self._batch_upsert_customer_data(
-                                batch_customer_data, db
-                            )
-                            processed_count += len(batch_customer_data)
-                        except Exception as e:
-                            error_msg = f"Failed to batch upsert customers: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += len(batch_customer_data)
-
-                    # Update cursor to the last processed record's ID
-                    cursor_id = raw_customers[-1].id
-                    processed_total += len(raw_customers)
-
-                    # Log progress
-                    progress_percent = min(100, (processed_total / total_count) * 100)
-                    self.logger.info(
-                        f"Processed {processed_total}/{total_count} customers ({progress_percent:.1f}%)"
-                    )
+                # Log progress
+                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                self.logger.info(
+                    f"Processed {processed_count}/{total_new_count} customers ({progress_percent:.1f}%)"
+                )
 
             self.logger.info(f"Successfully processed {processed_count} customers")
 
@@ -444,8 +620,10 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_collections(self, shop_id: str) -> StorageResult:
-        """Store collections from raw table to CollectionData table"""
+    async def store_collections(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store collections from raw table to CollectionData table with memory-efficient incremental processing"""
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -453,82 +631,119 @@ class MainTableStorageService:
         batch_size = 1000  # Process 1000 collections at a time to avoid memory issues
 
         try:
-            connection_pool = await self._get_connection_pool()
+            db = await self._get_database()
 
-            async with connection_pool.get_connection() as db:
-                # Get total count for progress tracking
-                total_count = await db.rawcollection.count(where={"shopId": shop_id})
-                self.logger.info(
-                    f"Processing {total_count} collections for shop {shop_id} in batches of {batch_size} using cursor-based pagination"
+            # Step 1: Get all raw collection IDs (lightweight query - only IDs, not full data)
+            raw_collections = await db.rawcollection.find_many(
+                where={"shopId": shop_id},
+                order={"extractedAt": "asc"},
+            )
+            raw_collection_ids = [
+                collection.shopifyId
+                for collection in raw_collections
+                if collection.shopifyId
+            ]
+
+            total_raw_count = len(raw_collection_ids)
+            self.logger.info(
+                f"Found {total_raw_count} raw collections for shop {shop_id}"
+            )
+
+            if total_raw_count == 0:
+                self.logger.info(f"No raw collections found for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-                # Process collections in batches using cursor-based pagination
-                cursor_id = None
-                processed_total = 0
+            # Step 2: Get already processed Shopify IDs (lightweight query)
+            processed_shopify_ids = set()
+            if incremental:
+                processed_shopify_ids = await self._get_processed_shopify_ids(
+                    shop_id, "collections"
+                )
+                self.logger.info(
+                    f"Found {len(processed_shopify_ids)} already processed collections for shop {shop_id}"
+                )
 
-                while True:
-                    # Get batch of raw collections using proper cursor-based pagination
-                    raw_collections = await db.rawcollection.find_many(
-                        where={"shopId": shop_id},
-                        take=batch_size,
-                        skip=1 if cursor_id else 0,
-                        cursor={"id": cursor_id} if cursor_id else None,
-                        order={"id": "asc"},
-                    )
+            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
+            raw_shopify_ids = set(raw_collection_ids)
+            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
-                    if not raw_collections:
-                        break
+            total_new_count = len(new_shopify_ids)
+            self.logger.info(
+                f"Processing {total_new_count} new collections for shop {shop_id} in batches of {batch_size}"
+            )
 
-                    # Collect collection data for batch processing
-                    batch_collection_data = []
+            if total_new_count == 0:
+                self.logger.info(f"No new collections to process for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
+                )
 
-                    for raw_collection in raw_collections:
-                        try:
-                            # Parse the JSON payload
-                            payload = raw_collection.payload
-                            if isinstance(payload, str):
-                                payload = json.loads(payload)
+            # Step 4: Process new collections in batches by fetching only needed records
+            new_shopify_ids_list = list(new_shopify_ids)
+            for i in range(0, total_new_count, batch_size):
+                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
 
-                            # Extract collection data
-                            collection_data = self._extract_collection_fields(
-                                payload, shop_id
+                # Fetch only the raw records we need to process (database does the filtering)
+                raw_collections = await db.rawcollection.find_many(
+                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
+                )
+
+                # Collect collection data for batch processing
+                batch_collection_data = []
+
+                for raw_collection in raw_collections:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_collection.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+
+                        # Extract collection data
+                        collection_data = self._extract_collection_fields(
+                            payload, shop_id
+                        )
+
+                        if collection_data:
+                            batch_collection_data.append(collection_data)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract collection data from raw collection {raw_collection.id}"
                             )
 
-                            if collection_data:
-                                batch_collection_data.append(collection_data)
-                            else:
-                                self.logger.warning(
-                                    f"Could not extract collection data from raw collection {raw_collection.id}"
-                                )
+                    except Exception as e:
+                        error_msg = f"Failed to process collection {raw_collection.id}: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                        except Exception as e:
-                            error_msg = f"Failed to process collection {raw_collection.id}: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += 1
+                # Batch upsert all collections in this batch
+                if batch_collection_data:
+                    try:
+                        await self._batch_upsert_collection_data(
+                            batch_collection_data, db
+                        )
+                        processed_count += len(batch_collection_data)
+                    except Exception as e:
+                        error_msg = f"Failed to batch upsert collections: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += len(batch_collection_data)
 
-                    # Batch upsert all collections in this batch
-                    if batch_collection_data:
-                        try:
-                            await self._batch_upsert_collection_data(
-                                batch_collection_data, db
-                            )
-                            processed_count += len(batch_collection_data)
-                        except Exception as e:
-                            error_msg = f"Failed to batch upsert collections: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += len(batch_collection_data)
-
-                    # Update cursor to the last processed record's ID
-                    cursor_id = raw_collections[-1].id
-                    processed_total += len(raw_collections)
-
-                    # Log progress
-                    progress_percent = min(100, (processed_total / total_count) * 100)
-                    self.logger.info(
-                        f"Processed {processed_total}/{total_count} collections ({progress_percent:.1f}%)"
-                    )
+                # Log progress
+                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                self.logger.info(
+                    f"Processed {processed_count}/{total_new_count} collections ({progress_percent:.1f}%)"
+                )
 
             self.logger.info(f"Successfully processed {processed_count} collections")
 
@@ -553,8 +768,10 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_customer_events(self, shop_id: str) -> StorageResult:
-        """Store customer events from raw table to CustomerEventData table"""
+    async def store_customer_events(
+        self, shop_id: str, incremental: bool = True
+    ) -> StorageResult:
+        """Store customer events from raw table to CustomerEventData table with memory-efficient incremental processing"""
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -564,84 +781,121 @@ class MainTableStorageService:
         )
 
         try:
-            connection_pool = await self._get_connection_pool()
+            db = await self._get_database()
 
-            async with connection_pool.get_connection() as db:
-                # Get total count for progress tracking
-                total_count = await db.rawcustomerevent.count(where={"shopId": shop_id})
-                self.logger.info(
-                    f"Processing {total_count} customer events for shop {shop_id} in batches of {batch_size} using cursor-based pagination"
+            # Step 1: Get all raw customer event IDs (lightweight query - only IDs, not full data)
+            raw_event_ids = await db.rawcustomerevent.find_many(
+                where={"shopId": shop_id},
+                select={"shopifyId": True},
+                order={"extractedAt": "asc"},
+            )
+
+            total_raw_count = len(raw_event_ids)
+            self.logger.info(
+                f"Found {total_raw_count} raw customer events for shop {shop_id}"
+            )
+
+            if total_raw_count == 0:
+                self.logger.info(f"No raw customer events found for shop {shop_id}")
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-                # Process customer events in batches using cursor-based pagination
-                cursor_id = None
-                processed_total = 0
+            # Step 2: Get already processed Shopify IDs (lightweight query)
+            processed_shopify_ids = set()
+            if incremental:
+                processed_shopify_ids = await self._get_processed_shopify_ids(
+                    shop_id, "customer_events"
+                )
+                self.logger.info(
+                    f"Found {len(processed_shopify_ids)} already processed customer events for shop {shop_id}"
+                )
 
-                while True:
-                    # Get batch of raw customer events using proper cursor-based pagination
-                    raw_events = await db.rawcustomerevent.find_many(
-                        where={"shopId": shop_id},
-                        take=batch_size,
-                        skip=1 if cursor_id else 0,
-                        cursor={"id": cursor_id} if cursor_id else None,
-                        order={"id": "asc"},
-                    )
+            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
+            raw_shopify_ids = {
+                event.shopifyId for event in raw_event_ids if event.shopifyId
+            }
+            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
-                    if not raw_events:
-                        break
+            total_new_count = len(new_shopify_ids)
+            self.logger.info(
+                f"Processing {total_new_count} new customer events for shop {shop_id} in batches of {batch_size}"
+            )
 
-                    # Collect customer event data for batch processing
-                    batch_event_data = []
+            if total_new_count == 0:
+                self.logger.info(
+                    f"No new customer events to process for shop {shop_id}"
+                )
+                return StorageResult(
+                    success=True,
+                    processed_count=0,
+                    error_count=0,
+                    errors=[],
+                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
+                )
 
-                    for raw_event in raw_events:
-                        try:
-                            # Parse the JSON payload
-                            payload = raw_event.payload
-                            if isinstance(payload, str):
-                                payload = json.loads(payload)
+            # Step 4: Process new customer events in batches by fetching only needed records
+            new_shopify_ids_list = list(new_shopify_ids)
+            for i in range(0, total_new_count, batch_size):
+                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
 
-                            # Extract customer event data
-                            event_data_list = self._extract_customer_event_fields(
-                                payload, shop_id
+                # Fetch only the raw records we need to process (database does the filtering)
+                raw_events = await db.rawcustomerevent.find_many(
+                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
+                )
+
+                # Collect customer event data for batch processing
+                batch_event_data = []
+
+                for raw_event in raw_events:
+                    try:
+                        # Parse the JSON payload
+                        payload = raw_event.payload
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+
+                        # Extract customer event data
+                        event_data_list = self._extract_customer_event_fields(
+                            payload, shop_id
+                        )
+
+                        if event_data_list:
+                            batch_event_data.extend(event_data_list)
+                        else:
+                            self.logger.warning(
+                                f"Could not extract customer event data from raw event {raw_event.id}"
                             )
 
-                            if event_data_list:
-                                batch_event_data.extend(event_data_list)
-                            else:
-                                self.logger.warning(
-                                    f"Could not extract customer event data from raw event {raw_event.id}"
-                                )
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to process customer event {raw_event.id}: {str(e)}"
+                        )
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += 1
 
-                        except Exception as e:
-                            error_msg = f"Failed to process customer event {raw_event.id}: {str(e)}"
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += 1
+                # Batch upsert all customer events in this batch
+                if batch_event_data:
+                    try:
+                        await self._batch_upsert_customer_event_data(
+                            batch_event_data, db
+                        )
+                        processed_count += len(batch_event_data)
+                    except Exception as e:
+                        error_msg = f"Failed to batch upsert customer events: {str(e)}"
+                        self.logger.error(error_msg)
+                        errors.append(error_msg)
+                        error_count += len(batch_event_data)
 
-                    # Batch upsert all customer events in this batch
-                    if batch_event_data:
-                        try:
-                            await self._batch_upsert_customer_event_data(
-                                batch_event_data, db
-                            )
-                            processed_count += len(batch_event_data)
-                        except Exception as e:
-                            error_msg = (
-                                f"Failed to batch upsert customer events: {str(e)}"
-                            )
-                            self.logger.error(error_msg)
-                            errors.append(error_msg)
-                            error_count += len(batch_event_data)
-
-                    # Update cursor to the last processed record's ID
-                    cursor_id = raw_events[-1].id
-                    processed_total += len(raw_events)
-
-                    # Log progress
-                    progress_percent = min(100, (processed_total / total_count) * 100)
-                    self.logger.info(
-                        f"Processed {processed_total}/{total_count} customer events ({progress_percent:.1f}%)"
-                    )
+                # Log progress
+                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                self.logger.info(
+                    f"Processed {processed_count}/{total_new_count} customer events ({progress_percent:.1f}%)"
+                )
 
             self.logger.info(
                 f"Successfully processed {processed_count} customer events"
@@ -1269,9 +1523,8 @@ class MainTableStorageService:
 
         # If no db connection provided, get one
         if db is None:
-            connection_pool = await self._get_connection_pool()
-            async with connection_pool.get_connection() as db:
-                await self._batch_upsert_product_data(product_data_list, db)
+            db = await self._get_database()
+            await self._batch_upsert_product_data(product_data_list, db)
             return
 
         # Prepare data for both batch insert and individual upserts
@@ -1349,9 +1602,8 @@ class MainTableStorageService:
 
         # If no db connection provided, get one
         if db is None:
-            connection_pool = await self._get_connection_pool()
-            async with connection_pool.get_connection() as db:
-                await self._batch_upsert_order_data(order_data_list, db)
+            db = await self._get_database()
+            await self._batch_upsert_order_data(order_data_list, db)
             return
 
         # Prepare data for both batch insert and individual upserts
@@ -1435,9 +1687,8 @@ class MainTableStorageService:
 
         # If no db connection provided, get one
         if db is None:
-            connection_pool = await self._get_connection_pool()
-            async with connection_pool.get_connection() as db:
-                await self._batch_upsert_customer_data(customer_data_list, db)
+            db = await self._get_database()
+            await self._batch_upsert_customer_data(customer_data_list, db)
             return
 
         # Prepare data for both batch insert and individual upserts
@@ -1511,9 +1762,8 @@ class MainTableStorageService:
 
         # If no db connection provided, get one
         if db is None:
-            connection_pool = await self._get_connection_pool()
-            async with connection_pool.get_connection() as db:
-                await self._batch_upsert_collection_data(collection_data_list, db)
+            db = await self._get_database()
+            await self._batch_upsert_collection_data(collection_data_list, db)
             return
 
         # Prepare data for both batch insert and individual upserts
@@ -1577,9 +1827,8 @@ class MainTableStorageService:
 
         # If no db connection provided, get one
         if db is None:
-            connection_pool = await self._get_connection_pool()
-            async with connection_pool.get_connection() as db:
-                await self._batch_upsert_customer_event_data(event_data_list, db)
+            db = await self._get_database()
+            await self._batch_upsert_customer_event_data(event_data_list, db)
             return
 
         # Prepare data for both batch insert and individual upserts

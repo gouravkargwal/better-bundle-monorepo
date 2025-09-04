@@ -738,8 +738,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     # Initialize main table storage (now uses connection pool internally)
                     main_table_storage = MainTableStorageService()
 
+                    # Pass the collection start time for incremental processing
                     main_storage_result = await main_table_storage.store_all_data(
-                        internal_shop_id
+                        internal_shop_id, incremental=True
                     )
                     logger.info(
                         f"Main table storage completed: {main_storage_result.processed_count} processed, "

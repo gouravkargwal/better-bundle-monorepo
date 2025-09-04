@@ -12,7 +12,7 @@ from enum import Enum
 from prisma import Prisma
 from app.core.logging import get_logger
 from app.core.exceptions import DataStorageError
-from app.core.database.connection_pool import get_connection_pool
+from app.core.database.simple_db_client import get_database
 from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
@@ -79,7 +79,7 @@ class ShopifyDataStorageService:
         self.config = StorageConfig()
         self.storage_metrics: Dict[str, StorageMetrics] = {}
         self._is_initialized = False
-        self.connection_pool = None
+        self._db_client = None
 
         # Performance tracking
         self._performance_cache: Dict[str, Any] = {}
@@ -91,8 +91,8 @@ class ShopifyDataStorageService:
             if self._is_initialized:
                 return
 
-            # Get connection pool (will initialize if needed)
-            self.connection_pool = await get_connection_pool()
+            # Get database client (will initialize if needed)
+            self._db_client = await get_database()
 
             # Initialize performance cache
             await self._initialize_performance_cache()
@@ -115,13 +115,13 @@ class ShopifyDataStorageService:
                 "rawcustomerevent",
             ]
 
-            async with self.connection_pool.get_connection() as db:
-                for table in tables:
-                    # Try to count records to verify table exists
-                    if hasattr(db, table):
-                        await getattr(db, table).count()
-                    else:
-                        raise DataStorageError(f"Required table {table} not found")
+            db = await get_database()
+            for table in tables:
+                # Try to count records to verify table exists
+                if hasattr(db, table):
+                    await getattr(db, table).count()
+                else:
+                    raise DataStorageError(f"Required table {table} not found")
 
         except Exception as e:
             logger.error(f"Schema verification failed: {e}")
@@ -131,16 +131,16 @@ class ShopifyDataStorageService:
         """Initialize performance optimization cache"""
         try:
             # Cache shop-specific metadata for faster lookups
-            async with self.connection_pool.get_connection() as db:
-                shops = await db.shop.find_many()
+            db = await get_database()
+            shops = await db.shop.find_many()
 
-                for shop in shops:
-                    cache_key = f"shop_metadata_{shop.id}"
-                    self._performance_cache[cache_key] = {
-                        "domain": shop.shopDomain,
-                        "last_analysis": shop.lastAnalysisAt,
-                        "cached_at": now_utc(),
-                    }
+            for shop in shops:
+                cache_key = f"shop_metadata_{shop.id}"
+                self._performance_cache[cache_key] = {
+                    "domain": shop.shopDomain,
+                    "last_analysis": shop.lastAnalysisAt,
+                    "cached_at": now_utc(),
+                }
 
         except Exception as e:
             logger.warning(f"Performance cache initialization failed: {e}")
@@ -156,37 +156,15 @@ class ShopifyDataStorageService:
         try:
             await self.initialize()
 
-            async with self.connection_pool.get_connection() as db:
-                # Check if shop exists and get last update
-                existing_shop = await db.shop.find_unique(
-                    where={"shopDomain": shop.domain}
-                )
+            db = await get_database()
+            # Check if shop exists and get last update
+            existing_shop = await db.shop.find_unique(where={"shopDomain": shop.domain})
 
-                if existing_shop:
-                    if incremental:
-                        # Check if data has changed
-                        if self._has_shop_data_changed(shop, existing_shop):
-                            # Update existing shop
-                            updated_shop = await db.shop.update(
-                                where={"id": existing_shop.id},
-                                data={
-                                    "accessToken": shop.access_token,
-                                    "planType": shop.plan_name or "Free",
-                                    "currencyCode": shop.currency,
-                                    "moneyFormat": (
-                                        shop.money_format
-                                        if hasattr(shop, "money_format")
-                                        else None
-                                    ),
-                                    "email": shop.email,
-                                    "updatedAt": now_utc(),
-                                },
-                            )
-                            metrics.updated_items = 1
-                        else:
-                            metrics.total_items = 1
-                    else:
-                        # Force update
+            if existing_shop:
+                if incremental:
+                    # Check if data has changed
+                    if self._has_shop_data_changed(shop, existing_shop):
+                        # Update existing shop
                         updated_shop = await db.shop.update(
                             where={"id": existing_shop.id},
                             data={
@@ -203,11 +181,13 @@ class ShopifyDataStorageService:
                             },
                         )
                         metrics.updated_items = 1
+                    else:
+                        metrics.total_items = 1
                 else:
-                    # Create new shop
-                    new_shop = await db.shop.create(
+                    # Force update
+                    updated_shop = await db.shop.update(
+                        where={"id": existing_shop.id},
                         data={
-                            "shopDomain": shop.domain,
                             "accessToken": shop.access_token,
                             "planType": shop.plan_name or "Free",
                             "currencyCode": shop.currency,
@@ -217,9 +197,25 @@ class ShopifyDataStorageService:
                                 else None
                             ),
                             "email": shop.email,
-                        }
+                            "updatedAt": now_utc(),
+                        },
                     )
-                    metrics.new_items = 1
+                    metrics.updated_items = 1
+            else:
+                # Create new shop
+                new_shop = await db.shop.create(
+                    data={
+                        "shopDomain": shop.domain,
+                        "accessToken": shop.access_token,
+                        "planType": shop.plan_name or "Free",
+                        "currencyCode": shop.currency,
+                        "moneyFormat": (
+                            shop.money_format if hasattr(shop, "money_format") else None
+                        ),
+                        "email": shop.email,
+                    }
+                )
+                metrics.new_items = 1
 
             metrics.total_items = 1
             metrics.end_time = now_utc()
@@ -300,13 +296,13 @@ class ShopifyDataStorageService:
         batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
 
         try:
-            # Use connection pool for database operations
-            async with self.connection_pool.get_connection() as db:
-                # Use fast batch processing without transactions for maximum speed
-                # create_many is already atomic, so no need for explicit transactions
-                batch_metrics = await self._process_products_in_transaction(
-                    db, products, shop_id, incremental
-                )
+            # Use database client for operations
+            db = await get_database()
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_products_in_transaction(
+                db, products, shop_id, incremental
+            )
 
             return batch_metrics
 
@@ -321,13 +317,13 @@ class ShopifyDataStorageService:
         batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
 
         try:
-            # Use connection pool for database operations
-            async with self.connection_pool.get_connection() as db:
-                # Use fast batch processing without transactions for maximum speed
-                # create_many is already atomic, so no need for explicit transactions
-                batch_metrics = await self._process_orders_in_transaction(
-                    db, orders, shop_id, incremental
-                )
+            # Use database client for operations
+            db = await get_database()
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_orders_in_transaction(
+                db, orders, shop_id, incremental
+            )
 
             return batch_metrics
 
@@ -819,13 +815,13 @@ class ShopifyDataStorageService:
         batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
 
         try:
-            # Use connection pool for database operations
-            async with self.connection_pool.get_connection() as db:
-                # Use fast batch processing without transactions for maximum speed
-                # create_many is already atomic, so no need for explicit transactions
-                batch_metrics = await self._process_customers_in_transaction(
-                    db, customers, shop_id, incremental
-                )
+            # Use database client for operations
+            db = await get_database()
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_customers_in_transaction(
+                db, customers, shop_id, incremental
+            )
 
             return batch_metrics
 
@@ -987,53 +983,16 @@ class ShopifyDataStorageService:
     ) -> None:
         """Process collections using fast batch operations with duplicate prevention"""
         try:
-            async with self.connection_pool.get_connection() as db:
-                if not incremental:
-                    # Full refresh: delete existing and insert all
-                    await db.rawcollection.delete_many(where={"shopId": shop_id})
-                    batch_data = []
-                    current_time = now_utc()
+            db = await get_database()
+            if not incremental:
+                # Full refresh: delete existing and insert all
+                await db.rawcollection.delete_many(where={"shopId": shop_id})
+                batch_data = []
+                current_time = now_utc()
 
-                    for collection in collections:
-                        batch_data.append(
-                            {
-                                "shopId": shop_id,
-                                "payload": json.dumps(
-                                    (
-                                        collection.dict()
-                                        if hasattr(collection, "dict")
-                                        else collection
-                                    ),
-                                    default=str,
-                                ),
-                                "extractedAt": current_time,
-                            }
-                        )
-
-                    await db.rawcollection.create_many(data=batch_data)
-                    metrics.new_items = len(collections)
-                    logger.info(f"Full refresh: {len(collections)} collections stored")
-                else:
-                    # Incremental: efficient batch approach using shopifyId
-                    current_time = now_utc()
-                    new_collections = []
-                    updated_collections = []
-
-                    for collection in collections:
-                        collection_id = self._extract_collection_id(collection)
-                        created_at, updated_at = self._extract_shopify_timestamps(
-                            collection
-                        )
-
-                        if not collection_id:
-                            continue
-
-                        # Check if collection exists using shopifyId
-                        existing_collection = await db.rawcollection.find_first(
-                            where={"shopId": shop_id, "shopifyId": collection_id}
-                        )
-
-                        collection_data = {
+                for collection in collections:
+                    batch_data.append(
+                        {
                             "shopId": shop_id,
                             "payload": json.dumps(
                                 (
@@ -1044,84 +1003,117 @@ class ShopifyDataStorageService:
                                 default=str,
                             ),
                             "extractedAt": current_time,
-                            "shopifyId": collection_id,
-                            "shopifyCreatedAt": created_at,
-                            "shopifyUpdatedAt": updated_at,
                         }
-
-                        if not existing_collection:
-                            # New collection
-                            new_collections.append(collection_data)
-                        elif updated_at and existing_collection.shopifyUpdatedAt:
-                            # Check if collection was updated
-                            if updated_at > existing_collection.shopifyUpdatedAt:
-                                updated_collections.append(collection_data)
-                        elif not existing_collection.shopifyUpdatedAt and updated_at:
-                            # Existing collection without timestamp, add timestamp
-                            updated_collections.append(collection_data)
-
-                    # Insert new collections
-                    if new_collections:
-                        await db.rawcollection.create_many(data=new_collections)
-                        metrics.new_items = len(new_collections)
-
-                    # Update existing collections
-                    if updated_collections:
-                        for collection_data in updated_collections:
-                            await db.rawcollection.update_many(
-                                where={
-                                    "shopId": shop_id,
-                                    "shopifyId": collection_data["shopifyId"],
-                                },
-                                data={
-                                    "payload": collection_data["payload"],
-                                    "extractedAt": collection_data["extractedAt"],
-                                    "shopifyUpdatedAt": collection_data[
-                                        "shopifyUpdatedAt"
-                                    ],
-                                },
-                            )
-                        metrics.updated_items = len(updated_collections)
-
-                    logger.info(
-                        f"Incremental: {len(new_collections)} new, {len(updated_collections)} updated collections"
                     )
+
+                await db.rawcollection.create_many(data=batch_data)
+                metrics.new_items = len(collections)
+                logger.info(f"Full refresh: {len(collections)} collections stored")
+            else:
+                # Incremental: efficient batch approach using shopifyId
+                current_time = now_utc()
+                new_collections = []
+                updated_collections = []
+
+                for collection in collections:
+                    collection_id = self._extract_collection_id(collection)
+                    created_at, updated_at = self._extract_shopify_timestamps(
+                        collection
+                    )
+
+                    if not collection_id:
+                        continue
+
+                    # Check if collection exists using shopifyId
+                    existing_collection = await db.rawcollection.find_first(
+                        where={"shopId": shop_id, "shopifyId": collection_id}
+                    )
+
+                    collection_data = {
+                        "shopId": shop_id,
+                        "payload": json.dumps(
+                            (
+                                collection.dict()
+                                if hasattr(collection, "dict")
+                                else collection
+                            ),
+                            default=str,
+                        ),
+                        "extractedAt": current_time,
+                        "shopifyId": collection_id,
+                        "shopifyCreatedAt": created_at,
+                        "shopifyUpdatedAt": updated_at,
+                    }
+
+                    if not existing_collection:
+                        # New collection
+                        new_collections.append(collection_data)
+                    elif updated_at and existing_collection.shopifyUpdatedAt:
+                        # Check if collection was updated
+                        if updated_at > existing_collection.shopifyUpdatedAt:
+                            updated_collections.append(collection_data)
+                    elif not existing_collection.shopifyUpdatedAt and updated_at:
+                        # Existing collection without timestamp, add timestamp
+                        updated_collections.append(collection_data)
+
+                # Insert new collections
+                if new_collections:
+                    await db.rawcollection.create_many(data=new_collections)
+                    metrics.new_items = len(new_collections)
+
+                # Update existing collections
+                if updated_collections:
+                    for collection_data in updated_collections:
+                        await db.rawcollection.update_many(
+                            where={
+                                "shopId": shop_id,
+                                "shopifyId": collection_data["shopifyId"],
+                            },
+                            data={
+                                "payload": collection_data["payload"],
+                                "extractedAt": collection_data["extractedAt"],
+                                "shopifyUpdatedAt": collection_data["shopifyUpdatedAt"],
+                            },
+                        )
+                    metrics.updated_items = len(updated_collections)
+
+                logger.info(
+                    f"Incremental: {len(new_collections)} new, {len(updated_collections)} updated collections"
+                )
 
         except Exception as e:
             logger.error(f"Timestamp-based processing failed: {e}")
             # Fallback to individual inserts if batch fails
-            async with self.connection_pool.get_connection() as db:
-                for collection in collections:
-                    try:
-                        collection_id = self._extract_collection_id(collection)
-                        created_at, updated_at = self._extract_shopify_timestamps(
-                            collection
-                        )
+            db = await get_database()
+            for collection in collections:
+                try:
+                    collection_id = self._extract_collection_id(collection)
+                    created_at, updated_at = self._extract_shopify_timestamps(
+                        collection
+                    )
 
-                        await db.rawcollection.create(
-                            data={
-                                "shopId": shop_id,
-                                "payload": json.dumps(
-                                    (
-                                        collection.dict()
-                                        if hasattr(collection, "dict")
-                                        else collection
-                                    ),
-                                    default=str,
+                    await db.rawcollection.create(
+                        data={
+                            "shopId": shop_id,
+                            "payload": json.dumps(
+                                (
+                                    collection.dict()
+                                    if hasattr(collection, "dict")
+                                    else collection
                                 ),
-                                "extractedAt": now_utc(),
-                                "shopifyId": collection_id,
-                                "shopifyCreatedAt": created_at,
-                                "shopifyUpdatedAt": updated_at,
-                            }
-                        )
-                        metrics.new_items += 1
-                    except Exception as individual_error:
-                        logger.error(
-                            f"Failed to process collection: {individual_error}"
-                        )
-                        metrics.failed_items += 1
-                        continue
+                                default=str,
+                            ),
+                            "extractedAt": now_utc(),
+                            "shopifyId": collection_id,
+                            "shopifyCreatedAt": created_at,
+                            "shopifyUpdatedAt": updated_at,
+                        }
+                    )
+                    metrics.new_items += 1
+                except Exception as individual_error:
+                    logger.error(f"Failed to process collection: {individual_error}")
+                    metrics.failed_items += 1
+                    continue
 
     async def _process_customer_events_in_transaction(
         self,
@@ -1261,13 +1253,13 @@ class ShopifyDataStorageService:
         batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
 
         try:
-            # Use connection pool for database operations
-            async with self.connection_pool.get_connection() as db:
-                # Use fast batch processing without transactions for maximum speed
-                # create_many is already atomic, so no need for explicit transactions
-                batch_metrics = await self._process_customer_events_in_transaction(
-                    db, events, shop_id, incremental
-                )
+            # Use database client for operations
+            db = await get_database()
+            # Use fast batch processing without transactions for maximum speed
+            # create_many is already atomic, so no need for explicit transactions
+            batch_metrics = await self._process_customer_events_in_transaction(
+                db, events, shop_id, incremental
+            )
 
             return batch_metrics
 
@@ -1509,13 +1501,13 @@ class ShopifyDataStorageService:
                 "rawcustomerevent",
             ]
 
-            async with self.connection_pool.get_connection() as db:
-                for table in tables:
-                    if hasattr(db, table):
-                        deleted = await getattr(db, table).delete_many(
-                            where={"extractedAt": {"lt": cutoff_date}}
-                        )
-                        deleted_count += deleted
+            db = await get_database()
+            for table in tables:
+                if hasattr(db, table):
+                    deleted = await getattr(db, table).delete_many(
+                        where={"extractedAt": {"lt": cutoff_date}}
+                    )
+                    deleted_count += deleted
 
             # Clean up performance cache
             await self._cleanup_performance_cache()
@@ -1563,9 +1555,9 @@ class ShopifyDataStorageService:
         """Get shop by domain for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                shop = await db.shop.find_first(where={"shopDomain": shop_domain})
-                return shop
+            db = await get_database()
+            shop = await db.shop.find_first(where={"shopDomain": shop_domain})
+            return shop
         except Exception as e:
             logger.error(f"Failed to get shop by domain {shop_domain}: {e}")
             return None
@@ -1574,11 +1566,11 @@ class ShopifyDataStorageService:
         """Get the most recently updated product for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                latest_product = await db.rawproduct.find_first(
-                    where={"shopId": shop_id}, order={"extractedAt": "desc"}
-                )
-                return latest_product
+            db = await get_database()
+            latest_product = await db.rawproduct.find_first(
+                where={"shopId": shop_id}, order={"extractedAt": "desc"}
+            )
+            return latest_product
         except Exception as e:
             logger.error(f"Failed to get latest product update for shop {shop_id}: {e}")
             return None
@@ -1587,11 +1579,11 @@ class ShopifyDataStorageService:
         """Get the most recently updated order for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                latest_order = await db.raworder.find_first(
-                    where={"shopId": shop_id}, order={"extractedAt": "desc"}
-                )
-                return latest_order
+            db = await get_database()
+            latest_order = await db.raworder.find_first(
+                where={"shopId": shop_id}, order={"extractedAt": "desc"}
+            )
+            return latest_order
         except Exception as e:
             logger.error(f"Failed to get latest order update for shop {shop_id}: {e}")
             return None
@@ -1600,11 +1592,11 @@ class ShopifyDataStorageService:
         """Get the most recently updated customer for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                latest_customer = await db.rawcustomer.find_first(
-                    where={"shopId": shop_id}, order={"extractedAt": "desc"}
-                )
-                return latest_customer
+            db = await get_database()
+            latest_customer = await db.rawcustomer.find_first(
+                where={"shopId": shop_id}, order={"extractedAt": "desc"}
+            )
+            return latest_customer
         except Exception as e:
             logger.error(
                 f"Failed to get latest customer update for shop {shop_id}: {e}"
@@ -1615,11 +1607,11 @@ class ShopifyDataStorageService:
         """Get the most recently updated collection for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                latest_collection = await db.rawcollection.find_first(
-                    where={"shopId": shop_id}, order={"extractedAt": "desc"}
-                )
-                return latest_collection
+            db = await get_database()
+            latest_collection = await db.rawcollection.find_first(
+                where={"shopId": shop_id}, order={"extractedAt": "desc"}
+            )
+            return latest_collection
         except Exception as e:
             logger.error(
                 f"Failed to get latest collection update for shop {shop_id}: {e}"
@@ -1630,11 +1622,11 @@ class ShopifyDataStorageService:
         """Get the most recently updated customer event for incremental collection"""
         try:
             await self.initialize()
-            async with self.connection_pool.get_connection() as db:
-                latest_event = await db.rawcustomerevent.find_first(
-                    where={"shopId": shop_id}, order={"extractedAt": "desc"}
-                )
-                return latest_event
+            db = await get_database()
+            latest_event = await db.rawcustomerevent.find_first(
+                where={"shopId": shop_id}, order={"extractedAt": "desc"}
+            )
+            return latest_event
         except Exception as e:
             logger.error(
                 f"Failed to get latest customer event update for shop {shop_id}: {e}"

@@ -201,10 +201,10 @@ async def cleanup_services():
         if "gorse_ml" in services:
             await services["gorse_ml"].close()
 
-        # Shutdown database connection pool
-        from app.core.database.connection_pool import shutdown_connection_pool
+        # Shutdown database connection
+        from app.core.database.simple_db_client import close_database
 
-        await shutdown_connection_pool()
+        await close_database()
 
         # Clear services dictionary
         services.clear()
