@@ -15,6 +15,8 @@ from prisma import Json
 from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.core.redis_client import streams_manager
+from app.core.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -84,6 +86,84 @@ class MainTableStorageService:
             self.logger.warning(
                 f"Failed to get processed Shopify IDs for {data_type}: {e}"
             )
+            return set()
+
+    async def _get_updated_shopify_ids(self, shop_id: str, data_type: str) -> set:
+        """Get Shopify IDs that have been updated in raw tables since last main table processing"""
+        try:
+            db = await self._get_database()
+
+            # Compare raw table extractedAt with main table updatedAt to find updated records
+            if data_type == "orders":
+                result = await db.query_raw(
+                    """
+                    SELECT r."shopifyId" 
+                    FROM "RawOrder" r
+                    LEFT JOIN "OrderData" o ON r."shopifyId" = o."orderId" AND r."shopId" = o."shopId"
+                    WHERE r."shopId" = $1 
+                    AND r."shopifyId" IS NOT NULL
+                    AND (o."orderId" IS NULL OR r."extractedAt" > o."updatedAt")
+                    """,
+                    shop_id,
+                )
+                return {row["shopifyId"] for row in result if row["shopifyId"]}
+            elif data_type == "products":
+                result = await db.query_raw(
+                    """
+                    SELECT r."shopifyId" 
+                    FROM "RawProduct" r
+                    LEFT JOIN "ProductData" p ON r."shopifyId" = p."productId" AND r."shopId" = p."shopId"
+                    WHERE r."shopId" = $1 
+                    AND r."shopifyId" IS NOT NULL
+                    AND (p."productId" IS NULL OR r."extractedAt" > p."updatedAt")
+                    """,
+                    shop_id,
+                )
+                return {row["shopifyId"] for row in result if row["shopifyId"]}
+            elif data_type == "customers":
+                result = await db.query_raw(
+                    """
+                    SELECT r."shopifyId" 
+                    FROM "RawCustomer" r
+                    LEFT JOIN "CustomerData" c ON r."shopifyId" = c."customerId" AND r."shopId" = c."shopId"
+                    WHERE r."shopId" = $1 
+                    AND r."shopifyId" IS NOT NULL
+                    AND (c."customerId" IS NULL OR r."extractedAt" > c."updatedAt")
+                    """,
+                    shop_id,
+                )
+                return {row["shopifyId"] for row in result if row["shopifyId"]}
+            elif data_type == "collections":
+                result = await db.query_raw(
+                    """
+                    SELECT r."shopifyId" 
+                    FROM "RawCollection" r
+                    LEFT JOIN "CollectionData" c ON r."shopifyId" = c."collectionId" AND r."shopId" = c."shopId"
+                    WHERE r."shopId" = $1 
+                    AND r."shopifyId" IS NOT NULL
+                    AND (c."collectionId" IS NULL OR r."extractedAt" > c."updatedAt")
+                    """,
+                    shop_id,
+                )
+                return {row["shopifyId"] for row in result if row["shopifyId"]}
+            elif data_type == "customer_events":
+                result = await db.query_raw(
+                    """
+                    SELECT r."shopifyId" 
+                    FROM "RawCustomerEvent" r
+                    LEFT JOIN "CustomerEventData" e ON r."shopifyId" = e."eventId" AND r."shopId" = e."shopId"
+                    WHERE r."shopId" = $1 
+                    AND r."shopifyId" IS NOT NULL
+                    AND (e."eventId" IS NULL OR r."extractedAt" > e."updatedAt")
+                    """,
+                    shop_id,
+                )
+                return {row["shopifyId"] for row in result if row["shopifyId"]}
+            else:
+                return set()
+
+        except Exception as e:
+            self.logger.error(f"Error getting updated Shopify IDs for {data_type}: {e}")
             return set()
 
     def _extract_order_id(self, order_data: Dict[str, Any]) -> Optional[str]:
@@ -180,6 +260,12 @@ class MainTableStorageService:
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
             self.logger.info(f"Concurrent storage completed in {duration_ms}ms")
 
+            # Publish event to trigger feature computation if storage was successful
+            if total_errors == 0 and total_processed > 0:
+                await self._publish_feature_computation_event(
+                    shop_id, total_processed, duration_ms
+                )
+
             return StorageResult(
                 success=total_errors == 0,
                 processed_count=total_processed,
@@ -234,27 +320,41 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 2: Get already processed Shopify IDs (lightweight query)
-            processed_shopify_ids = set()
+            # Step 2: Get records to process (new + updated)
+            records_to_process = set()
             if incremental:
+                # Get new records (not in main table)
                 processed_shopify_ids = await self._get_processed_shopify_ids(
                     shop_id, "orders"
                 )
+                raw_shopify_ids = set(raw_order_ids)
+                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
+
+                # Get updated records (in main table but raw table has newer data)
+                updated_shopify_ids = await self._get_updated_shopify_ids(
+                    shop_id, "orders"
+                )
+
+                # Combine new and updated records
+                records_to_process = new_shopify_ids | updated_shopify_ids
+
                 self.logger.info(
                     f"Found {len(processed_shopify_ids)} already processed orders for shop {shop_id}"
                 )
+                self.logger.info(
+                    f"Found {len(new_shopify_ids)} new orders, {len(updated_shopify_ids)} updated orders"
+                )
+            else:
+                # Full refresh: process all records
+                records_to_process = set(raw_order_ids)
 
-            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = set(raw_order_ids)
-            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-            total_new_count = len(new_shopify_ids)
+            total_count = len(records_to_process)
             self.logger.info(
-                f"Processing {total_new_count} new orders for shop {shop_id} in batches of {batch_size}"
+                f"Processing {total_count} orders (new + updated) for shop {shop_id} in batches of {batch_size}"
             )
 
-            if total_new_count == 0:
-                self.logger.info(f"No new orders to process for shop {shop_id}")
+            if total_count == 0:
+                self.logger.info(f"No orders to process for shop {shop_id}")
                 return StorageResult(
                     success=True,
                     processed_count=0,
@@ -263,10 +363,10 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 4: Process new orders in batches by fetching only needed records
-            new_shopify_ids_list = list(new_shopify_ids)
-            for i in range(0, total_new_count, batch_size):
-                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
+            # Step 4: Process orders in batches by fetching only needed records
+            records_to_process_list = list(records_to_process)
+            for i in range(0, total_count, batch_size):
+                batch_shopify_ids = records_to_process_list[i : i + batch_size]
 
                 # Fetch only the raw records we need to process (database does the filtering)
                 raw_orders = await db.raworder.find_many(
@@ -311,9 +411,9 @@ class MainTableStorageService:
                         error_count += len(batch_order_data)
 
                 # Log progress
-                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                progress_percent = min(100, (processed_count / total_count) * 100)
                 self.logger.info(
-                    f"Processed {processed_count}/{total_new_count} orders ({progress_percent:.1f}%)"
+                    f"Processed {processed_count}/{total_count} orders ({progress_percent:.1f}%)"
                 )
 
             self.logger.info(f"Successfully processed {processed_count} orders")
@@ -372,27 +472,41 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 2: Get already processed Shopify IDs (lightweight query)
-            processed_shopify_ids = set()
+            # Step 2: Get records to process (new + updated)
+            records_to_process = set()
             if incremental:
+                # Get new records (not in main table)
                 processed_shopify_ids = await self._get_processed_shopify_ids(
                     shop_id, "products"
                 )
+                raw_shopify_ids = set(raw_product_ids)
+                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
+
+                # Get updated records (in main table but raw table has newer data)
+                updated_shopify_ids = await self._get_updated_shopify_ids(
+                    shop_id, "products"
+                )
+
+                # Combine new and updated records
+                records_to_process = new_shopify_ids | updated_shopify_ids
+
                 self.logger.info(
                     f"Found {len(processed_shopify_ids)} already processed products for shop {shop_id}"
                 )
+                self.logger.info(
+                    f"Found {len(new_shopify_ids)} new products, {len(updated_shopify_ids)} updated products"
+                )
+            else:
+                # Full refresh: process all records
+                records_to_process = set(raw_product_ids)
 
-            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = set(raw_product_ids)
-            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-            total_new_count = len(new_shopify_ids)
+            total_count = len(records_to_process)
             self.logger.info(
-                f"Processing {total_new_count} new products for shop {shop_id} in batches of {batch_size}"
+                f"Processing {total_count} products (new + updated) for shop {shop_id} in batches of {batch_size}"
             )
 
-            if total_new_count == 0:
-                self.logger.info(f"No new products to process for shop {shop_id}")
+            if total_count == 0:
+                self.logger.info(f"No products to process for shop {shop_id}")
                 return StorageResult(
                     success=True,
                     processed_count=0,
@@ -401,10 +515,10 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 4: Process new products in batches by fetching only needed records
-            new_shopify_ids_list = list(new_shopify_ids)
-            for i in range(0, total_new_count, batch_size):
-                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
+            # Step 4: Process products in batches by fetching only needed records
+            records_to_process_list = list(records_to_process)
+            for i in range(0, total_count, batch_size):
+                batch_shopify_ids = records_to_process_list[i : i + batch_size]
 
                 # Fetch only the raw records we need to process (database does the filtering)
                 raw_products = await db.rawproduct.find_many(
@@ -451,9 +565,9 @@ class MainTableStorageService:
                         error_count += len(batch_product_data)
 
                 # Log progress
-                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                progress_percent = min(100, (processed_count / total_count) * 100)
                 self.logger.info(
-                    f"Processed {processed_count}/{total_new_count} products ({progress_percent:.1f}%)"
+                    f"Processed {processed_count}/{total_count} products ({progress_percent:.1f}%)"
                 )
 
             self.logger.info(f"Successfully processed {processed_count} products")
@@ -514,27 +628,41 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 2: Get already processed Shopify IDs (lightweight query)
-            processed_shopify_ids = set()
+            # Step 2: Get records to process (new + updated)
+            records_to_process = set()
             if incremental:
+                # Get new records (not in main table)
                 processed_shopify_ids = await self._get_processed_shopify_ids(
                     shop_id, "customers"
                 )
+                raw_shopify_ids = set(raw_customer_ids)
+                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
+
+                # Get updated records (in main table but raw table has newer data)
+                updated_shopify_ids = await self._get_updated_shopify_ids(
+                    shop_id, "customers"
+                )
+
+                # Combine new and updated records
+                records_to_process = new_shopify_ids | updated_shopify_ids
+
                 self.logger.info(
                     f"Found {len(processed_shopify_ids)} already processed customers for shop {shop_id}"
                 )
+                self.logger.info(
+                    f"Found {len(new_shopify_ids)} new customers, {len(updated_shopify_ids)} updated customers"
+                )
+            else:
+                # Full refresh: process all records
+                records_to_process = set(raw_customer_ids)
 
-            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = set(raw_customer_ids)
-            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-            total_new_count = len(new_shopify_ids)
+            total_count = len(records_to_process)
             self.logger.info(
-                f"Processing {total_new_count} new customers for shop {shop_id} in batches of {batch_size}"
+                f"Processing {total_count} customers (new + updated) for shop {shop_id} in batches of {batch_size}"
             )
 
-            if total_new_count == 0:
-                self.logger.info(f"No new customers to process for shop {shop_id}")
+            if total_count == 0:
+                self.logger.info(f"No customers to process for shop {shop_id}")
                 return StorageResult(
                     success=True,
                     processed_count=0,
@@ -543,10 +671,10 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 4: Process new customers in batches by fetching only needed records
-            new_shopify_ids_list = list(new_shopify_ids)
-            for i in range(0, total_new_count, batch_size):
-                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
+            # Step 4: Process customers in batches by fetching only needed records
+            records_to_process_list = list(records_to_process)
+            for i in range(0, total_count, batch_size):
+                batch_shopify_ids = records_to_process_list[i : i + batch_size]
 
                 # Fetch only the raw records we need to process (database does the filtering)
                 raw_customers = await db.rawcustomer.find_many(
@@ -593,9 +721,9 @@ class MainTableStorageService:
                         error_count += len(batch_customer_data)
 
                 # Log progress
-                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                progress_percent = min(100, (processed_count / total_count) * 100)
                 self.logger.info(
-                    f"Processed {processed_count}/{total_new_count} customers ({progress_percent:.1f}%)"
+                    f"Processed {processed_count}/{total_count} customers ({progress_percent:.1f}%)"
                 )
 
             self.logger.info(f"Successfully processed {processed_count} customers")
@@ -656,27 +784,41 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 2: Get already processed Shopify IDs (lightweight query)
-            processed_shopify_ids = set()
+            # Step 2: Get records to process (new + updated)
+            records_to_process = set()
             if incremental:
+                # Get new records (not in main table)
                 processed_shopify_ids = await self._get_processed_shopify_ids(
                     shop_id, "collections"
                 )
+                raw_shopify_ids = set(raw_collection_ids)
+                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
+
+                # Get updated records (in main table but raw table has newer data)
+                updated_shopify_ids = await self._get_updated_shopify_ids(
+                    shop_id, "collections"
+                )
+
+                # Combine new and updated records
+                records_to_process = new_shopify_ids | updated_shopify_ids
+
                 self.logger.info(
                     f"Found {len(processed_shopify_ids)} already processed collections for shop {shop_id}"
                 )
+                self.logger.info(
+                    f"Found {len(new_shopify_ids)} new collections, {len(updated_shopify_ids)} updated collections"
+                )
+            else:
+                # Full refresh: process all records
+                records_to_process = set(raw_collection_ids)
 
-            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = set(raw_collection_ids)
-            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-            total_new_count = len(new_shopify_ids)
+            total_count = len(records_to_process)
             self.logger.info(
-                f"Processing {total_new_count} new collections for shop {shop_id} in batches of {batch_size}"
+                f"Processing {total_count} collections (new + updated) for shop {shop_id} in batches of {batch_size}"
             )
 
-            if total_new_count == 0:
-                self.logger.info(f"No new collections to process for shop {shop_id}")
+            if total_count == 0:
+                self.logger.info(f"No collections to process for shop {shop_id}")
                 return StorageResult(
                     success=True,
                     processed_count=0,
@@ -685,10 +827,10 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 4: Process new collections in batches by fetching only needed records
-            new_shopify_ids_list = list(new_shopify_ids)
-            for i in range(0, total_new_count, batch_size):
-                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
+            # Step 4: Process collections in batches by fetching only needed records
+            records_to_process_list = list(records_to_process)
+            for i in range(0, total_count, batch_size):
+                batch_shopify_ids = records_to_process_list[i : i + batch_size]
 
                 # Fetch only the raw records we need to process (database does the filtering)
                 raw_collections = await db.rawcollection.find_many(
@@ -737,9 +879,9 @@ class MainTableStorageService:
                         error_count += len(batch_collection_data)
 
                 # Log progress
-                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                progress_percent = min(100, (processed_count / total_count) * 100)
                 self.logger.info(
-                    f"Processed {processed_count}/{total_new_count} collections ({progress_percent:.1f}%)"
+                    f"Processed {processed_count}/{total_count} collections ({progress_percent:.1f}%)"
                 )
 
             self.logger.info(f"Successfully processed {processed_count} collections")
@@ -802,29 +944,41 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 2: Get already processed Shopify IDs (lightweight query)
-            processed_shopify_ids = set()
+            # Step 2: Get records to process (new + updated)
+            records_to_process = set()
             if incremental:
+                # Get new records (not in main table)
                 processed_shopify_ids = await self._get_processed_shopify_ids(
                     shop_id, "customer_events"
                 )
+                raw_shopify_ids = set(raw_event_ids)
+                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
+
+                # Get updated records (in main table but raw table has newer data)
+                updated_shopify_ids = await self._get_updated_shopify_ids(
+                    shop_id, "customer_events"
+                )
+
+                # Combine new and updated records
+                records_to_process = new_shopify_ids | updated_shopify_ids
+
                 self.logger.info(
                     f"Found {len(processed_shopify_ids)} already processed customer events for shop {shop_id}"
                 )
+                self.logger.info(
+                    f"Found {len(new_shopify_ids)} new customer events, {len(updated_shopify_ids)} updated customer events"
+                )
+            else:
+                # Full refresh: process all records
+                records_to_process = set(raw_event_ids)
 
-            # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = set(raw_event_ids)
-            new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-            total_new_count = len(new_shopify_ids)
+            total_count = len(records_to_process)
             self.logger.info(
-                f"Processing {total_new_count} new customer events for shop {shop_id} in batches of {batch_size}"
+                f"Processing {total_count} customer events (new + updated) for shop {shop_id} in batches of {batch_size}"
             )
 
-            if total_new_count == 0:
-                self.logger.info(
-                    f"No new customer events to process for shop {shop_id}"
-                )
+            if total_count == 0:
+                self.logger.info(f"No customer events to process for shop {shop_id}")
                 return StorageResult(
                     success=True,
                     processed_count=0,
@@ -833,10 +987,10 @@ class MainTableStorageService:
                     duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
                 )
 
-            # Step 4: Process new customer events in batches by fetching only needed records
-            new_shopify_ids_list = list(new_shopify_ids)
-            for i in range(0, total_new_count, batch_size):
-                batch_shopify_ids = new_shopify_ids_list[i : i + batch_size]
+            # Step 4: Process customer events in batches by fetching only needed records
+            records_to_process_list = list(records_to_process)
+            for i in range(0, total_count, batch_size):
+                batch_shopify_ids = records_to_process_list[i : i + batch_size]
 
                 # Fetch only the raw records we need to process (database does the filtering)
                 raw_events = await db.rawcustomerevent.find_many(
@@ -887,9 +1041,9 @@ class MainTableStorageService:
                         error_count += len(batch_event_data)
 
                 # Log progress
-                progress_percent = min(100, (processed_count / total_new_count) * 100)
+                progress_percent = min(100, (processed_count / total_count) * 100)
                 self.logger.info(
-                    f"Processed {processed_count}/{total_new_count} customer events ({progress_percent:.1f}%)"
+                    f"Processed {processed_count}/{total_count} customer events ({progress_percent:.1f}%)"
                 )
 
             self.logger.info(
@@ -1922,3 +2076,41 @@ class MainTableStorageService:
                     },
                     data=prepared_data,
                 )
+
+    async def _publish_feature_computation_event(
+        self, shop_id: str, processed_count: int, duration_ms: int
+    ) -> None:
+        """Publish event to trigger feature computation after successful main table storage"""
+        try:
+            # Generate a unique job ID for this feature computation
+            job_id = f"feature_compute_{shop_id}_{now_utc().timestamp()}"
+
+            # Prepare event metadata
+            metadata = {
+                "processed_count": processed_count,
+                "storage_duration_ms": duration_ms,
+                "trigger_source": "main_table_storage",
+                "timestamp": now_utc().isoformat(),
+            }
+
+            # Publish the event
+            event_id = await streams_manager.publish_features_computed_event(
+                job_id=job_id,
+                shop_id=shop_id,
+                features_ready=False,  # Features need to be computed
+                metadata=metadata,
+            )
+
+            self.logger.info(
+                f"Published feature computation event",
+                shop_id=shop_id,
+                job_id=job_id,
+                event_id=event_id,
+                processed_count=processed_count,
+            )
+
+        except Exception as e:
+            # Don't fail the main storage operation if event publishing fails
+            self.logger.error(
+                f"Failed to publish feature computation event for shop {shop_id}: {str(e)}"
+            )

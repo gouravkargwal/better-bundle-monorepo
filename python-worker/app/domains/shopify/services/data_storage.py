@@ -366,24 +366,24 @@ class ShopifyDataStorageService:
                 await db_client.rawproduct.create_many(data=batch_data)
                 batch_metrics["new"] = len(products)
             else:
-                # Incremental: timestamp-based approach
+                # Incremental: timestamp-based approach with batch lookup
                 current_time = now_utc()
                 new_products = []
                 updated_products = []
 
+                # Extract all product IDs first
+                product_ids = []
+                product_data_map = {}
+
                 for product in products:
                     product_id = self._extract_product_id(product)
-                    created_at, updated_at = self._extract_shopify_timestamps(product)
-
                     if not product_id:
                         continue
 
-                    # Check if product exists
-                    existing_product = await db_client.rawproduct.find_first(
-                        where={"shopId": shop_id, "shopifyId": product_id}
-                    )
+                    product_ids.append(product_id)
+                    created_at, updated_at = self._extract_shopify_timestamps(product)
 
-                    product_data = {
+                    product_data_map[product_id] = {
                         "shopId": shop_id,
                         "payload": self._serialize_product(product),
                         "extractedAt": current_time,
@@ -392,14 +392,37 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
+                # Batch lookup all existing products in a single query
+                existing_products = {}
+                if product_ids:
+                    existing_records = await db_client.rawproduct.find_many(
+                        where={"shopId": shop_id, "shopifyId": {"in": product_ids}}
+                    )
+                    existing_products = {
+                        record.shopifyId: record for record in existing_records
+                    }
+
+                # Process each product using the batch lookup results
+                for product_id, product_data in product_data_map.items():
+                    existing_product = existing_products.get(product_id)
+
                     if not existing_product:
                         # New product
                         new_products.append(product_data)
-                    elif updated_at and existing_product.shopifyUpdatedAt:
+                    elif (
+                        product_data["shopifyUpdatedAt"]
+                        and existing_product.shopifyUpdatedAt
+                    ):
                         # Check if product was updated
-                        if updated_at > existing_product.shopifyUpdatedAt:
+                        if (
+                            product_data["shopifyUpdatedAt"]
+                            > existing_product.shopifyUpdatedAt
+                        ):
                             updated_products.append(product_data)
-                    elif not existing_product.shopifyUpdatedAt and updated_at:
+                    elif (
+                        not existing_product.shopifyUpdatedAt
+                        and product_data["shopifyUpdatedAt"]
+                    ):
                         # Existing product without timestamp, add timestamp
                         updated_products.append(product_data)
 
@@ -408,19 +431,21 @@ class ShopifyDataStorageService:
                     await db_client.rawproduct.create_many(data=new_products)
                     batch_metrics["new"] = len(new_products)
 
-                # Update existing products
+                # Update existing products (optimized batch update)
                 if updated_products:
+                    # Use raw SQL for efficient batch updates
                     for product_data in updated_products:
-                        await db_client.rawproduct.update_many(
-                            where={
-                                "shopId": shop_id,
-                                "shopifyId": product_data["shopifyId"],
-                            },
-                            data={
-                                "payload": product_data["payload"],
-                                "extractedAt": product_data["extractedAt"],
-                                "shopifyUpdatedAt": product_data["shopifyUpdatedAt"],
-                            },
+                        await db_client.query_raw(
+                            """
+                            UPDATE "RawProduct" 
+                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
+                            WHERE "shopId" = $4 AND "shopifyId" = $5
+                            """,
+                            product_data["payload"],
+                            product_data["extractedAt"],
+                            product_data["shopifyUpdatedAt"],
+                            shop_id,
+                            product_data["shopifyId"],
                         )
                     batch_metrics["updated"] = len(updated_products)
 
@@ -718,24 +743,24 @@ class ShopifyDataStorageService:
                 await db_client.raworder.create_many(data=batch_data)
                 batch_metrics["new"] = len(orders)
             else:
-                # Incremental: timestamp-based approach
+                # Incremental: timestamp-based approach with batch lookup
                 current_time = now_utc()
                 new_orders = []
                 updated_orders = []
 
+                # Extract all order IDs first
+                order_ids = []
+                order_data_map = {}
+
                 for order in orders:
                     order_id = self._extract_order_id(order)
-                    created_at, updated_at = self._extract_shopify_timestamps(order)
-
                     if not order_id:
                         continue
 
-                    # Check if order exists
-                    existing_order = await db_client.raworder.find_first(
-                        where={"shopId": shop_id, "shopifyId": order_id}
-                    )
+                    order_ids.append(order_id)
+                    created_at, updated_at = self._extract_shopify_timestamps(order)
 
-                    order_data = {
+                    order_data_map[order_id] = {
                         "shopId": shop_id,
                         "payload": json.dumps(
                             order.dict() if hasattr(order, "dict") else order,
@@ -747,14 +772,37 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
+                # Batch lookup all existing orders in a single query
+                existing_orders = {}
+                if order_ids:
+                    existing_records = await db_client.raworder.find_many(
+                        where={"shopId": shop_id, "shopifyId": {"in": order_ids}}
+                    )
+                    existing_orders = {
+                        record.shopifyId: record for record in existing_records
+                    }
+
+                # Process each order using the batch lookup results
+                for order_id, order_data in order_data_map.items():
+                    existing_order = existing_orders.get(order_id)
+
                     if not existing_order:
                         # New order
                         new_orders.append(order_data)
-                    elif updated_at and existing_order.shopifyUpdatedAt:
+                    elif (
+                        order_data["shopifyUpdatedAt"]
+                        and existing_order.shopifyUpdatedAt
+                    ):
                         # Check if order was updated
-                        if updated_at > existing_order.shopifyUpdatedAt:
+                        if (
+                            order_data["shopifyUpdatedAt"]
+                            > existing_order.shopifyUpdatedAt
+                        ):
                             updated_orders.append(order_data)
-                    elif not existing_order.shopifyUpdatedAt and updated_at:
+                    elif (
+                        not existing_order.shopifyUpdatedAt
+                        and order_data["shopifyUpdatedAt"]
+                    ):
                         # Existing order without timestamp, add timestamp
                         updated_orders.append(order_data)
 
@@ -763,19 +811,21 @@ class ShopifyDataStorageService:
                     await db_client.raworder.create_many(data=new_orders)
                     batch_metrics["new"] = len(new_orders)
 
-                # Update existing orders
+                # Update existing orders (optimized batch update)
                 if updated_orders:
+                    # Use raw SQL for efficient batch updates
                     for order_data in updated_orders:
-                        await db_client.raworder.update_many(
-                            where={
-                                "shopId": shop_id,
-                                "shopifyId": order_data["shopifyId"],
-                            },
-                            data={
-                                "payload": order_data["payload"],
-                                "extractedAt": order_data["extractedAt"],
-                                "shopifyUpdatedAt": order_data["shopifyUpdatedAt"],
-                            },
+                        await db_client.query_raw(
+                            """
+                            UPDATE "RawOrder" 
+                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
+                            WHERE "shopId" = $4 AND "shopifyId" = $5
+                            """,
+                            order_data["payload"],
+                            order_data["extractedAt"],
+                            order_data["shopifyUpdatedAt"],
+                            shop_id,
+                            order_data["shopifyId"],
                         )
                     batch_metrics["updated"] = len(updated_orders)
 
@@ -874,24 +924,24 @@ class ShopifyDataStorageService:
                 batch_metrics["new"] = len(customers)
                 logger.info(f"Full refresh: {len(customers)} customers stored")
             else:
-                # Incremental: timestamp-based approach
+                # Incremental: timestamp-based approach with batch lookup
                 current_time = now_utc()
                 new_customers = []
                 updated_customers = []
 
+                # Extract all customer IDs first
+                customer_ids = []
+                customer_data_map = {}
+
                 for customer in customers:
                     customer_id = self._extract_customer_id(customer)
-                    created_at, updated_at = self._extract_shopify_timestamps(customer)
-
                     if not customer_id:
                         continue
 
-                    # Check if customer exists
-                    existing_customer = await db_client.rawcustomer.find_first(
-                        where={"shopId": shop_id, "shopifyId": customer_id}
-                    )
+                    customer_ids.append(customer_id)
+                    created_at, updated_at = self._extract_shopify_timestamps(customer)
 
-                    customer_data = {
+                    customer_data_map[customer_id] = {
                         "shopId": shop_id,
                         "payload": json.dumps(
                             customer.dict() if hasattr(customer, "dict") else customer,
@@ -903,14 +953,37 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
+                # Batch lookup all existing customers in a single query
+                existing_customers = {}
+                if customer_ids:
+                    existing_records = await db_client.rawcustomer.find_many(
+                        where={"shopId": shop_id, "shopifyId": {"in": customer_ids}}
+                    )
+                    existing_customers = {
+                        record.shopifyId: record for record in existing_records
+                    }
+
+                # Process each customer using the batch lookup results
+                for customer_id, customer_data in customer_data_map.items():
+                    existing_customer = existing_customers.get(customer_id)
+
                     if not existing_customer:
                         # New customer
                         new_customers.append(customer_data)
-                    elif updated_at and existing_customer.shopifyUpdatedAt:
+                    elif (
+                        customer_data["shopifyUpdatedAt"]
+                        and existing_customer.shopifyUpdatedAt
+                    ):
                         # Check if customer was updated
-                        if updated_at > existing_customer.shopifyUpdatedAt:
+                        if (
+                            customer_data["shopifyUpdatedAt"]
+                            > existing_customer.shopifyUpdatedAt
+                        ):
                             updated_customers.append(customer_data)
-                    elif not existing_customer.shopifyUpdatedAt and updated_at:
+                    elif (
+                        not existing_customer.shopifyUpdatedAt
+                        and customer_data["shopifyUpdatedAt"]
+                    ):
                         # Existing customer without timestamp, add timestamp
                         updated_customers.append(customer_data)
 
@@ -922,19 +995,21 @@ class ShopifyDataStorageService:
                         f"Incremental: {len(new_customers)} new customers stored"
                     )
 
-                # Update existing customers
+                # Update existing customers (optimized batch update)
                 if updated_customers:
+                    # Use raw SQL for efficient batch updates
                     for customer_data in updated_customers:
-                        await db_client.rawcustomer.update_many(
-                            where={
-                                "shopId": shop_id,
-                                "shopifyId": customer_data["shopifyId"],
-                            },
-                            data={
-                                "payload": customer_data["payload"],
-                                "extractedAt": customer_data["extractedAt"],
-                                "shopifyUpdatedAt": customer_data["shopifyUpdatedAt"],
-                            },
+                        await db_client.query_raw(
+                            """
+                            UPDATE "RawCustomer" 
+                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
+                            WHERE "shopId" = $4 AND "shopifyId" = $5
+                            """,
+                            customer_data["payload"],
+                            customer_data["extractedAt"],
+                            customer_data["shopifyUpdatedAt"],
+                            shop_id,
+                            customer_data["shopifyId"],
                         )
                     batch_metrics["updated"] = len(updated_customers)
                     logger.info(
@@ -1010,26 +1085,26 @@ class ShopifyDataStorageService:
                 metrics.new_items = len(collections)
                 logger.info(f"Full refresh: {len(collections)} collections stored")
             else:
-                # Incremental: efficient batch approach using shopifyId
+                # Incremental: efficient batch approach with batch lookup
                 current_time = now_utc()
                 new_collections = []
                 updated_collections = []
 
+                # Extract all collection IDs first
+                collection_ids = []
+                collection_data_map = {}
+
                 for collection in collections:
                     collection_id = self._extract_collection_id(collection)
+                    if not collection_id:
+                        continue
+
+                    collection_ids.append(collection_id)
                     created_at, updated_at = self._extract_shopify_timestamps(
                         collection
                     )
 
-                    if not collection_id:
-                        continue
-
-                    # Check if collection exists using shopifyId
-                    existing_collection = await db.rawcollection.find_first(
-                        where={"shopId": shop_id, "shopifyId": collection_id}
-                    )
-
-                    collection_data = {
+                    collection_data_map[collection_id] = {
                         "shopId": shop_id,
                         "payload": json.dumps(
                             (
@@ -1045,14 +1120,37 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
+                # Batch lookup all existing collections in a single query
+                existing_collections = {}
+                if collection_ids:
+                    existing_records = await db.rawcollection.find_many(
+                        where={"shopId": shop_id, "shopifyId": {"in": collection_ids}}
+                    )
+                    existing_collections = {
+                        record.shopifyId: record for record in existing_records
+                    }
+
+                # Process each collection using the batch lookup results
+                for collection_id, collection_data in collection_data_map.items():
+                    existing_collection = existing_collections.get(collection_id)
+
                     if not existing_collection:
                         # New collection
                         new_collections.append(collection_data)
-                    elif updated_at and existing_collection.shopifyUpdatedAt:
+                    elif (
+                        collection_data["shopifyUpdatedAt"]
+                        and existing_collection.shopifyUpdatedAt
+                    ):
                         # Check if collection was updated
-                        if updated_at > existing_collection.shopifyUpdatedAt:
+                        if (
+                            collection_data["shopifyUpdatedAt"]
+                            > existing_collection.shopifyUpdatedAt
+                        ):
                             updated_collections.append(collection_data)
-                    elif not existing_collection.shopifyUpdatedAt and updated_at:
+                    elif (
+                        not existing_collection.shopifyUpdatedAt
+                        and collection_data["shopifyUpdatedAt"]
+                    ):
                         # Existing collection without timestamp, add timestamp
                         updated_collections.append(collection_data)
 
@@ -1061,19 +1159,21 @@ class ShopifyDataStorageService:
                     await db.rawcollection.create_many(data=new_collections)
                     metrics.new_items = len(new_collections)
 
-                # Update existing collections
+                # Update existing collections (optimized batch update)
                 if updated_collections:
+                    # Use raw SQL for efficient batch updates
                     for collection_data in updated_collections:
-                        await db.rawcollection.update_many(
-                            where={
-                                "shopId": shop_id,
-                                "shopifyId": collection_data["shopifyId"],
-                            },
-                            data={
-                                "payload": collection_data["payload"],
-                                "extractedAt": collection_data["extractedAt"],
-                                "shopifyUpdatedAt": collection_data["shopifyUpdatedAt"],
-                            },
+                        await db.query_raw(
+                            """
+                            UPDATE "RawCollection" 
+                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
+                            WHERE "shopId" = $4 AND "shopifyId" = $5
+                            """,
+                            collection_data["payload"],
+                            collection_data["extractedAt"],
+                            collection_data["shopifyUpdatedAt"],
+                            shop_id,
+                            collection_data["shopifyId"],
                         )
                     metrics.updated_items = len(updated_collections)
 
@@ -1150,24 +1250,24 @@ class ShopifyDataStorageService:
                 batch_metrics["new"] = len(events)
                 logger.info(f"Full refresh: {len(events)} customer events stored")
             else:
-                # Incremental: efficient batch approach using shopifyId
+                # Incremental: efficient batch approach with batch lookup
                 current_time = now_utc()
                 new_events = []
                 updated_events = []
 
+                # Extract all event IDs first
+                event_ids = []
+                event_data_map = {}
+
                 for event in events:
                     event_id = self._extract_customer_event_id(event)
-                    created_at, updated_at = self._extract_shopify_timestamps(event)
-
                     if not event_id:
                         continue
 
-                    # Check if event exists using shopifyId
-                    existing_event = await db_client.rawcustomerevent.find_first(
-                        where={"shopId": shop_id, "shopifyId": event_id}
-                    )
+                    event_ids.append(event_id)
+                    created_at, updated_at = self._extract_shopify_timestamps(event)
 
-                    event_data = {
+                    event_data_map[event_id] = {
                         "shopId": shop_id,
                         "payload": json.dumps(
                             event.dict() if hasattr(event, "dict") else event,
@@ -1179,14 +1279,37 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
+                # Batch lookup all existing events in a single query
+                existing_events = {}
+                if event_ids:
+                    existing_records = await db_client.rawcustomerevent.find_many(
+                        where={"shopId": shop_id, "shopifyId": {"in": event_ids}}
+                    )
+                    existing_events = {
+                        record.shopifyId: record for record in existing_records
+                    }
+
+                # Process each event using the batch lookup results
+                for event_id, event_data in event_data_map.items():
+                    existing_event = existing_events.get(event_id)
+
                     if not existing_event:
                         # New event
                         new_events.append(event_data)
-                    elif updated_at and existing_event.shopifyUpdatedAt:
+                    elif (
+                        event_data["shopifyUpdatedAt"]
+                        and existing_event.shopifyUpdatedAt
+                    ):
                         # Check if event was updated
-                        if updated_at > existing_event.shopifyUpdatedAt:
+                        if (
+                            event_data["shopifyUpdatedAt"]
+                            > existing_event.shopifyUpdatedAt
+                        ):
                             updated_events.append(event_data)
-                    elif not existing_event.shopifyUpdatedAt and updated_at:
+                    elif (
+                        not existing_event.shopifyUpdatedAt
+                        and event_data["shopifyUpdatedAt"]
+                    ):
                         # Existing event without timestamp, add timestamp
                         updated_events.append(event_data)
 
@@ -1195,19 +1318,21 @@ class ShopifyDataStorageService:
                     await db_client.rawcustomerevent.create_many(data=new_events)
                     batch_metrics["new"] = len(new_events)
 
-                # Update existing events
+                # Update existing events (optimized batch update)
                 if updated_events:
+                    # Use raw SQL for efficient batch updates
                     for event_data in updated_events:
-                        await db_client.rawcustomerevent.update_many(
-                            where={
-                                "shopId": shop_id,
-                                "shopifyId": event_data["shopifyId"],
-                            },
-                            data={
-                                "payload": event_data["payload"],
-                                "extractedAt": event_data["extractedAt"],
-                                "shopifyUpdatedAt": event_data["shopifyUpdatedAt"],
-                            },
+                        await db_client.query_raw(
+                            """
+                            UPDATE "RawCustomerEvent" 
+                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
+                            WHERE "shopId" = $4 AND "shopifyId" = $5
+                            """,
+                            event_data["payload"],
+                            event_data["extractedAt"],
+                            event_data["shopifyUpdatedAt"],
+                            shop_id,
+                            event_data["shopifyId"],
                         )
                     batch_metrics["updated"] = len(updated_events)
 

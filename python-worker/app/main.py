@@ -23,7 +23,6 @@ from app.domains.shopify.services import (
 from app.domains.ml.services import (
     FeatureEngineeringService,
     GorseMLService,
-    MLPipelineService,
 )
 from app.domains.analytics.services import (
     BusinessMetricsService,
@@ -40,6 +39,7 @@ from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
+from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -105,9 +105,13 @@ async def initialize_services():
             shopify_service=services["shopify"]
         )
 
-        # Register and start only data collection consumer
+        # Initialize feature computation consumer
+        services["feature_computation_consumer"] = FeatureComputationConsumer()
+
+        # Register and start consumers
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
+            feature_computation_consumer=services["feature_computation_consumer"],
         )
 
         # Start consumer manager
@@ -134,10 +138,6 @@ async def get_service(service_name: str):
                 await get_service("feature_engineering")
             if "gorse_ml" not in services:
                 await get_service("gorse_ml")
-            services["ml_pipeline"] = MLPipelineService(
-                feature_service=services["feature_engineering"],
-                gorse_service=services["gorse_ml"],
-            )
         elif service_name == "business_metrics":
             services["business_metrics"] = BusinessMetricsService()
         elif service_name == "performance_analytics":
@@ -181,6 +181,8 @@ async def get_service(service_name: str):
                 product_analytics_service=services["product_analytics"],
                 revenue_analytics_service=services["revenue_analytics"],
             )
+        elif service_name == "feature_computation_consumer":
+            services["feature_computation_consumer"] = FeatureComputationConsumer()
 
     return services[service_name]
 
@@ -270,6 +272,51 @@ async def get_data_status(shop_id: str):
 
     except Exception as e:
         logger.error(f"Failed to get data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Feature computation endpoints
+@app.post("/api/features/compute")
+async def compute_features(
+    shop_id: str,
+    batch_size: int = 100,
+    background_tasks: BackgroundTasks = None,
+):
+    """Compute features for a shop"""
+    try:
+        # Lazy load feature engineering service
+        feature_service = await get_service("feature_engineering")
+
+        if background_tasks:
+            # Start feature computation in background
+            background_tasks.add_task(
+                feature_service.run_feature_pipeline_for_shop,
+                shop_id,
+                batch_size,
+            )
+
+            return {
+                "message": "Feature computation started",
+                "shop_id": shop_id,
+                "batch_size": batch_size,
+                "status": "processing",
+                "timestamp": now_utc().isoformat(),
+            }
+        else:
+            # Run synchronously
+            result = await feature_service.run_feature_pipeline_for_shop(
+                shop_id, batch_size
+            )
+
+            return {
+                "message": "Feature computation completed",
+                "shop_id": shop_id,
+                "result": result,
+                "timestamp": now_utc().isoformat(),
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to compute features: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

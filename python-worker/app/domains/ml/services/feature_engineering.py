@@ -2,18 +2,15 @@
 Feature engineering service implementation for BetterBundle Python Worker
 """
 
-import asyncio
-from typing import Dict, Any, List, Optional, Union
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
 import math
-import statistics
 
 from app.core.logging import get_logger
-from app.shared.decorators import async_timing
 from app.shared.helpers import now_utc
+from app.core.database.simple_db_client import get_database
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
-from ..models import MLFeatures, MLModel, MLTrainingJob, MLPrediction
+from ..models import MLFeatures
 from app.domains.shopify.models import (
     ShopifyShop,
     ShopifyProduct,
@@ -39,6 +36,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         # Feature importance weights
         self.feature_importance_weights = self._initialize_feature_importance()
+
+        # Database client
+        self._db_client = None
 
     async def compute_product_features(
         self,
@@ -334,7 +334,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Collection-performance features
             features.update(
-                self._compute_collection_performance_features(
+                self._compute_collection_performance_features_batch(
                     collections, products, orders
                 )
             )
@@ -971,7 +971,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             "total_spent": customer.total_spent,
             "has_phone": 1 if customer.phone else 0,
             "has_address": 1 if customer.default_address else 0,
-            "is_verified": 1 if customer.verified_email else 0,
+            "is_verified": (
+                1 if customer.email else 0
+            ),  # Use email presence as verification
             "accepts_marketing": 1 if customer.accepts_marketing else 0,
             "tags_count": len(customer.tags) if customer.tags else 0,
         }
@@ -1157,7 +1159,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         return {
             "collection_id": collection.id,
             "title_length": len(collection.title or ""),
-            "description_length": len(collection.body_html or ""),
+            "description_length": len(collection.description_html or ""),
             "products_count": collection.products_count,
             "is_published": 1 if collection.is_published else 0,
             "is_automated": 1 if collection.is_automated else 0,
@@ -1362,7 +1364,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             ),
         }
 
-    def _compute_collection_performance_features(
+    def _compute_collection_performance_features_batch(
         self,
         collections: List[ShopifyCollection],
         products: List[ShopifyProduct],
@@ -1561,10 +1563,1153 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             self._compute_product_customer_interactions(products, customers, orders)
         )
         features.update(
-            self._compute_collection_performance_features(collections, products, orders)
+            self._compute_collection_performance_features_batch(
+                collections, products, orders
+            )
         )
         features.update(self._compute_customer_segment_features(customers, orders, []))
         features.update(self._compute_product_category_features(products, collections))
         features.update(self._compute_time_series_features(orders, []))
 
         return features
+
+    # Main table data reading and feature pipeline methods
+
+    async def _get_database(self):
+        """Get or initialize the database client"""
+        if self._db_client is None:
+            self._db_client = await get_database()
+        return self._db_client
+
+    async def run_feature_pipeline_for_shop(
+        self, shop_id: str, batch_size: int = 100
+    ) -> Dict[str, Any]:
+        """Run complete feature engineering pipeline for a shop using batch processing"""
+        try:
+            logger.info(f"Starting feature pipeline for shop: {shop_id}")
+
+            # Read shop info only
+            shop_data = await self._read_shop_data_from_main_tables(shop_id)
+            if not shop_data:
+                logger.warning(f"No shop found: {shop_id}")
+                return {"success": False, "message": "No shop found"}
+
+            shop = shop_data["shop"]
+            results = {}
+
+            # Process products in batches
+            product_count = await self._get_entity_count(shop_id, "products")
+            if product_count > 0:
+                logger.info(
+                    f"Processing {product_count} products in batches of {batch_size}"
+                )
+                results["product_features"] = await self._process_products_batch(
+                    shop_id, shop, batch_size, product_count
+                )
+
+            # Process customers in batches
+            customer_count = await self._get_entity_count(shop_id, "customers")
+            if customer_count > 0:
+                logger.info(
+                    f"Processing {customer_count} customers in batches of {batch_size}"
+                )
+                results["customer_features"] = await self._process_customers_batch(
+                    shop_id, shop, batch_size, customer_count
+                )
+
+            # Process collections in batches
+            collection_count = await self._get_entity_count(shop_id, "collections")
+            if collection_count > 0:
+                logger.info(
+                    f"Processing {collection_count} collections in batches of {batch_size}"
+                )
+                results["collection_features"] = await self._process_collections_batch(
+                    shop_id, shop, batch_size, collection_count
+                )
+
+            # Process interactions in batches
+            order_count = await self._get_entity_count(shop_id, "orders")
+            if order_count > 0:
+                logger.info(
+                    f"Processing {order_count} orders for interactions in batches of {batch_size}"
+                )
+                results["interaction_features"] = (
+                    await self._process_interactions_batch(
+                        shop_id, batch_size, order_count
+                    )
+                )
+
+            logger.info(f"Feature pipeline completed for shop: {shop_id}")
+            return {"success": True, "results": results}
+
+        except Exception as e:
+            logger.error(f"Feature pipeline failed for shop {shop_id}: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def _read_shop_data_from_main_tables(self, shop_id: str) -> Dict[str, Any]:
+        """Read shop info only - other data will be loaded in batches"""
+        try:
+            db = await self._get_database()
+
+            # Read shop info only
+            shop_result = await db.query_raw(
+                'SELECT * FROM "Shop" WHERE id = $1', shop_id
+            )
+            if not shop_result:
+                return None
+            shop_data = shop_result[0]
+
+            return {
+                "shop": self._convert_shop_data(shop_data),
+                "shop_id": shop_id,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to read shop data: {str(e)}")
+            return None
+
+    async def _get_entity_count(self, shop_id: str, entity_type: str) -> int:
+        """Get count of entities for a shop"""
+        try:
+            db = await self._get_database()
+
+            table_map = {
+                "products": "ProductData",
+                "customers": "CustomerData",
+                "orders": "OrderData",
+                "collections": "CollectionData",
+                "events": "CustomerEventData",
+            }
+
+            table_name = table_map.get(entity_type)
+            if not table_name:
+                return 0
+
+            result = await db.query_raw(
+                f'SELECT COUNT(*) as count FROM "{table_name}" WHERE "shopId" = $1',
+                shop_id,
+            )
+            return result[0]["count"] if result else 0
+
+        except Exception as e:
+            logger.error(f"Failed to get {entity_type} count: {str(e)}")
+            return 0
+
+    async def _read_entities_batch(
+        self, shop_id: str, entity_type: str, offset: int, limit: int
+    ) -> List[Dict]:
+        """Read a batch of entities from main tables"""
+        try:
+            db = await self._get_database()
+
+            table_map = {
+                "products": ("ProductData", self._convert_product_data),
+                "customers": ("CustomerData", self._convert_customer_data),
+                "orders": ("OrderData", self._convert_order_data),
+                "collections": ("CollectionData", self._convert_collection_data),
+                "events": ("CustomerEventData", self._convert_event_data),
+            }
+
+            table_name, converter = table_map.get(entity_type, (None, None))
+            if not table_name or not converter:
+                return []
+
+            result = await db.query_raw(
+                f'SELECT * FROM "{table_name}" WHERE "shopId" = $1 ORDER BY id LIMIT $2 OFFSET $3',
+                shop_id,
+                limit,
+                offset,
+            )
+
+            return [converter(row) for row in result]
+
+        except Exception as e:
+            logger.error(f"Failed to read {entity_type} batch: {str(e)}")
+            return []
+
+    # Batch processing methods
+
+    async def _process_products_batch(
+        self, shop_id: str, shop: Dict, batch_size: int, total_count: int
+    ) -> Dict[str, Any]:
+        """Process products in batches to avoid memory issues"""
+        total_saved = 0
+        total_processed = 0
+
+        for offset in range(0, total_count, batch_size):
+            # Load batch of products
+            products_batch = await self._read_entities_batch(
+                shop_id, "products", offset, batch_size
+            )
+            if not products_batch:
+                break
+
+            # Process and save batch
+            batch_result = await self._compute_and_save_product_features_batch(
+                shop_id, products_batch, shop
+            )
+            total_saved += batch_result.get("saved_count", 0)
+            total_processed += len(products_batch)
+
+            logger.debug(
+                f"Processed product batch {offset//batch_size + 1}: {len(products_batch)} products"
+            )
+
+        return {"saved_count": total_saved, "total_processed": total_processed}
+
+    async def _process_customers_batch(
+        self, shop_id: str, shop: Dict, batch_size: int, total_count: int
+    ) -> Dict[str, Any]:
+        """Process customers in batches"""
+        total_saved = 0
+        total_processed = 0
+
+        for offset in range(0, total_count, batch_size):
+            # Load batch of customers
+            customers_batch = await self._read_entities_batch(
+                shop_id, "customers", offset, batch_size
+            )
+            if not customers_batch:
+                break
+
+            # Process and save batch
+            batch_result = await self._compute_and_save_customer_features_batch(
+                shop_id, customers_batch, shop
+            )
+            total_saved += batch_result.get("saved_count", 0)
+            total_processed += len(customers_batch)
+
+            logger.debug(
+                f"Processed customer batch {offset//batch_size + 1}: {len(customers_batch)} customers"
+            )
+
+        return {"saved_count": total_saved, "total_processed": total_processed}
+
+    async def _process_collections_batch(
+        self, shop_id: str, shop: Dict, batch_size: int, total_count: int
+    ) -> Dict[str, Any]:
+        """Process collections in batches"""
+        total_saved = 0
+        total_processed = 0
+
+        for offset in range(0, total_count, batch_size):
+            # Load batch of collections
+            collections_batch = await self._read_entities_batch(
+                shop_id, "collections", offset, batch_size
+            )
+            if not collections_batch:
+                break
+
+            # Process and save batch
+            batch_result = await self._compute_and_save_collection_features_batch(
+                shop_id, collections_batch, shop
+            )
+            total_saved += batch_result.get("saved_count", 0)
+            total_processed += len(collections_batch)
+
+            logger.debug(
+                f"Processed collection batch {offset//batch_size + 1}: {len(collections_batch)} collections"
+            )
+
+        return {"saved_count": total_saved, "total_processed": total_processed}
+
+    async def _process_interactions_batch(
+        self, shop_id: str, batch_size: int, total_count: int
+    ) -> Dict[str, Any]:
+        """Process interactions in batches"""
+        total_saved = 0
+        total_processed = 0
+
+        for offset in range(0, total_count, batch_size):
+            # Load batch of orders
+            orders_batch = await self._read_entities_batch(
+                shop_id, "orders", offset, batch_size
+            )
+            if not orders_batch:
+                break
+
+            # Process and save batch
+            batch_result = await self._compute_and_save_interaction_features_batch(
+                shop_id, orders_batch
+            )
+            total_saved += batch_result.get("saved_count", 0)
+            total_processed += len(orders_batch)
+
+            logger.debug(
+                f"Processed interaction batch {offset//batch_size + 1}: {len(orders_batch)} orders"
+            )
+
+        return {"saved_count": total_saved, "total_processed": total_processed}
+
+    # Batch feature computation and saving methods (fixes N+1 problem)
+
+    async def _compute_and_save_product_features_batch(
+        self, shop_id: str, products: List[ShopifyProduct], shop: Dict
+    ) -> Dict[str, Any]:
+        """Compute and save product features in batch to avoid N+1 writes"""
+        try:
+            db = await self._get_database()
+
+            # Prepare batch data
+            batch_data = []
+            for product in products:
+                features = await self.compute_product_features(product, shop)
+
+                batch_data.append(
+                    (
+                        shop_id,
+                        product.id,
+                        features.get("total_orders", 0),
+                        self._get_price_tier(features.get("avg_price", 0)),
+                        product.product_type,
+                        features.get("variant_count", 0) / 10.0,
+                        features.get("image_count", 0) / 10.0,
+                        features.get("tag_diversity", 0) / 10.0,
+                        1 if product.product_type else 0,
+                        1 if product.vendor else 0,
+                        now_utc(),
+                    )
+                )
+
+            if not batch_data:
+                return {"saved_count": 0, "total_products": 0}
+
+            # Use Prisma's upsert method for each product feature to handle auto-generated IDs
+            saved_count = 0
+            for product_data in batch_data:
+                try:
+                    # Try to find existing record first
+                    existing = await db.productfeatures.find_first(
+                        where={
+                            "shopId": product_data[0],
+                            "productId": product_data[1],
+                        }
+                    )
+
+                    if existing:
+                        # Update existing record
+                        await db.productfeatures.update(
+                            where={"id": existing.id},
+                            data={
+                                "popularity": product_data[2],
+                                "priceTier": product_data[3],
+                                "category": product_data[4],
+                                "variantComplexity": product_data[5],
+                                "imageRichness": product_data[6],
+                                "tagDiversity": product_data[7],
+                                "categoryEncoded": product_data[8],
+                                "vendorScore": product_data[9],
+                                "lastComputedAt": product_data[10],
+                            },
+                        )
+                    else:
+                        # Create new record
+                        await db.productfeatures.create(
+                            data={
+                                "shopId": product_data[0],
+                                "productId": product_data[1],
+                                "popularity": product_data[2],
+                                "priceTier": product_data[3],
+                                "category": product_data[4],
+                                "variantComplexity": product_data[5],
+                                "imageRichness": product_data[6],
+                                "tagDiversity": product_data[7],
+                                "categoryEncoded": product_data[8],
+                                "vendorScore": product_data[9],
+                                "lastComputedAt": product_data[10],
+                            }
+                        )
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to upsert product feature: {str(e)}")
+                    continue
+
+            return {"saved_count": len(batch_data), "total_products": len(products)}
+
+        except Exception as e:
+            logger.error(f"Failed to save product features batch: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_customer_features_batch(
+        self, shop_id: str, customers: List[ShopifyCustomer], shop: Dict
+    ) -> Dict[str, Any]:
+        """Compute and save customer features in batch"""
+        try:
+            db = await self._get_database()
+
+            # Prepare batch data for UserFeatures
+            user_features_batch = []
+            behavior_features_batch = []
+
+            for customer in customers:
+
+                # Get customer's orders and events (simplified for batch processing)
+                features = await self.compute_customer_features(customer, shop, [], [])
+
+                # UserFeatures batch
+                user_features_batch.append(
+                    (
+                        shop_id,
+                        customer.id,
+                        features.get("total_orders", 0),
+                        features.get("total_spent", 0),
+                        features.get("days_since_creation", 0),
+                        features.get("average_order_value", 0),
+                        None,  # preferred_category - simplified
+                        now_utc(),
+                    )
+                )
+
+                # CustomerBehaviorFeatures batch
+                behavior_features_batch.append(
+                    (
+                        shop_id,
+                        customer.id,
+                        features.get("unique_event_types", 0),
+                        features.get("event_count", 0),
+                        features.get("days_since_creation", 0),
+                        features.get("last_event_days", 0),
+                        features.get("total_orders", 0),
+                        features.get("engagement_score", 0),
+                        features.get("recency_score", 0),
+                        features.get("diversity_score", 0),
+                        features.get("behavioral_score", 0),
+                        now_utc(),
+                    )
+                )
+
+            saved_count = 0
+
+            # Use Prisma's upsert method for each user feature to handle auto-generated IDs
+            if user_features_batch:
+                for user_data in user_features_batch:
+                    try:
+                        # Try to find existing record first
+                        existing = await db.userfeatures.find_first(
+                            where={
+                                "shopId": user_data[0],
+                                "customerId": user_data[1],
+                            }
+                        )
+
+                        if existing:
+                            # Update existing record
+                            await db.userfeatures.update(
+                                where={"id": existing.id},
+                                data={
+                                    "totalPurchases": user_data[2],
+                                    "totalSpent": user_data[3],
+                                    "recencyDays": user_data[4],
+                                    "avgPurchaseIntervalDays": user_data[5],
+                                    "preferredCategory": user_data[6],
+                                    "lastComputedAt": user_data[7],
+                                },
+                            )
+                        else:
+                            # Create new record
+                            await db.userfeatures.create(
+                                data={
+                                    "shopId": user_data[0],
+                                    "customerId": user_data[1],
+                                    "totalPurchases": user_data[2],
+                                    "totalSpent": user_data[3],
+                                    "recencyDays": user_data[4],
+                                    "avgPurchaseIntervalDays": user_data[5],
+                                    "preferredCategory": user_data[6],
+                                    "lastComputedAt": user_data[7],
+                                }
+                            )
+                        saved_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to upsert user feature: {str(e)}")
+                        continue
+
+            # Use Prisma's upsert method for each customer behavior feature to handle auto-generated IDs
+            if behavior_features_batch:
+                for behavior_data in behavior_features_batch:
+                    try:
+                        # Try to find existing record first
+                        existing = await db.customerbehaviorfeatures.find_first(
+                            where={
+                                "shopId": behavior_data[0],
+                                "customerId": behavior_data[1],
+                            }
+                        )
+
+                        if existing:
+                            # Update existing record
+                            await db.customerbehaviorfeatures.update(
+                                where={"id": existing.id},
+                                data={
+                                    "eventDiversity": behavior_data[2],
+                                    "eventFrequency": behavior_data[3],
+                                    "daysSinceFirstEvent": behavior_data[4],
+                                    "daysSinceLastEvent": behavior_data[5],
+                                    "purchaseFrequency": behavior_data[6],
+                                    "engagementScore": behavior_data[7],
+                                    "recencyScore": behavior_data[8],
+                                    "diversityScore": behavior_data[9],
+                                    "behavioralScore": behavior_data[10],
+                                    "lastComputedAt": behavior_data[11],
+                                },
+                            )
+                        else:
+                            # Create new record
+                            await db.customerbehaviorfeatures.create(
+                                data={
+                                    "shopId": behavior_data[0],
+                                    "customerId": behavior_data[1],
+                                    "eventDiversity": behavior_data[2],
+                                    "eventFrequency": behavior_data[3],
+                                    "daysSinceFirstEvent": behavior_data[4],
+                                    "daysSinceLastEvent": behavior_data[5],
+                                    "purchaseFrequency": behavior_data[6],
+                                    "engagementScore": behavior_data[7],
+                                    "recencyScore": behavior_data[8],
+                                    "diversityScore": behavior_data[9],
+                                    "behavioralScore": behavior_data[10],
+                                    "lastComputedAt": behavior_data[11],
+                                }
+                            )
+                        saved_count += 1
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to upsert customer behavior feature: {str(e)}"
+                        )
+                        continue
+
+            return {"saved_count": saved_count, "total_customers": len(customers)}
+
+        except Exception as e:
+            logger.error(f"Failed to save customer features batch: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_collection_features_batch(
+        self, shop_id: str, collections: List[ShopifyCollection], shop: Dict
+    ) -> Dict[str, Any]:
+        """Compute and save collection features in batch"""
+        try:
+            db = await self._get_database()
+
+            # Prepare batch data
+            batch_data = []
+            for collection in collections:
+                features = await self.compute_collection_features(collection, shop, [])
+
+                batch_data.append(
+                    (
+                        shop_id,
+                        collection.id,
+                        features.get("products_count", 0),
+                        features.get("is_automated", False),
+                        features.get("performance_score", 0),
+                        features.get("seo_score", 0),
+                        features.get("image_score", 0),
+                        now_utc(),
+                    )
+                )
+
+            if not batch_data:
+                return {"saved_count": 0, "total_collections": 0}
+
+            # Use Prisma's upsert method for each collection feature to handle auto-generated IDs
+            saved_count = 0
+            for collection_data in batch_data:
+                try:
+                    # Try to find existing record first
+                    existing = await db.collectionfeatures.find_first(
+                        where={
+                            "shopId": collection_data[0],
+                            "collectionId": collection_data[1],
+                        }
+                    )
+
+                    if existing:
+                        # Update existing record
+                        await db.collectionfeatures.update(
+                            where={"id": existing.id},
+                            data={
+                                "productCount": collection_data[2],
+                                "isAutomated": collection_data[3],
+                                "performanceScore": collection_data[4],
+                                "seoScore": collection_data[5],
+                                "imageScore": collection_data[6],
+                                "lastComputedAt": collection_data[7],
+                            },
+                        )
+                    else:
+                        # Create new record
+                        await db.collectionfeatures.create(
+                            data={
+                                "shopId": collection_data[0],
+                                "collectionId": collection_data[1],
+                                "productCount": collection_data[2],
+                                "isAutomated": collection_data[3],
+                                "performanceScore": collection_data[4],
+                                "seoScore": collection_data[5],
+                                "imageScore": collection_data[6],
+                                "lastComputedAt": collection_data[7],
+                            }
+                        )
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to upsert collection feature: {str(e)}")
+                    continue
+
+            return {
+                "saved_count": saved_count,
+                "total_collections": len(collections),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to save collection features batch: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_interaction_features_batch(
+        self, shop_id: str, orders: List[ShopifyOrder]
+    ) -> Dict[str, Any]:
+        """Compute and save interaction features in batch"""
+        try:
+            db = await self._get_database()
+
+            # Group interactions by customer-product pairs
+            interactions = {}
+            for order in orders:
+                customer_id = order.customer_id
+                if not customer_id:
+                    continue
+
+                for line_item in order.line_items:
+                    product_id = line_item.product_id
+                    if not product_id:
+                        continue
+
+                    key = f"{customer_id}_{product_id}"
+                    if key not in interactions:
+                        interactions[key] = {
+                            "customerId": customer_id,
+                            "productId": product_id,
+                            "purchaseCount": 0,
+                            "lastPurchaseDate": None,
+                        }
+
+                    interactions[key]["purchaseCount"] += line_item.quantity
+                    order_date = order.created_at
+                    if order_date and (
+                        not interactions[key]["lastPurchaseDate"]
+                        or order_date > interactions[key]["lastPurchaseDate"]
+                    ):
+                        interactions[key]["lastPurchaseDate"] = order_date
+
+            if not interactions:
+                return {"saved_count": 0, "total_interactions": 0}
+
+            # Prepare batch data
+            batch_data = []
+            for interaction in interactions.values():
+                batch_data.append(
+                    (
+                        shop_id,
+                        interaction["customerId"],
+                        interaction["productId"],
+                        interaction["purchaseCount"],
+                        interaction["lastPurchaseDate"],
+                        interaction["purchaseCount"] * 0.9,  # Simple time decay
+                        now_utc(),
+                    )
+                )
+
+            # Use Prisma's upsert method for each interaction feature to handle auto-generated IDs
+            saved_count = 0
+            for interaction_data in batch_data:
+                try:
+                    # Try to find existing record first
+                    existing = await db.interactionfeatures.find_first(
+                        where={
+                            "shopId": interaction_data[0],
+                            "customerId": interaction_data[1],
+                            "productId": interaction_data[2],
+                        }
+                    )
+
+                    if existing:
+                        # Update existing record
+                        await db.interactionfeatures.update(
+                            where={"id": existing.id},
+                            data={
+                                "purchaseCount": interaction_data[3],
+                                "lastPurchaseDate": interaction_data[4],
+                                "timeDecayedWeight": interaction_data[5],
+                                "lastComputedAt": interaction_data[6],
+                            },
+                        )
+                    else:
+                        # Create new record
+                        await db.interactionfeatures.create(
+                            data={
+                                "shopId": interaction_data[0],
+                                "customerId": interaction_data[1],
+                                "productId": interaction_data[2],
+                                "purchaseCount": interaction_data[3],
+                                "lastPurchaseDate": interaction_data[4],
+                                "timeDecayedWeight": interaction_data[5],
+                                "lastComputedAt": interaction_data[6],
+                            }
+                        )
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to upsert interaction feature: {str(e)}")
+                    continue
+
+            return {
+                "saved_count": saved_count,
+                "total_interactions": len(interactions),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to save interaction features batch: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    # Legacy methods (kept for backward compatibility but now use batch processing)
+
+    async def _compute_and_save_product_features(
+        self, shop_id: str, products: List[Dict], shop: Dict
+    ) -> Dict[str, Any]:
+        """Compute and save product features"""
+        try:
+            db = await self._get_database()
+            saved_count = 0
+
+            for product_data in products:
+                # Convert to ShopifyProduct model
+                product = self._convert_product_data(product_data)
+
+                # Compute features
+                features = await self.compute_product_features(product, shop)
+
+                # Save to ProductFeatures table
+                await db.execute_raw(
+                    """
+                    INSERT INTO "ProductFeatures" (
+                        "shopId", "productId", "popularity", "priceTier", "category",
+                        "variantComplexity", "imageRichness", "tagDiversity", 
+                        "categoryEncoded", "vendorScore", "lastComputedAt"
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    ON CONFLICT ("shopId", "productId") 
+                    DO UPDATE SET
+                        "popularity" = EXCLUDED."popularity",
+                        "priceTier" = EXCLUDED."priceTier", 
+                        "category" = EXCLUDED."category",
+                        "variantComplexity" = EXCLUDED."variantComplexity",
+                        "imageRichness" = EXCLUDED."imageRichness",
+                        "tagDiversity" = EXCLUDED."tagDiversity",
+                        "categoryEncoded" = EXCLUDED."categoryEncoded",
+                        "vendorScore" = EXCLUDED."vendorScore",
+                        "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    """,
+                    shop_id,
+                    product.id,
+                    features.get("total_orders", 0),
+                    self._get_price_tier(features.get("avg_price", 0)),
+                    product.product_type,
+                    features.get("variant_count", 0) / 10.0,  # Normalize
+                    features.get("image_count", 0) / 10.0,  # Normalize
+                    features.get("tag_diversity", 0) / 10.0,  # Normalize
+                    1 if product.product_type else 0,
+                    1 if product.vendor else 0,
+                    now_utc(),
+                )
+                saved_count += 1
+
+            return {"saved_count": saved_count, "total_products": len(products)}
+
+        except Exception as e:
+            logger.error(f"Failed to save product features: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_customer_features(
+        self,
+        shop_id: str,
+        customers: List[Dict],
+        shop: Dict,
+        orders: List[Dict],
+        events: List[Dict],
+    ) -> Dict[str, Any]:
+        """Compute and save customer features"""
+        try:
+            db = await self._get_database()
+            saved_count = 0
+
+            for customer_data in customers:
+                # Convert to ShopifyCustomer model
+                customer = self._convert_customer_data(customer_data)
+
+                # Get customer's orders and events
+                customer_orders = [
+                    o for o in orders if o.get("customerId") == customer.id
+                ]
+                customer_events = [
+                    e for e in events if e.get("customerId") == customer.id
+                ]
+
+                # Compute features
+                features = await self.compute_customer_features(
+                    customer, shop, customer_orders, customer_events
+                )
+
+                # Save to UserFeatures table
+                await db.execute_raw(
+                    """
+                    INSERT INTO "UserFeatures" (
+                        "shopId", "customerId", "totalPurchases", "totalSpent",
+                        "recencyDays", "avgPurchaseIntervalDays", "preferredCategory",
+                        "lastComputedAt"
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT ("shopId", "customerId")
+                    DO UPDATE SET
+                        "totalPurchases" = EXCLUDED."totalPurchases",
+                        "totalSpent" = EXCLUDED."totalSpent",
+                        "recencyDays" = EXCLUDED."recencyDays",
+                        "avgPurchaseIntervalDays" = EXCLUDED."avgPurchaseIntervalDays",
+                        "preferredCategory" = EXCLUDED."preferredCategory",
+                        "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    """,
+                    shop_id,
+                    customer.id,
+                    features.get("total_orders", 0),
+                    features.get("total_spent", 0),
+                    features.get("days_since_creation", 0),
+                    features.get("average_order_value", 0),
+                    (
+                        customer.default_address.country
+                        if customer.default_address
+                        else None
+                    ),
+                    now_utc(),
+                )
+
+                # Save to CustomerBehaviorFeatures table
+                await db.execute_raw(
+                    """
+                    INSERT INTO "CustomerBehaviorFeatures" (
+                        "shopId", "customerId", "eventDiversity", "eventFrequency",
+                        "daysSinceFirstEvent", "daysSinceLastEvent", "purchaseFrequency",
+                        "engagementScore", "recencyScore", "diversityScore", "behavioralScore",
+                        "lastComputedAt"
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT ("shopId", "customerId")
+                    DO UPDATE SET
+                        "eventDiversity" = EXCLUDED."eventDiversity",
+                        "eventFrequency" = EXCLUDED."eventFrequency",
+                        "daysSinceFirstEvent" = EXCLUDED."daysSinceFirstEvent",
+                        "daysSinceLastEvent" = EXCLUDED."daysSinceLastEvent",
+                        "purchaseFrequency" = EXCLUDED."purchaseFrequency",
+                        "engagementScore" = EXCLUDED."engagementScore",
+                        "recencyScore" = EXCLUDED."recencyScore",
+                        "diversityScore" = EXCLUDED."diversityScore",
+                        "behavioralScore" = EXCLUDED."behavioralScore",
+                        "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    """,
+                    shop_id,
+                    customer.id,
+                    features.get("unique_event_types", 0),
+                    features.get("event_count", 0),
+                    features.get("days_since_creation", 0),
+                    features.get("last_event_days", 0),
+                    features.get("total_orders", 0),
+                    features.get("engagement_score", 0),
+                    features.get("recency_score", 0),
+                    features.get("diversity_score", 0),
+                    features.get("behavioral_score", 0),
+                    now_utc(),
+                )
+
+                saved_count += 1
+
+            return {"saved_count": saved_count, "total_customers": len(customers)}
+
+        except Exception as e:
+            logger.error(f"Failed to save customer features: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_collection_features(
+        self, shop_id: str, collections: List[Dict], shop: Dict, products: List[Dict]
+    ) -> Dict[str, Any]:
+        """Compute and save collection features"""
+        try:
+            db = await self._get_database()
+            saved_count = 0
+
+            for collection_data in collections:
+                # Convert to ShopifyCollection model
+                collection = self._convert_collection_data(collection_data)
+
+                # Compute features
+                features = await self.compute_collection_features(
+                    collection, shop, products
+                )
+
+                # Save to CollectionFeatures table
+                await db.execute_raw(
+                    """
+                    INSERT INTO "CollectionFeatures" (
+                        "shopId", "collectionId", "productCount", "isAutomated",
+                        "performanceScore", "seoScore", "imageScore", "lastComputedAt"
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT ("shopId", "collectionId")
+                    DO UPDATE SET
+                        "productCount" = EXCLUDED."productCount",
+                        "isAutomated" = EXCLUDED."isAutomated",
+                        "performanceScore" = EXCLUDED."performanceScore",
+                        "seoScore" = EXCLUDED."seoScore",
+                        "imageScore" = EXCLUDED."imageScore",
+                        "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    """,
+                    shop_id,
+                    collection.id,
+                    features.get("products_count", 0),
+                    features.get("is_automated", False),
+                    features.get("performance_score", 0),
+                    features.get("seo_score", 0),
+                    features.get("image_score", 0),
+                    now_utc(),
+                )
+
+                saved_count += 1
+
+            return {"saved_count": saved_count, "total_collections": len(collections)}
+
+        except Exception as e:
+            logger.error(f"Failed to save collection features: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    async def _compute_and_save_interaction_features(
+        self, shop_id: str, orders: List[Dict], products: List[Dict]
+    ) -> Dict[str, Any]:
+        """Compute and save interaction features"""
+        try:
+            db = await self._get_database()
+            saved_count = 0
+
+            # Group interactions by customer-product pairs
+            interactions = {}
+            for order in orders:
+                customer_id = order.customer_id
+                if not customer_id:
+                    continue
+
+                for line_item in order.line_items:
+                    product_id = line_item.product_id
+                    if not product_id:
+                        continue
+
+                    key = f"{customer_id}_{product_id}"
+                    if key not in interactions:
+                        interactions[key] = {
+                            "customerId": customer_id,
+                            "productId": product_id,
+                            "purchaseCount": 0,
+                            "lastPurchaseDate": None,
+                        }
+
+                    interactions[key]["purchaseCount"] += line_item.quantity
+                    order_date = order.created_at
+                    if order_date and (
+                        not interactions[key]["lastPurchaseDate"]
+                        or order_date > interactions[key]["lastPurchaseDate"]
+                    ):
+                        interactions[key]["lastPurchaseDate"] = order_date
+
+            # Save interactions
+            for interaction in interactions.values():
+                await db.execute_raw(
+                    """
+                    INSERT INTO "InteractionFeatures" (
+                        "shopId", "customerId", "productId", "purchaseCount",
+                        "lastPurchaseDate", "timeDecayedWeight", "lastComputedAt"
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT ("shopId", "customerId", "productId")
+                    DO UPDATE SET
+                        "purchaseCount" = EXCLUDED."purchaseCount",
+                        "lastPurchaseDate" = EXCLUDED."lastPurchaseDate",
+                        "timeDecayedWeight" = EXCLUDED."timeDecayedWeight",
+                        "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    """,
+                    shop_id,
+                    interaction["customerId"],
+                    interaction["productId"],
+                    interaction["purchaseCount"],
+                    interaction["lastPurchaseDate"],
+                    interaction["purchaseCount"] * 0.9,  # Simple time decay
+                    now_utc(),
+                )
+                saved_count += 1
+
+            return {"saved_count": saved_count, "total_interactions": len(interactions)}
+
+        except Exception as e:
+            logger.error(f"Failed to save interaction features: {str(e)}")
+            return {"saved_count": 0, "error": str(e)}
+
+    # Helper methods for data conversion
+
+    def _convert_shop_data(self, shop_data: Dict) -> ShopifyShop:
+        """Convert database shop data to ShopifyShop model"""
+        # Extract domain from shopDomain and create myshopify_domain
+        shop_domain = shop_data.get("shopDomain", "")
+        myshopify_domain = (
+            shop_domain
+            if shop_domain.endswith(".myshopify.com")
+            else f"{shop_domain}.myshopify.com"
+        )
+
+        return ShopifyShop(
+            id=shop_data["id"],
+            name=shop_data.get("shopDomain", "Unknown Shop"),
+            domain=shop_domain,
+            email=shop_data.get("email"),
+            phone=None,
+            access_token=shop_data.get("accessToken"),
+            address1=None,
+            address2=None,
+            city=None,
+            province=None,
+            country=None,
+            zip=None,
+            currency=shop_data.get("currencyCode", "USD"),
+            primary_locale="en",  # Default value
+            timezone=None,
+            plan_name=shop_data.get("planType"),
+            plan_display_name=shop_data.get("planType"),
+            shop_owner=None,
+            has_storefront=False,
+            has_discounts=False,
+            has_gift_cards=False,
+            has_marketing=False,
+            has_multi_location=False,
+            google_analytics_account=None,
+            google_analytics_domain=None,
+            seo_title=None,
+            seo_description=None,
+            meta_description=None,
+            facebook_account=None,
+            instagram_account=None,
+            twitter_account=None,
+            myshopify_domain=myshopify_domain,
+            primary_location_id=None,
+            created_at=shop_data.get("createdAt", now_utc()),
+            updated_at=shop_data.get("updatedAt", now_utc()),
+            bb_installed_at=None,
+            bb_last_sync=None,
+            bb_sync_frequency="daily",
+            bb_ml_enabled=True,
+            raw_data=shop_data,
+        )
+
+    def _convert_product_data(self, product_data: Dict) -> ShopifyProduct:
+        """Convert database product data to ShopifyProduct model"""
+        return ShopifyProduct(
+            id=product_data["productId"],
+            title=product_data.get("title", ""),
+            handle=product_data.get("handle", ""),
+            body_html=product_data.get("descriptionHtml", ""),
+            product_type=product_data.get("productType", ""),
+            vendor=product_data.get("vendor", ""),
+            tags=product_data.get("tags", []),
+            status=product_data.get("status", "active").lower(),
+            price=product_data.get("price", 0),
+            compare_at_price=product_data.get("compareAtPrice"),
+            total_inventory=product_data.get("totalInventory", 0),
+            main_image_url=product_data.get("imageUrl"),
+            variant_count=len(product_data.get("variants") or []),
+            has_multiple_variants=len(product_data.get("variants") or []) > 1,
+            tag_count=len(product_data.get("tags") or []),
+            collection_count=len(product_data.get("collections") or []),
+            has_images=bool(product_data.get("imageUrl")),
+            image_count=len(product_data.get("images") or []),
+            is_published=product_data.get("isActive", False),
+            created_at=product_data.get("productCreatedAt") or now_utc(),
+            updated_at=product_data.get("productUpdatedAt") or now_utc(),
+            published_at=product_data.get("productCreatedAt") or now_utc(),
+            variants=[],  # Simplified for now
+            images=[],  # Simplified for now
+            options=[],  # Simplified for now
+            metafields=[],  # Simplified for now
+        )
+
+    def _convert_customer_data(self, customer_data: Dict) -> ShopifyCustomer:
+        """Convert database customer data to ShopifyCustomer model"""
+        return ShopifyCustomer(
+            id=customer_data["customerId"],
+            email=customer_data.get("email", ""),
+            first_name=customer_data.get("firstName", ""),
+            last_name=customer_data.get("lastName", ""),
+            phone=customer_data.get("phone"),
+            orders_count=customer_data.get("ordersCount", 0),
+            total_spent=customer_data.get("totalSpent", 0),
+            verified_email=customer_data.get("emailVerified", False),
+            accepts_marketing=customer_data.get("acceptsMarketing", False),
+            tags=customer_data.get("tags", []),
+            created_at=customer_data.get("customerCreatedAt") or now_utc(),
+            updated_at=customer_data.get("customerUpdatedAt") or now_utc(),
+            default_address=None,  # Simplified for now
+            addresses=[],  # Simplified for now
+        )
+
+    def _convert_order_data(self, order_data: Dict) -> ShopifyOrder:
+        """Convert database order data to ShopifyOrder model"""
+        return ShopifyOrder(
+            id=order_data["orderId"],
+            customer_id=order_data.get("customerId"),
+            total_price=order_data.get("totalPrice", 0),
+            subtotal_price=order_data.get("subtotalPrice", 0),
+            total_tax=order_data.get("totalTax", 0),
+            total_discounts=order_data.get("totalDiscounts", 0),
+            total_shipping_price_set=order_data.get("totalShippingPriceSet", 0),
+            net_payment_refunded=order_data.get("netPaymentRefunded", 0),
+            currency=order_data.get("currency", ""),
+            financial_status=order_data.get("financialStatus", ""),
+            fulfillment_status=order_data.get("fulfillmentStatus", ""),
+            created_at=order_data.get("orderCreatedAt") or now_utc(),
+            updated_at=order_data.get("orderUpdatedAt") or now_utc(),
+            line_items=[],  # Simplified for now
+            customer_orders_count=0,  # Not available
+        )
+
+    def _convert_collection_data(self, collection_data: Dict) -> ShopifyCollection:
+        """Convert database collection data to ShopifyCollection model"""
+        return ShopifyCollection(
+            id=collection_data["collectionId"],
+            title=collection_data.get("title", ""),
+            handle=collection_data.get("handle", ""),
+            body_html=collection_data.get("descriptionHtml", ""),
+            products_count=collection_data.get("productsCount", 0),
+            is_published=collection_data.get("isPublished", False),
+            is_automated=collection_data.get("isAutomated", False),
+            is_manual=not collection_data.get("isAutomated", True),
+            sort_order=collection_data.get("sortOrder", ""),
+            seo_title=collection_data.get("seoTitle"),
+            seo_description=collection_data.get("seoDescription"),
+            created_at=collection_data.get("collectionCreatedAt") or now_utc(),
+            updated_at=collection_data.get("collectionUpdatedAt") or now_utc(),
+            product_ids=collection_data.get("productIds", []),
+        )
+
+    def _convert_event_data(self, event_data: Dict) -> ShopifyCustomerEvent:
+        """Convert database event data to ShopifyCustomerEvent model"""
+        return ShopifyCustomerEvent(
+            id=event_data["eventId"],
+            customer_id=event_data.get("customerId"),
+            event_type=event_data.get("eventType", ""),
+            created_at=event_data.get("eventCreatedAt") or now_utc(),
+            properties=event_data.get("properties", {}),
+        )
+
+    def _get_price_tier(self, price: float) -> str:
+        """Convert price to tier"""
+        if price < 25:
+            return "low"
+        elif price < 100:
+            return "mid"
+        else:
+            return "high"
