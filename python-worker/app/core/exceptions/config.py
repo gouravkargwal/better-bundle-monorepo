@@ -20,17 +20,22 @@ class ConfigurationError(BetterBundleException):
         if details:
             config_details.update(details)
         super().__init__(
-            message=message,
-            error_code="CONFIG_ERROR",
-            details=config_details,
-            cause=cause,
+            message,
+            "CONFIG_ERROR",
+            config_details,
+            cause,
         )
 
 
 class EnvironmentVariableError(ConfigurationError):
     """Raised when a required environment variable is missing"""
 
-    def __init__(self, var_name: str, details: Optional[dict] = None, cause: Optional[Exception] = None):
+    def __init__(
+        self,
+        var_name: str,
+        details: Optional[dict] = None,
+        cause: Optional[Exception] = None,
+    ):
         env_details = {"missing_variable": var_name}
         if details:
             env_details.update(details)
@@ -45,13 +50,19 @@ class EnvironmentVariableError(ConfigurationError):
 class ConfigurationValidationError(ConfigurationError):
     """Raised when configuration validation fails"""
 
-    def __init__(self, message: str, validation_errors: list, details: Optional[dict] = None, cause: Optional[Exception] = None):
+    def __init__(
+        self,
+        message: str,
+        validation_errors: list,
+        details: Optional[dict] = None,
+        cause: Optional[Exception] = None,
+    ):
         validation_details = {"validation_errors": validation_errors}
         if details:
             validation_details.update(details)
         super().__init__(
-            message=message,
-            error_code="CONFIG_VALIDATION_ERROR",
-            details=validation_details,
-            cause=cause,
+            message,
+            "CONFIG_VALIDATION_ERROR",
+            validation_details,
+            cause,
         )

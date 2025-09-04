@@ -43,14 +43,17 @@ class ConsumerManager:
 
     def register_consumers(
         self,
-        data_collection_consumer: DataCollectionConsumer,
-        ml_training_consumer: MLTrainingConsumer,
-        analytics_consumer: AnalyticsConsumer,
+        data_collection_consumer: Optional[DataCollectionConsumer] = None,
+        ml_training_consumer: Optional[MLTrainingConsumer] = None,
+        analytics_consumer: Optional[AnalyticsConsumer] = None,
     ):
-        """Register all consumers with the manager"""
-        self.consumers["data_collection"] = data_collection_consumer
-        self.consumers["ml_training"] = ml_training_consumer
-        self.consumers["analytics"] = analytics_consumer
+        """Register consumers with the manager (all parameters are optional)"""
+        if data_collection_consumer:
+            self.consumers["data_collection"] = data_collection_consumer
+        if ml_training_consumer:
+            self.consumers["ml_training"] = ml_training_consumer
+        if analytics_consumer:
+            self.consumers["analytics"] = analytics_consumer
 
         self.logger.info(f"Registered {len(self.consumers)} consumers")
 

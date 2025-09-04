@@ -31,7 +31,7 @@ class RedisClient:
         )
         self._client: Optional[Redis] = None
         self._connection_time: Optional[float] = None
-        self._metrics = RedisMetrics(last_reset=time.time())
+        self._metrics = RedisMetrics(last_reset=str(time.time()))
         self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
@@ -234,7 +234,7 @@ class RedisClient:
 
     def reset_metrics(self) -> None:
         """Reset performance metrics"""
-        self._metrics = RedisMetrics(last_reset=time.time())
+        self._metrics = RedisMetrics(last_reset=str(time.time()))
         logger.info("Redis metrics reset")
 
 

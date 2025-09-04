@@ -9,52 +9,82 @@ datasource db {
 }
 
 model RawOrder {
-  id           String   @id @default(cuid())
-  shopId       String
-  payload      Json
-  extractedAt  DateTime @default(now())
+  id                String    @id @default(cuid())
+  shopId            String
+  payload           Json
+  extractedAt       DateTime  @default(now())
+  shopifyId         String?   // Shopify order ID for efficient lookups
+  shopifyCreatedAt  DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
   @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
   @@map("RawOrder")
 }
 
 model RawProduct {
-  id           String   @id @default(cuid())
-  shopId       String
-  payload      Json
-  extractedAt  DateTime @default(now())
+  id                String    @id @default(cuid())
+  shopId            String
+  payload           Json
+  extractedAt       DateTime  @default(now())
+  shopifyId         String?   // Shopify product ID for efficient lookups
+  shopifyCreatedAt  DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
   @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
   @@map("RawProduct")
 }
 
 model RawCustomer {
-  id           String   @id @default(cuid())
-  shopId       String
-  payload      Json
-  extractedAt  DateTime @default(now())
+  id                String    @id @default(cuid())
+  shopId            String
+  payload           Json
+  extractedAt       DateTime  @default(now())
+  shopifyId         String?   // Shopify customer ID for efficient lookups
+  shopifyCreatedAt  DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
   @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
   @@map("RawCustomer")
 }
 
 model RawCollection {
-  id           String   @id @default(cuid())
-  shopId       String
-  payload      Json
-  extractedAt  DateTime @default(now())
+  id                String    @id @default(cuid())
+  shopId            String
+  payload           Json
+  extractedAt       DateTime  @default(now())
+  shopifyId         String?   // Shopify collection ID for efficient lookups
+  shopifyCreatedAt  DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
   @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
   @@map("RawCollection")
 }
 
 model RawCustomerEvent {
-  id           String   @id @default(cuid())
-  shopId       String
-  payload      Json
-  extractedAt  DateTime @default(now())
+  id                String    @id @default(cuid())
+  shopId            String
+  payload           Json
+  extractedAt       DateTime  @default(now())
+  shopifyId         String?   // Shopify customer event ID for efficient lookups
+  shopifyCreatedAt  DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
   @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
   @@map("RawCustomerEvent")
 }
 

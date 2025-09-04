@@ -91,15 +91,21 @@ class RedisStreamsService {
     shopId: string;
     shopDomain: string;
     accessToken: string;
-    type: "analysis" | "incremental" | "scheduled";
+    type: "data_collection" | "analysis" | "incremental" | "scheduled";
     priority?: "high" | "normal" | "low";
   }): Promise<string> {
     if (!this.redis) {
       throw new Error("Redis Streams service not initialized");
     }
 
+    // Convert camelCase to snake_case for Python consumer compatibility
     const eventData = {
-      ...jobData,
+      job_id: jobData.jobId,
+      shop_id: jobData.shopId,
+      shop_domain: jobData.shopDomain,
+      access_token: jobData.accessToken,
+      job_type: jobData.type, // Convert 'type' to 'job_type'
+      priority: jobData.priority || "normal",
       timestamp: Date.now(),
       source: "shopify-app",
     };

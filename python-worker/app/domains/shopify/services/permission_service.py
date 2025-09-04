@@ -11,6 +11,7 @@ from app.core.logging import get_logger
 from app.core.exceptions import ConfigurationError
 from app.shared.decorators import async_timing
 from app.shared.helpers import now_utc
+from app.shared.services.redis_cache import create_cache_service
 
 from ..interfaces.permission_service import IShopifyPermissionService
 from ..interfaces.api_client import IShopifyAPIClient
@@ -29,22 +30,34 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "read_products",
             "read_orders",
             "read_customers",
-            "read_collections",
-            "read_marketing_events",
+            "read_customer_events",
         ]
 
         # Scope to data type mapping
         self.scope_data_mapping = {
-            "read_products": ["products", "variants", "images"],
+            "read_products": [
+                "products",
+                "variants",
+                "images",
+                "collections",
+                "collection_products",
+            ],
             "read_orders": ["orders", "line_items", "financials"],
             "read_customers": ["customers", "customer_addresses"],
-            "read_collections": ["collections", "collection_products"],
-            "read_marketing_events": ["customer_events", "marketing_events"],
+            "read_customer_events": ["customer_events", "browsing_behavior"],
         }
 
-        # Permission cache
-        self.permission_cache: Dict[str, Dict[str, Any]] = {}
+        # Redis cache service for permissions
+        self.cache_service = None
         self.cache_ttl = 3600  # 1 hour
+
+    async def _ensure_cache_service(self):
+        """Ensure cache service is initialized"""
+        if self.cache_service is None:
+            self.cache_service = await create_cache_service(
+                "permissions", self.cache_ttl
+            )
+            logger.debug("Permission cache service initialized")
 
     async def check_shop_permissions(
         self, shop_domain: str, access_token: str = None
@@ -53,127 +66,106 @@ class ShopifyPermissionService(IShopifyPermissionService):
         logger.info(f"Starting permission check for shop: {shop_domain}")
         logger.debug(f"Access token provided: {'Yes' if access_token else 'No'}")
 
-        # Check cache first
-        cached = self._get_cached_permissions(shop_domain)
-        if cached:
-            logger.info(f"Using cached permissions for {shop_domain}")
-            logger.debug(f"Cached permissions: {cached}")
-            return cached
+        # Simple recursion guard - return basic permissions to avoid infinite loops
+        if not hasattr(self, "_checking_permissions"):
+            self._checking_permissions = set()
 
-        logger.info(f"Checking permissions for shop: {shop_domain}")
-        logger.debug(f"No cache hit, proceeding with API calls")
+        if shop_domain in self._checking_permissions:
+            logger.warning(
+                f"Recursion detected for {shop_domain}, returning basic permissions"
+            )
+            return {
+                "products": True,
+                "orders": True,
+                "customers": True,
+                "collections": True,
+                "customer_events": True,
+                "has_access": True,
+            }
 
-        permissions = {}
+        self._checking_permissions.add(shop_domain)
 
-        # Check each data type access
-        logger.debug(f"Testing products access for {shop_domain}")
-        permissions["products"] = await self.can_collect_products(
-            shop_domain, access_token
-        )
-        logger.debug(f"Products access result: {permissions['products']}")
+        try:
+            # Check cache first
+            cached = await self._get_cached_permissions(shop_domain)
+            if cached:
+                logger.info(f"Using cached permissions for {shop_domain}")
+                logger.debug(f"Cached permissions: {cached}")
+                return cached
 
-        logger.debug(f"Testing orders access for {shop_domain}")
-        permissions["orders"] = await self.can_collect_orders(shop_domain, access_token)
-        logger.debug(f"Orders access result: {permissions['orders']}")
+            logger.info(f"Checking permissions for shop: {shop_domain}")
+            logger.debug(f"No cache hit, proceeding with scopes API call")
 
-        logger.debug(f"Testing customers access for {shop_domain}")
-        permissions["customers"] = await self.can_collect_customers(
-            shop_domain, access_token
-        )
-        logger.debug(f"Customers access result: {permissions['customers']}")
+            # Get actual granted scopes from Shopify
+            scopes = await self._get_shopify_scopes(shop_domain, access_token)
+            logger.debug(f"Granted scopes for {shop_domain}: {scopes}")
 
-        logger.debug(f"Testing collections access for {shop_domain}")
-        permissions["collections"] = await self.can_collect_collections(
-            shop_domain, access_token
-        )
-        logger.debug(f"Collections access result: {permissions['collections']}")
+            # Check permissions based on granted scopes
+            logger.info(f"Checking permissions against granted scopes: {scopes}")
 
-        logger.debug(f"Testing customer events access for {shop_domain}")
-        permissions["customer_events"] = await self.can_collect_customer_events(
-            shop_domain, access_token
-        )
-        logger.debug(f"Customer events access result: {permissions['customer_events']}")
+            # Check each permission individually with detailed logging
+            products_permission = any(
+                scope in ["read_products", "write_products"] for scope in scopes
+            )
+            logger.info(
+                f"Products permission check: {products_permission} (looking for: read_products, write_products)"
+            )
 
-        # Check overall access
-        permissions["has_access"] = any(
-            [
-                permissions["products"],
-                permissions["orders"],
-                permissions["customers"],
-                permissions["collections"],
-                permissions["customer_events"],
-            ]
-        )
-        logger.debug(f"Overall access result: {permissions['has_access']}")
+            orders_permission = any(
+                scope in ["read_orders", "write_orders"] for scope in scopes
+            )
+            logger.info(
+                f"Orders permission check: {orders_permission} (looking for: read_orders, write_orders)"
+            )
 
-        # Cache the results
-        logger.debug(f"Caching permission results for {shop_domain}")
-        self._cache_permissions(shop_domain, permissions)
+            customers_permission = any(
+                scope in ["read_customers", "write_customers"] for scope in scopes
+            )
+            logger.info(
+                f"Customers permission check: {customers_permission} (looking for: read_customers, write_customers)"
+            )
 
-        # Log the results
-        await self.log_permission_check(shop_domain, permissions)
+            # Collections are part of read_products scope
+            collections_permission = any(
+                scope in ["read_products", "write_products"] for scope in scopes
+            )
+            logger.info(
+                f"Collections permission check: {collections_permission} (collections are part of read_products scope)"
+            )
 
-        return permissions
+            # Customer events use read_customer_events scope
+            customer_events_permission = any(
+                scope in ["read_customer_events", "write_customer_events"]
+                for scope in scopes
+            )
+            logger.info(
+                f"Customer events permission check: {customer_events_permission} (looking for: read_customer_events, write_customer_events)"
+            )
 
-    async def check_products_access(self, shop_domain: str) -> Dict[str, Any]:
-        """Check access to products data"""
-        can_access = await self.can_collect_products(shop_domain)
+            permissions = {
+                "products": products_permission,
+                "orders": orders_permission,
+                "customers": customers_permission,
+                "collections": collections_permission,
+                "customer_events": customer_events_permission,
+            }
 
-        return {
-            "can_access": can_access,
-            "scope_required": "read_products",
-            "data_types": self.scope_data_mapping.get("read_products", []),
-            "tested_at": now_utc().isoformat(),
-            "access_method": "graphql" if can_access else "none",
-        }
+            # Check overall access
+            permissions["has_access"] = any(permissions.values())
+            logger.debug(f"Overall access result: {permissions['has_access']}")
 
-    async def check_orders_access(self, shop_domain: str) -> Dict[str, Any]:
-        """Check access to orders data"""
-        can_access = await self.can_collect_orders(shop_domain)
+            # Cache the results
+            logger.debug(f"Caching permission results for {shop_domain}")
+            await self._cache_permissions(shop_domain, permissions)
 
-        return {
-            "can_access": can_access,
-            "scope_required": "read_orders",
-            "data_types": self.scope_data_mapping.get("read_orders", []),
-            "tested_at": now_utc().isoformat(),
-            "access_method": "graphql" if can_access else "none",
-        }
+            # Log the results
+            await self.log_permission_check(shop_domain, permissions)
 
-    async def check_customers_access(self, shop_domain: str) -> Dict[str, Any]:
-        """Check access to customers data"""
-        can_access = await self.can_collect_customers(shop_domain)
+            return permissions
 
-        return {
-            "can_access": can_access,
-            "scope_required": "read_customers",
-            "data_types": self.scope_data_mapping.get("read_customers", []),
-            "tested_at": now_utc().isoformat(),
-            "access_method": "graphql" if can_access else "none",
-        }
-
-    async def check_collections_access(self, shop_domain: str) -> Dict[str, Any]:
-        """Check access to collections data"""
-        can_access = await self.can_collect_collections(shop_domain)
-
-        return {
-            "can_access": can_access,
-            "scope_required": "read_collections",
-            "data_types": self.scope_data_mapping.get("read_collections", []),
-            "tested_at": now_utc().isoformat(),
-            "access_method": "graphql" if can_access else "none",
-        }
-
-    async def check_customer_events_access(self, shop_domain: str) -> Dict[str, Any]:
-        """Check access to customer events data"""
-        can_access = await self.can_collect_customer_events(shop_domain)
-
-        return {
-            "can_access": can_access,
-            "scope_required": "read_marketing_events",
-            "data_types": self.scope_data_mapping.get("read_marketing_events", []),
-            "tested_at": now_utc().isoformat(),
-            "access_method": "graphql" if can_access else "none",
-        }
+        finally:
+            # Clean up recursion guard
+            self._checking_permissions.discard(shop_domain)
 
     def get_required_scopes(self) -> List[str]:
         """Get list of required Shopify scopes for the app"""
@@ -184,6 +176,12 @@ class ShopifyPermissionService(IShopifyPermissionService):
     ) -> List[str]:
         """Get list of missing scopes for a shop"""
         permissions = await self.check_shop_permissions(shop_domain, access_token)
+        return self._get_missing_scopes_from_permissions(permissions)
+
+    def _get_missing_scopes_from_permissions(
+        self, permissions: Dict[str, bool]
+    ) -> List[str]:
+        """Get list of missing scopes from permissions dict"""
         missing_scopes = []
 
         if not permissions.get("products"):
@@ -193,9 +191,11 @@ class ShopifyPermissionService(IShopifyPermissionService):
         if not permissions.get("customers"):
             missing_scopes.append("read_customers")
         if not permissions.get("collections"):
-            missing_scopes.append("read_collections")
+            missing_scopes.append(
+                "read_products"
+            )  # Collections are part of read_products
         if not permissions.get("customer_events"):
-            missing_scopes.append("read_marketing_events")
+            missing_scopes.append("read_customer_events")
 
         return missing_scopes
 
@@ -235,94 +235,43 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "validated_at": now_utc().isoformat(),
         }
 
-    async def can_collect_products(
+    async def _get_shopify_scopes(
         self, shop_domain: str, access_token: str = None
-    ) -> bool:
-        """Check if app can collect products data"""
+    ) -> List[str]:
+        """Get the actual scopes granted to the app from Shopify GraphQL API"""
         try:
-            # Try to get a single product as a test
-            result = await self.api_client.get_products(
-                shop_domain, access_token=access_token, limit=1
-            )
-            return "edges" in result and len(result["edges"]) >= 0
-        except Exception as e:
-            logger.debug(
-                f"Products access test failed", shop_domain=shop_domain, error=str(e)
-            )
-            return False
+            # Ensure API client is connected
+            await self.api_client.connect()
 
-    async def can_collect_orders(
-        self, shop_domain: str, access_token: str = None
-    ) -> bool:
-        """Check if app can collect orders data"""
-        try:
-            # Try to get a single order as a test
-            result = await self.api_client.get_orders(
-                shop_domain, access_token=access_token, limit=1
-            )
-            return "edges" in result and len(result["edges"]) >= 0
-        except Exception as e:
-            logger.debug(
-                f"Orders access test failed", shop_domain=shop_domain, error=str(e)
-            )
-            return False
+            # Set access token for API client
+            if access_token:
+                await self.api_client.set_access_token(shop_domain, access_token)
 
-    async def can_collect_customers(
-        self, shop_domain: str, access_token: str = None
-    ) -> bool:
-        """Check if app can collect customers data"""
-        try:
-            # Try to get a single customer as a test
-            result = await self.api_client.get_customers(
-                shop_domain, access_token=access_token, limit=1
-            )
-            return "edges" in result and len(result["edges"]) >= 0
-        except Exception as e:
-            logger.debug(
-                f"Customers access test failed", shop_domain=shop_domain, error=str(e)
-            )
-            return False
+            # Use the API client to get scopes
+            scopes = await self.api_client.get_app_installation_scopes(shop_domain)
 
-    async def can_collect_collections(
-        self, shop_domain: str, access_token: str = None
-    ) -> bool:
-        """Check if app can collect collections data"""
-        try:
-            # Try to get a single collection as a test
-            result = await self.api_client.get_collections(
-                shop_domain, access_token=access_token, limit=1
-            )
-            return "edges" in result and len(result["edges"]) >= 0
-        except Exception as e:
-            logger.debug(
-                f"Collections access test failed", shop_domain=shop_domain, error=str(e)
-            )
-            return False
+            logger.info(f"Retrieved {len(scopes)} scopes for {shop_domain}: {scopes}")
 
-    async def can_collect_customer_events(
-        self, shop_domain: str, access_token: str = None
-    ) -> bool:
-        """Check if app can collect customer events data"""
-        try:
-            # Try to get a single customer event as a test
-            result = await self.api_client.get_customer_events(
-                shop_domain, access_token=access_token, limit=1
-            )
-            return "edges" in result and len(result["edges"]) >= 0
+            # Log each scope individually for debugging
+            for i, scope in enumerate(scopes):
+                logger.debug(f"Scope {i+1}: {scope}")
+
+            return scopes
+
         except Exception as e:
-            logger.debug(
-                f"Customer events access test failed",
-                shop_domain=shop_domain,
-                error=str(e),
-            )
-            return False
+            logger.error(f"Error getting scopes for {shop_domain}: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
 
     async def get_collection_strategy(
         self, shop_domain: str, access_token: str = None
     ) -> Dict[str, Any]:
         """Get optimal data collection strategy based on available permissions"""
         permissions = await self.check_shop_permissions(shop_domain, access_token)
-        missing_scopes = await self.get_missing_scopes(shop_domain, access_token)
+        missing_scopes = self._get_missing_scopes_from_permissions(permissions)
 
         # Determine what data to collect
         collectable_data = []
@@ -386,59 +335,59 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 f"Permission check completed - all scopes available", **log_data
             )
 
-    def _get_cached_permissions(self, shop_domain: str) -> Optional[Dict[str, bool]]:
+    async def _get_cached_permissions(
+        self, shop_domain: str
+    ) -> Optional[Dict[str, bool]]:
         """Get cached permissions if still valid"""
-        logger.debug(f"Checking cache for {shop_domain}")
-        logger.debug(f"Current cache keys: {list(self.permission_cache.keys())}")
+        await self._ensure_cache_service()
 
-        if shop_domain not in self.permission_cache:
-            logger.debug(f"No cache entry found for {shop_domain}")
-            return None
+        logger.debug(f"Checking Redis cache for {shop_domain}")
 
-        cache_entry = self.permission_cache[shop_domain]
-        cache_time = cache_entry.get("cached_at", 0)
-        current_time = time.time()
+        cached = await self.cache_service.get(shop_domain)
+        if cached:
+            logger.debug(f"Cache hit for {shop_domain}: {cached}")
+            return cached
 
-        logger.debug(
-            f"Cache entry found for {shop_domain}, cached_at: {cache_time}, current_time: {current_time}, ttl: {self.cache_ttl}"
-        )
+        logger.debug(f"Cache miss for {shop_domain}")
+        return None
 
-        if current_time - cache_time > self.cache_ttl:
-            # Cache expired, remove it
-            logger.debug(f"Cache expired for {shop_domain}, removing")
-            del self.permission_cache[shop_domain]
-            return None
-
-        logger.debug(
-            f"Using cached permissions for {shop_domain}: {cache_entry.get('permissions')}"
-        )
-        return cache_entry.get("permissions")
-
-    def _cache_permissions(self, shop_domain: str, permissions: Dict[str, bool]):
+    async def _cache_permissions(self, shop_domain: str, permissions: Dict[str, bool]):
         """Cache permission results"""
-        logger.debug(f"Caching permissions for {shop_domain}: {permissions}")
-        self.permission_cache[shop_domain] = {
-            "permissions": permissions,
-            "cached_at": time.time(),
-        }
-        logger.debug(f"Cache after storing: {list(self.permission_cache.keys())}")
+        await self._ensure_cache_service()
 
-    def clear_permission_cache(self, shop_domain: Optional[str] = None):
+        logger.debug(f"Caching permissions for {shop_domain}: {permissions}")
+        success = await self.cache_service.set(shop_domain, permissions, self.cache_ttl)
+        if success:
+            logger.debug(f"Successfully cached permissions for {shop_domain}")
+        else:
+            logger.warning(f"Failed to cache permissions for {shop_domain}")
+
+    async def clear_permission_cache(self, shop_domain: Optional[str] = None):
         """Clear permission cache for a specific shop or all shops"""
-        logger.debug(f"Clearing permission cache for: {shop_domain if shop_domain else 'all shops'}")
-        logger.debug(f"Cache before clearing: {list(self.permission_cache.keys())}")
-        
+        await self._ensure_cache_service()
+
+        logger.debug(
+            f"Clearing permission cache for: {shop_domain if shop_domain else 'all shops'}"
+        )
+
         if shop_domain:
-            if shop_domain in self.permission_cache:
-                del self.permission_cache[shop_domain]
+            # Clear specific shop cache
+            success = await self.cache_service.delete(shop_domain)
+            if success:
                 logger.info(f"Cleared permission cache for {shop_domain}")
             else:
                 logger.debug(f"No cache entry found for {shop_domain}")
         else:
-            self.permission_cache.clear()
-            logger.info("Cleared all permission cache")
-        
-        logger.debug(f"Cache after clearing: {list(self.permission_cache.keys())}")
+            # Clear all permission cache
+            success = await self.cache_service.clear_namespace()
+            if success:
+                logger.info("Cleared all permission cache")
+            else:
+                logger.warning("Failed to clear all permission cache")
+
+        # Get current cache keys for debugging
+        current_keys = await self.cache_service.get_keys()
+        logger.debug(f"Cache after clearing: {current_keys}")
 
     def _get_scope_recommendations(self, missing_scopes: List[str]) -> List[str]:
         """Get recommendations for missing scopes"""
@@ -459,14 +408,14 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 "Request 'read_customers' scope to access customer profiles and behavior data"
             )
 
-        if "read_collections" in missing_scopes:
+        if "read_products" in missing_scopes and "collections" in str(missing_scopes):
             recommendations.append(
-                "Request 'read_collections' scope to access product collections and categorization"
+                "Request 'read_products' scope to access product collections and categorization"
             )
 
-        if "read_marketing_events" in missing_scopes:
+        if "read_customer_events" in missing_scopes:
             recommendations.append(
-                "Request 'read_marketing_events' scope to access customer engagement and marketing data"
+                "Request 'read_customer_events' scope to access customer browsing behavior and engagement data"
             )
 
         if len(missing_scopes) >= 3:

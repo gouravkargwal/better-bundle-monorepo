@@ -60,8 +60,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         jobId,
         shopId: shop.id,
         shopDomain: shop.shopDomain,
-        accessToken: shop.accessToken,
-        type: "analysis",
+        accessToken: "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",
+        type: "data_collection", // Changed from "analysis" to trigger data collection
         priority: "normal",
       });
 

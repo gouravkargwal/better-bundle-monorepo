@@ -88,11 +88,11 @@ services = {}
 
 
 async def initialize_services():
-    """Initialize all domain services"""
+    """Initialize only essential services at startup"""
     try:
-        logger.info("Initializing domain services...")
+        logger.info("Initializing essential services...")
 
-        # Initialize Shopify services
+        # Initialize only core Shopify services (lazy load others)
         services["shopify_api"] = ShopifyAPIClient()
         services["shopify_permissions"] = ShopifyPermissionService(
             api_client=services["shopify_api"]
@@ -102,62 +102,89 @@ async def initialize_services():
             permission_service=services["shopify_permissions"],
         )
 
-        # Initialize ML services
-        services["feature_engineering"] = FeatureEngineeringService()
-        services["gorse_ml"] = GorseMLService()
-        services["ml_pipeline"] = MLPipelineService(
-            feature_service=services["feature_engineering"],
-            gorse_service=services["gorse_ml"],
-        )
-
-        # Initialize Analytics services
-        services["business_metrics"] = BusinessMetricsService()
-        services["performance_analytics"] = PerformanceAnalyticsService()
-        services["customer_analytics"] = CustomerAnalyticsService()
-        services["product_analytics"] = ProductAnalyticsService()
-        services["revenue_analytics"] = RevenueAnalyticsService()
-        services["heuristic"] = HeuristicService()
-
-        # Initialize ML training monitor
-        services["gorse_training_monitor"] = GorseTrainingMonitor(
-            heuristic_service=services["heuristic"]
-        )
-
-        # Initialize consumers
+        # Initialize only data collection consumer (most critical)
         services["data_collection_consumer"] = DataCollectionConsumer(
             shopify_service=services["shopify"]
         )
-        services["ml_training_consumer"] = MLTrainingConsumer(
-            ml_pipeline_service=services["ml_pipeline"]
-        )
-        services["analytics_consumer"] = AnalyticsConsumer(
-            business_metrics_service=services["business_metrics"],
-            performance_analytics_service=services["performance_analytics"],
-            customer_analytics_service=services["customer_analytics"],
-            product_analytics_service=services["product_analytics"],
-            revenue_analytics_service=services["revenue_analytics"],
-        )
 
-        # Register consumers with consumer manager
+        # Register and start only data collection consumer
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
-            ml_training_consumer=services["ml_training_consumer"],
-            analytics_consumer=services["analytics_consumer"],
         )
 
         # Start consumer manager
         await consumer_manager.start()
 
-        # Start Gorse training monitoring for all shops
-        await services["gorse_training_monitor"].start_monitoring(
-            ["shop_123", "shop_456", "shop_789"]  # Mock shop IDs
-        )
-
-        logger.info("All services initialized successfully")
+        logger.info("Essential services initialized successfully")
 
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
+
+
+async def get_service(service_name: str):
+    """Lazy load services on demand"""
+    if service_name not in services:
+        logger.info(f"Lazy loading service: {service_name}")
+
+        if service_name == "feature_engineering":
+            services["feature_engineering"] = FeatureEngineeringService()
+        elif service_name == "gorse_ml":
+            services["gorse_ml"] = GorseMLService()
+        elif service_name == "ml_pipeline":
+            if "feature_engineering" not in services:
+                await get_service("feature_engineering")
+            if "gorse_ml" not in services:
+                await get_service("gorse_ml")
+            services["ml_pipeline"] = MLPipelineService(
+                feature_service=services["feature_engineering"],
+                gorse_service=services["gorse_ml"],
+            )
+        elif service_name == "business_metrics":
+            services["business_metrics"] = BusinessMetricsService()
+        elif service_name == "performance_analytics":
+            services["performance_analytics"] = PerformanceAnalyticsService()
+        elif service_name == "customer_analytics":
+            services["customer_analytics"] = CustomerAnalyticsService()
+        elif service_name == "product_analytics":
+            services["product_analytics"] = ProductAnalyticsService()
+        elif service_name == "revenue_analytics":
+            services["revenue_analytics"] = RevenueAnalyticsService()
+        elif service_name == "heuristic":
+            services["heuristic"] = HeuristicService()
+        elif service_name == "gorse_training_monitor":
+            if "heuristic" not in services:
+                await get_service("heuristic")
+            services["gorse_training_monitor"] = GorseTrainingMonitor(
+                heuristic_service=services["heuristic"]
+            )
+        elif service_name == "ml_training_consumer":
+            if "ml_pipeline" not in services:
+                await get_service("ml_pipeline")
+            services["ml_training_consumer"] = MLTrainingConsumer(
+                ml_pipeline_service=services["ml_pipeline"]
+            )
+        elif service_name == "analytics_consumer":
+            # Load all analytics services
+            for analytics_service in [
+                "business_metrics",
+                "performance_analytics",
+                "customer_analytics",
+                "product_analytics",
+                "revenue_analytics",
+            ]:
+                if analytics_service not in services:
+                    await get_service(analytics_service)
+
+            services["analytics_consumer"] = AnalyticsConsumer(
+                business_metrics_service=services["business_metrics"],
+                performance_analytics_service=services["performance_analytics"],
+                customer_analytics_service=services["customer_analytics"],
+                product_analytics_service=services["product_analytics"],
+                revenue_analytics_service=services["revenue_analytics"],
+            )
+
+    return services[service_name]
 
 
 async def cleanup_services():
@@ -175,6 +202,14 @@ async def cleanup_services():
         # Close Gorse ML service
         if "gorse_ml" in services:
             await services["gorse_ml"].close()
+
+        # Shutdown database connection pool
+        from app.core.database.connection_pool import shutdown_connection_pool
+
+        await shutdown_connection_pool()
+
+        # Clear services dictionary
+        services.clear()
 
         logger.info("Services cleaned up successfully")
 
@@ -249,14 +284,12 @@ async def run_ml_pipeline(
 ):
     """Run ML pipeline for a shop"""
     try:
-        if "ml_pipeline" not in services:
-            raise HTTPException(
-                status_code=500, detail="ML pipeline service not available"
-            )
+        # Lazy load ML pipeline service
+        ml_pipeline_service = await get_service("ml_pipeline")
 
         # Start ML pipeline in background
         background_tasks.add_task(
-            services["ml_pipeline"].run_end_to_end_pipeline,
+            ml_pipeline_service.run_end_to_end_pipeline,
             shop_id,
             {},  # Empty shop_data for now
             pipeline_config,
@@ -278,12 +311,10 @@ async def run_ml_pipeline(
 async def get_pipeline_status(shop_id: str, pipeline_id: Optional[str] = None):
     """Get ML pipeline status"""
     try:
-        if "ml_pipeline" not in services:
-            raise HTTPException(
-                status_code=500, detail="ML pipeline service not available"
-            )
+        # Lazy load ML pipeline service
+        ml_pipeline_service = await get_service("ml_pipeline")
 
-        status = await services["ml_pipeline"].get_pipeline_status(shop_id, pipeline_id)
+        status = await ml_pipeline_service.get_pipeline_status(shop_id, pipeline_id)
         return status
 
     except Exception as e:
@@ -300,10 +331,8 @@ async def get_business_metrics(
 ):
     """Get business metrics for a shop"""
     try:
-        if "business_metrics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Business metrics service not available"
-            )
+        # Lazy load business metrics service
+        business_metrics_service = await get_service("business_metrics")
 
         # Parse dates
         from datetime import datetime
@@ -311,7 +340,7 @@ async def get_business_metrics(
         start = datetime.fromisoformat(start_date) if start_date else datetime.now()
         end = datetime.fromisoformat(end_date) if end_date else datetime.now()
 
-        metrics = await services["business_metrics"].compute_overall_metrics(
+        metrics = await business_metrics_service.compute_overall_metrics(
             shop_id, start, end
         )
         return metrics
@@ -513,14 +542,12 @@ async def clear_permission_cache(shop_domain: Optional[str] = None):
     """Clear permission cache for a specific shop or all shops"""
     try:
         if "shopify" not in services:
-            raise HTTPException(
-                status_code=500, detail="Shopify service not available"
-            )
+            raise HTTPException(status_code=500, detail="Shopify service not available")
 
         shopify_service = services["shopify"]
         # Clear the cache of the permission service that's actually used by the data collection service
-        shopify_service.permission_service.clear_permission_cache(shop_domain)
-        
+        await shopify_service.permission_service.clear_permission_cache(shop_domain)
+
         if shop_domain:
             return {"message": f"Permission cache cleared for {shop_domain}"}
         else:

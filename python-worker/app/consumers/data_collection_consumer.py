@@ -41,15 +41,23 @@ class DataCollectionConsumer(BaseConsumer):
         try:
             # Extract message data - Redis streams return data directly
             message_data = message  # No need to get "data" field
-            job_id = message_data.get("job_id")
-            shop_id = message_data.get("shop_id")
-            shop_domain = message_data.get("shop_domain")
-            access_token = message_data.get("access_token")
-            job_type = message_data.get("job_type", "data_collection")
+
+            # Handle both camelCase (from Shopify app) and snake_case (from manual events) field names
+            job_id = message_data.get("job_id") or message_data.get("jobId")
+            shop_id = message_data.get("shop_id") or message_data.get("shopId")
+            shop_domain = message_data.get("shop_domain") or message_data.get(
+                "shopDomain"
+            )
+            access_token = message_data.get("access_token") or message_data.get(
+                "accessToken"
+            )
+            job_type = message_data.get("job_type") or message_data.get(
+                "type", "data_collection"
+            )
 
             if not all([job_id, shop_id, shop_domain]):
                 raise ValueError(
-                    "Missing required job fields: job_id, shop_id, shop_domain"
+                    "Missing required job fields: job_id/shop_id/shop_domain (or jobId/shopId/shopDomain)"
                 )
 
             self.logger.info(

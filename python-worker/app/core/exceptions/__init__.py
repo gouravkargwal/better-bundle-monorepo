@@ -9,7 +9,7 @@ from .config import (
     ConfigurationValidationError,
 )
 from .database import DatabaseError, DatabaseConnectionError, DatabaseQueryError
-from .redis import RedisError, RedisConnectionError, RedisStreamError
+from .redis import RedisError, RedisConnectionError, RedisStreamError, RedisTimeoutError
 from .validation import ValidationError, DataValidationError
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "RedisError",
     "RedisConnectionError",
     "RedisStreamError",
+    "RedisTimeoutError",
     "ValidationError",
     "DataValidationError",
     "DataStorageError",

@@ -102,8 +102,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
         access_token = self.access_tokens.get(shop_domain)
         if not access_token:
             raise ConfigurationError(
-                message=f"No access token found for shop: {shop_domain}",
-                error_code="SHOPIFY_NO_ACCESS_TOKEN",
+                f"No access token found for shop: {shop_domain}",
+                config_key=shop_domain,
+                details={"error_code": "SHOPIFY_NO_ACCESS_TOKEN"},
             )
 
         return {
@@ -205,36 +206,13 @@ class ShopifyAPIClient(IShopifyAPIClient):
             shop {
                 id
                 name
-                domain
                 email
-                phone
-                address1
-                address2
-                city
-                province
-                country
-                zip
-                currency
-                primaryLocale
-                timezone
-                planName
-                planDisplayName
-                shopOwner
-                hasStorefront
-                hasDiscounts
-                hasGiftCards
-                hasMarketing
-                hasMultiLocation
-                googleAnalyticsAccount
-                googleAnalyticsDomain
-                seoTitle
-                seoDescription
-                metaDescription
-                facebookAccount
-                instagramAccount
-                twitterAccount
                 myshopifyDomain
-                primaryLocationId
+                plan {
+                    displayName
+                }
+                currencyCode
+                ianaTimezone
                 createdAt
                 updatedAt
             }
@@ -252,7 +230,11 @@ class ShopifyAPIClient(IShopifyAPIClient):
         query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get products from shop"""
-        variables = {"first": limit or 50, "after": cursor, "query": query}
+        variables = {
+            "first": limit or 250,
+            "after": cursor,
+            "query": query,
+        }  # Increased from 50 to 250
 
         graphql_query = """
         query($first: Int!, $after: String, $query: String) {
@@ -272,14 +254,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         vendor
                         productType
                         handle
-                        seoTitle
-                        seoDescription
-                        metaDescription
                         status
                         publishedAt
-                        publishedScope
                         tags
-                        templateSuffix
                         createdAt
                         updatedAt
                         images(first: 10) {
@@ -300,17 +277,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     barcode
                                     price
                                     compareAtPrice
-                                    costPerItem
                                     inventoryQuantity
                                     inventoryPolicy
-                                    inventoryManagement
-                                    weight
-                                    weightUnit
-                                    requiresShipping
                                     taxable
-                                    option1
-                                    option2
-                                    option3
                                     createdAt
                                     updatedAt
                                 }
@@ -339,25 +308,37 @@ class ShopifyAPIClient(IShopifyAPIClient):
         shop_domain: str,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
+        query: Optional[str] = None,
         status: Optional[str] = None,
         created_at_min: Optional[datetime] = None,
         created_at_max: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Get orders from shop"""
+        # Build query string for filtering
+        query_parts = []
+        if query:
+            query_parts.append(query)
+        if created_at_min:
+            query_parts.append(f"created_at:>={created_at_min.isoformat()}")
+        if created_at_max:
+            query_parts.append(f"created_at:<={created_at_max.isoformat()}")
+        if status:
+            query_parts.append(f"status:{status}")
+
+        query_string = " AND ".join(query_parts) if query_parts else None
+
         variables = {
-            "first": limit or 50,
+            "first": limit or 250,  # Increased from 50 to 250
             "after": cursor,
-            "status": status,
-            "createdAtMin": created_at_min.isoformat() if created_at_min else None,
-            "createdAtMax": created_at_max.isoformat() if created_at_max else None,
+            "query": query_string,
         }
 
         # Remove None values
         variables = {k: v for k, v in variables.items() if v is not None}
 
         graphql_query = """
-        query($first: Int!, $after: String, $status: OrderStatus, $createdAtMin: DateTime, $createdAtMax: DateTime) {
-            orders(first: $first, after: $after, status: $status, createdAtMin: $createdAtMin, createdAtMax: $createdAtMax) {
+        query($first: Int!, $after: String, $query: String) {
+            orders(first: $first, after: $after, query: $query) {
                 pageInfo {
                     hasNextPage
                     hasPreviousPage
@@ -453,7 +434,11 @@ class ShopifyAPIClient(IShopifyAPIClient):
         query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get customers from shop"""
-        variables = {"first": limit or 50, "after": cursor, "query": query}
+        variables = {
+            "first": limit or 250,
+            "after": cursor,
+            "query": query,
+        }  # Increased from 50 to 250
 
         # Remove None values
         variables = {k: v for k, v in variables.items() if v is not None}
@@ -475,11 +460,8 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         lastName
                         email
                         phone
-                        acceptsMarketing
                         createdAt
                         updatedAt
-                        ordersCount
-                        totalSpent
                         defaultAddress {
                             address1
                             address2
@@ -504,13 +486,21 @@ class ShopifyAPIClient(IShopifyAPIClient):
         shop_domain: str,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get collections from shop"""
-        variables = {"first": limit or 50, "after": cursor}
+        variables = {
+            "first": limit or 250,  # Increased from 50 to 250
+            "after": cursor,
+            "query": query,
+        }
+
+        # Remove None values
+        variables = {k: v for k, v in variables.items() if v is not None}
 
         graphql_query = """
-        query($first: Int!, $after: String) {
-            collections(first: $first, after: $after) {
+        query($first: Int!, $after: String, $query: String) {
+            collections(first: $first, after: $after, query: $query) {
                 pageInfo {
                     hasNextPage
                     hasPreviousPage
@@ -564,7 +554,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
     ) -> Dict[str, Any]:
         """Get customer events from shop"""
         variables = {
-            "first": limit or 50,
+            "first": limit or 250,  # Increased from 50 to 250
             "after": cursor,
             "eventType": event_type,
             "createdAtMin": created_at_min.isoformat() if created_at_min else None,
@@ -680,6 +670,44 @@ class ShopifyAPIClient(IShopifyAPIClient):
         # For now, we'll just return False as it's not implemented
         logger.warning("Access token refresh not implemented", shop_domain=shop_domain)
         return False
+
+    async def get_app_installation_scopes(self, shop_domain: str) -> List[str]:
+        """Get the actual scopes granted to the app from Shopify GraphQL API"""
+        query = """
+        query {
+          currentAppInstallation {
+            id
+            accessScopes {
+              handle
+              description
+            }
+          }
+        }
+        """
+
+        try:
+            result = await self.execute_query(query, shop_domain=shop_domain)
+
+            if "currentAppInstallation" in result:
+                installation = result["currentAppInstallation"]
+                scopes = installation.get("accessScopes", [])
+
+                # Extract scope handles
+                scope_handles = [scope["handle"] for scope in scopes]
+                logger.info(
+                    f"Retrieved {len(scope_handles)} scopes for {shop_domain}: {scope_handles}"
+                )
+
+                return scope_handles
+            else:
+                logger.warning(f"No app installation data found for {shop_domain}")
+                return []
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get app installation scopes for {shop_domain}: {e}"
+            )
+            return []
 
     async def get_api_limits(self, shop_domain: str) -> Dict[str, Any]:
         """Get API usage limits and quotas"""
