@@ -673,44 +673,72 @@ class MainTableStorageService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key order fields from nested JSON payload"""
         try:
+            self.logger.debug(f"=== ORDER EXTRACTION START ===")
+            self.logger.debug(f"Payload: {payload}")
+            self.logger.debug(f"Shop ID: {shop_id}")
+            self.logger.debug(f"Payload type: {type(payload)}")
+            self.logger.debug(f"Payload is None: {payload is None}")
+
             # Check if payload is None or not a dict
             if payload is None or not isinstance(payload, dict):
+                self.logger.debug(f"Payload is None or not dict, returning None")
                 return None
 
             # Handle nested JSON structure: payload.raw_data.order
             order_data = None
+            self.logger.debug(
+                f"Checking for raw_data in payload: {'raw_data' in payload}"
+            )
 
             # Try nested structure first: payload.raw_data.order
             if "raw_data" in payload and isinstance(payload["raw_data"], dict):
                 raw_data = payload["raw_data"]
+                self.logger.debug(f"Raw data: {raw_data}")
+                self.logger.debug(f"Raw data type: {type(raw_data)}")
                 if raw_data is not None and "order" in raw_data:
                     order_data = raw_data["order"]
+                    self.logger.debug(f"Found order in raw_data: {order_data}")
+                    self.logger.debug(f"Order data type: {type(order_data)}")
 
             # Fallback to direct order data
             if not order_data:
+                self.logger.debug(f"No order data found in raw_data, trying fallback")
                 order_data = (
                     payload.get("order")
                     or payload.get("data", {}).get("order")
                     or payload
                 )
+                self.logger.debug(f"Fallback order data: {order_data}")
+                self.logger.debug(f"Fallback order data type: {type(order_data)}")
+
+            self.logger.debug(f"Validating order_data: {order_data}")
+            self.logger.debug(f"Order data is None: {order_data is None}")
+            self.logger.debug(f"Order data is dict: {isinstance(order_data, dict)}")
 
             if (
                 not order_data
                 or not isinstance(order_data, dict)
                 or not order_data.get("id")
             ):
+                self.logger.debug(f"Order data validation failed, returning None")
                 return None
+
+            self.logger.debug(f"Order data validation passed, extracting fields")
 
             # Extract order ID
             order_id = self._extract_shopify_id(order_data.get("id", ""))
+            self.logger.debug(f"Extracted order ID: {order_id}")
             if not order_id:
+                self.logger.debug(f"No order ID extracted, returning None")
                 return None
 
             # Extract customer information
             customer = order_data.get("customer", {})
+            self.logger.debug(f"Customer data: {customer}, type: {type(customer)}")
 
             # Extract line items (keep as JSON for complex data)
             line_items = order_data.get("lineItems", {})
+            self.logger.debug(f"Line items: {line_items}, type: {type(line_items)}")
             if isinstance(line_items, dict) and "edges" in line_items:
                 line_items = [
                     edge.get("node", {}) for edge in line_items.get("edges", [])
@@ -718,9 +746,15 @@ class MainTableStorageService:
 
             # Extract shipping address
             shipping_address = order_data.get("shippingAddress")
+            self.logger.debug(
+                f"Shipping address: {shipping_address}, type: {type(shipping_address)}"
+            )
 
             # Extract billing address
             billing_address = order_data.get("billingAddress")
+            self.logger.debug(
+                f"Billing address: {billing_address}, type: {type(billing_address)}"
+            )
 
             # Extract discount applications (keep as JSON for complex data)
             discount_applications = order_data.get("discountApplications", {})
@@ -757,7 +791,8 @@ class MainTableStorageService:
                     if customer
                     else None
                 ),
-                "customerEmail": order_data.get("email") or customer.get("email"),
+                "customerEmail": order_data.get("email")
+                or (customer.get("email") if customer else None),
                 "customerPhone": order_data.get("phone"),
                 "totalAmount": float(
                     order_data.get("totalPriceSet", {})
@@ -812,7 +847,13 @@ class MainTableStorageService:
             }
 
         except Exception as e:
+            import traceback
+
             self.logger.error(f"Failed to extract order fields: {str(e)}")
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.logger.error(f"Payload that caused error: {payload}")
+            self.logger.error(f"Shop ID: {shop_id}")
             return None
 
     def _extract_product_fields(
