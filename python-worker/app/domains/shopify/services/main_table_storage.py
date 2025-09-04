@@ -673,72 +673,45 @@ class MainTableStorageService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key order fields from nested JSON payload"""
         try:
-            self.logger.debug(f"=== ORDER EXTRACTION START ===")
-            self.logger.debug(f"Payload: {payload}")
-            self.logger.debug(f"Shop ID: {shop_id}")
-            self.logger.debug(f"Payload type: {type(payload)}")
-            self.logger.debug(f"Payload is None: {payload is None}")
-
             # Check if payload is None or not a dict
             if payload is None or not isinstance(payload, dict):
-                self.logger.debug(f"Payload is None or not dict, returning None")
                 return None
 
             # Handle nested JSON structure: payload.raw_data.order
             order_data = None
-            self.logger.debug(
-                f"Checking for raw_data in payload: {'raw_data' in payload}"
-            )
 
             # Try nested structure first: payload.raw_data.order
             if "raw_data" in payload and isinstance(payload["raw_data"], dict):
                 raw_data = payload["raw_data"]
-                self.logger.debug(f"Raw data: {raw_data}")
-                self.logger.debug(f"Raw data type: {type(raw_data)}")
                 if raw_data is not None and "order" in raw_data:
                     order_data = raw_data["order"]
-                    self.logger.debug(f"Found order in raw_data: {order_data}")
-                    self.logger.debug(f"Order data type: {type(order_data)}")
 
             # Fallback to direct order data
             if not order_data:
-                self.logger.debug(f"No order data found in raw_data, trying fallback")
                 order_data = (
                     payload.get("order")
                     or payload.get("data", {}).get("order")
                     or payload
                 )
-                self.logger.debug(f"Fallback order data: {order_data}")
-                self.logger.debug(f"Fallback order data type: {type(order_data)}")
-
-            self.logger.debug(f"Validating order_data: {order_data}")
-            self.logger.debug(f"Order data is None: {order_data is None}")
-            self.logger.debug(f"Order data is dict: {isinstance(order_data, dict)}")
 
             if (
                 not order_data
                 or not isinstance(order_data, dict)
                 or not order_data.get("id")
             ):
-                self.logger.debug(f"Order data validation failed, returning None")
                 return None
-
-            self.logger.debug(f"Order data validation passed, extracting fields")
 
             # Extract order ID
             order_id = self._extract_shopify_id(order_data.get("id", ""))
-            self.logger.debug(f"Extracted order ID: {order_id}")
+
             if not order_id:
-                self.logger.debug(f"No order ID extracted, returning None")
                 return None
 
             # Extract customer information
             customer = order_data.get("customer", {})
-            self.logger.debug(f"Customer data: {customer}, type: {type(customer)}")
 
             # Extract line items (keep as JSON for complex data)
             line_items = order_data.get("lineItems", {})
-            self.logger.debug(f"Line items: {line_items}, type: {type(line_items)}")
             if isinstance(line_items, dict) and "edges" in line_items:
                 line_items = [
                     edge.get("node", {}) for edge in line_items.get("edges", [])
@@ -746,15 +719,9 @@ class MainTableStorageService:
 
             # Extract shipping address
             shipping_address = order_data.get("shippingAddress")
-            self.logger.debug(
-                f"Shipping address: {shipping_address}, type: {type(shipping_address)}"
-            )
 
             # Extract billing address
             billing_address = order_data.get("billingAddress")
-            self.logger.debug(
-                f"Billing address: {billing_address}, type: {type(billing_address)}"
-            )
 
             # Extract discount applications (keep as JSON for complex data)
             discount_applications = order_data.get("discountApplications", {})
@@ -1082,44 +1049,20 @@ class MainTableStorageService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key collection fields from nested JSON payload"""
         try:
-            self.logger.info("=== COLLECTION EXTRACTION START ===")
-            self.logger.info(f"Payload: {payload}")
-            self.logger.info(f"Shop ID: {shop_id}")
 
             if payload is None:
-                self.logger.error("Payload is None in collection extraction")
                 return None
 
-            self.logger.debug(f"Starting collection extraction for shop_id: {shop_id}")
-            self.logger.debug(f"Payload type: {type(payload)}")
             # Handle nested JSON structure: payload.raw_data.collection
             collection_data = None
 
-            self.logger.info(
-                f"Checking if payload is dict: {isinstance(payload, dict)}"
-            )
             if isinstance(payload, dict):
-                self.logger.info("Payload is dict, proceeding with extraction")
-                # Try nested structure first: payload.raw_data.collection
-                self.logger.info(
-                    f"Checking for raw_data in payload: {'raw_data' in payload}"
-                )
+
                 if "raw_data" in payload and isinstance(payload["raw_data"], dict):
-                    self.logger.info("Found raw_data, extracting...")
                     raw_data = payload["raw_data"]
-                    self.logger.debug(f"Raw data: {raw_data}, type: {type(raw_data)}")
                     if raw_data is not None and "collection" in raw_data:
-                        self.logger.info("Found collection in raw_data")
                         collection_data = raw_data["collection"]
-                        self.logger.info(
-                            f"Collection data extracted: {collection_data}"
-                        )
-                        self.logger.info(
-                            f"Collection data type: {type(collection_data)}"
-                        )
-                        self.logger.debug(
-                            f"Collection data: {collection_data}, type: {type(collection_data)}"
-                        )
+
                     else:
                         self.logger.info("No collection found in raw_data")
                 else:
@@ -1133,36 +1076,20 @@ class MainTableStorageService:
                         or payload
                     )
 
-            self.logger.debug(f"Collection data before validation: {collection_data}")
-            self.logger.debug(f"Collection data type: {type(collection_data)}")
-            if collection_data and isinstance(collection_data, dict):
-                self.logger.debug(f"Collection data ID: {collection_data.get('id')}")
-
             if (
                 not collection_data
                 or not isinstance(collection_data, dict)
                 or not collection_data.get("id")
             ):
-                self.logger.debug(
-                    f"Collection data validation failed: collection_data={collection_data}"
-                )
                 return None
 
             # Extract collection ID
-            self.logger.debug(
-                f"Extracting collection ID from: {collection_data.get('id')}"
-            )
             collection_id = self._extract_shopify_id(collection_data.get("id", ""))
-            self.logger.debug(f"Extracted collection ID: {collection_id}")
             if not collection_id:
-                self.logger.debug(
-                    f"Collection ID extraction failed: id={collection_data.get('id')}"
-                )
                 return None
 
             # Extract image information
             image = collection_data.get("image")
-            self.logger.debug(f"Image data: {image}, type: {type(image)}")
             image_url = image.get("url") if image and isinstance(image, dict) else None
             image_alt = (
                 image.get("altText") if image and isinstance(image, dict) else None
@@ -1170,13 +1097,9 @@ class MainTableStorageService:
 
             # Extract SEO information
             seo = collection_data.get("seo", {})
-            self.logger.debug(f"SEO data: {seo}, type: {type(seo)}")
 
             # Extract metafields (keep as JSON for complex data)
             metafields = collection_data.get("metafields", {})
-            self.logger.debug(
-                f"Metafields data: {metafields}, type: {type(metafields)}"
-            )
             if isinstance(metafields, dict) and "edges" in metafields:
                 metafields = [
                     edge.get("node", {}) for edge in metafields.get("edges", [])
@@ -1188,9 +1111,6 @@ class MainTableStorageService:
 
             # Skip collections with missing required fields
             if not title or not handle:
-                self.logger.warning(
-                    f"Skipping collection {collection_id} - missing required fields: title='{title}', handle='{handle}'"
-                )
                 return None
 
             return {
