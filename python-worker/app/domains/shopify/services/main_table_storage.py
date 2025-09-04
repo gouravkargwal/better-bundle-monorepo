@@ -673,23 +673,26 @@ class MainTableStorageService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key order fields from nested JSON payload"""
         try:
+            # Check if payload is None or not a dict
+            if payload is None or not isinstance(payload, dict):
+                return None
+
             # Handle nested JSON structure: payload.raw_data.order
             order_data = None
 
-            if isinstance(payload, dict):
-                # Try nested structure first: payload.raw_data.order
-                if "raw_data" in payload and isinstance(payload["raw_data"], dict):
-                    raw_data = payload["raw_data"]
-                    if raw_data is not None and "order" in raw_data:
-                        order_data = raw_data["order"]
+            # Try nested structure first: payload.raw_data.order
+            if "raw_data" in payload and isinstance(payload["raw_data"], dict):
+                raw_data = payload["raw_data"]
+                if raw_data is not None and "order" in raw_data:
+                    order_data = raw_data["order"]
 
-                # Fallback to direct order data
-                if not order_data:
-                    order_data = (
-                        payload.get("order")
-                        or payload.get("data", {}).get("order")
-                        or payload
-                    )
+            # Fallback to direct order data
+            if not order_data:
+                order_data = (
+                    payload.get("order")
+                    or payload.get("data", {}).get("order")
+                    or payload
+                )
 
             if (
                 not order_data
@@ -1038,15 +1041,48 @@ class MainTableStorageService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key collection fields from nested JSON payload"""
         try:
+            self.logger.info("=== COLLECTION EXTRACTION START ===")
+            self.logger.info(f"Payload: {payload}")
+            self.logger.info(f"Shop ID: {shop_id}")
+
+            if payload is None:
+                self.logger.error("Payload is None in collection extraction")
+                return None
+
+            self.logger.debug(f"Starting collection extraction for shop_id: {shop_id}")
+            self.logger.debug(f"Payload type: {type(payload)}")
             # Handle nested JSON structure: payload.raw_data.collection
             collection_data = None
 
+            self.logger.info(
+                f"Checking if payload is dict: {isinstance(payload, dict)}"
+            )
             if isinstance(payload, dict):
+                self.logger.info("Payload is dict, proceeding with extraction")
                 # Try nested structure first: payload.raw_data.collection
+                self.logger.info(
+                    f"Checking for raw_data in payload: {'raw_data' in payload}"
+                )
                 if "raw_data" in payload and isinstance(payload["raw_data"], dict):
+                    self.logger.info("Found raw_data, extracting...")
                     raw_data = payload["raw_data"]
+                    self.logger.debug(f"Raw data: {raw_data}, type: {type(raw_data)}")
                     if raw_data is not None and "collection" in raw_data:
+                        self.logger.info("Found collection in raw_data")
                         collection_data = raw_data["collection"]
+                        self.logger.info(
+                            f"Collection data extracted: {collection_data}"
+                        )
+                        self.logger.info(
+                            f"Collection data type: {type(collection_data)}"
+                        )
+                        self.logger.debug(
+                            f"Collection data: {collection_data}, type: {type(collection_data)}"
+                        )
+                    else:
+                        self.logger.info("No collection found in raw_data")
+                else:
+                    self.logger.info("No raw_data found or raw_data is not dict")
 
                 # Fallback to direct collection data
                 if not collection_data:
@@ -1056,28 +1092,50 @@ class MainTableStorageService:
                         or payload
                     )
 
+            self.logger.debug(f"Collection data before validation: {collection_data}")
+            self.logger.debug(f"Collection data type: {type(collection_data)}")
+            if collection_data and isinstance(collection_data, dict):
+                self.logger.debug(f"Collection data ID: {collection_data.get('id')}")
+
             if (
                 not collection_data
                 or not isinstance(collection_data, dict)
                 or not collection_data.get("id")
             ):
+                self.logger.debug(
+                    f"Collection data validation failed: collection_data={collection_data}"
+                )
                 return None
 
             # Extract collection ID
+            self.logger.debug(
+                f"Extracting collection ID from: {collection_data.get('id')}"
+            )
             collection_id = self._extract_shopify_id(collection_data.get("id", ""))
+            self.logger.debug(f"Extracted collection ID: {collection_id}")
             if not collection_id:
+                self.logger.debug(
+                    f"Collection ID extraction failed: id={collection_data.get('id')}"
+                )
                 return None
 
             # Extract image information
-            image = collection_data.get("image", {})
-            image_url = image.get("url") if image else None
-            image_alt = image.get("altText") if image else None
+            image = collection_data.get("image")
+            self.logger.debug(f"Image data: {image}, type: {type(image)}")
+            image_url = image.get("url") if image and isinstance(image, dict) else None
+            image_alt = (
+                image.get("altText") if image and isinstance(image, dict) else None
+            )
 
             # Extract SEO information
             seo = collection_data.get("seo", {})
+            self.logger.debug(f"SEO data: {seo}, type: {type(seo)}")
 
             # Extract metafields (keep as JSON for complex data)
             metafields = collection_data.get("metafields", {})
+            self.logger.debug(
+                f"Metafields data: {metafields}, type: {type(metafields)}"
+            )
             if isinstance(metafields, dict) and "edges" in metafields:
                 metafields = [
                     edge.get("node", {}) for edge in metafields.get("edges", [])
@@ -1107,8 +1165,12 @@ class MainTableStorageService:
                 "imageUrl": image_url,
                 "imageAlt": image_alt,
                 "productCount": int(collection_data.get("productsCount", 0)),
-                "isAutomated": collection_data.get("ruleSet", {}).get("rules", [])
-                != [],
+                "isAutomated": (
+                    collection_data.get("ruleSet", {}).get("rules", []) != []
+                    if collection_data.get("ruleSet")
+                    and isinstance(collection_data.get("ruleSet"), dict)
+                    else False
+                ),
                 "metafields": metafields,
             }
 
@@ -1121,15 +1183,15 @@ class MainTableStorageService:
     ) -> Optional[List[Dict[str, Any]]]:
         """Extract key customer event fields from nested JSON payload"""
         try:
-            # Handle nested JSON structure: payload.raw_data.customer
+            # Handle nested JSON structure: payload.raw_data.customer_event
             customer_data = None
 
             if isinstance(payload, dict):
-                # Try nested structure first: payload.raw_data.customer
+                # Try nested structure first: payload.raw_data.customer_event
                 if "raw_data" in payload and isinstance(payload["raw_data"], dict):
                     raw_data = payload["raw_data"]
-                    if raw_data is not None and "customer" in raw_data:
-                        customer_data = raw_data["customer"]
+                    if raw_data is not None and "customer_event" in raw_data:
+                        customer_data = raw_data["customer_event"]
 
                 # Fallback to direct customer data
                 if not customer_data:
@@ -1151,42 +1213,35 @@ class MainTableStorageService:
             if not customer_id:
                 return None
 
-            # Extract events
-            events = customer_data.get("events", {})
-            if isinstance(events, dict) and "edges" in events:
-                events = [edge.get("node", {}) for edge in events.get("edges", [])]
-            elif not isinstance(events, list):
-                events = []
-
-            # Process each event
+            # For customer events, we create a single event record from the customer data
+            # since the payload structure shows this is a customer record, not multiple events
             event_data_list = []
-            for event in events:
-                event_id = self._extract_shopify_id(event.get("id", ""))
-                if event_id:
-                    event_data_list.append(
-                        {
-                            "shopId": shop_id,
-                            "customerId": customer_id,
-                            "eventId": event_id,
-                            "eventType": event.get("type", "unknown"),
-                            "customerEmail": customer_data.get("email"),
-                            "customerFirstName": customer_data.get("firstName"),
-                            "customerLastName": customer_data.get("lastName"),
-                            "customerTags": customer_data.get("tags", []),
-                            "customerState": customer_data.get("state"),
-                            "customerOrdersCount": int(
-                                customer_data.get("ordersCount", 0)
-                            ),
-                            "customerAmountSpent": float(
-                                customer_data.get("totalSpent", 0)
-                            ),
-                            "customerCurrency": customer_data.get("currency", "USD"),
-                            "eventTimestamp": self._parse_datetime(
-                                event.get("createdAt")
-                            ),
-                            "rawEventData": event,
-                        }
-                    )
+
+            # Create a customer event record from the customer data
+            event_data_list.append(
+                {
+                    "shopId": shop_id,
+                    "customerId": customer_id,
+                    "eventId": customer_id,  # Use customer ID as event ID since no separate event ID exists
+                    "eventType": payload.get("event_type", "CustomerEvent"),
+                    "customerEmail": customer_data.get("email"),
+                    "customerFirstName": customer_data.get("firstName"),
+                    "customerLastName": customer_data.get("lastName"),
+                    "customerTags": Json(customer_data.get("tags", [])),
+                    "customerState": customer_data.get("state"),
+                    "customerOrdersCount": int(customer_data.get("numberOfOrders", 0)),
+                    "customerAmountSpent": float(
+                        customer_data.get("amountSpent", {}).get("amount", 0)
+                    ),
+                    "customerCurrency": customer_data.get("amountSpent", {}).get(
+                        "currencyCode", "USD"
+                    ),
+                    "eventTimestamp": self._parse_datetime(
+                        customer_data.get("createdAt")
+                    ),
+                    "rawEventData": Json(customer_data),
+                }
+            )
 
             return event_data_list
 
@@ -1261,7 +1316,7 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_product_data(product_data):
             """Prepare product data for database insertion"""
-            return {
+            data = {
                 "shopId": product_data["shopId"],
                 "productId": product_data["productId"],
                 "title": product_data["title"],
@@ -1280,27 +1335,22 @@ class MainTableStorageService:
                 "imageAlt": product_data["imageAlt"],
                 "productCreatedAt": product_data["productCreatedAt"],
                 "productUpdatedAt": product_data["productUpdatedAt"],
-                "variants": (
-                    Json(product_data["variants"]) if product_data["variants"] else None
-                ),
-                "images": (
-                    Json(product_data["images"]) if product_data["images"] else None
-                ),
-                "options": (
-                    Json(product_data["options"]) if product_data["options"] else None
-                ),
-                "collections": (
-                    Json(product_data["collections"])
-                    if product_data["collections"]
-                    else None
-                ),
-                "metafields": (
-                    Json(product_data["metafields"])
-                    if product_data["metafields"]
-                    else None
-                ),
                 "isActive": product_data["isActive"],
             }
+
+            # Only add optional fields if they have values
+            if product_data["variants"]:
+                data["variants"] = Json(product_data["variants"])
+            if product_data["images"]:
+                data["images"] = Json(product_data["images"])
+            if product_data["options"]:
+                data["options"] = Json(product_data["options"])
+            if product_data["collections"]:
+                data["collections"] = Json(product_data["collections"])
+            if product_data["metafields"]:
+                data["metafields"] = Json(product_data["metafields"])
+
+            return data
 
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
@@ -1432,7 +1482,7 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_customer_data(customer_data):
             """Prepare customer data for database insertion"""
-            return {
+            data = {
                 "shopId": customer_data["shopId"],
                 "customerId": customer_data["customerId"],
                 "email": customer_data["email"],
@@ -1444,32 +1494,24 @@ class MainTableStorageService:
                 "tags": Json(customer_data["tags"]),
                 "createdAtShopify": customer_data["createdAtShopify"],
                 "lastOrderId": customer_data["lastOrderId"],
-                "location": (
-                    Json(customer_data["location"])
-                    if customer_data["location"]
-                    else None
-                ),
-                "metafields": (
-                    Json(customer_data["metafields"])
-                    if customer_data["metafields"]
-                    else Json({})
-                ),
                 "state": customer_data["state"],
                 "verifiedEmail": customer_data["verifiedEmail"],
                 "taxExempt": customer_data["taxExempt"],
-                "defaultAddress": (
-                    Json(customer_data["defaultAddress"])
-                    if customer_data["defaultAddress"]
-                    else None
-                ),
-                "addresses": (
-                    Json(customer_data["addresses"])
-                    if customer_data["addresses"]
-                    else None
-                ),
                 "currencyCode": customer_data["currencyCode"],
                 "customerLocale": customer_data["customerLocale"],
             }
+
+            # Only add optional fields if they have values
+            if customer_data["location"]:
+                data["location"] = Json(customer_data["location"])
+            if customer_data["metafields"]:
+                data["metafields"] = Json(customer_data["metafields"])
+            if customer_data["defaultAddress"]:
+                data["defaultAddress"] = Json(customer_data["defaultAddress"])
+            if customer_data["addresses"]:
+                data["addresses"] = Json(customer_data["addresses"])
+
+            return data
 
         # Use Prisma's create_many for batch insert (much faster than individual upserts)
         try:
@@ -1533,7 +1575,7 @@ class MainTableStorageService:
                 "metafields": (
                     Json(collection_data["metafields"])
                     if collection_data["metafields"]
-                    else None
+                    else Json({})
                 ),
             }
 
