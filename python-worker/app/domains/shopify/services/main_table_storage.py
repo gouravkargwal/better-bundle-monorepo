@@ -44,36 +44,41 @@ class MainTableStorageService:
         return self._db_client
 
     async def _get_processed_shopify_ids(self, shop_id: str, data_type: str) -> set:
-        """Get all Shopify IDs that have already been processed in the main table"""
+        """Get all Shopify IDs that have already been processed in the main table using efficient raw SQL queries"""
         try:
             db = await self._get_database()
 
-            # Get all processed Shopify IDs from the main table
+            # Use raw SQL queries to get only the IDs we need - much more memory efficient
             if data_type == "orders":
-                records = await db.orderdata.find_many(
-                    where={"shopId": shop_id}, select={"shopifyId": True}
+                result = await db.query_raw(
+                    'SELECT "orderId" FROM "OrderData" WHERE "shopId" = $1', shop_id
                 )
+                return {row["orderId"] for row in result if row["orderId"]}
             elif data_type == "products":
-                records = await db.productdata.find_many(
-                    where={"shopId": shop_id}, select={"shopifyId": True}
+                result = await db.query_raw(
+                    'SELECT "productId" FROM "ProductData" WHERE "shopId" = $1', shop_id
                 )
+                return {row["productId"] for row in result if row["productId"]}
             elif data_type == "customers":
-                records = await db.customerdata.find_many(
-                    where={"shopId": shop_id}, select={"shopifyId": True}
+                result = await db.query_raw(
+                    'SELECT "customerId" FROM "CustomerData" WHERE "shopId" = $1',
+                    shop_id,
                 )
+                return {row["customerId"] for row in result if row["customerId"]}
             elif data_type == "collections":
-                records = await db.collectiondata.find_many(
-                    where={"shopId": shop_id}, select={"shopifyId": True}
+                result = await db.query_raw(
+                    'SELECT "collectionId" FROM "CollectionData" WHERE "shopId" = $1',
+                    shop_id,
                 )
+                return {row["collectionId"] for row in result if row["collectionId"]}
             elif data_type == "customer_events":
-                records = await db.customereventdata.find_many(
-                    where={"shopId": shop_id}, select={"shopifyId": True}
+                result = await db.query_raw(
+                    'SELECT "eventId" FROM "CustomerEventData" WHERE "shopId" = $1',
+                    shop_id,
                 )
+                return {row["eventId"] for row in result if row["eventId"]}
             else:
                 return set()
-
-            # Extract Shopify IDs and return as a set for fast lookup
-            return {record.shopifyId for record in records if record.shopifyId}
 
         except Exception as e:
             self.logger.warning(
@@ -209,12 +214,12 @@ class MainTableStorageService:
         try:
             db = await self._get_database()
 
-            # Step 1: Get all raw order IDs (lightweight query - only IDs, not full data)
-            raw_orders = await db.raworder.find_many(
-                where={"shopId": shop_id},
-                order={"extractedAt": "asc"},
+            # Step 1: Get all raw order IDs using efficient raw SQL query
+            raw_order_result = await db.query_raw(
+                'SELECT "shopifyId" FROM "RawOrder" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
+                shop_id,
             )
-            raw_order_ids = [order.shopifyId for order in raw_orders if order.shopifyId]
+            raw_order_ids = [row["shopifyId"] for row in raw_order_result]
 
             total_raw_count = len(raw_order_ids)
             self.logger.info(f"Found {total_raw_count} raw orders for shop {shop_id}")
@@ -347,14 +352,12 @@ class MainTableStorageService:
         try:
             db = await self._get_database()
 
-            # Step 1: Get all raw product IDs (lightweight query - only IDs, not full data)
-            raw_products = await db.rawproduct.find_many(
-                where={"shopId": shop_id},
-                order={"extractedAt": "asc"},
+            # Step 1: Get all raw product IDs using efficient raw SQL query
+            raw_product_result = await db.query_raw(
+                'SELECT "shopifyId" FROM "RawProduct" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
+                shop_id,
             )
-            raw_product_ids = [
-                product.shopifyId for product in raw_products if product.shopifyId
-            ]
+            raw_product_ids = [row["shopifyId"] for row in raw_product_result]
 
             total_raw_count = len(raw_product_ids)
             self.logger.info(f"Found {total_raw_count} raw products for shop {shop_id}")
@@ -489,14 +492,12 @@ class MainTableStorageService:
         try:
             db = await self._get_database()
 
-            # Step 1: Get all raw customer IDs (lightweight query - only IDs, not full data)
-            raw_customers = await db.rawcustomer.find_many(
-                where={"shopId": shop_id},
-                order={"extractedAt": "asc"},
+            # Step 1: Get all raw customer IDs using efficient raw SQL query
+            raw_customer_result = await db.query_raw(
+                'SELECT "shopifyId" FROM "RawCustomer" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
+                shop_id,
             )
-            raw_customer_ids = [
-                customer.shopifyId for customer in raw_customers if customer.shopifyId
-            ]
+            raw_customer_ids = [row["shopifyId"] for row in raw_customer_result]
 
             total_raw_count = len(raw_customer_ids)
             self.logger.info(
@@ -633,16 +634,12 @@ class MainTableStorageService:
         try:
             db = await self._get_database()
 
-            # Step 1: Get all raw collection IDs (lightweight query - only IDs, not full data)
-            raw_collections = await db.rawcollection.find_many(
-                where={"shopId": shop_id},
-                order={"extractedAt": "asc"},
+            # Step 1: Get all raw collection IDs using efficient raw SQL query
+            raw_collection_result = await db.query_raw(
+                'SELECT "shopifyId" FROM "RawCollection" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
+                shop_id,
             )
-            raw_collection_ids = [
-                collection.shopifyId
-                for collection in raw_collections
-                if collection.shopifyId
-            ]
+            raw_collection_ids = [row["shopifyId"] for row in raw_collection_result]
 
             total_raw_count = len(raw_collection_ids)
             self.logger.info(
@@ -783,12 +780,12 @@ class MainTableStorageService:
         try:
             db = await self._get_database()
 
-            # Step 1: Get all raw customer event IDs (lightweight query - only IDs, not full data)
-            raw_event_ids = await db.rawcustomerevent.find_many(
-                where={"shopId": shop_id},
-                select={"shopifyId": True},
-                order={"extractedAt": "asc"},
+            # Step 1: Get all raw customer event IDs using efficient raw SQL query
+            raw_event_result = await db.query_raw(
+                'SELECT "shopifyId" FROM "RawCustomerEvent" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
+                shop_id,
             )
+            raw_event_ids = [row["shopifyId"] for row in raw_event_result]
 
             total_raw_count = len(raw_event_ids)
             self.logger.info(
@@ -816,9 +813,7 @@ class MainTableStorageService:
                 )
 
             # Step 3: Calculate difference to get new IDs (fast set operation in memory)
-            raw_shopify_ids = {
-                event.shopifyId for event in raw_event_ids if event.shopifyId
-            }
+            raw_shopify_ids = set(raw_event_ids)
             new_shopify_ids = raw_shopify_ids - processed_shopify_ids
 
             total_new_count = len(new_shopify_ids)
@@ -1318,9 +1313,9 @@ class MainTableStorageService:
                         collection_data = raw_data["collection"]
 
                     else:
-                        self.logger.info("No collection found in raw_data")
+                        pass  # No collection found in raw_data
                 else:
-                    self.logger.info("No raw_data found or raw_data is not dict")
+                    pass  # No raw_data found or raw_data is not dict
 
                 # Fallback to direct collection data
                 if not collection_data:
@@ -1433,11 +1428,15 @@ class MainTableStorageService:
             event_data_list = []
 
             # Create a customer event record from the customer data
+            # Extract the event ID the same way it was stored in the raw table
+            event_id = self._extract_customer_event_id_from_payload(payload)
+
             event_data_list.append(
                 {
                     "shopId": shop_id,
                     "customerId": customer_id,
-                    "eventId": customer_id,  # Use customer ID as event ID since no separate event ID exists
+                    "eventId": event_id
+                    or customer_id,  # Use extracted event ID or fallback to customer ID
                     "eventType": payload.get("event_type", "CustomerEvent"),
                     "customerEmail": customer_data.get("email"),
                     "customerFirstName": customer_data.get("firstName"),
@@ -1462,6 +1461,45 @@ class MainTableStorageService:
 
         except Exception as e:
             self.logger.error(f"Failed to extract customer event fields: {str(e)}")
+            return None
+
+    def _extract_customer_event_id_from_payload(
+        self, payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extract customer event ID from payload - same logic as data_storage.py"""
+        try:
+            # Try to get the event ID from the payload
+            event_id = None
+
+            # Check if payload has an id field
+            if "id" in payload:
+                event_id = str(payload["id"])
+
+            # If no direct id, check in nested structures
+            if not event_id and "raw_data" in payload:
+                raw_data = payload["raw_data"]
+                if isinstance(raw_data, dict):
+                    # Check for customer_event nested structure
+                    if "customer_event" in raw_data:
+                        customer_event = raw_data["customer_event"]
+                        if isinstance(customer_event, dict) and "id" in customer_event:
+                            event_id = str(customer_event["id"])
+                    # Check for direct id in raw_data
+                    elif "id" in raw_data:
+                        event_id = str(raw_data["id"])
+
+            if not event_id:
+                return None
+
+            # Extract numeric ID from Shopify GraphQL ID format (gid://shopify/MarketingEvent/123456789)
+            if event_id.startswith("gid://shopify/MarketingEvent/"):
+                return event_id.split("/")[-1]
+
+            return event_id
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to extract customer event ID from payload: {e}"
+            )
             return None
 
     def _extract_shopify_id(self, gid: str) -> Optional[str]:
