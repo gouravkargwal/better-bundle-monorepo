@@ -123,7 +123,6 @@ model Shop {
   productData        ProductData[]
   customerData       CustomerData[]
   collectionData     CollectionData[]
-  customerEventData  CustomerEventData[]
   analysisConfig     ShopAnalysisConfig?
   trackedSales       TrackedSale[]
   widgetConfig       WidgetConfiguration?
@@ -299,33 +298,6 @@ model CollectionData {
   @@map("CollectionData")
 }
 
-model CustomerEventData {
-  id                  String   @id @default(cuid())
-  shopId              String
-  customerId          String
-  eventId             String
-  eventType           String
-  customerEmail       String?
-  customerFirstName   String?
-  customerLastName    String?
-  customerTags        Json?
-  customerState       String?
-  customerOrdersCount Int      @default(0)
-  customerAmountSpent Float    @default(0)
-  customerCurrency    String   @default("USD")
-  eventTimestamp      DateTime @default(now())
-  rawEventData        Json?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, eventId])
-  @@index([shopId, customerId])
-  @@index([shopId, eventType])
-  @@index([shopId, eventTimestamp])
-  @@index([shopId, customerEmail])
-  @@map("CustomerEventData")
-}
 
 model BundleAnalysisResult {
   id              String   @id @default(cuid())
