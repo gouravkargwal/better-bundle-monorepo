@@ -14,15 +14,35 @@ from app.webhooks.models import ShopifyBehavioralEvent
 test_payloads = [
     # 1. PageViewedEvent
     {
-        "id": "page-viewed-123",
-        "timestamp": "2025-09-05T09:30:00Z",
+        "id": "e_b15b565a-5282-4f73-af5c-097561f38e6e",
         "name": "page_viewed",
-        "customer_id": "cust-101",
-        "data": {
-            "url": "https://test-shop.myshopify.com/products/test-product",
-            "referrer": "https://google.com",
+        "timestamp": "2025-09-05T13:50:00.000Z",
+        "clientId": "b5a939f5-4e00-4e2b-8b29-9e8c1b3f2e1a",
+        "seq": 7,
+        "type": "standard",
+        "context": {
+            "document": {
+                "location": {
+                    "href": "https://your-store.myshopify.com/products/example-product",
+                    "pathname": "/products/example-product",
+                    "search": "",
+                },
+                "referrer": "https://your-store.myshopify.com/collections/all",
+                "title": "Example Product - Your Store",
+            },
+            "navigator": {
+                "cookieEnabled": True,
+                "language": "en-US",
+                "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            },
+            "window": {
+                "innerHeight": 800,
+                "innerWidth": 1440,
+                "outerHeight": 900,
+                "outerWidth": 1540,
+            },
         },
-        "context": {"shop": {"domain": "test-shop.myshopify.com"}},
+        "data": {},
     },
     # 2. ProductViewedEvent
     {
@@ -134,35 +154,144 @@ test_payloads = [
     },
     # 4. CollectionViewedEvent
     {
-        "id": "collection-viewed-101",
-        "timestamp": "2025-09-05T09:45:00Z",
+        "id": "e_b15b565a-5282-4f73-af5c-097561f38e6e",
         "name": "collection_viewed",
-        "customer_id": "cust-101",
-        "data": {
-            "collectionId": "collection-555",
-            "collectionTitle": "Summer Collection",
+        "timestamp": "2025-09-05T13:45:00.000Z",
+        "clientId": "b5a939f5-4e00-4e2b-8b29-9e8c1b3f2e1a",
+        "seq": 6,
+        "type": "standard",
+        "context": {
+            "document": {
+                "location": {
+                    "href": "https://your-store.myshopify.com/collections/summer-collection",
+                    "pathname": "/collections/summer-collection",
+                    "search": "",
+                },
+                "referrer": "https://your-store.myshopify.com/",
+                "title": "Summer Collection - Your Store",
+            },
+            "navigator": {
+                "cookieEnabled": True,
+                "language": "en-US",
+                "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            },
+            "window": {
+                "innerHeight": 800,
+                "innerWidth": 1440,
+                "outerHeight": 900,
+                "outerWidth": 1540,
+            },
         },
-        "context": {"shop": {"domain": "test-shop.myshopify.com"}},
+        "data": {
+            "collection": {
+                "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Db2xsZWN0aW9uLzgyMTA4MjM1NzU4MjM",
+                "title": "Summer Collection",
+                "productVariants": [
+                    {
+                        "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0VmFyaWFudC8zNzgzNjk2NTQ5OTI3",
+                        "title": "T-Shirt - White",
+                        "sku": "TS-WHT-101",
+                        "price": {"amount": 25.00, "currencyCode": "USD"},
+                        "image": {
+                            "src": "https://cdn.shopify.com/s/files/1/0000/0000/products/tshirt-white.jpg",
+                        },
+                        "product": {
+                            "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0LzgyMTA4MjM1NzU4MjM",
+                            "title": "Unisex T-Shirt",
+                            "type": "Clothing",
+                            "vendor": "My Clothing Store",
+                            "url": "/products/unisex-t-shirt",
+                        },
+                    },
+                    {
+                        "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0VmFyaWFudC80NTY5NTg0MzQzMDYzNQ",
+                        "title": "Sunglasses - Black",
+                        "sku": "SG-BLK-202",
+                        "price": {"amount": 55.00, "currencyCode": "USD"},
+                        "image": {
+                            "src": "https://cdn.shopify.com/s/files/1/0000/0000/products/sunglasses-black.jpg",
+                        },
+                        "product": {
+                            "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0Lzc2MzI5NDMzNDMwNjM1",
+                            "title": "Aviator Sunglasses",
+                            "type": "Accessories",
+                            "vendor": "My Eyewear Store",
+                            "url": "/products/aviator-sunglasses",
+                        },
+                    },
+                ],
+            },
+        },
     },
     # 5. SearchSubmittedEvent
     {
-        "id": "search-submitted-202",
-        "timestamp": "2025-09-05T09:50:00Z",
+        "id": "e_8a7c6f5e-4d3b-2c1a-9f8e-7d6c5b4a3c2b",
         "name": "search_submitted",
-        "customer_id": "cust-101",
-        "data": {
-            "query": "blue jeans",
-            "results": [
-                {
-                    "id": "variant-456",
-                    "title": "Slim Fit Blue Jeans",
-                    "sku": "SFBJ-101",
-                    "price": 75.00,
-                    "productId": "prod-456",
-                }
-            ],
+        "timestamp": "2025-09-05T13:40:00.000Z",
+        "clientId": "b5a939f5-4e00-4e2b-8b29-9e8c1b3f2e1a",
+        "seq": 5,
+        "type": "standard",
+        "context": {
+            "document": {
+                "location": {
+                    "href": "https://your-store.myshopify.com/search?q=t-shirt",
+                    "pathname": "/search",
+                    "search": "?q=t-shirt",
+                },
+                "referrer": "https://your-store.myshopify.com/",
+                "title": "Search results for 't-shirt' - Your Store",
+            },
+            "navigator": {
+                "cookieEnabled": True,
+                "language": "en-US",
+                "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            },
+            "window": {
+                "innerHeight": 800,
+                "innerWidth": 1440,
+                "outerHeight": 900,
+                "outerWidth": 1540,
+            },
         },
-        "context": {"shop": {"domain": "test-shop.myshopify.com"}},
+        "data": {
+            "searchResult": {
+                "query": "t-shirt",
+                "productVariants": [
+                    {
+                        "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0VmFyaWFudC8zNzgzNjk2NTQ5OTI3",
+                        "title": "Unisex T-Shirt - Blue",
+                        "sku": "UT-BLU-101",
+                        "price": {"amount": 25.00, "currencyCode": "USD"},
+                        "image": {
+                            "src": "https://cdn.shopify.com/s/files/1/0000/0000/products/tshirt-blue.jpg",
+                        },
+                        "product": {
+                            "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0LzgyMTA4MjM1NzU4MjM",
+                            "title": "Unisex T-Shirt",
+                            "type": "Clothing",
+                            "vendor": "My Clothing Store",
+                            "url": "/products/unisex-t-shirt",
+                        },
+                    },
+                    {
+                        "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0VmFyaWFudC80NTY5NTg0MzQzMDYzNQ",
+                        "title": "V-Neck T-Shirt - White",
+                        "sku": "VT-WHT-202",
+                        "price": {"amount": 28.00, "currencyCode": "USD"},
+                        "image": {
+                            "src": "https://cdn.shopify.com/s/files/1/0000/0000/products/tshirt-white.jpg",
+                        },
+                        "product": {
+                            "id": "Z2lkOi8vbm9kZS8vU2hvcGlmeS9Qcm9kdWN0Lzc2MzI5NDMzNDMwNjM1",
+                            "title": "V-Neck T-Shirt",
+                            "type": "Clothing",
+                            "vendor": "My Clothing Store",
+                            "url": "/products/v-neck-t-shirt",
+                        },
+                    },
+                ],
+            },
+        },
     },
     # 7. CheckoutCompletedEvent
     {
