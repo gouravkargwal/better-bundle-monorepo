@@ -4,12 +4,10 @@ Shopify data collection service implementation for BetterBundle Python Worker
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 from app.core.logging import get_logger
-from app.core.exceptions import ConfigurationError
-from app.shared.decorators import retry, async_timing
 from app.shared.helpers import now_utc
 
 from ..interfaces.data_collector import IShopifyDataCollector
@@ -20,7 +18,6 @@ from ..models.product import ShopifyProduct, ShopifyProductVariant
 from ..models.order import ShopifyOrder, ShopifyOrderLineItem
 from ..models.customer import ShopifyCustomer, ShopifyCustomerAddress
 from ..models.collection import ShopifyCollection
-from ..models.customer_event import ShopifyCustomerEvent
 from .data_storage import ShopifyDataStorageService
 from .main_table_storage import MainTableStorageService
 
@@ -438,62 +435,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
             raise
 
-    async def collect_customer_events(
-        self,
-        shop_domain: str,
-        access_token: str = None,
-        limit: Optional[int] = None,
-        since_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-    ) -> List[ShopifyCustomerEvent]:
-        """Collect customer events data from Shopify API with smart incremental collection"""
-        try:
-            # Note: Permissions already checked in collect_all_data method
-
-            # Get the last collection timestamp from database
-            last_updated_at = await self._get_last_collection_time(
-                shop_domain, "customer_events"
-            )
-
-            # Calculate the query date (max 90 days back, or since last collection)
-            now = now_utc()
-            max_days_back = now - timedelta(days=90)
-
-            if last_updated_at:
-                # Use the later of: last collection time or 90 days ago
-                query_since = max(last_updated_at, max_days_back)
-                logger.info(
-                    f"Starting incremental customer events collection since {query_since}",
-                    shop_domain=shop_domain,
-                )
-            else:
-                # No previous data, collect last 90 days
-                query_since = max_days_back
-                logger.info(
-                    f"Starting full customer events collection (last 90 days)",
-                    shop_domain=shop_domain,
-                )
-
-            return await self._collect_data_generic(
-                shop_domain=shop_domain,
-                data_type="customer_events",
-                api_method="get_customer_events",
-                create_method="_create_customer_event_from_data",
-                query_since=query_since,
-                limit=limit,
-                since_id=since_id,
-                event_type=event_type,
-                created_at_min=query_since,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"Failed to collect customer events",
-                shop_domain=shop_domain,
-                error=str(e),
-            )
-            raise
-
     async def collect_all_data(
         self,
         shop_domain: str,
@@ -502,7 +443,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         include_orders: bool = True,
         include_customers: bool = True,
         include_collections: bool = True,
-        include_customer_events: bool = True,
     ) -> Dict[str, Any]:
         """Collect all available data from Shopify API"""
         try:
@@ -529,8 +469,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 collectable_data.append("customers")
             if permissions.get("collections"):
                 collectable_data.append("collections")
-            if permissions.get("customer_events"):
-                collectable_data.append("customer_events")
 
             if not collectable_data:
                 logger.warning(f"No data can be collected", shop_domain=shop_domain)
@@ -555,7 +493,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 "orders": [],
                 "customers": [],
                 "collections": [],
-                "customer_events": [],
                 "collection_strategy": strategy,
                 "collection_stats": {},
                 "started_at": now_utc().isoformat(),
@@ -630,16 +567,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 )
                 task_data_types.append("collections")
 
-            if "customer_events" in collectable_data and include_customer_events:
-                collection_tasks.append(
-                    asyncio.create_task(
-                        self._collect_with_progress(
-                            "customer_events", shop_domain, access_token
-                        )
-                    )
-                )
-                task_data_types.append("customer_events")
-
             # Execute collection tasks
             if collection_tasks:
                 results = await asyncio.gather(
@@ -687,10 +614,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                                         await self.data_storage.store_collections_data(
                                             result, internal_shop_id
                                         )
-                                    )
-                                elif data_type == "customer_events":
-                                    storage_result = await self.data_storage.store_customer_events_data(
-                                        result, internal_shop_id
                                     )
 
                                 logger.info(
@@ -1517,29 +1440,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 else now_utc()
             ),
             raw_data={"collection": collection_data},
-        )
-
-    def _create_customer_event_from_data(
-        self, event_data: Dict[str, Any]
-    ) -> ShopifyCustomerEvent:
-        """Create ShopifyCustomerEvent from API data"""
-        # Since we're now using customers with events, the event_data structure is different
-        # We need to extract event information from the customer's events
-        return ShopifyCustomerEvent(
-            id=event_data.get("id", ""),
-            event_type=event_data.get("__typename", "CustomerEvent"),
-            description=f"Customer event: {event_data.get('__typename', 'Unknown')}",
-            created_at=(
-                datetime.fromisoformat(event_data.get("createdAt"))
-                if event_data.get("createdAt")
-                else now_utc()
-            ),
-            updated_at=(
-                datetime.fromisoformat(event_data.get("updatedAt"))
-                if event_data.get("updatedAt")
-                else now_utc()
-            ),
-            raw_data={"customer_event": event_data},
         )
 
     def _update_progress(

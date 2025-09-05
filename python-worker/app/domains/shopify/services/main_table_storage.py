@@ -73,12 +73,6 @@ class MainTableStorageService:
                     shop_id,
                 )
                 return {row["collectionId"] for row in result if row["collectionId"]}
-            elif data_type == "customer_events":
-                result = await db.query_raw(
-                    'SELECT "eventId" FROM "CustomerEventData" WHERE "shopId" = $1',
-                    shop_id,
-                )
-                return {row["eventId"] for row in result if row["eventId"]}
             else:
                 return set()
 
@@ -146,19 +140,6 @@ class MainTableStorageService:
                     shop_id,
                 )
                 return {row["shopifyId"] for row in result if row["shopifyId"]}
-            elif data_type == "customer_events":
-                result = await db.query_raw(
-                    """
-                    SELECT r."shopifyId" 
-                    FROM "RawCustomerEvent" r
-                    LEFT JOIN "CustomerEventData" e ON r."shopifyId" = e."eventId" AND r."shopId" = e."shopId"
-                    WHERE r."shopId" = $1 
-                    AND r."shopifyId" IS NOT NULL
-                    AND (e."eventId" IS NULL OR r."extractedAt" > e."updatedAt")
-                    """,
-                    shop_id,
-                )
-                return {row["shopifyId"] for row in result if row["shopifyId"]}
             else:
                 return set()
 
@@ -194,17 +175,6 @@ class MainTableStorageService:
         except Exception:
             return None
 
-    def _extract_customer_event_id(self, event_data: Dict[str, Any]) -> Optional[str]:
-        """Extract Shopify customer event ID from event data"""
-        try:
-            # Customer events might not have a direct ID, use a combination of fields
-            customer_id = event_data.get("customer_id", "")
-            event_type = event_data.get("event_type", "")
-            timestamp = event_data.get("timestamp", "")
-            return f"{customer_id}_{event_type}_{timestamp}"
-        except Exception:
-            return None
-
     async def store_all_data(
         self, shop_id: str, incremental: bool = True
     ) -> StorageResult:
@@ -226,7 +196,6 @@ class MainTableStorageService:
                 self.store_products(shop_id, incremental=incremental),
                 self.store_customers(shop_id, incremental=incremental),
                 self.store_collections(shop_id, incremental=incremental),
-                self.store_customer_events(shop_id, incremental=incremental),
                 return_exceptions=True,  # Don't fail if one operation fails
             )
 
@@ -236,7 +205,6 @@ class MainTableStorageService:
                 "products",
                 "customers",
                 "collections",
-                "customer_events",
             ]
 
             for i, result in enumerate(results):
@@ -907,170 +875,6 @@ class MainTableStorageService:
                 duration_ms=duration_ms,
             )
 
-    async def store_customer_events(
-        self, shop_id: str, incremental: bool = True
-    ) -> StorageResult:
-        """Store customer events from raw table to CustomerEventData table with memory-efficient incremental processing"""
-        start_time = now_utc()
-        processed_count = 0
-        error_count = 0
-        errors = []
-        batch_size = (
-            1000  # Process 1000 customer events at a time to avoid memory issues
-        )
-
-        try:
-            db = await self._get_database()
-
-            # Step 1: Get all raw customer event IDs using efficient raw SQL query
-            raw_event_result = await db.query_raw(
-                'SELECT "shopifyId" FROM "RawCustomerEvent" WHERE "shopId" = $1 AND "shopifyId" IS NOT NULL ORDER BY "extractedAt" ASC',
-                shop_id,
-            )
-            raw_event_ids = [row["shopifyId"] for row in raw_event_result]
-
-            total_raw_count = len(raw_event_ids)
-            self.logger.info(
-                f"Found {total_raw_count} raw customer events for shop {shop_id}"
-            )
-
-            if total_raw_count == 0:
-                self.logger.info(f"No raw customer events found for shop {shop_id}")
-                return StorageResult(
-                    success=True,
-                    processed_count=0,
-                    error_count=0,
-                    errors=[],
-                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
-                )
-
-            # Step 2: Get records to process (new + updated)
-            records_to_process = set()
-            if incremental:
-                # Get new records (not in main table)
-                processed_shopify_ids = await self._get_processed_shopify_ids(
-                    shop_id, "customer_events"
-                )
-                raw_shopify_ids = set(raw_event_ids)
-                new_shopify_ids = raw_shopify_ids - processed_shopify_ids
-
-                # Get updated records (in main table but raw table has newer data)
-                updated_shopify_ids = await self._get_updated_shopify_ids(
-                    shop_id, "customer_events"
-                )
-
-                # Combine new and updated records
-                records_to_process = new_shopify_ids | updated_shopify_ids
-
-                self.logger.info(
-                    f"Found {len(processed_shopify_ids)} already processed customer events for shop {shop_id}"
-                )
-                self.logger.info(
-                    f"Found {len(new_shopify_ids)} new customer events, {len(updated_shopify_ids)} updated customer events"
-                )
-            else:
-                # Full refresh: process all records
-                records_to_process = set(raw_event_ids)
-
-            total_count = len(records_to_process)
-            self.logger.info(
-                f"Processing {total_count} customer events (new + updated) for shop {shop_id} in batches of {batch_size}"
-            )
-
-            if total_count == 0:
-                self.logger.info(f"No customer events to process for shop {shop_id}")
-                return StorageResult(
-                    success=True,
-                    processed_count=0,
-                    error_count=0,
-                    errors=[],
-                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
-                )
-
-            # Step 4: Process customer events in batches by fetching only needed records
-            records_to_process_list = list(records_to_process)
-            for i in range(0, total_count, batch_size):
-                batch_shopify_ids = records_to_process_list[i : i + batch_size]
-
-                # Fetch only the raw records we need to process (database does the filtering)
-                raw_events = await db.rawcustomerevent.find_many(
-                    where={"shopId": shop_id, "shopifyId": {"in": batch_shopify_ids}}
-                )
-
-                # Collect customer event data for batch processing
-                batch_event_data = []
-
-                for raw_event in raw_events:
-                    try:
-                        # Parse the JSON payload
-                        payload = raw_event.payload
-                        if isinstance(payload, str):
-                            payload = json.loads(payload)
-
-                        # Extract customer event data
-                        event_data_list = self._extract_customer_event_fields(
-                            payload, shop_id
-                        )
-
-                        if event_data_list:
-                            batch_event_data.extend(event_data_list)
-                        else:
-                            self.logger.warning(
-                                f"Could not extract customer event data from raw event {raw_event.id}"
-                            )
-
-                    except Exception as e:
-                        error_msg = (
-                            f"Failed to process customer event {raw_event.id}: {str(e)}"
-                        )
-                        self.logger.error(error_msg)
-                        errors.append(error_msg)
-                        error_count += 1
-
-                # Batch upsert all customer events in this batch
-                if batch_event_data:
-                    try:
-                        await self._batch_upsert_customer_event_data(
-                            batch_event_data, db
-                        )
-                        processed_count += len(batch_event_data)
-                    except Exception as e:
-                        error_msg = f"Failed to batch upsert customer events: {str(e)}"
-                        self.logger.error(error_msg)
-                        errors.append(error_msg)
-                        error_count += len(batch_event_data)
-
-                # Log progress
-                progress_percent = min(100, (processed_count / total_count) * 100)
-                self.logger.info(
-                    f"Processed {processed_count}/{total_count} customer events ({progress_percent:.1f}%)"
-                )
-
-            self.logger.info(
-                f"Successfully processed {processed_count} customer events"
-            )
-
-            duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
-            return StorageResult(
-                success=error_count == 0,
-                processed_count=processed_count,
-                error_count=error_count,
-                errors=errors,
-                duration_ms=duration_ms,
-            )
-
-        except Exception as e:
-            duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
-            error_msg = f"Failed to store customer events: {str(e)}"
-            self.logger.error(error_msg)
-            return StorageResult(
-                success=False,
-                processed_count=processed_count,
-                error_count=error_count + 1,
-                errors=errors + [error_msg],
-                duration_ms=duration_ms,
-            )
-
     def _extract_order_fields(
         self, payload: Dict[str, Any], shop_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -1542,120 +1346,6 @@ class MainTableStorageService:
             self.logger.error(f"Failed to extract collection fields: {str(e)}")
             return None
 
-    def _extract_customer_event_fields(
-        self, payload: Dict[str, Any], shop_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Extract key customer event fields from nested JSON payload"""
-        try:
-            # Handle nested JSON structure: payload.raw_data.customer_event
-            customer_data = None
-
-            if isinstance(payload, dict):
-                # Try nested structure first: payload.raw_data.customer_event
-                if "raw_data" in payload and isinstance(payload["raw_data"], dict):
-                    raw_data = payload["raw_data"]
-                    if raw_data is not None and "customer_event" in raw_data:
-                        customer_data = raw_data["customer_event"]
-
-                # Fallback to direct customer data
-                if not customer_data:
-                    customer_data = (
-                        payload.get("customer")
-                        or payload.get("data", {}).get("customer")
-                        or payload
-                    )
-
-            if (
-                not customer_data
-                or not isinstance(customer_data, dict)
-                or not customer_data.get("id")
-            ):
-                return None
-
-            # Extract customer ID
-            customer_id = self._extract_shopify_id(customer_data.get("id", ""))
-            if not customer_id:
-                return None
-
-            # For customer events, we create a single event record from the customer data
-            # since the payload structure shows this is a customer record, not multiple events
-            event_data_list = []
-
-            # Create a customer event record from the customer data
-            # Extract the event ID the same way it was stored in the raw table
-            event_id = self._extract_customer_event_id_from_payload(payload)
-
-            event_data_list.append(
-                {
-                    "shopId": shop_id,
-                    "customerId": customer_id,
-                    "eventId": event_id
-                    or customer_id,  # Use extracted event ID or fallback to customer ID
-                    "eventType": payload.get("event_type", "CustomerEvent"),
-                    "customerEmail": customer_data.get("email"),
-                    "customerFirstName": customer_data.get("firstName"),
-                    "customerLastName": customer_data.get("lastName"),
-                    "customerTags": Json(customer_data.get("tags", [])),
-                    "customerState": customer_data.get("state"),
-                    "customerOrdersCount": int(customer_data.get("numberOfOrders", 0)),
-                    "customerAmountSpent": float(
-                        customer_data.get("amountSpent", {}).get("amount", 0)
-                    ),
-                    "customerCurrency": customer_data.get("amountSpent", {}).get(
-                        "currencyCode", "USD"
-                    ),
-                    "eventTimestamp": self._parse_datetime(
-                        customer_data.get("createdAt")
-                    ),
-                    "rawEventData": Json(customer_data),
-                }
-            )
-
-            return event_data_list
-
-        except Exception as e:
-            self.logger.error(f"Failed to extract customer event fields: {str(e)}")
-            return None
-
-    def _extract_customer_event_id_from_payload(
-        self, payload: Dict[str, Any]
-    ) -> Optional[str]:
-        """Extract customer event ID from payload - same logic as data_storage.py"""
-        try:
-            # Try to get the event ID from the payload
-            event_id = None
-
-            # Check if payload has an id field
-            if "id" in payload:
-                event_id = str(payload["id"])
-
-            # If no direct id, check in nested structures
-            if not event_id and "raw_data" in payload:
-                raw_data = payload["raw_data"]
-                if isinstance(raw_data, dict):
-                    # Check for customer_event nested structure
-                    if "customer_event" in raw_data:
-                        customer_event = raw_data["customer_event"]
-                        if isinstance(customer_event, dict) and "id" in customer_event:
-                            event_id = str(customer_event["id"])
-                    # Check for direct id in raw_data
-                    elif "id" in raw_data:
-                        event_id = str(raw_data["id"])
-
-            if not event_id:
-                return None
-
-            # Extract numeric ID from Shopify GraphQL ID format (gid://shopify/MarketingEvent/123456789)
-            if event_id.startswith("gid://shopify/MarketingEvent/"):
-                return event_id.split("/")[-1]
-
-            return event_id
-        except Exception as e:
-            self.logger.warning(
-                f"Failed to extract customer event ID from payload: {e}"
-            )
-            return None
-
     def _extract_shopify_id(self, gid: str) -> Optional[str]:
         """Extract numeric ID from Shopify GraphQL GID"""
         if not gid:
@@ -2005,73 +1695,6 @@ class MainTableStorageService:
                         "shopId_collectionId": {
                             "shopId": collection_data["shopId"],
                             "collectionId": collection_data["collectionId"],
-                        }
-                    },
-                    data=prepared_data,
-                )
-
-    async def _batch_upsert_customer_event_data(
-        self, event_data_list: List[Dict[str, Any]], db=None
-    ) -> None:
-        """Batch upsert customer event data to CustomerEventData table using Prisma"""
-        if not event_data_list:
-            return
-
-        # If no db connection provided, get one
-        if db is None:
-            db = await self._get_database()
-            await self._batch_upsert_customer_event_data(event_data_list, db)
-            return
-
-        # Prepare data for both batch insert and individual upserts
-        def prepare_customer_event_data(event_data):
-            """Prepare customer event data for database insertion"""
-            return {
-                "shopId": event_data["shopId"],
-                "customerId": event_data["customerId"],
-                "eventId": event_data["eventId"],
-                "eventType": event_data["eventType"],
-                "customerEmail": event_data["customerEmail"],
-                "customerFirstName": event_data["customerFirstName"],
-                "customerLastName": event_data["customerLastName"],
-                "customerTags": Json(event_data["customerTags"]),
-                "customerState": event_data["customerState"],
-                "customerOrdersCount": event_data["customerOrdersCount"],
-                "customerAmountSpent": event_data["customerAmountSpent"],
-                "customerCurrency": event_data["customerCurrency"],
-                "eventTimestamp": event_data["eventTimestamp"],
-                "rawEventData": (
-                    Json(event_data["rawEventData"])
-                    if event_data["rawEventData"]
-                    else None
-                ),
-            }
-
-        # Use Prisma's create_many for batch insert (much faster than individual upserts)
-        try:
-            # Prepare data for create_many
-            create_data = [
-                prepare_customer_event_data(event_data)
-                for event_data in event_data_list
-            ]
-
-            # Use create_many with skipDuplicates for batch insert
-            await db.customereventdata.create_many(
-                data=create_data, skip_duplicates=True
-            )
-
-        except Exception as e:
-            # Fallback to individual upserts if batch insert fails
-            self.logger.warning(
-                f"Batch insert failed, falling back to individual upserts: {str(e)}"
-            )
-            for event_data in event_data_list:
-                prepared_data = prepare_customer_event_data(event_data)
-                await db.customereventdata.upsert(
-                    where={
-                        "shopId_eventId": {
-                            "shopId": event_data["shopId"],
-                            "eventId": event_data["eventId"],
                         }
                     },
                     data=prepared_data,

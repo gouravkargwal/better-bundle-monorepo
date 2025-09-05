@@ -72,20 +72,17 @@ model RawCollection {
   @@map("RawCollection")
 }
 
-model RawCustomerEvent {
-  id                String    @id @default(cuid())
-  shopId            String
-  payload           Json
-  extractedAt       DateTime  @default(now())
-  shopifyId         String?   // Shopify customer event ID for efficient lookups
-  shopifyCreatedAt  DateTime? // Shopify creation timestamp
-  shopifyUpdatedAt  DateTime? // Shopify update timestamp
+model RawBehavioralEvents {
+  id          String   @id @default(cuid())
+  shopId      String
+  payload     Json
+  receivedAt  DateTime @default(now())
+  
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId])
-  @@index([shopId, shopifyId])
-  @@index([shopId, shopifyUpdatedAt])
-  @@index([shopId, shopifyCreatedAt])
-  @@map("RawCustomerEvent")
+  @@index([shopId, receivedAt])
+  @@map("RawBehavioralEvents")
 }
 
 model Session {
@@ -868,18 +865,7 @@ model CustomerAnalytics {
 }
 
 // Behavioral Events Tables
-model RawBehavioralEvents {
-  id          String   @id @default(cuid())
-  shopId      String
-  payload     Json
-  receivedAt  DateTime @default(now())
-  
-  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  @@index([shopId])
-  @@index([shopId, receivedAt])
-  @@map("RawBehavioralEvents")
-}
 
 model BehavioralEvents {
   eventId     String   @id

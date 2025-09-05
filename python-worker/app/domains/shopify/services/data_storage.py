@@ -26,7 +26,6 @@ class DataType(Enum):
     ORDERS = "orders"
     CUSTOMERS = "customers"
     COLLECTIONS = "collections"
-    CUSTOMER_EVENTS = "customer_events"
 
 
 @dataclass
@@ -112,7 +111,6 @@ class ShopifyDataStorageService:
                 "rawproduct",
                 "rawcustomer",
                 "rawcollection",
-                "rawcustomerevent",
             ]
 
             db = await get_database()
@@ -616,24 +614,6 @@ class ShopifyDataStorageService:
             return collection_id
         except Exception as e:
             logger.warning(f"Failed to extract collection ID: {e}")
-            return None
-
-    def _extract_customer_event_id(self, event: Any) -> Optional[str]:
-        """Extract customer event ID from event object"""
-        try:
-            if hasattr(event, "id"):
-                event_id = str(event.id)
-            elif isinstance(event, dict) and "id" in event:
-                event_id = str(event["id"])
-            else:
-                return None
-
-            # Extract numeric ID from Shopify GraphQL ID format (gid://shopify/MarketingEvent/123456789)
-            if event_id.startswith("gid://shopify/MarketingEvent/"):
-                return event_id.split("/")[-1]
-            return event_id
-        except Exception as e:
-            logger.warning(f"Failed to extract customer event ID: {e}")
             return None
 
     def _extract_shopify_timestamps(
@@ -1215,183 +1195,6 @@ class ShopifyDataStorageService:
                     metrics.failed_items += 1
                     continue
 
-    async def _process_customer_events_in_transaction(
-        self,
-        db_client: Union[Prisma, Any],
-        events: List[Any],
-        shop_id: str,
-        incremental: bool,
-        batch_metrics: Dict[str, int] = None,
-    ) -> Dict[str, int]:
-        """Process customer events using fast batch operations with duplicate prevention"""
-        if batch_metrics is None:
-            batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
-
-        try:
-            if not incremental:
-                # Full refresh: delete existing and insert all
-                await db_client.rawcustomerevent.delete_many(where={"shopId": shop_id})
-                batch_data = []
-                current_time = now_utc()
-
-                for event in events:
-                    batch_data.append(
-                        {
-                            "shopId": shop_id,
-                            "payload": json.dumps(
-                                event.dict() if hasattr(event, "dict") else event,
-                                default=str,
-                            ),
-                            "extractedAt": current_time,
-                        }
-                    )
-
-                await db_client.rawcustomerevent.create_many(data=batch_data)
-                batch_metrics["new"] = len(events)
-                logger.info(f"Full refresh: {len(events)} customer events stored")
-            else:
-                # Incremental: efficient batch approach with batch lookup
-                current_time = now_utc()
-                new_events = []
-                updated_events = []
-
-                # Extract all event IDs first
-                event_ids = []
-                event_data_map = {}
-
-                for event in events:
-                    event_id = self._extract_customer_event_id(event)
-                    if not event_id:
-                        continue
-
-                    event_ids.append(event_id)
-                    created_at, updated_at = self._extract_shopify_timestamps(event)
-
-                    event_data_map[event_id] = {
-                        "shopId": shop_id,
-                        "payload": json.dumps(
-                            event.dict() if hasattr(event, "dict") else event,
-                            default=str,
-                        ),
-                        "extractedAt": current_time,
-                        "shopifyId": event_id,
-                        "shopifyCreatedAt": created_at,
-                        "shopifyUpdatedAt": updated_at,
-                    }
-
-                # Batch lookup all existing events in a single query
-                existing_events = {}
-                if event_ids:
-                    existing_records = await db_client.rawcustomerevent.find_many(
-                        where={"shopId": shop_id, "shopifyId": {"in": event_ids}}
-                    )
-                    existing_events = {
-                        record.shopifyId: record for record in existing_records
-                    }
-
-                # Process each event using the batch lookup results
-                for event_id, event_data in event_data_map.items():
-                    existing_event = existing_events.get(event_id)
-
-                    if not existing_event:
-                        # New event
-                        new_events.append(event_data)
-                    elif (
-                        event_data["shopifyUpdatedAt"]
-                        and existing_event.shopifyUpdatedAt
-                    ):
-                        # Check if event was updated
-                        if (
-                            event_data["shopifyUpdatedAt"]
-                            > existing_event.shopifyUpdatedAt
-                        ):
-                            updated_events.append(event_data)
-                    elif (
-                        not existing_event.shopifyUpdatedAt
-                        and event_data["shopifyUpdatedAt"]
-                    ):
-                        # Existing event without timestamp, add timestamp
-                        updated_events.append(event_data)
-
-                # Insert new events
-                if new_events:
-                    await db_client.rawcustomerevent.create_many(data=new_events)
-                    batch_metrics["new"] = len(new_events)
-
-                # Update existing events (optimized batch update)
-                if updated_events:
-                    # Use raw SQL for efficient batch updates
-                    for event_data in updated_events:
-                        await db_client.query_raw(
-                            """
-                            UPDATE "RawCustomerEvent" 
-                            SET "payload" = $1, "extractedAt" = $2, "shopifyUpdatedAt" = $3
-                            WHERE "shopId" = $4 AND "shopifyId" = $5
-                            """,
-                            event_data["payload"],
-                            event_data["extractedAt"],
-                            event_data["shopifyUpdatedAt"],
-                            shop_id,
-                            event_data["shopifyId"],
-                        )
-                    batch_metrics["updated"] = len(updated_events)
-
-                logger.info(
-                    f"Incremental: {len(new_events)} new, {len(updated_events)} updated customer events"
-                )
-
-        except Exception as e:
-            logger.error(f"Timestamp-based processing failed: {e}")
-            # Fallback to individual inserts if batch fails
-            for event in events:
-                try:
-                    event_id = self._extract_customer_event_id(event)
-                    created_at, updated_at = self._extract_shopify_timestamps(event)
-
-                    await db_client.rawcustomerevent.create(
-                        data={
-                            "shopId": shop_id,
-                            "payload": json.dumps(
-                                event.dict() if hasattr(event, "dict") else event,
-                                default=str,
-                            ),
-                            "extractedAt": now_utc(),
-                            "shopifyId": event_id,
-                            "shopifyCreatedAt": created_at,
-                            "shopifyUpdatedAt": updated_at,
-                        }
-                    )
-                    batch_metrics["new"] += 1
-                except Exception as individual_error:
-                    logger.error(
-                        f"Failed to process customer event: {individual_error}"
-                    )
-                    batch_metrics["failed"] = batch_metrics.get("failed", 0) + 1
-                    continue
-
-        return batch_metrics
-
-    async def _process_customer_events_batch(
-        self, events: List[Any], shop_id: str, incremental: bool
-    ) -> Dict[str, int]:
-        """Process a batch of customer events with transaction support"""
-        batch_metrics = {"new": 0, "updated": 0, "deleted": 0}
-
-        try:
-            # Use database client for operations
-            db = await get_database()
-            # Use fast batch processing without transactions for maximum speed
-            # create_many is already atomic, so no need for explicit transactions
-            batch_metrics = await self._process_customer_events_in_transaction(
-                db, events, shop_id, incremental
-            )
-
-            return batch_metrics
-
-        except Exception as e:
-            logger.error(f"Batch processing failed: {e}")
-            raise
-
     async def _update_performance_cache(self, shop_id: str, domain: str) -> None:
         """Update performance cache with latest shop information"""
         cache_key = f"shop_metadata_{shop_id}"
@@ -1553,62 +1356,6 @@ class ShopifyDataStorageService:
             logger.error(f"Failed to store collections data: {e}")
             raise DataStorageError(f"Collections data storage failed: {e}")
 
-    async def store_customer_events_data(
-        self, events: List[Any], shop_id: str, incremental: bool = True
-    ) -> StorageMetrics:
-        """Store customer events data with enterprise-grade performance"""
-        metrics = StorageMetrics(
-            data_type=DataType.CUSTOMER_EVENTS.value,
-            shop_id=shop_id,
-            start_time=now_utc(),
-            total_items=len(events),
-        )
-
-        try:
-            await self.initialize()
-
-            if not events:
-                return metrics
-
-            # Process in batches for performance
-            batches = self._create_batches(events, self.config.batch_size)
-
-            # Process batches in parallel for maximum efficiency
-            batch_tasks = [
-                self._process_customer_events_batch(batch, shop_id, incremental)
-                for batch in batches
-            ]
-
-            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-
-            # Aggregate results
-            for result in batch_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Batch processing failed: {result}")
-                    metrics.failed_items += len(batch_results)
-                else:
-                    metrics.new_items += result.get("new", 0)
-                    metrics.updated_items += result.get("updated", 0)
-
-            metrics.end_time = now_utc()
-            metrics.processing_time = (
-                metrics.end_time - metrics.start_time
-            ).total_seconds()
-            metrics.batch_size = self.config.batch_size
-
-            # Update metrics
-            self.storage_metrics[f"{shop_id}_{DataType.CUSTOMER_EVENTS.value}"] = (
-                metrics
-            )
-
-            return metrics
-
-        except Exception as e:
-            metrics.failed_items = len(events)
-            metrics.end_time = now_utc()
-            logger.error(f"Failed to store customer events data: {e}")
-            raise DataStorageError(f"Customer events data storage failed: {e}")
-
     async def cleanup_old_data(self, days_to_keep: int = 90) -> int:
         """Clean up old data to maintain performance"""
         try:
@@ -1740,20 +1487,5 @@ class ShopifyDataStorageService:
         except Exception as e:
             logger.error(
                 f"Failed to get latest collection update for shop {shop_id}: {e}"
-            )
-            return None
-
-    async def get_latest_customer_event_update(self, shop_id: str) -> Optional[Any]:
-        """Get the most recently updated customer event for incremental collection"""
-        try:
-            await self.initialize()
-            db = await get_database()
-            latest_event = await db.rawcustomerevent.find_first(
-                where={"shopId": shop_id}, order={"extractedAt": "desc"}
-            )
-            return latest_event
-        except Exception as e:
-            logger.error(
-                f"Failed to get latest customer event update for shop {shop_id}: {e}"
             )
             return None
