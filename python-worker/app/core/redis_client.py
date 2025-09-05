@@ -7,10 +7,10 @@ import json
 import time
 from typing import Dict, Any, Optional, List
 from redis.asyncio import Redis
-from redis.exceptions import RedisError, ConnectionError
+from redis.exceptions import RedisError
 from datetime import datetime
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.logging import get_logger
 
 logger = get_logger("redis-client")
@@ -336,6 +336,23 @@ class RedisStreamsManager:
             "metadata": metadata or {},
         }
         return await self.publish_event(settings.FEATURES_COMPUTED_STREAM, event_data)
+
+    async def publish_behavioral_event(
+        self,
+        event_id: str,
+        shop_id: str,
+        payload: Dict[str, Any],
+    ) -> str:
+        """Publish a behavioral event for background processing"""
+        event_data = {
+            "event_id": event_id,
+            "shop_id": shop_id,
+            "payload": payload,
+            "received_at": time.time(),
+            "status": "queued",
+        }
+
+        return await self.publish_event(settings.BEHAVIORAL_EVENTS_STREAM, event_data)
 
 
 # Global streams manager instance

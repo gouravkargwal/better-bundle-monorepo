@@ -11,7 +11,7 @@ from typing import Optional
 from prisma import Prisma
 from prisma.errors import PrismaError
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

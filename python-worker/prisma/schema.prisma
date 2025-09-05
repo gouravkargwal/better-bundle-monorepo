@@ -150,6 +150,10 @@ model Shop {
   advancedMLFeatures        AdvancedMLFeatures?
   collectionAnalytics       CollectionAnalytics?
   customerBehaviorAnalytics CustomerBehaviorAnalytics?
+  
+  // Behavioral events
+  rawBehavioralEvents       RawBehavioralEvents[]
+  behavioralEvents          BehavioralEvents[]
 }
 
 model OrderData {
@@ -861,4 +865,34 @@ model CustomerAnalytics {
   @@index([shopId, totalSessions])
   @@index([shopId, lastActivityAt])
   @@map("CustomerAnalytics")
+}
+
+// Behavioral Events Tables
+model RawBehavioralEvents {
+  id          String   @id @default(cuid())
+  shopId      String
+  payload     Json
+  receivedAt  DateTime @default(now())
+  
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([shopId, receivedAt])
+  @@map("RawBehavioralEvents")
+}
+
+model BehavioralEvents {
+  eventId     String   @id
+  shopId      String
+  customerId  String?
+  eventType   String
+  occurredAt  DateTime
+  eventData   Json?
+  
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, eventType])
+  @@index([shopId, occurredAt])
+  @@index([shopId, customerId])
+  @@map("BehavioralEvents")
 }

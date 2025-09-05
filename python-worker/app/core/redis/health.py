@@ -7,7 +7,7 @@ import time
 from typing import Optional
 from datetime import datetime
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.exceptions import RedisConnectionError
 from app.core.logging import get_logger
 from .client import get_redis_client_instance

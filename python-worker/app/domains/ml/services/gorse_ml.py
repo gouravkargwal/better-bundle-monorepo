@@ -8,7 +8,7 @@ from datetime import datetime
 import httpx
 
 from app.core.logging import get_logger
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.shared.decorators import async_timing
 from app.shared.helpers import now_utc
 

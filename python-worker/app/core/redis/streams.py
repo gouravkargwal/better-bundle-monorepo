@@ -8,7 +8,7 @@ import time
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.exceptions import RedisStreamError
 from app.core.logging import get_logger
 from .client import get_redis_client_instance

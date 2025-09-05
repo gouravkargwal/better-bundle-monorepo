@@ -4,13 +4,13 @@ Main application for BetterBundle Python Worker
 
 import asyncio
 import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.logging import setup_logging, get_logger
 from app.shared.helpers import now_utc
 
@@ -40,6 +40,11 @@ from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
+
+# Webhook imports
+from app.webhooks.handler import WebhookHandler
+from app.webhooks.repository import WebhookRepository
+from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -108,10 +113,18 @@ async def initialize_services():
         # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
 
+        # Initialize behavioral events consumer
+        services["behavioral_events_consumer"] = BehavioralEventsConsumer()
+
+        # Initialize webhook services
+        services["webhook_repository"] = WebhookRepository()
+        services["webhook_handler"] = WebhookHandler(services["webhook_repository"])
+
         # Register and start consumers
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
+            behavioral_events_consumer=services["behavioral_events_consumer"],
         )
 
         # Start consumer manager
@@ -735,6 +748,89 @@ async def evaluate_analysis_need(shop_id: str):
         return decision
     except Exception as e:
         logger.error(f"Failed to evaluate analysis need: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Webhook endpoints
+@app.post("/collect/behavioral-events")
+async def handle_behavioral_event(
+    request: Request,
+    x_shopify_shop_domain: Optional[str] = Header(None),
+):
+    """This endpoint receives behavioral events from the Shopify Web Pixel and queues them for background processing."""
+    try:
+        if "webhook_handler" not in services:
+            raise HTTPException(status_code=500, detail="Webhook handler not available")
+
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    shop_id = x_shopify_shop_domain or payload.get("context", {}).get("shop", {}).get(
+        "domain"
+    )
+
+    if not shop_id:
+        raise HTTPException(status_code=400, detail="Shop domain not found in request.")
+
+    # Queue the event for background processing instead of processing directly
+    result = await services["webhook_handler"].queue_behavioral_event(shop_id, payload)
+
+    if "error" in result.get("status"):
+        raise HTTPException(status_code=500, detail=result)
+
+    return result
+
+
+@app.get("/api/behavioral-events/status")
+async def get_behavioral_events_status():
+    """Get status of behavioral events processing"""
+    try:
+        if "behavioral_events_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Behavioral events consumer not available"
+            )
+
+        active_events = await services["behavioral_events_consumer"].get_active_events()
+
+        return {
+            "status": "active",
+            "active_events_count": len(active_events),
+            "active_events": active_events,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get behavioral events status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/behavioral-events/status/{event_id}")
+async def get_behavioral_event_status(event_id: str):
+    """Get status of a specific behavioral event"""
+    try:
+        if "behavioral_events_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Behavioral events consumer not available"
+            )
+
+        event_status = await services["behavioral_events_consumer"].get_event_status(
+            event_id
+        )
+
+        if not event_status:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        return {
+            "event_id": event_id,
+            "status": event_status,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get behavioral event status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

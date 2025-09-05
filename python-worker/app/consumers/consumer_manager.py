@@ -11,6 +11,7 @@ from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
+from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
 from app.core.logging import get_logger
 
 
@@ -46,6 +47,7 @@ class ConsumerManager:
         ml_training_consumer: Optional[MLTrainingConsumer] = None,
         analytics_consumer: Optional[AnalyticsConsumer] = None,
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
+        behavioral_events_consumer: Optional[BehavioralEventsConsumer] = None,
     ):
         """Register consumers with the manager (all parameters are optional)"""
         if data_collection_consumer:
@@ -56,6 +58,8 @@ class ConsumerManager:
             self.consumers["analytics"] = analytics_consumer
         if feature_computation_consumer:
             self.consumers["feature_computation"] = feature_computation_consumer
+        if behavioral_events_consumer:
+            self.consumers["behavioral_events"] = behavioral_events_consumer
 
     async def start_all_consumers(self):
         """Start all registered consumers"""

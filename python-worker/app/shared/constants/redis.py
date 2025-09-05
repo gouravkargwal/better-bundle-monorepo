@@ -15,6 +15,7 @@ HEURISTIC_DECISION_STREAM = "betterbundle:heuristic-decision-requested"
 NEXT_ANALYSIS_SCHEDULED_STREAM = "betterbundle:next-analysis-scheduled"
 COMPLETION_RESULTS_STREAM = "betterbundle:completion-results"
 COMPLETION_EVENTS_STREAM = "betterbundle:ml-training-complete"
+BEHAVIORAL_EVENTS_STREAM = "betterbundle:behavioral-events"
 
 # Consumer Group Names
 DATA_PROCESSOR_GROUP = "data-processors"
@@ -48,6 +49,7 @@ __all__ = [
     "NEXT_ANALYSIS_SCHEDULED_STREAM",
     "COMPLETION_RESULTS_STREAM",
     "COMPLETION_EVENTS_STREAM",
+    "BEHAVIORAL_EVENTS_STREAM",
     "DATA_PROCESSOR_GROUP",
     "FEATURES_CONSUMER_GROUP",
     "ML_TRAINING_GROUP",

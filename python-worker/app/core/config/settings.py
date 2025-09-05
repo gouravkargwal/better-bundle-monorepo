@@ -32,6 +32,7 @@ from app.shared.constants.redis import (
     NEXT_ANALYSIS_SCHEDULED_STREAM,
     COMPLETION_RESULTS_STREAM,
     COMPLETION_EVENTS_STREAM,
+    BEHAVIORAL_EVENTS_STREAM,
     DATA_PROCESSOR_GROUP,
     FEATURES_CONSUMER_GROUP,
     ML_TRAINING_GROUP,
@@ -81,6 +82,9 @@ class RedisSettings(BaseSettings):
     )
     ML_TRAINING_COMPLETE_STREAM: str = Field(
         default=ML_TRAINING_COMPLETE_STREAM, env="ML_TRAINING_COMPLETE_STREAM"
+    )
+    BEHAVIORAL_EVENTS_STREAM: str = Field(
+        default=BEHAVIORAL_EVENTS_STREAM, env="BEHAVIORAL_EVENTS_STREAM"
     )
 
     # Consumer Group Names
@@ -326,6 +330,10 @@ class Settings(BaseSettings):
     @property
     def COMPLETION_EVENTS_STREAM(self) -> str:
         return self.redis.COMPLETION_EVENTS_STREAM
+
+    @property
+    def BEHAVIORAL_EVENTS_STREAM(self) -> str:
+        return self.redis.BEHAVIORAL_EVENTS_STREAM
 
     # Worker Configuration (Direct access for backward compatibility)
     @property

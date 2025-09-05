@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from redis.asyncio import Redis
 from redis.exceptions import RedisError, ConnectionError, TimeoutError
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.exceptions import RedisConnectionError, RedisTimeoutError
 from app.core.logging import get_logger
 from .models import RedisConnectionConfig, RedisMetrics

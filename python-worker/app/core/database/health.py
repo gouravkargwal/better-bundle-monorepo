@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 from dataclasses import dataclass
 
-from app.core.config import settings
+from app.core.config.settings import settings
 from app.core.exceptions import DatabaseConnectionError
 from app.core.logging import get_logger
 from .simple_db_client import get_database

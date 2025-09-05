@@ -281,8 +281,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         importance_scores[feature_name] = base_weight * normalized_value
                 else:
                     importance_scores[feature_name] = base_weight
-                else:
-                    importance_scores[feature_name] = 0.1  # Default low importance
 
             return importance_scores
 
@@ -435,7 +433,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         self, shop_id: str, batch_size: int = 500, incremental: bool = True
     ) -> Dict[str, Any]:
         """Run complete feature engineering pipeline for a shop using batch processing"""
-        return await self.pipeline.run_feature_pipeline_for_shop(shop_id, batch_size, incremental)
+        return await self.pipeline.run_feature_pipeline_for_shop(
+            shop_id, batch_size, incremental
+        )
 
     # Helper methods (extracted from original service)
     def _initialize_feature_schemas(self) -> Dict[str, Dict[str, Any]]:
