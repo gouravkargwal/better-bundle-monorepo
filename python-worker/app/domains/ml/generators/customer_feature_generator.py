@@ -23,7 +23,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify customers"""
 
     async def generate_features(
-        self, customer: ShopifyCustomer, context: Dict[str, Any]
+        self, customer: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate features for a customer
@@ -36,7 +36,9 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features
         """
         try:
-            logger.debug(f"Computing features for customer: {customer.id}")
+            logger.debug(
+                f"Computing features for customer: {customer.get('id', 'unknown')}"
+            )
 
             features = {}
             shop = context.get("shop")
@@ -48,14 +50,18 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
             # Order history features
             if orders:
-                customer_orders = [o for o in orders if o.customer_id == customer.id]
+                customer_orders = [
+                    o for o in orders if o.get("customerId") == customer.get("id")
+                ]
                 features.update(
                     self._compute_order_history_features(customer, customer_orders)
                 )
 
             # Behavioral features
             if events:
-                customer_events = [e for e in events if e.customer_id == customer.id]
+                customer_events = [
+                    e for e in events if e.get("customerId") == customer.get("id")
+                ]
                 features.update(
                     self._compute_behavioral_features(customer, customer_events)
                 )
@@ -73,13 +79,13 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             features = self.validate_features(features)
 
             logger.debug(
-                f"Computed {len(features)} features for customer: {customer.id}"
+                f"Computed {len(features)} features for customer: {customer.get('id', 'unknown')}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute customer features for {customer.id}: {str(e)}"
+                f"Failed to compute customer features for {customer.get('id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -88,31 +94,35 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic customer features"""
         return {
-            "customer_id": customer.id,
-            "accepts_marketing": 1 if customer.accepts_marketing else 0,
-            "orders_count": customer.orders_count,
-            "total_spent": customer.total_spent,
-            "state_encoded": self._encode_categorical_feature(customer.state or ""),
-            "note_encoded": self._encode_categorical_feature(customer.note or ""),
-            "verified_email": 1 if customer.verified_email else 0,
-            "multipass_identifier": self._encode_categorical_feature(
-                customer.multipass_identifier or ""
+            "customer_id": customer.get("id", ""),
+            "accepts_marketing": 1 if customer.get("acceptsMarketing") else 0,
+            "orders_count": customer.get("orderCount", 0),
+            "total_spent": customer.get("totalSpent", 0.0),
+            "state_encoded": self._encode_categorical_feature(
+                customer.get("state", "")
             ),
-            "tax_exempt": 1 if customer.tax_exempt else 0,
-            "phone_encoded": self._encode_categorical_feature(customer.phone or ""),
+            "note_encoded": self._encode_categorical_feature(customer.get("note", "")),
+            "verified_email": 1 if customer.get("verifiedEmail") else 0,
+            "multipass_identifier": self._encode_categorical_feature(
+                customer.get("multipassIdentifier", "")
+            ),
+            "tax_exempt": 1 if customer.get("taxExempt") else 0,
+            "phone_encoded": self._encode_categorical_feature(
+                customer.get("phone", "")
+            ),
             "tags_encoded": self._encode_categorical_feature(
-                "|".join(customer.tags or [])
+                "|".join(customer.get("tags", []))
             ),
             "last_order_id": self._encode_categorical_feature(
-                customer.last_order_id or ""
+                customer.get("lastOrderId", "")
             ),
             "currency_encoded": self._encode_categorical_feature(
-                customer.currency or ""
+                customer.get("currencyCode", "")
             ),
         }
 
     def _compute_order_history_features(
-        self, customer: ShopifyCustomer, orders: List[ShopifyOrder]
+        self, customer: Dict[str, Any], orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute order history features"""
         if not orders:
@@ -338,9 +348,9 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             **journey_features,
         }
 
-    def _compute_address_features(self, customer: ShopifyCustomer) -> Dict[str, Any]:
+    def _compute_address_features(self, customer: Dict[str, Any]) -> Dict[str, Any]:
         """Compute address-related features"""
-        if not customer.default_address:
+        if not customer.get("defaultAddress"):
             return {
                 "has_address": 0,
                 "country_encoded": 0,
@@ -348,7 +358,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
                 "city_encoded": 0,
             }
 
-        address = customer.default_address
+        address = customer.get("defaultAddress", {})
         return {
             "has_address": 1,
             "country_encoded": self._encode_categorical_feature(address.country or ""),
@@ -363,31 +373,31 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute time-based features for customer"""
         return self._compute_time_based_features(
-            customer.created_at, customer.updated_at
+            customer.get("createdAtShopify"), customer.get("updatedAt")
         )
 
-    def _compute_engagement_features(self, customer: ShopifyCustomer) -> Dict[str, Any]:
+    def _compute_engagement_features(self, customer: Dict[str, Any]) -> Dict[str, Any]:
         """Compute customer engagement features"""
         engagement_score = 0
 
         # Marketing acceptance
-        if customer.accepts_marketing:
+        if customer.get("acceptsMarketing"):
             engagement_score += 1
 
         # Email verification
-        if customer.verified_email:
+        if customer.get("verifiedEmail"):
             engagement_score += 1
 
         # Order history
-        if customer.orders_count > 0:
+        if customer.get("orderCount", 0) > 0:
             engagement_score += 1
 
         # Spending history
-        if customer.total_spent > 0:
+        if customer.get("totalSpent", 0) > 0:
             engagement_score += 1
 
         # Address provided
-        if customer.default_address:
+        if customer.get("defaultAddress"):
             engagement_score += 1
 
         return {

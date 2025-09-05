@@ -24,7 +24,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify products"""
 
     async def generate_features(
-        self, product: ShopifyProduct, context: Dict[str, Any]
+        self, product: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate features for a product
@@ -37,7 +37,9 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features
         """
         try:
-            logger.debug(f"Computing features for product: {product.id}")
+            logger.debug(
+                f"Computing features for product: {product.get('id', 'unknown')}"
+            )
 
             features = {}
             shop = context.get("shop")
@@ -86,12 +88,14 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
-            logger.debug(f"Computed {len(features)} features for product: {product.id}")
+            logger.debug(
+                f"Computed {len(features)} features for product: {product.get('id', 'unknown')}"
+            )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute product features for {product.id}: {str(e)}"
+                f"Failed to compute product features for {product.get('id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -100,26 +104,29 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic product features"""
         return {
-            "product_id": product.id,
-            "title_length": len(product.title or ""),
-            "description_length": len(product.body_html or ""),
-            "vendor_encoded": self._encode_categorical_feature(product.vendor),
-            "product_type_encoded": self._encode_categorical_feature(
-                product.product_type
+            "product_id": product.get("id", ""),
+            "title_length": len(product.get("title", "")),
+            "description_length": len(product.get("descriptionHtml", "")),
+            "vendor_encoded": self._encode_categorical_feature(
+                product.get("vendor", "")
             ),
-            "status_encoded": 1 if product.status == "active" else 0,
-            "is_published": 1 if product.is_published else 0,
-            "variant_count": product.variant_count,
-            "has_multiple_variants": 1 if product.has_multiple_variants else 0,
-            "tag_count": product.tag_count,
-            "collection_count": product.collection_count,
-            "has_images": 1 if product.has_images else 0,
-            "image_count": product.image_count,
+            "product_type_encoded": self._encode_categorical_feature(
+                product.get("productType", "")
+            ),
+            "status_encoded": 1 if product.get("status") == "active" else 0,
+            "is_published": 1 if product.get("status") == "active" else 0,
+            "variant_count": len(product.get("variants", [])),
+            "has_multiple_variants": 1 if len(product.get("variants", [])) > 1 else 0,
+            "tag_count": len(product.get("tags", [])),
+            "collection_count": len(product.get("collections", [])),
+            "has_images": 1 if product.get("images") else 0,
+            "image_count": len(product.get("images", [])),
         }
 
-    def _compute_variant_features(self, product: ShopifyProduct) -> Dict[str, Any]:
+    def _compute_variant_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute variant-related features"""
-        if not product.variants:
+        variants = product.get("variants", [])
+        if not variants:
             return {
                 "variant_count": 0,
                 "price_range": 0,
@@ -133,16 +140,18 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "avg_inventory": 0,
             }
 
-        prices = [v.price for v in product.variants if v.price is not None]
-        weights = [v.weight for v in product.variants if v.weight is not None]
+        prices = [v.get("price", 0.0) for v in variants if v.get("price") is not None]
+        weights = [
+            v.get("weight", 0.0) for v in variants if v.get("weight") is not None
+        ]
         inventory = [
-            v.inventory_quantity
-            for v in product.variants
-            if v.inventory_quantity is not None
+            v.get("inventoryQuantity", 0)
+            for v in variants
+            if v.get("inventoryQuantity") is not None
         ]
 
         return {
-            "variant_count": len(product.variants),
+            "variant_count": len(variants),
             "price_range": max(prices) - min(prices) if prices else 0,
             "price_std": statistics.stdev(prices) if len(prices) > 1 else 0,
             "avg_price": statistics.mean(prices) if prices else 0,
@@ -154,26 +163,27 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "avg_inventory": statistics.mean(inventory) if inventory else 0,
         }
 
-    def _compute_image_features(self, product: ShopifyProduct) -> Dict[str, Any]:
+    def _compute_image_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute image-related features"""
-        if not product.images:
+        images = product.get("images", [])
+        if not images:
             return {
                 "image_count": 0,
                 "has_images": 0,
                 "image_alt_text_coverage": 0,
             }
 
-        alt_text_count = sum(1 for img in product.images if img.alt_text)
+        alt_text_count = sum(1 for img in images if img.get("altText"))
 
         return {
-            "image_count": len(product.images),
+            "image_count": len(images),
             "has_images": 1,
-            "image_alt_text_coverage": alt_text_count / len(product.images),
+            "image_alt_text_coverage": alt_text_count / len(images),
         }
 
-    def _compute_tag_features(self, product: ShopifyProduct) -> Dict[str, Any]:
+    def _compute_tag_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute tag and category features"""
-        tags = product.tags or []
+        tags = product.get("tags", [])
 
         return {
             "tag_count": len(tags),
@@ -183,11 +193,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_collection_features(
-        self, product: ShopifyProduct, collections: List[ShopifyCollection]
+        self, product: Dict[str, Any], collections: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute collection-related features"""
         product_collections = [
-            c for c in collections if product.id in [p.id for p in c.products]
+            c
+            for c in collections
+            if product.get("id") in [p.get("id") for p in c.get("products", [])]
         ]
 
         if not product_collections:
@@ -208,7 +220,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_performance_features(
-        self, product: ShopifyProduct, orders: List[ShopifyOrder]
+        self, product: Dict[str, Any], orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute historical performance features"""
         product_orders = []
@@ -216,8 +228,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         total_revenue = 0
 
         for order in orders:
-            for line_item in order.line_items:
-                if line_item.product_id == product.id:
+            for line_item in order.get("lineItems", []):
+                if line_item.get("productId") == product.get("id"):
                     product_orders.append(order)
                     total_quantity += line_item.quantity
                     total_revenue += line_item.price * line_item.quantity
@@ -246,32 +258,37 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             ),
         }
 
-    def _compute_time_features(self, product: ShopifyProduct) -> Dict[str, Any]:
+    def _compute_time_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute time-based features"""
-        return self._compute_time_based_features(product.created_at, product.updated_at)
+        return self._compute_time_based_features(
+            product.get("productCreatedAt"), product.get("productUpdatedAt")
+        )
 
-    def _compute_quality_features(self, product: ShopifyProduct) -> Dict[str, Any]:
+    def _compute_quality_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute product quality features"""
         quality_score = 0
 
         # Title quality
-        if product.title and len(product.title) > 10:
+        if product.get("title") and len(product.get("title", "")) > 10:
             quality_score += 1
 
         # Description quality
-        if product.body_html and len(product.body_html) > 50:
+        if (
+            product.get("descriptionHtml")
+            and len(product.get("descriptionHtml", "")) > 50
+        ):
             quality_score += 1
 
         # Image quality
-        if product.has_images:
+        if product.get("images"):
             quality_score += 1
 
         # Tag quality
-        if product.tags and len(product.tags) > 2:
+        if product.get("tags") and len(product.get("tags", [])) > 2:
             quality_score += 1
 
         # Variant quality
-        if product.variant_count > 0:
+        if len(product.get("variants", [])) > 0:
             quality_score += 1
 
         return {
@@ -307,11 +324,11 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Calculate velocities (events per hour)
-        product_events = [e for e in events if e.get_product_id() == product.id]
+        product_events = [e for e in events if e.get("productId") == product.get("id")]
         product_orders = []
         for order in orders:
-            for line_item in order.line_items:
-                if line_item.product_id == product.id:
+            for line_item in order.get("lineItems", []):
+                if line_item.get("productId") == product.get("id"):
                     product_orders.append(order)
                     break
 
@@ -360,7 +377,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 search_result = search_event.event_data.get("searchResult", {})
                 product_variants = search_result.get("productVariants", [])
                 for variant in product_variants:
-                    if variant.get("product", {}).get("id") == product.id:
+                    if variant.get("product", {}).get("id") == product.get("id"):
                         search_appearances += 1
                         break
         search_popularity = search_appearances / max(len(search_events), 1)
@@ -370,7 +387,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         featured_count = sum(
             1
             for c in collections
-            if product.id in [p.id for p in c.products] and c.is_featured
+            if product.get("id") in [p.get("id") for p in c.get("products", [])]
+            and c.get("isFeatured")
         )
 
         # Cross-sell opportunity score
@@ -464,12 +482,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Get product orders and events
         product_orders = []
         for order in orders:
-            for line_item in order.line_items:
-                if line_item.product_id == product.id:
+            for line_item in order.get("lineItems", []):
+                if line_item.get("productId") == product.get("id"):
                     product_orders.append(order)
                     break
 
-        product_events = [e for e in events if e.get_product_id() == product.id]
+        product_events = [e for e in events if e.get("productId") == product.get("id")]
 
         # Seasonal analysis
         seasonal_score = self._calculate_seasonal_score(product, product_orders)
@@ -504,8 +522,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Find products frequently bought with this product
         co_purchased = {}
         for order in product_orders:
-            for line_item in order.line_items:
-                if line_item.product_id != product.id:
+            for line_item in order.get("lineItems", []):
+                if line_item.get("productId") != product.get("id"):
                     co_purchased[line_item.product_id] = (
                         co_purchased.get(line_item.product_id, 0) + 1
                     )
@@ -524,7 +542,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         self, product: ShopifyProduct, product_orders: List
     ) -> Dict[str, Any]:
         """Compute inventory-related features"""
-        if not product.variants:
+        variants = product.get("variants", [])
+        if not variants:
             return {
                 "inventory_velocity": 0.0,
                 "stockout_risk": 0.0,
@@ -533,15 +552,15 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Calculate total inventory
-        total_inventory = sum(v.inventory_quantity or 0 for v in product.variants)
+        total_inventory = sum(v.get("inventoryQuantity", 0) for v in variants)
 
         # Calculate sales velocity (units sold per day)
         if product_orders:
             total_quantity_sold = sum(
                 sum(
-                    li.quantity
-                    for li in order.line_items
-                    if li.product_id == product.id
+                    li.get("quantity", 0)
+                    for li in order.get("lineItems", [])
+                    if li.get("productId") == product.get("id")
                 )
                 for order in product_orders
             )
@@ -588,7 +607,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Analyze seasonal patterns in product orders
         monthly_orders = [0] * 12
         for order in product_orders:
-            month = order.created_at.month - 1
+            month = order.get("orderDate", now_utc()).month - 1
             monthly_orders[month] += 1
 
         # Calculate seasonal variation
@@ -609,10 +628,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         co_purchased = {}
 
         for order in orders:
-            order_products = [li.product_id for li in order.line_items]
-            if product.id in order_products:
+            order_products = [li.get("productId") for li in order.get("lineItems", [])]
+            if product.get("id") in order_products:
                 for other_product in order_products:
-                    if other_product != product.id:
+                    if other_product != product.get("id"):
                         co_purchased[other_product] = (
                             co_purchased.get(other_product, 0) + 1
                         )
@@ -621,7 +640,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         sorted_products = sorted(co_purchased.items(), key=lambda x: x[1], reverse=True)
         return [product_id for product_id, _ in sorted_products[:5]]
 
-    def _find_viewed_together(self, product: ShopifyProduct, events: List) -> float:
+    def _find_viewed_together(self, product: Dict[str, Any], events: List) -> float:
         """Calculate how often this product is viewed together with others in sessions"""
         # Group events by session (simplified)
         sessions = {}
@@ -642,7 +661,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 if product_id:
                     session_products.add(product_id)
 
-            if product.id in session_products:
+            if product.get("id") in session_products:
                 total_sessions_with_product += 1
                 if len(session_products) > 1:
                     viewed_together_count += 1
@@ -657,7 +676,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             return 0.0
 
         # This is a simplified version - in practice, you'd have category relationship data
-        product_category = product.product_type or ""
+        product_category = product.get("productType", "")
 
         # Define complementary categories (simplified)
         complementary_categories = {
@@ -678,10 +697,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         self, product: ShopifyProduct, fbt_products: List[str]
     ) -> float:
         """Calculate price point affinity with frequently bought together products"""
-        if not fbt_products or not product.variants:
+        if not fbt_products or not product.get("variants"):
             return 0.0
 
-        product_price = product.variants[0].price or 0
+        product_price = product.get("variants", [{}])[0].get("price", 0.0)
 
         # In practice, you'd look up prices of fbt_products
         # For now, we'll use a simplified approach
@@ -696,8 +715,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         if not fbt_products:
             return 0.0
 
-        product_tags = set(product.tags or [])
-        product_vendor = product.vendor or ""
+        product_tags = set(product.get("tags", []))
+        product_vendor = product.get("vendor", "")
 
         # In practice, you'd compare with fbt_products' tags and vendors
         # For now, we'll use a simplified approach
@@ -728,7 +747,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Analyze order distribution across months
         monthly_orders = [0] * 12
         for order in product_orders:
-            month = order.created_at.month - 1
+            month = order.get("orderDate", now_utc()).month - 1
             monthly_orders[month] += 1
 
         if not any(monthly_orders):
@@ -745,7 +764,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
         return min(seasonal_score, 1.0)
 
-    def _calculate_current_season_relevance(self, product: ShopifyProduct) -> float:
+    def _calculate_current_season_relevance(self, product: Dict[str, Any]) -> float:
         """Calculate how relevant this product is for the current season"""
         current_month = now_utc().month
 
@@ -757,8 +776,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "fall": ["autumn", "warm", "cozy", "harvest"],
         }
 
-        product_title = (product.title or "").lower()
-        product_tags = " ".join(product.tags or []).lower()
+        product_title = (product.get("title", "")).lower()
+        product_tags = " ".join(product.get("tags", [])).lower()
         product_text = f"{product_title} {product_tags}"
 
         # Determine current season
@@ -782,7 +801,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
         return relevance_score
 
-    def _calculate_holiday_relevance(self, product: ShopifyProduct) -> float:
+    def _calculate_holiday_relevance(self, product: Dict[str, Any]) -> float:
         """Calculate how relevant this product is for upcoming holidays"""
         current_month = now_utc().month
 
@@ -794,8 +813,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             11: ["thanksgiving", "grateful", "family", "harvest"],
         }
 
-        product_title = (product.title or "").lower()
-        product_tags = " ".join(product.tags or []).lower()
+        product_title = (product.get("title", "")).lower()
+        product_tags = " ".join(product.get("tags", [])).lower()
         product_text = f"{product_title} {product_tags}"
 
         keywords = holiday_keywords.get(current_month, [])
@@ -810,8 +829,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     ) -> float:
         """Calculate how much weather affects demand for this product"""
         # This is a simplified version - in practice, you'd correlate with weather data
-        product_title = (product.title or "").lower()
-        product_tags = " ".join(product.tags or []).lower()
+        product_title = (product.get("title", "")).lower()
+        product_tags = " ".join(product.get("tags", [])).lower()
         product_text = f"{product_title} {product_tags}"
 
         weather_keywords = [
@@ -836,7 +855,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         monthly_orders = [0.0] * 12
 
         for order in product_orders:
-            month = order.created_at.month - 1
+            month = order.get("orderDate", now_utc()).month - 1
             monthly_orders[month] += 1
 
         # Normalize to 0-1 scale

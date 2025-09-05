@@ -2,17 +2,10 @@
 Collection feature generator for ML feature engineering
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import statistics
 
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyCollection,
-    ShopifyShop,
-    ShopifyProduct,
-    ShopifyOrder,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -23,7 +16,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify collections"""
 
     async def generate_features(
-        self, collection: ShopifyCollection, context: Dict[str, Any]
+        self, collection: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate features for a collection
@@ -36,7 +29,9 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features
         """
         try:
-            logger.debug(f"Computing features for collection: {collection.id}")
+            logger.debug(
+                f"Computing features for collection: {collection.get('id', 'unknown')}"
+            )
 
             features = {}
             shop = context.get("shop")
@@ -68,13 +63,13 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             features = self.validate_features(features)
 
             logger.debug(
-                f"Computed {len(features)} features for collection: {collection.id}"
+                f"Computed {len(features)} features for collection: {collection.get('id', 'unknown')}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute collection features for {collection.id}: {str(e)}"
+                f"Failed to compute collection features for {collection.get('id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -83,23 +78,27 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic collection features"""
         return {
-            "collection_id": collection.id,
-            "title_length": len(collection.title or ""),
-            "description_length": len(collection.body_html or ""),
-            "handle_encoded": self._encode_categorical_feature(collection.handle or ""),
-            "sort_order_encoded": self._encode_categorical_feature(
-                collection.sort_order or ""
+            "collection_id": collection.get("id", ""),
+            "title_length": len(collection.get("title", "")),
+            "description_length": len(collection.get("description", "")),
+            "handle_encoded": self._encode_categorical_feature(
+                collection.get("handle", "")
             ),
-            "is_published": 1 if collection.published else 0,
-            "products_count": collection.products_count,
-            "is_automated": 1 if collection.is_automated else 0,
+            "sort_order_encoded": self._encode_categorical_feature(
+                collection.get("sortOrder", "")
+            ),
+            "is_published": 1 if collection.get("isPublished") else 0,
+            "products_count": collection.get("productCount", 0),
+            "is_automated": 1 if collection.get("isAutomated") else 0,
         }
 
     def _compute_collection_product_features(
-        self, collection: ShopifyCollection, products: List[ShopifyProduct]
+        self, collection: Dict[str, Any], products: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute product-related collection features"""
-        collection_products = [p for p in products if p.id in collection.product_ids]
+        collection_products = [
+            p for p in products if p.get("id") in collection.get("productIds", [])
+        ]
 
         if not collection_products:
             return {
@@ -128,20 +127,23 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             "avg_product_rating": 0,  # Placeholder - would need rating data
         }
 
-    def _compute_seo_features(self, collection: ShopifyCollection) -> Dict[str, Any]:
+    def _compute_seo_features(self, collection: Dict[str, Any]) -> Dict[str, Any]:
         """Compute SEO-related features"""
         seo_score = 0
 
         # Title quality
-        if collection.title and len(collection.title) > 10:
+        if collection.get("title") and len(collection.get("title", "")) > 10:
             seo_score += 1
 
         # Description quality
-        if collection.body_html and len(collection.body_html) > 50:
+        if (
+            collection.get("description")
+            and len(collection.get("description", "")) > 50
+        ):
             seo_score += 1
 
         # Handle quality
-        if collection.handle and len(collection.handle) > 3:
+        if collection.get("handle") and len(collection.get("handle", "")) > 3:
             seo_score += 1
 
         return {
@@ -156,19 +158,19 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute time-based collection features"""
         return self._compute_time_based_features(
-            collection.created_at, collection.updated_at
+            collection.get("createdAt"), collection.get("updatedAt")
         )
 
     def _compute_collection_performance_features(
-        self, collection: ShopifyCollection, orders: List[ShopifyOrder]
+        self, collection: Dict[str, Any], orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute collection performance features"""
         collection_orders = []
         total_revenue = 0
 
         for order in orders:
-            for line_item in order.line_items:
-                if line_item.product_id in collection.product_ids:
+            for line_item in order.get("lineItems", []):
+                if line_item.get("productId") in collection.get("productIds", []):
                     collection_orders.append(order)
                     total_revenue += line_item.price * line_item.quantity
                     break

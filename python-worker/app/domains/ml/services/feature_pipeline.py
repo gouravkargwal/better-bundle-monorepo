@@ -8,14 +8,6 @@ from datetime import datetime
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyShop,
-    ShopifyProduct,
-    ShopifyOrder,
-    ShopifyCustomer,
-    ShopifyCollection,
-    BehavioralEvent,
-)
 
 from ..repositories.feature_repository import FeatureRepository, IFeatureRepository
 from ..generators import (
@@ -43,7 +35,7 @@ class IFeaturePipeline(ABC):
 
     @abstractmethod
     async def compute_and_save_product_features_batch(
-        self, shop_id: str, products: List[ShopifyProduct], shop_id_param: str
+        self, shop_id: str, products: List[Dict[str, Any]], shop_id_param: str
     ) -> Dict[str, Any]:
         """Compute and save product features in batch"""
         pass
@@ -52,23 +44,23 @@ class IFeaturePipeline(ABC):
     async def compute_and_save_customer_features_batch(
         self,
         shop_id: str,
-        customers: List[ShopifyCustomer],
-        orders: List[ShopifyOrder],
-        events: List[BehavioralEvent],
+        customers: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute and save customer features in batch with actual orders and events"""
         pass
 
     @abstractmethod
     async def compute_and_save_collection_features_batch(
-        self, shop_id: str, collections: List[ShopifyCollection], shop_id_param: str
+        self, shop_id: str, collections: List[Dict[str, Any]], shop_id_param: str
     ) -> Dict[str, Any]:
         """Compute and save collection features in batch"""
         pass
 
     @abstractmethod
     async def compute_and_save_interaction_features_batch(
-        self, shop_id: str, orders: List[ShopifyOrder]
+        self, shop_id: str, orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute and save interaction features in batch"""
         pass
@@ -255,12 +247,9 @@ class FeaturePipeline(IFeaturePipeline):
                     if not products_batch:
                         break
 
-                    # Convert raw data to Pydantic models
-                    products_models = [
-                        ShopifyProduct(**product) for product in products_batch
-                    ]
+                    # Use cleaned data directly from main tables (no Pydantic validation needed)
                     batch_result = await self.compute_and_save_product_features_batch(
-                        shop_id, products_models, shop_id
+                        shop_id, products_batch, shop_id
                     )
                     results["products"]["saved_count"] += batch_result.get(
                         "saved_count", 0
@@ -290,15 +279,9 @@ class FeaturePipeline(IFeaturePipeline):
                         shop_id, customer_ids
                     )
 
-                    # Convert raw data to Pydantic models
-                    customers_models = [
-                        ShopifyCustomer(**customer) for customer in customers_batch
-                    ]
-                    orders_models = [ShopifyOrder(**order) for order in orders_raw]
-                    events_models = [BehavioralEvent(**event) for event in events_raw]
-
+                    # Use cleaned data directly from main tables (no Pydantic validation needed)
                     batch_result = await self.compute_and_save_customer_features_batch(
-                        shop_id, customers_models, orders_models, events_models
+                        shop_id, customers_batch, orders_raw, events_raw
                     )
                     results["customers"]["saved_count"] += batch_result.get(
                         "saved_count", 0
@@ -315,14 +298,10 @@ class FeaturePipeline(IFeaturePipeline):
                     if not collections_batch:
                         break
 
-                    # Convert raw data to Pydantic models
-                    collections_models = [
-                        ShopifyCollection(**collection)
-                        for collection in collections_batch
-                    ]
+                    # Use cleaned data directly from main tables (no Pydantic validation needed)
                     batch_result = (
                         await self.compute_and_save_collection_features_batch(
-                            shop_id, collections_models, shop_id
+                            shop_id, collections_batch, shop_id
                         )
                     )
                     results["collections"]["saved_count"] += batch_result.get(
@@ -412,9 +391,9 @@ class FeaturePipeline(IFeaturePipeline):
     async def compute_and_save_customer_features_batch(
         self,
         shop_id: str,
-        customers: List[ShopifyCustomer],
-        orders: List[ShopifyOrder],
-        events: List[BehavioralEvent],
+        customers: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute and save customer features in batch with actual orders and events"""
         try:
@@ -505,7 +484,7 @@ class FeaturePipeline(IFeaturePipeline):
             return {"saved_count": 0, "error": str(e)}
 
     async def compute_and_save_collection_features_batch(
-        self, shop_id: str, collections: List[ShopifyCollection], shop: Dict
+        self, shop_id: str, collections: List[Dict[str, Any]], shop: Dict
     ) -> Dict[str, Any]:
         """Compute and save collection features in batch"""
         try:
@@ -545,7 +524,7 @@ class FeaturePipeline(IFeaturePipeline):
             return {"saved_count": 0, "error": str(e)}
 
     async def compute_and_save_interaction_features_batch(
-        self, shop_id: str, orders: List[ShopifyOrder]
+        self, shop_id: str, orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute and save interaction features in batch"""
         try:
@@ -763,13 +742,12 @@ class FeaturePipeline(IFeaturePipeline):
 
             for i in range(0, len(products), batch_size):
                 batch_raw = products[i : i + batch_size]
-                # Convert raw data to Pydantic models
-                batch_models = [ShopifyProduct(**product) for product in batch_raw]
+                # Use cleaned data directly from main tables (no Pydantic validation needed)
                 batch_result = await self.compute_and_save_product_features_batch(
-                    shop_id, batch_models, shop_id
+                    shop_id, batch_raw, shop_id
                 )
                 results["products"]["saved_count"] += batch_result.get("saved_count", 0)
-                results["products"]["total_products"] += len(batch_models)
+                results["products"]["total_products"] += len(batch_raw)
 
             logger.info(f"Processed {len(products)} products in batches")
         except Exception as e:
@@ -803,18 +781,14 @@ class FeaturePipeline(IFeaturePipeline):
                     shop_id, customer_ids
                 )
 
-                # Convert raw data to Pydantic models
-                batch_models = [ShopifyCustomer(**customer) for customer in batch_raw]
-                orders_models = [ShopifyOrder(**order) for order in orders_raw]
-                events_models = [BehavioralEvent(**event) for event in events_raw]
-
+                # Use cleaned data directly from main tables (no Pydantic validation needed)
                 batch_result = await self.compute_and_save_customer_features_batch(
-                    shop_id, batch_models, orders_models, events_models
+                    shop_id, batch_raw, orders_raw, events_raw
                 )
                 results["customers"]["saved_count"] += batch_result.get(
                     "saved_count", 0
                 )
-                results["customers"]["total_customers"] += len(batch_models)
+                results["customers"]["total_customers"] += len(batch_raw)
 
             logger.info(
                 f"Processed {len(customers)} customers in batches with related data"
@@ -836,17 +810,14 @@ class FeaturePipeline(IFeaturePipeline):
 
             for i in range(0, len(collections), batch_size):
                 batch_raw = collections[i : i + batch_size]
-                # Convert raw data to Pydantic models
-                batch_models = [
-                    ShopifyCollection(**collection) for collection in batch_raw
-                ]
+                # Use cleaned data directly from main tables (no Pydantic validation needed)
                 batch_result = await self.compute_and_save_collection_features_batch(
-                    shop_id, batch_models, shop_id
+                    shop_id, batch_raw, shop_id
                 )
                 results["collections"]["saved_count"] += batch_result.get(
                     "saved_count", 0
                 )
-                results["collections"]["total_collections"] += len(batch_models)
+                results["collections"]["total_collections"] += len(batch_raw)
 
             logger.info(f"Processed {len(collections)} collections in batches")
         except Exception as e:
@@ -855,10 +826,10 @@ class FeaturePipeline(IFeaturePipeline):
     async def compute_and_save_interaction_features_batch(
         self,
         shop_id: str,
-        customers: List[ShopifyCustomer],
-        products: List[ShopifyProduct],
-        orders: List[ShopifyOrder],
-        events: List[BehavioralEvent],
+        customers: List[Dict[str, Any]],
+        products: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute and save customer-product interaction features in batch"""
         try:

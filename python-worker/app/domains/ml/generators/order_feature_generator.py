@@ -22,7 +22,7 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify orders"""
 
     async def generate_features(
-        self, order: ShopifyOrder, context: Dict[str, Any]
+        self, order: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate features for an order
@@ -35,7 +35,7 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features
         """
         try:
-            logger.debug(f"Computing features for order: {order.id}")
+            logger.debug(f"Computing features for order: {order.get('id', 'unknown')}")
 
             features = {}
             shop = context.get("shop")
@@ -72,36 +72,43 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
-            logger.debug(f"Computed {len(features)} features for order: {order.id}")
+            logger.debug(
+                f"Computed {len(features)} features for order: {order.get('id', 'unknown')}"
+            )
             return features
 
         except Exception as e:
-            logger.error(f"Failed to compute order features for {order.id}: {str(e)}")
+            logger.error(
+                f"Failed to compute order features for {order.get('id', 'unknown')}: {str(e)}"
+            )
             return {}
 
-    def _compute_basic_order_features(self, order: ShopifyOrder) -> Dict[str, Any]:
+    def _compute_basic_order_features(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Compute basic order features"""
         return {
-            "order_id": order.id,
-            "order_number": order.order_number,
-            "total_price": order.total_price,
-            "subtotal_price": order.subtotal_price,
-            "total_tax": order.total_tax,
-            "currency_encoded": self._encode_categorical_feature(order.currency or ""),
+            "order_id": order.get("id", ""),
+            "order_number": order.get("orderNumber", ""),
+            "total_price": order.get("totalAmount", 0.0),
+            "subtotal_price": order.get("subtotalAmount", 0.0),
+            "total_tax": order.get("totalTaxAmount", 0.0),
+            "currency_encoded": self._encode_categorical_feature(
+                order.get("currencyCode", "")
+            ),
             "financial_status_encoded": self._encode_categorical_feature(
-                order.financial_status or ""
+                order.get("orderStatus", "")
             ),
             "fulfillment_status_encoded": self._encode_categorical_feature(
-                order.fulfillment_status or ""
+                order.get("orderStatus", "")
             ),
-            "line_items_count": len(order.line_items),
-            "has_discount": 1 if order.total_discounts > 0 else 0,
-            "total_discounts": order.total_discounts,
+            "line_items_count": len(order.get("lineItems", [])),
+            "has_discount": 1 if order.get("totalRefundedAmount", 0) > 0 else 0,
+            "total_discounts": order.get("totalRefundedAmount", 0.0),
         }
 
-    def _compute_line_item_features(self, order: ShopifyOrder) -> Dict[str, Any]:
+    def _compute_line_item_features(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Compute line item features"""
-        if not order.line_items:
+        line_items = order.get("lineItems", [])
+        if not line_items:
             return {
                 "line_items_count": 0,
                 "total_quantity": 0,
@@ -110,31 +117,38 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
                 "unique_products": 0,
             }
 
-        quantities = [item.quantity for item in order.line_items]
-        prices = [item.price for item in order.line_items]
-        product_ids = [item.product_id for item in order.line_items if item.product_id]
+        quantities = [item.get("quantity", 0) for item in line_items]
+        prices = [item.get("price", 0.0) for item in line_items]
+        product_ids = [
+            item.get("productId") for item in line_items if item.get("productId")
+        ]
 
         return {
-            "line_items_count": len(order.line_items),
+            "line_items_count": len(line_items),
             "total_quantity": sum(quantities),
             "avg_item_price": statistics.mean(prices) if prices else 0,
             "price_std": statistics.stdev(prices) if len(prices) > 1 else 0,
             "unique_products": len(set(product_ids)),
         }
 
-    def _compute_order_customer_features(self, order: ShopifyOrder) -> Dict[str, Any]:
+    def _compute_order_customer_features(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Compute customer-related order features"""
         return {
-            "customer_id": self._encode_categorical_feature(order.customer_id or ""),
-            "has_customer": 1 if order.customer_id else 0,
+            "customer_id": self._encode_categorical_feature(
+                order.get("customerId", "")
+            ),
+            "has_customer": 1 if order.get("customerId") else 0,
         }
 
     def _compute_order_product_features(
-        self, order: ShopifyOrder, products: List[ShopifyProduct]
+        self, order: Dict[str, Any], products: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute product-related order features"""
-        product_ids = [item.product_id for item in order.line_items if item.product_id]
-        order_products = [p for p in products if p.id in product_ids]
+        line_items = order.get("lineItems", [])
+        product_ids = [
+            item.get("productId") for item in line_items if item.get("productId")
+        ]
+        order_products = [p for p in products if p.get("id") in product_ids]
 
         if not order_products:
             return {
@@ -143,9 +157,15 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
                 "product_vendors": 0,
             }
 
-        prices = [p.variants[0].price for p in order_products if p.variants]
-        categories = [p.product_type for p in order_products if p.product_type]
-        vendors = [p.vendor for p in order_products if p.vendor]
+        prices = [
+            p.get("variants", [{}])[0].get("price", 0.0)
+            for p in order_products
+            if p.get("variants")
+        ]
+        categories = [
+            p.get("productType", "") for p in order_products if p.get("productType")
+        ]
+        vendors = [p.get("vendor", "") for p in order_products if p.get("vendor")]
 
         return {
             "avg_product_price": statistics.mean(prices) if prices else 0,
@@ -153,36 +173,38 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
             "product_vendors": len(set(vendors)),
         }
 
-    def _compute_order_time_features(self, order: ShopifyOrder) -> Dict[str, Any]:
+    def _compute_order_time_features(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Compute time-based order features"""
-        return self._compute_time_based_features(order.created_at, order.updated_at)
+        return self._compute_time_based_features(
+            order.get("orderDate"), order.get("updatedAt")
+        )
 
-    def _compute_financial_features(self, order: ShopifyOrder) -> Dict[str, Any]:
+    def _compute_financial_features(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Compute financial features"""
         return {
-            "total_price": order.total_price,
-            "subtotal_price": order.subtotal_price,
-            "total_tax": order.total_tax,
-            "total_discounts": order.total_discounts,
+            "total_price": order.get("totalAmount", 0.0),
+            "subtotal_price": order.get("subtotalAmount", 0.0),
+            "total_tax": order.get("totalTaxAmount", 0.0),
+            "total_discounts": order.get("totalRefundedAmount", 0.0),
             "discount_rate": (
-                order.total_discounts / order.subtotal_price
-                if order.subtotal_price > 0
+                order.get("totalRefundedAmount", 0.0) / order.get("subtotalAmount", 1.0)
+                if order.get("subtotalAmount", 0) > 0
                 else 0
             ),
             "tax_rate": (
-                order.total_tax / order.subtotal_price
-                if order.subtotal_price > 0
+                order.get("totalTaxAmount", 0.0) / order.get("subtotalAmount", 1.0)
+                if order.get("subtotalAmount", 0) > 0
                 else 0
             ),
         }
 
     def _compute_customer_lifetime_features(
-        self, order: ShopifyOrder, context: Dict[str, Any]
+        self, order: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute customer lifetime value features"""
         orders = context.get("orders", [])
 
-        if not order.customer_id:
+        if not order.get("customerId"):
             return {
                 "customer_lifetime_value": 0.0,
                 "customer_order_count": 0,
@@ -195,8 +217,10 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Get all orders for this customer
-        customer_orders = [o for o in orders if o.customer_id == order.customer_id]
-        customer_orders.sort(key=lambda x: x.created_at)
+        customer_orders = [
+            o for o in orders if o.get("customerId") == order.get("customerId")
+        ]
+        customer_orders.sort(key=lambda x: x.get("orderDate", ""))
 
         if not customer_orders:
             return {}
@@ -276,12 +300,13 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_basket_analysis_features(
-        self, order: ShopifyOrder, context: Dict[str, Any]
+        self, order: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute basket analysis features"""
         products = context.get("products", [])
 
-        if not order.line_items or not products:
+        line_items = order.get("lineItems", [])
+        if not line_items or not products:
             return {
                 "basket_diversity": 0.0,
                 "category_diversity": 0.0,
@@ -294,10 +319,11 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
 
         # Get product details for line items
         line_item_products = []
-        for line_item in order.line_items:
-            if line_item.product_id:
+        for line_item in line_items:
+            if line_item.get("productId"):
                 product = next(
-                    (p for p in products if p.id == line_item.product_id), None
+                    (p for p in products if p.get("id") == line_item.get("productId")),
+                    None,
                 )
                 if product:
                     line_item_products.append((line_item, product))
@@ -345,13 +371,14 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_cross_selling_features(
-        self, order: ShopifyOrder, context: Dict[str, Any]
+        self, order: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute cross-selling and upselling features"""
         orders = context.get("orders", [])
         products = context.get("products", [])
 
-        if not order.line_items or not products:
+        line_items = order.get("lineItems", [])
+        if not line_items or not products:
             return {
                 "upselling_opportunity": 0.0,
                 "cross_selling_opportunity": 0.0,
@@ -362,25 +389,31 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Calculate average item value
-        total_value = sum(li.price * li.quantity for li in order.line_items)
-        total_quantity = sum(li.quantity for li in order.line_items)
+        total_value = sum(
+            li.get("price", 0.0) * li.get("quantity", 0) for li in line_items
+        )
+        total_quantity = sum(li.get("quantity", 0) for li in line_items)
         avg_item_value = total_value / max(total_quantity, 1)
 
         # Premium item ratio (items above average price)
-        premium_items = sum(1 for li in order.line_items if li.price > avg_item_value)
-        premium_ratio = premium_items / len(order.line_items)
+        premium_items = sum(
+            1 for li in line_items if li.get("price", 0.0) > avg_item_value
+        )
+        premium_ratio = premium_items / len(line_items)
 
         # Accessory ratio (based on product types)
         accessory_types = ["accessories", "add-ons", "extras", "cases", "covers"]
         accessory_items = 0
-        for li in order.line_items:
-            product = next((p for p in products if p.id == li.product_id), None)
+        for li in line_items:
+            product = next(
+                (p for p in products if p.get("id") == li.get("productId")), None
+            )
             if product and any(
-                acc_type in (product.product_type or "").lower()
+                acc_type in (product.get("productType") or "").lower()
                 for acc_type in accessory_types
             ):
                 accessory_items += 1
-        accessory_ratio = accessory_items / len(order.line_items)
+        accessory_ratio = accessory_items / len(line_items)
 
         # Upselling opportunity (could customer have bought more expensive versions)
         upselling_opportunity = self._calculate_upselling_opportunity(order, products)
@@ -472,48 +505,56 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
         return 0.2  # Planned purchase
 
     def _calculate_upselling_opportunity(
-        self, order: ShopifyOrder, products: List
+        self, order: Dict[str, Any], products: List
     ) -> float:
         """Calculate upselling opportunity score"""
-        if not order.line_items or not products:
+        line_items = order.get("lineItems", [])
+        if not line_items or not products:
             return 0.0
 
         # Find products in order that have higher-priced variants
         upselling_opportunities = 0
 
-        for line_item in order.line_items:
-            product = next((p for p in products if p.id == line_item.product_id), None)
-            if product and product.variants:
+        for line_item in line_items:
+            product = next(
+                (p for p in products if p.get("id") == line_item.get("productId")), None
+            )
+            if product and product.get("variants"):
                 # Check if there are higher-priced variants
-                current_price = line_item.price
+                current_price = line_item.get("price", 0.0)
                 higher_priced_variants = [
-                    v for v in product.variants if v.price > current_price
+                    v
+                    for v in product.get("variants", [])
+                    if v.get("price", 0.0) > current_price
                 ]
 
                 if higher_priced_variants:
                     upselling_opportunities += 1
 
-        return upselling_opportunities / len(order.line_items)
+        return upselling_opportunities / len(line_items)
 
     def _calculate_cross_selling_opportunity(
-        self, order: ShopifyOrder, all_orders: List, products: List
+        self, order: Dict[str, Any], all_orders: List, products: List
     ) -> float:
         """Calculate cross-selling opportunity score"""
-        if not order.line_items or not all_orders or not products:
+        line_items = order.get("lineItems", [])
+        if not line_items or not all_orders or not products:
             return 0.0
 
         # Find products frequently bought with items in this order
-        order_product_ids = [li.product_id for li in order.line_items]
+        order_product_ids = [li.get("productId") for li in line_items]
 
         # Analyze other orders to find co-purchase patterns
         co_purchase_count = 0
         total_other_orders = 0
 
         for other_order in all_orders:
-            if other_order.id == order.id:
+            if other_order.get("id") == order.get("id"):
                 continue
 
-            other_product_ids = [li.product_id for li in other_order.line_items]
+            other_product_ids = [
+                li.get("productId") for li in other_order.get("lineItems", [])
+            ]
 
             # Check if any products from this order appear in other orders
             if any(pid in other_product_ids for pid in order_product_ids):
@@ -530,17 +571,20 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
         return co_purchase_count / total_other_orders
 
     def _calculate_replacement_ratio(
-        self, order: ShopifyOrder, products: List
+        self, order: Dict[str, Any], products: List
     ) -> float:
         """Calculate ratio of items that might be replacements"""
-        if not order.line_items or not products:
+        line_items = order.get("lineItems", [])
+        if not line_items or not products:
             return 0.0
 
         # Simple heuristic: items with similar categories might be replacements
         replacement_indicators = 0
 
-        for line_item in order.line_items:
-            product = next((p for p in products if p.id == line_item.product_id), None)
+        for line_item in line_items:
+            product = next(
+                (p for p in products if p.get("id") == line_item.get("productId")), None
+            )
             if product:
                 # Check if this is a replacement-type product
                 replacement_keywords = [
@@ -550,9 +594,9 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
                     "upgrade",
                     "version",
                 ]
-                product_text = f"{product.title} {product.product_type}".lower()
+                product_text = f"{product.get('title', '')} {product.get('productType', '')}".lower()
 
                 if any(keyword in product_text for keyword in replacement_keywords):
                     replacement_indicators += 1
 
-        return replacement_indicators / len(order.line_items)
+        return replacement_indicators / len(line_items)

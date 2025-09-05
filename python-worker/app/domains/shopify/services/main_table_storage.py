@@ -28,12 +28,16 @@ def clean_product_data_for_storage(product_data: Dict[str, Any]) -> Dict[str, An
         if not product_data.get("productType"):
             product_data["productType"] = "Unknown"
 
-        # Fix invalid status values
+        # Fix invalid status values - map to ENUM values
         status = product_data.get("status", "").lower()
         if status == "active":
             product_data["status"] = "active"
-        elif status not in ["active", "archived", "draft"]:
+        elif status == "archived":
+            product_data["status"] = "archived"
+        elif status == "draft":
             product_data["status"] = "draft"
+        else:
+            product_data["status"] = "draft"  # Default to draft for unknown status
 
         # Fix missing images
         if product_data.get("images") is None:
@@ -84,10 +88,69 @@ def clean_collection_data_for_storage(
                     int(collection_data["isAutomated"])
                 )
 
+        # Fix sortOrder - map to ENUM values
+        sort_order = collection_data.get("sortOrder", "").lower()
+        if sort_order == "manual":
+            collection_data["sortOrder"] = "manual"
+        elif sort_order == "best_selling":
+            collection_data["sortOrder"] = "best_selling"
+        elif sort_order == "created":
+            collection_data["sortOrder"] = "created"
+        elif sort_order == "created_desc":
+            collection_data["sortOrder"] = "created_desc"
+        elif sort_order == "id":
+            collection_data["sortOrder"] = "id"
+        elif sort_order == "id_desc":
+            collection_data["sortOrder"] = "id_desc"
+        elif sort_order == "price":
+            collection_data["sortOrder"] = "price"
+        elif sort_order == "price_desc":
+            collection_data["sortOrder"] = "price_desc"
+        elif sort_order == "title":
+            collection_data["sortOrder"] = "title"
+        elif sort_order == "title_desc":
+            collection_data["sortOrder"] = "title_desc"
+        elif sort_order == "updated_at":
+            collection_data["sortOrder"] = "updated_at"
+        elif sort_order == "updated_at_desc":
+            collection_data["sortOrder"] = "updated_at_desc"
+        else:
+            collection_data["sortOrder"] = "manual"  # Default to manual
+
         return collection_data
     except Exception as e:
         logger.warning(f"Failed to clean collection data: {str(e)}")
         return collection_data
+
+
+def clean_order_data_for_storage(order_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean and fix order data before storing in main tables"""
+    try:
+        # Fix orderStatus - map to ENUM values
+        order_status = order_data.get("orderStatus", "").lower()
+        if order_status == "pending":
+            order_data["orderStatus"] = "pending"
+        elif order_status == "confirmed":
+            order_data["orderStatus"] = "confirmed"
+        elif order_status == "paid":
+            order_data["orderStatus"] = "paid"
+        elif order_status == "partially_paid":
+            order_data["orderStatus"] = "partially_paid"
+        elif order_status == "partially_refunded":
+            order_data["orderStatus"] = "partially_refunded"
+        elif order_status == "refunded":
+            order_data["orderStatus"] = "refunded"
+        elif order_status == "voided":
+            order_data["orderStatus"] = "voided"
+        elif order_status == "cancelled":
+            order_data["orderStatus"] = "cancelled"
+        else:
+            order_data["orderStatus"] = "pending"  # Default to pending
+
+        return order_data
+    except Exception as e:
+        logger.warning(f"Failed to clean order data: {str(e)}")
+        return order_data
 
 
 @dataclass
@@ -1562,46 +1625,48 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_order_data(order_data):
             """Prepare order data for database insertion"""
+            # Clean the data first
+            cleaned_data = clean_order_data_for_storage(order_data)
             return {
-                "shopId": order_data["shopId"],
-                "orderId": order_data["orderId"],
-                "orderName": order_data.get("orderName"),
-                "customerId": order_data.get("customerId"),
-                "customerEmail": order_data.get("customerEmail"),
-                "customerPhone": order_data.get("customerPhone"),
-                "totalAmount": order_data["totalAmount"],
-                "subtotalAmount": order_data.get("subtotalAmount"),
-                "totalTaxAmount": order_data.get("totalTaxAmount"),
-                "totalShippingAmount": order_data.get("totalShippingAmount"),
-                "totalRefundedAmount": order_data.get("totalRefundedAmount"),
-                "totalOutstandingAmount": order_data.get("totalOutstandingAmount"),
-                "orderDate": order_data["orderDate"],
-                "processedAt": order_data.get("processedAt"),
-                "cancelledAt": order_data.get("cancelledAt"),
-                "cancelReason": order_data.get("cancelReason"),
-                "orderStatus": order_data.get("orderStatus"),
-                "orderLocale": order_data.get("orderLocale"),
-                "currencyCode": order_data.get("currencyCode"),
-                "presentmentCurrencyCode": order_data.get("presentmentCurrencyCode"),
-                "confirmed": order_data.get("confirmed", False),
-                "test": order_data.get("test", False),
-                "tags": Json(order_data.get("tags", [])),
-                "note": order_data.get("note"),
-                "lineItems": Json(order_data.get("lineItems", [])),
+                "shopId": cleaned_data["shopId"],
+                "orderId": cleaned_data["orderId"],
+                "orderName": cleaned_data.get("orderName"),
+                "customerId": cleaned_data.get("customerId"),
+                "customerEmail": cleaned_data.get("customerEmail"),
+                "customerPhone": cleaned_data.get("customerPhone"),
+                "totalAmount": cleaned_data["totalAmount"],
+                "subtotalAmount": cleaned_data.get("subtotalAmount"),
+                "totalTaxAmount": cleaned_data.get("totalTaxAmount"),
+                "totalShippingAmount": cleaned_data.get("totalShippingAmount"),
+                "totalRefundedAmount": cleaned_data.get("totalRefundedAmount"),
+                "totalOutstandingAmount": cleaned_data.get("totalOutstandingAmount"),
+                "orderDate": cleaned_data["orderDate"],
+                "processedAt": cleaned_data.get("processedAt"),
+                "cancelledAt": cleaned_data.get("cancelledAt"),
+                "cancelReason": cleaned_data.get("cancelReason"),
+                "orderStatus": cleaned_data.get("orderStatus"),
+                "orderLocale": cleaned_data.get("orderLocale"),
+                "currencyCode": cleaned_data.get("currencyCode"),
+                "presentmentCurrencyCode": cleaned_data.get("presentmentCurrencyCode"),
+                "confirmed": cleaned_data.get("confirmed", False),
+                "test": cleaned_data.get("test", False),
+                "tags": Json(cleaned_data.get("tags", [])),
+                "note": cleaned_data.get("note"),
+                "lineItems": Json(cleaned_data.get("lineItems", [])),
                 "shippingAddress": (
-                    Json(order_data.get("shippingAddress"))
-                    if order_data.get("shippingAddress")
+                    Json(cleaned_data.get("shippingAddress"))
+                    if cleaned_data.get("shippingAddress")
                     else Json({})
                 ),
                 "billingAddress": (
-                    Json(order_data.get("billingAddress"))
-                    if order_data.get("billingAddress")
+                    Json(cleaned_data.get("billingAddress"))
+                    if cleaned_data.get("billingAddress")
                     else Json({})
                 ),
                 "discountApplications": Json(
-                    order_data.get("discountApplications", [])
+                    cleaned_data.get("discountApplications", [])
                 ),
-                "metafields": Json(order_data.get("metafields", [])),
+                "metafields": Json(cleaned_data.get("metafields", [])),
             }
 
         # Use Prisma's create_many for batch insert (much faster than individual upserts)

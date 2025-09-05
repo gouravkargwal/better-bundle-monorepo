@@ -2,19 +2,10 @@
 Shop feature generator for ML feature engineering
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import statistics
 
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyShop,
-    ShopifyProduct,
-    ShopifyOrder,
-    ShopifyCustomer,
-    ShopifyCollection,
-    BehavioralEvent,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -82,7 +73,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
             logger.error(f"Failed to compute shop features for {shop.id}: {str(e)}")
             return {}
 
-    def _compute_basic_shop_features(self, shop: ShopifyShop) -> Dict[str, Any]:
+    def _compute_basic_shop_features(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         """Compute basic shop features"""
         return {
             "shop_id": shop.id,
@@ -98,7 +89,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_product_features(
-        self, shop: ShopifyShop, products: List[ShopifyProduct]
+        self, shop: Dict[str, Any], products: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute product-related shop features"""
         if not products:
@@ -129,7 +120,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_order_features(
-        self, shop: ShopifyShop, orders: List[ShopifyOrder]
+        self, shop: Dict[str, Any], orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute order-related shop features"""
         if not orders:
@@ -160,7 +151,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_customer_features(
-        self, shop: ShopifyShop, customers: List[ShopifyCustomer]
+        self, shop: Dict[str, Any], customers: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute customer-related shop features"""
         if not customers:
@@ -190,7 +181,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_collection_features(
-        self, shop: ShopifyShop, collections: List[ShopifyCollection]
+        self, shop: Dict[str, Any], collections: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute collection-related shop features"""
         if not collections:
