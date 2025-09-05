@@ -38,33 +38,125 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
-        """Get all shop data for feature computation"""
+    async def get_products_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of products for a shop"""
         pass
 
     @abstractmethod
-    async def get_products_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all products for a shop"""
+    async def get_orders_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of orders for a shop"""
         pass
 
     @abstractmethod
-    async def get_orders_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all orders for a shop"""
+    async def get_customers_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of customers for a shop"""
         pass
 
     @abstractmethod
-    async def get_customers_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all customers for a shop"""
+    async def get_collections_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of collections for a shop"""
         pass
 
     @abstractmethod
-    async def get_collections_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all collections for a shop"""
+    async def get_events_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of events for a shop"""
         pass
 
     @abstractmethod
-    async def get_events_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all customer events for a shop"""
+    async def get_entity_count(self, shop_id: str, entity_table: str) -> int:
+        """Get the total count of an entity for a shop"""
+        pass
+
+    @abstractmethod
+    async def get_orders_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of orders created since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_products_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of products updated since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_customers_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of customers updated since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_collections_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of collections updated since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_orders_since(
+        self, shop_id: str, since_timestamp: str
+    ) -> List[Dict[str, Any]]:
+        """Get orders created since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_shop_last_computation_time(self, shop_id: str) -> str:
+        """Get the last feature computation timestamp for a shop"""
+        pass
+
+    @abstractmethod
+    async def update_shop_last_computation_time(
+        self, shop_id: str, timestamp: str
+    ) -> None:
+        """Update the last feature computation timestamp for a shop"""
+        pass
+
+    @abstractmethod
+    async def get_affected_entity_ids_from_orders(
+        self, shop_id: str, since_timestamp: str
+    ) -> Dict[str, List[str]]:
+        """Extract affected product and customer IDs from new orders since timestamp"""
+        pass
+
+    @abstractmethod
+    async def get_products_by_ids(
+        self, shop_id: str, product_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get products by their IDs for processing"""
+        pass
+
+    @abstractmethod
+    async def get_customers_by_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get customers by their IDs for processing"""
+        pass
+
+    @abstractmethod
+    async def get_orders_for_customer_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get all orders for a batch of customer IDs"""
+        pass
+
+    @abstractmethod
+    async def get_events_for_customer_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get all events for a batch of customer IDs"""
         pass
 
 
@@ -81,20 +173,30 @@ class FeatureRepository(IFeatureRepository):
         return self._db_client
 
     async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert product features using parameterized queries to avoid SQL injection"""
+        """Bulk upsert product features using a single query with multiple VALUES"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Use parameterized query to prevent SQL injection
-            bulk_upsert_query = """
+            # Build a single query with multiple VALUES clauses
+            values_clauses = []
+            params = []
+            param_index = 1
+
+            for data in batch_data:
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10})"
+                values_clauses.append(values_clause)
+                params.extend(data)
+                param_index += 11
+
+            bulk_upsert_query = f"""
             INSERT INTO "ProductFeatures" (
                 "shopId", "productId", "popularity", "priceTier", "category",
                 "variantComplexity", "imageRichness", "tagDiversity", 
                 "categoryEncoded", "vendorScore", "lastComputedAt"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES {', '.join(values_clauses)}
             ON CONFLICT ("shopId", "productId") 
             DO UPDATE SET
                 "popularity" = EXCLUDED."popularity",
@@ -108,9 +210,8 @@ class FeatureRepository(IFeatureRepository):
                 "lastComputedAt" = EXCLUDED."lastComputedAt"
             """
 
-            # Execute each row as a separate parameterized query
-            for data in batch_data:
-                await db.execute_raw(bulk_upsert_query, *data)
+            # Execute single bulk query
+            await db.execute_raw(bulk_upsert_query, *params)
 
             return len(batch_data)
 
@@ -121,18 +222,29 @@ class FeatureRepository(IFeatureRepository):
     async def bulk_upsert_customer_features(
         self, user_features_batch: List[tuple], behavior_features_batch: List[tuple]
     ) -> int:
-        """Bulk upsert customer features using parameterized queries to avoid SQL injection"""
+        """Bulk upsert customer features using single queries with multiple VALUES"""
         try:
             total_saved = 0
             db = await self._get_database()
 
             # Bulk upsert user features
             if user_features_batch:
-                user_upsert_query = """
+                # Build a single query with multiple VALUES clauses for user features
+                values_clauses = []
+                params = []
+                param_index = 1
+
+                for data in user_features_batch:
+                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7})"
+                    values_clauses.append(values_clause)
+                    params.extend(data)
+                    param_index += 8
+
+                user_upsert_query = f"""
                 INSERT INTO "UserFeatures" (
                     "shopId", "customerId", "totalPurchases", "totalSpent", "recencyDays",
                     "avgPurchaseIntervalDays", "preferredCategory", "lastComputedAt"
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ) VALUES {', '.join(values_clauses)}
                 ON CONFLICT ("shopId", "customerId") 
                 DO UPDATE SET
                     "totalPurchases" = EXCLUDED."totalPurchases",
@@ -143,19 +255,28 @@ class FeatureRepository(IFeatureRepository):
                     "lastComputedAt" = EXCLUDED."lastComputedAt"
                 """
 
-                for data in user_features_batch:
-                    await db.execute_raw(user_upsert_query, *data)
-
+                await db.execute_raw(user_upsert_query, *params)
                 total_saved += len(user_features_batch)
 
             # Bulk upsert behavior features
             if behavior_features_batch:
-                behavior_upsert_query = """
+                # Build a single query with multiple VALUES clauses for behavior features
+                values_clauses = []
+                params = []
+                param_index = 1
+
+                for data in behavior_features_batch:
+                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10}, ${param_index + 11})"
+                    values_clauses.append(values_clause)
+                    params.extend(data)
+                    param_index += 12
+
+                behavior_upsert_query = f"""
                 INSERT INTO "CustomerBehaviorFeatures" (
                     "shopId", "customerId", "eventDiversity", "eventFrequency", "daysSinceFirstEvent",
                     "daysSinceLastEvent", "purchaseFrequency", "engagementScore", "recencyScore", 
                     "diversityScore", "behavioralScore", "lastComputedAt"
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ) VALUES {', '.join(values_clauses)}
                 ON CONFLICT ("shopId", "customerId") 
                 DO UPDATE SET
                     "eventDiversity" = EXCLUDED."eventDiversity",
@@ -170,9 +291,7 @@ class FeatureRepository(IFeatureRepository):
                     "lastComputedAt" = EXCLUDED."lastComputedAt"
                 """
 
-                for data in behavior_features_batch:
-                    await db.execute_raw(behavior_upsert_query, *data)
-
+                await db.execute_raw(behavior_upsert_query, *params)
                 total_saved += len(behavior_features_batch)
 
             return total_saved
@@ -182,18 +301,29 @@ class FeatureRepository(IFeatureRepository):
             return 0
 
     async def bulk_upsert_collection_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert collection features using parameterized queries to avoid SQL injection"""
+        """Bulk upsert collection features using a single query with multiple VALUES"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            collection_upsert_query = """
+            # Build a single query with multiple VALUES clauses
+            values_clauses = []
+            params = []
+            param_index = 1
+
+            for data in batch_data:
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7})"
+                values_clauses.append(values_clause)
+                params.extend(data)
+                param_index += 8
+
+            collection_upsert_query = f"""
             INSERT INTO "CollectionFeatures" (
                 "shopId", "collectionId", "productCount", "isAutomated", "performanceScore",
                 "seoScore", "imageScore", "lastComputedAt"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES {', '.join(values_clauses)}
             ON CONFLICT ("shopId", "collectionId") 
             DO UPDATE SET
                 "productCount" = EXCLUDED."productCount",
@@ -204,8 +334,8 @@ class FeatureRepository(IFeatureRepository):
                 "lastComputedAt" = EXCLUDED."lastComputedAt"
             """
 
-            for data in batch_data:
-                await db.execute_raw(collection_upsert_query, *data)
+            # Execute single bulk query
+            await db.execute_raw(collection_upsert_query, *params)
 
             return len(batch_data)
 
@@ -214,18 +344,29 @@ class FeatureRepository(IFeatureRepository):
             return 0
 
     async def bulk_upsert_interaction_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert interaction features using parameterized queries to avoid SQL injection"""
+        """Bulk upsert interaction features using a single query with multiple VALUES"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            interaction_upsert_query = """
+            # Build a single query with multiple VALUES clauses
+            values_clauses = []
+            params = []
+            param_index = 1
+
+            for data in batch_data:
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6})"
+                values_clauses.append(values_clause)
+                params.extend(data)
+                param_index += 7
+
+            interaction_upsert_query = f"""
             INSERT INTO "InteractionFeatures" (
                 "shopId", "customerId", "productId", "purchaseCount",
                 "lastPurchaseDate", "timeDecayedWeight", "lastComputedAt"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ) VALUES {', '.join(values_clauses)}
             ON CONFLICT ("shopId", "customerId", "productId") 
             DO UPDATE SET
                 "purchaseCount" = EXCLUDED."purchaseCount",
@@ -234,8 +375,8 @@ class FeatureRepository(IFeatureRepository):
                 "lastComputedAt" = EXCLUDED."lastComputedAt"
             """
 
-            for data in batch_data:
-                await db.execute_raw(interaction_upsert_query, *data)
+            # Execute single bulk query
+            await db.execute_raw(interaction_upsert_query, *params)
 
             return len(batch_data)
 
@@ -243,78 +384,321 @@ class FeatureRepository(IFeatureRepository):
             logger.error(f"Failed to bulk upsert interaction features: {str(e)}")
             return 0
 
-    async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
-        """Get all shop data for feature computation"""
+    async def get_products_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of products for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get products batch for shop {shop_id}: {str(e)}")
+            return []
+
+    async def get_orders_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of orders for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get orders batch for shop {shop_id}: {str(e)}")
+            return []
+
+    async def get_customers_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of customers for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get customers batch for shop {shop_id}: {str(e)}")
+            return []
+
+    async def get_collections_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of collections for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyCollection" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get collections batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_events_batch(
+        self, shop_id: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of events for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyEvent" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get events batch for shop {shop_id}: {str(e)}")
+            return []
+
+    async def get_entity_count(self, shop_id: str, entity_table: str) -> int:
+        """Get the total count of an entity for a shop"""
+        try:
+            db = await self._get_database()
+            query = (
+                f'SELECT COUNT(*) as count FROM "{entity_table}" WHERE "shopId" = $1'
+            )
+            result = await db.query_raw(query, shop_id)
+            return result[0]["count"] if result else 0
+        except Exception as e:
+            logger.error(
+                f"Failed to get entity count for {entity_table} in shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def get_orders_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of orders created since timestamp"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "createdAt" > $2 ORDER BY "createdAt" LIMIT $3 OFFSET $4'
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get orders batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_products_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of products updated since timestamp"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get products batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_customers_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of customers updated since timestamp"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get customers batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_collections_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of collections updated since timestamp"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyCollection" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get collections batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_orders_since(
+        self, shop_id: str, since_timestamp: str
+    ) -> List[Dict[str, Any]]:
+        """Get orders created since timestamp"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "createdAt" > $2 ORDER BY "createdAt"'
+            result = await db.query_raw(query, shop_id, since_timestamp)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get orders since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_shop_last_computation_time(self, shop_id: str) -> str:
+        """Get the last feature computation timestamp for a shop"""
+        try:
+            db = await self._get_database()
+            query = (
+                'SELECT "lastFeatureComputationAt" FROM "ShopifyShop" WHERE "id" = $1'
+            )
+            result = await db.query_raw(query, shop_id)
+            if result and result[0].get("lastFeatureComputationAt"):
+                return result[0]["lastFeatureComputationAt"]
+            # Return a very old timestamp for first run
+            return "1970-01-01T00:00:00Z"
+        except Exception as e:
+            logger.error(
+                f"Failed to get last computation time for shop {shop_id}: {str(e)}"
+            )
+            return "1970-01-01T00:00:00Z"
+
+    async def update_shop_last_computation_time(
+        self, shop_id: str, timestamp: str
+    ) -> None:
+        """Update the last feature computation timestamp for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'UPDATE "ShopifyShop" SET "lastFeatureComputationAt" = $1 WHERE "id" = $2'
+            await db.execute_raw(query, timestamp, shop_id)
+        except Exception as e:
+            logger.error(
+                f"Failed to update last computation time for shop {shop_id}: {str(e)}"
+            )
+
+    async def get_affected_entity_ids_from_orders(
+        self, shop_id: str, since_timestamp: str
+    ) -> Dict[str, List[str]]:
+        """Extract affected product and customer IDs from new orders since timestamp"""
         try:
             db = await self._get_database()
 
-            # Get shop info
-            shop_query = 'SELECT * FROM "ShopifyShop" WHERE "id" = $1'
-            shop_result = await db.fetch_one(shop_query, shop_id)
+            # Query to get all unique product and customer IDs from new orders
+            query = """
+            SELECT DISTINCT 
+                o."customerId",
+                li."productId"
+            FROM "ShopifyOrder" o
+            JOIN "ShopifyLineItem" li ON o."id" = li."orderId"
+            WHERE o."shopId" = $1 
+            AND o."createdAt" > $2
+            AND o."customerId" IS NOT NULL
+            AND li."productId" IS NOT NULL
+            """
 
-            if not shop_result:
-                logger.warning(f"Shop not found: {shop_id}")
-                return {}
+            result = await db.query_raw(query, shop_id, since_timestamp)
+
+            # Extract unique IDs
+            customer_ids = set()
+            product_ids = set()
+
+            for row in result:
+                if row.get("customerId"):
+                    customer_ids.add(row["customerId"])
+                if row.get("productId"):
+                    product_ids.add(row["productId"])
 
             return {
-                "shop": shop_result,
-                "products": await self.get_products_for_shop(shop_id),
-                "orders": await self.get_orders_for_shop(shop_id),
-                "customers": await self.get_customers_for_shop(shop_id),
-                "collections": await self.get_collections_for_shop(shop_id),
-                "events": await self.get_events_for_shop(shop_id),
+                "customer_ids": list(customer_ids),
+                "product_ids": list(product_ids),
             }
 
         except Exception as e:
-            logger.error(f"Failed to get shop data for {shop_id}: {str(e)}")
-            return {}
+            logger.error(
+                f"Failed to get affected entity IDs from orders for shop {shop_id}: {str(e)}"
+            )
+            return {"customer_ids": [], "product_ids": []}
 
-    async def get_products_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all products for a shop"""
+    async def get_products_by_ids(
+        self, shop_id: str, product_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get products by their IDs for processing"""
         try:
+            if not product_ids:
+                return []
+
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1'
-            return await db.fetch_all(query, shop_id)
+
+            # Create placeholders for the IN clause
+            placeholders = ",".join([f"${i+2}" for i in range(len(product_ids))])
+            query = f'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
+
+            result = await db.query_raw(query, shop_id, *product_ids)
+            return [dict(row) for row in result] if result else []
+
         except Exception as e:
-            logger.error(f"Failed to get products for shop {shop_id}: {str(e)}")
+            logger.error(f"Failed to get products by IDs for shop {shop_id}: {str(e)}")
             return []
 
-    async def get_orders_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all orders for a shop"""
+    async def get_customers_by_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get customers by their IDs for processing"""
         try:
+            if not customer_ids:
+                return []
+
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1'
-            return await db.fetch_all(query, shop_id)
+
+            # Create placeholders for the IN clause
+            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
+            query = f'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
+
+            result = await db.query_raw(query, shop_id, *customer_ids)
+            return [dict(row) for row in result] if result else []
+
         except Exception as e:
-            logger.error(f"Failed to get orders for shop {shop_id}: {str(e)}")
+            logger.error(f"Failed to get customers by IDs for shop {shop_id}: {str(e)}")
             return []
 
-    async def get_customers_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all customers for a shop"""
+    async def get_orders_for_customer_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get all orders for a batch of customer IDs"""
         try:
+            if not customer_ids:
+                return []
+
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1'
-            return await db.fetch_all(query, shop_id)
+
+            # Create placeholders for the IN clause
+            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
+            query = f'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
+
+            result = await db.query_raw(query, shop_id, *customer_ids)
+            return [dict(row) for row in result] if result else []
+
         except Exception as e:
-            logger.error(f"Failed to get customers for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get orders for customer IDs for shop {shop_id}: {str(e)}"
+            )
             return []
 
-    async def get_collections_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all collections for a shop"""
+    async def get_events_for_customer_ids(
+        self, shop_id: str, customer_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Get all events for a batch of customer IDs"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCollection" WHERE "shopId" = $1'
-            return await db.fetch_all(query, shop_id)
-        except Exception as e:
-            logger.error(f"Failed to get collections for shop {shop_id}: {str(e)}")
-            return []
+            if not customer_ids:
+                return []
 
-    async def get_events_for_shop(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Get all customer events for a shop"""
-        try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCustomerEvent" WHERE "shopId" = $1'
-            return await db.fetch_all(query, shop_id)
+
+            # Create placeholders for the IN clause
+            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
+            query = f'SELECT * FROM "ShopifyCustomerEvent" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
+
+            result = await db.query_raw(query, shop_id, *customer_ids)
+            return [dict(row) for row in result] if result else []
+
         except Exception as e:
-            logger.error(f"Failed to get events for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get events for customer IDs for shop {shop_id}: {str(e)}"
+            )
             return []
