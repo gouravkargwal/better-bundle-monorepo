@@ -8,12 +8,45 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums for better data validation
+enum ProductStatus {
+  active
+  archived
+  draft
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  paid
+  partially_paid
+  partially_refunded
+  refunded
+  voided
+  cancelled
+}
+
+enum CollectionSortOrder {
+  manual
+  best_selling
+  created
+  created_desc
+  id
+  id_desc
+  price
+  price_desc
+  title
+  title_desc
+  updated_at
+  updated_at_desc
+}
+
 model RawOrder {
   id                String    @id @default(cuid())
   shopId            String
   payload           Json
   extractedAt       DateTime  @default(now())
-  shopifyId         String?   // Shopify order ID for efficient lookups
+  shopifyId         String?   @db.VarChar(100) // Shopify order ID for efficient lookups
   shopifyCreatedAt  DateTime? // Shopify creation timestamp
   shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
@@ -29,7 +62,7 @@ model RawProduct {
   shopId            String
   payload           Json
   extractedAt       DateTime  @default(now())
-  shopifyId         String?   // Shopify product ID for efficient lookups
+  shopifyId         String?   @db.VarChar(100) // Shopify product ID for efficient lookups
   shopifyCreatedAt  DateTime? // Shopify creation timestamp
   shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
@@ -45,7 +78,7 @@ model RawCustomer {
   shopId            String
   payload           Json
   extractedAt       DateTime  @default(now())
-  shopifyId         String?   // Shopify customer ID for efficient lookups
+  shopifyId         String?   @db.VarChar(100) // Shopify customer ID for efficient lookups
   shopifyCreatedAt  DateTime? // Shopify creation timestamp
   shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
@@ -61,7 +94,7 @@ model RawCollection {
   shopId            String
   payload           Json
   extractedAt       DateTime  @default(now())
-  shopifyId         String?   // Shopify collection ID for efficient lookups
+  shopifyId         String?   @db.VarChar(100) // Shopify collection ID for efficient lookups
   shopifyCreatedAt  DateTime? // Shopify creation timestamp
   shopifyUpdatedAt  DateTime? // Shopify update timestamp
 
@@ -90,28 +123,28 @@ model Session {
   shop          String
   state         String
   isOnline      Boolean   @default(false)
-  scope         String?
+  scope         String?  @db.VarChar(500)
   expires       DateTime?
-  accessToken   String
+  accessToken   String   @db.VarChar(1000)
   userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
+  firstName     String?  @db.VarChar(100)
+  lastName      String?  @db.VarChar(100)
+  email         String?  @db.VarChar(255)
   accountOwner  Boolean   @default(false)
-  locale        String?
+  locale        String?  @db.VarChar(10)
   collaborator  Boolean?
   emailVerified Boolean?
 }
 
 model Shop {
   id                 String                   @id @default(cuid())
-  shopDomain         String                   @unique
-  accessToken        String
-  planType           String                   @default("Free")
-  currencyCode       String?
-  moneyFormat        String?
+  shopDomain         String                   @db.VarChar(255) @unique
+  accessToken        String                   @db.VarChar(1000)
+  planType           String                   @db.VarChar(50) @default("Free")
+  currencyCode       String?                  @db.VarChar(10)
+  moneyFormat        String?                  @db.VarChar(100)
   isActive           Boolean                  @default(true)
-  email              String?
+  email              String?                  @db.VarChar(255)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   lastAnalysisAt     DateTime?
@@ -156,33 +189,33 @@ model OrderData {
   id        String   @id @default(cuid())
   shopId    String
   orderId   String
-  orderName String?  // Shopify order name (e.g., "#1001")
-  customerId String?
-  customerEmail String?
-  customerPhone String?
-  totalAmount Float
-  subtotalAmount Float?
-  totalTaxAmount Float?
-  totalShippingAmount Float?
-  totalRefundedAmount Float?
-  totalOutstandingAmount Float?
+  orderName String?  @db.VarChar(100) // Shopify order name (e.g., "#1001")
+  customerId String? @db.VarChar(100)
+  customerEmail String? @db.VarChar(255)
+  customerPhone String? @db.VarChar(50)
+  totalAmount Float  @default(0.0)
+  subtotalAmount Float? @default(0.0)
+  totalTaxAmount Float? @default(0.0)
+  totalShippingAmount Float? @default(0.0)
+  totalRefundedAmount Float? @default(0.0)
+  totalOutstandingAmount Float? @default(0.0)
   orderDate  DateTime
   processedAt DateTime?
   cancelledAt DateTime?
-  cancelReason String?
-  orderStatus String?
-  orderLocale String?
-  currencyCode String?
-  presentmentCurrencyCode String?
+  cancelReason String? @db.VarChar(500) @default("")
+  orderStatus OrderStatus? @default(pending)
+  orderLocale String? @db.VarChar(10) @default("en")
+  currencyCode String? @db.VarChar(10) @default("USD")
+  presentmentCurrencyCode String? @db.VarChar(10) @default("USD")
   confirmed Boolean @default(false)
   test Boolean @default(false)
-  tags Json?
-  note String?
-  lineItems  Json
-  shippingAddress Json?
-  billingAddress Json?
-  discountApplications Json?
-  metafields Json?
+  tags Json? @default("[]")
+  note String? @db.Text @default("")
+  lineItems  Json @default("[]")
+  shippingAddress Json? @default("{}")
+  billingAddress Json? @default("{}")
+  discountApplications Json? @default("[]")
+  metafields Json? @default("[]")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -200,27 +233,27 @@ model ProductData {
   id        String   @id @default(cuid())
   shopId    String
   productId String
-  title     String
-  handle    String
-  description String?
-  descriptionHtml String?
-  productType String?
-  vendor    String?
-  tags      Json?
-  status    String?
-  totalInventory Int?
-  price     Float
-  compareAtPrice Float?
-  inventory Int?
-  imageUrl  String?
-  imageAlt  String?
+  title     String   @db.VarChar(500)
+  handle    String   @db.VarChar(255)
+  description String? @db.Text
+  descriptionHtml String? @db.Text
+  productType String? @db.VarChar(100) @default("")
+  vendor    String?  @db.VarChar(255) @default("")
+  tags      Json?    @default("[]")
+  status    ProductStatus? @default(active)
+  totalInventory Int? @default(0)
+  price     Float    @default(0.0)
+  compareAtPrice Float? @default(0.0)
+  inventory Int?     @default(0)
+  imageUrl  String?  @db.VarChar(1000)
+  imageAlt  String?  @db.VarChar(500)
   productCreatedAt DateTime?
   productUpdatedAt DateTime?
-  variants  Json?
-  images    Json?
-  options   Json?
-  collections Json?
-  metafields Json?
+  variants  Json?    @default("[]")
+  images    Json?    @default("[]")
+  options   Json?    @default("[]")
+  collections Json?  @default("[]")
+  metafields Json?   @default("[]")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,24 +273,24 @@ model CustomerData {
   id        String   @id @default(cuid())
   shopId    String
   customerId String
-  email     String?
-  firstName String?
-  lastName  String?
-  totalSpent Float   @default(0)
+  email     String?  @db.VarChar(255)
+  firstName String?  @db.VarChar(100)
+  lastName  String?  @db.VarChar(100)
+  totalSpent Float   @default(0.0)
   orderCount Int     @default(0)
   lastOrderDate DateTime?
-  tags      Json?
+  tags      Json?    @default("[]")
   createdAtShopify DateTime?
-  lastOrderId String?
-  location Json?
-  metafields Json?
-  state String?
+  lastOrderId String? @db.VarChar(100)
+  location Json?     @default("{}")
+  metafields Json?   @default("[]")
+  state String?      @db.VarChar(50) @default("")
   verifiedEmail Boolean @default(false)
   taxExempt Boolean @default(false)
-  defaultAddress Json?
-  addresses Json?
-  currencyCode String?
-  customerLocale String?
+  defaultAddress Json? @default("{}")
+  addresses Json?    @default("[]")
+  currencyCode String? @db.VarChar(10) @default("USD")
+  customerLocale String? @db.VarChar(10) @default("en")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -275,18 +308,18 @@ model CollectionData {
   id              String   @id @default(cuid())
   shopId          String
   collectionId    String
-  title           String
-  handle          String
-  description     String?
-  sortOrder       String?
-  templateSuffix  String?
-  seoTitle        String?
-  seoDescription  String?
-  imageUrl        String?
-  imageAlt        String?
+  title           String   @db.VarChar(500)
+  handle          String   @db.VarChar(255)
+  description     String?  @db.Text @default("")
+  sortOrder       CollectionSortOrder? @default(manual)
+  templateSuffix  String?  @db.VarChar(100) @default("")
+  seoTitle        String?  @db.VarChar(500) @default("")
+  seoDescription  String?  @db.Text @default("")
+  imageUrl        String?  @db.VarChar(1000)
+  imageAlt        String?  @db.VarChar(500)
   productCount    Int      @default(0)
   isAutomated     Boolean  @default(false)
-  metafields      Json?
+  metafields      Json?    @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -332,7 +365,7 @@ model TrackedSale {
   revenueGenerated Float
   commissionOwed   Float
   status           String   @default("pending")
-  billingPeriod    String?
+  billingPeriod    String?  @db.VarChar(50)
   createdAt        DateTime @default(now())
   shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -346,7 +379,7 @@ model WidgetEvent {
   id         String   @id @default(cuid())
   shopId     String
   sessionId  String
-  bundleId   String?
+  bundleId   String?  @db.VarChar(100)
   action     String
   productIds String[]
   timestamp  DateTime @default(now())
@@ -383,7 +416,7 @@ model AnalysisJob {
   progress    Int       @default(0)
   startedAt   DateTime?
   completedAt DateTime?
-  error       String?
+  error       String?  @db.Text
   result      Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -409,8 +442,8 @@ model ShopAnalysisConfig {
 model HeuristicDecision {
   id                    String   @id @default(cuid())
   shopId                String
-  decision              String   // Human-readable decision
-  reason                String   // Detailed reasoning
+  decision              String   @db.VarChar(500) // Human-readable decision
+  reason                String   @db.Text // Detailed reasoning
   nextAnalysisHours     Int      // Next analysis interval in hours
   confidence            Float    // Confidence score (0.0 to 1.0)
   
@@ -419,11 +452,11 @@ model HeuristicDecision {
   revenueVelocity       Float    // Revenue per day
   bundleEffectiveness   Float    // Bundle performance score (0.0 to 1.0)
   dataChangeRate        Float    // Data change percentage
-  shopActivityLevel     String   // 'low', 'medium', 'high'
+  shopActivityLevel     String   @db.VarChar(20) // 'low', 'medium', 'high'
   userEngagement        Float    // User engagement score (0.0 to 1.0)
   
   // Additional metadata
-  reasoningSummary      String?  // Summary of reasoning
+  reasoningSummary      String?  @db.Text // Summary of reasoning
   analysisTimestamp     DateTime @default(now())
   createdAt             DateTime @default(now())
   
@@ -455,10 +488,10 @@ model IncrementalAnalysisLog {
 model TrackingEvent {
   id          String   @id @default(cuid())
   shopId      String
-  eventType   String   // "recommendation_displayed", "recommendation_clicked", etc.
-  sessionId   String
-  trackingId  String
-  userId      String?
+  eventType   String   @db.VarChar(100) // "recommendation_displayed", "recommendation_clicked", etc.
+  sessionId   String   @db.VarChar(100)
+  trackingId  String   @db.VarChar(100)
+  userId      String?  @db.VarChar(100)
   timestamp   DateTime
   metadata    Json
   rawEvent    Json
@@ -494,8 +527,8 @@ model ShopAnalytics {
 model BillingSubscription {
   id                String   @id @default(cuid())
   shopId            String
-  planName          String
-  status            String   // "active", "cancelled", "declined", "frozen"
+  planName          String   @db.VarChar(100)
+  status            String   @db.VarChar(50) // "active", "cancelled", "declined", "frozen"
   trialDays         Int      @default(14)
   currentPeriodEnd  DateTime
   nextBillingDate   DateTime
@@ -515,10 +548,10 @@ model BillingCharge {
   shopId        String
   subscriptionId String
   amount        Float
-  currency      String   @default("USD")
-  description   String
-  billingPeriod String
-  status        String   // "pending", "active", "cancelled", "declined"
+  currency      String   @db.VarChar(10) @default("USD")
+  description   String   @db.VarChar(500)
+  billingPeriod String   @db.VarChar(50)
+  status        String   @db.VarChar(50) // "pending", "active", "cancelled", "declined"
   createdAt     DateTime @default(now())
   dueDate       DateTime
   paidAt        DateTime?
@@ -545,7 +578,7 @@ model MLTrainingLog {
   usersCount   Int     @default(0)
   collectionsCount Int @default(0)
   customerEventsCount Int @default(0)
-  error       String?
+  error       String?  @db.Text
   createdAt   DateTime @default(now())
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -581,7 +614,7 @@ model UserFeatures {
   recencyDays             Int?
   avgPurchaseIntervalDays  Float?
   totalSpent              Float    @default(0)
-  preferredCategory       String?
+  preferredCategory       String?  @db.VarChar(100)
   lastComputedAt          DateTime @default(now())
   shop                    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -597,8 +630,8 @@ model ProductFeatures {
   productId       String
   popularity      Int      @default(0)
   avgRating       Float?
-  priceTier       String?  // "low", "mid", "high"
-  category        String?
+  priceTier       String?  @db.VarChar(20) // "low", "mid", "high"
+  category        String?  @db.VarChar(100)
   tags            Json?
   lastComputedAt  DateTime @default(now())
   
@@ -842,8 +875,8 @@ model CustomerAnalytics {
 model BehavioralEvents {
   eventId     String   @id
   shopId      String
-  customerId  String?
-  eventType   String
+  customerId  String?  @db.VarChar(100)
+  eventType   String   @db.VarChar(100)
   occurredAt  DateTime
   eventData   Json?
   
