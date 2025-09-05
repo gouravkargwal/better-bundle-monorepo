@@ -133,6 +133,7 @@ class DataCollectionConsumer(BaseConsumer):
             result = await self.shopify_service.collect_all_data(
                 shop_domain=shop_domain,
                 access_token=access_token,  # Pass the access token
+                shop_id=shop_id,  # Pass the shop_id directly
                 include_products=True,
                 include_orders=True,
                 include_customers=True,
@@ -308,22 +309,3 @@ class DataCollectionConsumer(BaseConsumer):
 
         # Clean up old jobs periodically
         await self.cleanup_old_jobs()
-
-        # Log job statistics
-        active_count = len(
-            [j for j in self.active_jobs.values() if j["status"] == "processing"]
-        )
-        completed_count = len(
-            [j for j in self.active_jobs.values() if j["status"] == "completed"]
-        )
-        failed_count = len(
-            [j for j in self.active_jobs.values() if j["status"] == "failed"]
-        )
-
-        self.logger.info(
-            f"Data collection consumer job status",
-            active_jobs=active_count,
-            completed_jobs=completed_count,
-            failed_jobs=failed_count,
-            total_jobs=len(self.active_jobs),
-        )

@@ -257,7 +257,7 @@ async def collect_shopify_data(
 
         # Start data collection in background
         background_tasks.add_task(
-            services["shopify"].collect_all_data,
+            services["shopify"].collect_all_data_by_shop_id,
             shop_id,
             collection_config or {},
         )

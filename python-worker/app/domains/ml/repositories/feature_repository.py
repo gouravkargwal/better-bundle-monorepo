@@ -118,9 +118,7 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def update_shop_last_computation_time(
-        self, shop_id: str, timestamp: str
-    ) -> None:
+    async def update_shop_last_computation_time(self, shop_id: str, timestamp) -> None:
         """Update the last feature computation timestamp for a shop"""
         pass
 
@@ -387,7 +385,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_products_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of products for a shop"""
+        """Get a batch of products for a shop from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
@@ -400,7 +398,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_orders_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of orders for a shop"""
+        """Get a batch of orders for a shop from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
@@ -413,7 +411,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_customers_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of customers for a shop"""
+        """Get a batch of customers for a shop from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
@@ -426,7 +424,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_collections_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of collections for a shop"""
+        """Get a batch of collections for a shop from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
@@ -484,7 +482,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_products_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of products updated since timestamp"""
+        """Get a batch of products updated since timestamp from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
@@ -499,7 +497,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_customers_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of customers updated since timestamp"""
+        """Get a batch of customers updated since timestamp from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
@@ -514,7 +512,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_collections_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of collections updated since timestamp"""
+        """Get a batch of collections updated since timestamp from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
@@ -529,7 +527,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_orders_since(
         self, shop_id: str, since_timestamp: str
     ) -> List[Dict[str, Any]]:
-        """Get orders created since timestamp"""
+        """Get orders created since timestamp from main table"""
         try:
             db = await self._get_database()
             query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "createdAt" > $2::timestamp ORDER BY "createdAt"'
@@ -557,14 +555,18 @@ class FeatureRepository(IFeatureRepository):
             )
             return "1970-01-01T00:00:00Z"
 
-    async def update_shop_last_computation_time(
-        self, shop_id: str, timestamp: str
-    ) -> None:
+    async def update_shop_last_computation_time(self, shop_id: str, timestamp) -> None:
         """Update the last feature computation timestamp for a shop"""
         try:
             db = await self._get_database()
+            # Convert timestamp to ISO format string if it's a datetime object
+            if hasattr(timestamp, "isoformat"):
+                timestamp_str = timestamp.isoformat()
+            else:
+                timestamp_str = str(timestamp)
+
             query = 'UPDATE "Shop" SET "lastAnalysisAt" = $1 WHERE "id" = $2'
-            await db.execute_raw(query, timestamp, shop_id)
+            await db.execute_raw(query, timestamp_str, shop_id)
         except Exception as e:
             logger.error(
                 f"Failed to update last computation time for shop {shop_id}: {str(e)}"

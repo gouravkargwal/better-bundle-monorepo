@@ -439,6 +439,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self,
         shop_domain: str,
         access_token: str = None,
+        shop_id: str = None,
         include_products: bool = True,
         include_orders: bool = True,
         include_customers: bool = True,
@@ -498,32 +499,41 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 "started_at": now_utc().isoformat(),
             }
 
-            # Collect shop data first
-            shop = await self.collect_shop_data(shop_domain, access_token)
-            collection_results["shop"] = shop
+            # Use provided shop_id or get it from shop data
+            internal_shop_id = shop_id
 
-            # Store shop data in database and get the internal shop ID
-            internal_shop_id = None
-            if shop:
-                try:
-                    # Store shop data - the method will create or update the shop
-                    shop_metrics = await self.data_storage.store_shop_data(
-                        shop, shop.domain  # Pass domain instead of shop.id
-                    )
+            if not internal_shop_id:
+                # Collect shop data first (fallback for when shop_id is not provided)
+                shop = await self.collect_shop_data(shop_domain, access_token)
+                collection_results["shop"] = shop
 
-                    # Get the internal shop ID from the database
-                    db_shop = await self.data_storage.get_shop_by_domain(shop.domain)
-                    if db_shop:
-                        internal_shop_id = db_shop.id
-                        logger.info(
-                            f"Retrieved internal shop ID: {internal_shop_id} for domain: {shop.domain}"
+                # Store shop data in database and get the internal shop ID
+                if shop:
+                    try:
+                        # Store shop data - the method will create or update the shop
+                        shop_metrics = await self.data_storage.store_shop_data(
+                            shop, shop.domain  # Pass domain instead of shop.id
                         )
-                    else:
-                        logger.error(
-                            f"Failed to retrieve internal shop ID for domain: {shop.domain}"
+
+                        # Get the internal shop ID from the database
+                        db_shop = await self.data_storage.get_shop_by_domain(
+                            shop.domain
                         )
-                except Exception as e:
-                    logger.error(f"Failed to store shop data: {e}")
+                        if db_shop:
+                            internal_shop_id = db_shop.id
+                            logger.info(
+                                f"Retrieved internal shop ID: {internal_shop_id} for domain: {shop.domain}"
+                            )
+                        else:
+                            logger.error(
+                                f"Failed to retrieve internal shop ID for domain: {shop.domain}"
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to store shop data: {e}")
+            else:
+                logger.info(
+                    f"Using provided shop_id: {internal_shop_id} for domain: {shop_domain}"
+                )
 
             # Collect data based on permissions and preferences using parallel processing
             collection_tasks = []

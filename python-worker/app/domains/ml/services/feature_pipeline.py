@@ -123,7 +123,7 @@ class FeaturePipeline(IFeaturePipeline):
             last_computation_time = (
                 await self.repository.get_shop_last_computation_time(shop_id)
             )
-            current_time = datetime.utcnow().isoformat() + "Z"
+            current_time = now_utc()
 
             logger.info(
                 f"Processing incremental updates since: {last_computation_time}"

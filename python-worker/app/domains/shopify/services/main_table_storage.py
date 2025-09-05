@@ -21,6 +21,75 @@ from app.core.config.settings import settings
 logger = get_logger(__name__)
 
 
+def clean_product_data_for_storage(product_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean and fix product data before storing in main tables"""
+    try:
+        # Fix missing product_type
+        if not product_data.get("productType"):
+            product_data["productType"] = "Unknown"
+
+        # Fix invalid status values
+        status = product_data.get("status", "").lower()
+        if status == "active":
+            product_data["status"] = "active"
+        elif status not in ["active", "archived", "draft"]:
+            product_data["status"] = "draft"
+
+        # Fix missing images
+        if product_data.get("images") is None:
+            product_data["images"] = []
+
+        # Fix missing metafields
+        if product_data.get("metafields") is None:
+            product_data["metafields"] = []
+
+        # Fix variants - ensure each variant has product_id
+        variants = product_data.get("variants", [])
+        for variant in variants:
+            if not variant.get("product_id") and product_data.get("productId"):
+                variant["product_id"] = product_data["productId"]
+
+        return product_data
+    except Exception as e:
+        logger.warning(f"Failed to clean product data: {str(e)}")
+        return product_data
+
+
+def clean_customer_data_for_storage(customer_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean and fix customer data before storing in main tables"""
+    try:
+        # Fix missing addresses - ensure it's an empty list if None
+        if customer_data.get("addresses") is None:
+            customer_data["addresses"] = []
+
+        return customer_data
+    except Exception as e:
+        logger.warning(f"Failed to clean customer data: {str(e)}")
+        return customer_data
+
+
+def clean_collection_data_for_storage(
+    collection_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Clean and fix collection data before storing in main tables"""
+    try:
+        # Fix missing body_html
+        if not collection_data.get("bodyHtml"):
+            collection_data["bodyHtml"] = ""
+
+        # Fix isAutomated boolean type
+        if "isAutomated" in collection_data:
+            if isinstance(collection_data["isAutomated"], (int, str)):
+                collection_data["isAutomated"] = bool(
+                    int(collection_data["isAutomated"])
+                )
+
+        return collection_data
+    except Exception as e:
+        logger.warning(f"Failed to clean collection data: {str(e)}")
+        return collection_data
+
+
 @dataclass
 class StorageResult:
     """Result of main table storage operation"""
@@ -1412,39 +1481,41 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_product_data(product_data):
             """Prepare product data for database insertion"""
+            # Clean the data before processing
+            cleaned_data = clean_product_data_for_storage(product_data)
             data = {
-                "shopId": product_data["shopId"],
-                "productId": product_data["productId"],
-                "title": product_data["title"],
-                "handle": product_data["handle"],
-                "description": product_data["description"],
-                "descriptionHtml": product_data["descriptionHtml"],
-                "productType": product_data["productType"],
-                "vendor": product_data["vendor"],
-                "tags": Json(product_data["tags"]),
-                "status": product_data["status"],
-                "totalInventory": product_data["totalInventory"],
-                "price": product_data["price"],
-                "compareAtPrice": product_data["compareAtPrice"],
-                "inventory": product_data["inventory"],
-                "imageUrl": product_data["imageUrl"],
-                "imageAlt": product_data["imageAlt"],
-                "productCreatedAt": product_data["productCreatedAt"],
-                "productUpdatedAt": product_data["productUpdatedAt"],
-                "isActive": product_data["isActive"],
+                "shopId": cleaned_data["shopId"],
+                "productId": cleaned_data["productId"],
+                "title": cleaned_data["title"],
+                "handle": cleaned_data["handle"],
+                "description": cleaned_data["description"],
+                "descriptionHtml": cleaned_data["descriptionHtml"],
+                "productType": cleaned_data["productType"],
+                "vendor": cleaned_data["vendor"],
+                "tags": Json(cleaned_data["tags"]),
+                "status": cleaned_data["status"],
+                "totalInventory": cleaned_data["totalInventory"],
+                "price": cleaned_data["price"],
+                "compareAtPrice": cleaned_data["compareAtPrice"],
+                "inventory": cleaned_data["inventory"],
+                "imageUrl": cleaned_data["imageUrl"],
+                "imageAlt": cleaned_data["imageAlt"],
+                "productCreatedAt": cleaned_data["productCreatedAt"],
+                "productUpdatedAt": cleaned_data["productUpdatedAt"],
+                "isActive": cleaned_data["isActive"],
             }
 
             # Only add optional fields if they have values
-            if product_data["variants"]:
-                data["variants"] = Json(product_data["variants"])
-            if product_data["images"]:
-                data["images"] = Json(product_data["images"])
-            if product_data["options"]:
-                data["options"] = Json(product_data["options"])
-            if product_data["collections"]:
-                data["collections"] = Json(product_data["collections"])
-            if product_data["metafields"]:
-                data["metafields"] = Json(product_data["metafields"])
+            if cleaned_data["variants"]:
+                data["variants"] = Json(cleaned_data["variants"])
+            if cleaned_data["images"]:
+                data["images"] = Json(cleaned_data["images"])
+            if cleaned_data["options"]:
+                data["options"] = Json(cleaned_data["options"])
+            if cleaned_data["collections"]:
+                data["collections"] = Json(cleaned_data["collections"])
+            if cleaned_data["metafields"]:
+                data["metafields"] = Json(cleaned_data["metafields"])
 
             return data
 
@@ -1576,34 +1647,36 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_customer_data(customer_data):
             """Prepare customer data for database insertion"""
+            # Clean the data before processing
+            cleaned_data = clean_customer_data_for_storage(customer_data)
             data = {
-                "shopId": customer_data["shopId"],
-                "customerId": customer_data["customerId"],
-                "email": customer_data["email"],
-                "firstName": customer_data["firstName"],
-                "lastName": customer_data["lastName"],
-                "totalSpent": customer_data["totalSpent"],
-                "orderCount": customer_data["orderCount"],
-                "lastOrderDate": customer_data["lastOrderDate"],
-                "tags": Json(customer_data["tags"]),
-                "createdAtShopify": customer_data["createdAtShopify"],
-                "lastOrderId": customer_data["lastOrderId"],
-                "state": customer_data["state"],
-                "verifiedEmail": customer_data["verifiedEmail"],
-                "taxExempt": customer_data["taxExempt"],
-                "currencyCode": customer_data["currencyCode"],
-                "customerLocale": customer_data["customerLocale"],
+                "shopId": cleaned_data["shopId"],
+                "customerId": cleaned_data["customerId"],
+                "email": cleaned_data["email"],
+                "firstName": cleaned_data["firstName"],
+                "lastName": cleaned_data["lastName"],
+                "totalSpent": cleaned_data["totalSpent"],
+                "orderCount": cleaned_data["orderCount"],
+                "lastOrderDate": cleaned_data["lastOrderDate"],
+                "tags": Json(cleaned_data["tags"]),
+                "createdAtShopify": cleaned_data["createdAtShopify"],
+                "lastOrderId": cleaned_data["lastOrderId"],
+                "state": cleaned_data["state"],
+                "verifiedEmail": cleaned_data["verifiedEmail"],
+                "taxExempt": cleaned_data["taxExempt"],
+                "currencyCode": cleaned_data["currencyCode"],
+                "customerLocale": cleaned_data["customerLocale"],
             }
 
             # Only add optional fields if they have values
-            if customer_data["location"]:
-                data["location"] = Json(customer_data["location"])
-            if customer_data["metafields"]:
-                data["metafields"] = Json(customer_data["metafields"])
-            if customer_data["defaultAddress"]:
-                data["defaultAddress"] = Json(customer_data["defaultAddress"])
-            if customer_data["addresses"]:
-                data["addresses"] = Json(customer_data["addresses"])
+            if cleaned_data["location"]:
+                data["location"] = Json(cleaned_data["location"])
+            if cleaned_data["metafields"]:
+                data["metafields"] = Json(cleaned_data["metafields"])
+            if cleaned_data["defaultAddress"]:
+                data["defaultAddress"] = Json(cleaned_data["defaultAddress"])
+            if cleaned_data["addresses"]:
+                data["addresses"] = Json(cleaned_data["addresses"])
 
             return data
 
@@ -1651,23 +1724,25 @@ class MainTableStorageService:
         # Prepare data for both batch insert and individual upserts
         def prepare_collection_data(collection_data):
             """Prepare collection data for database insertion"""
+            # Clean the data before processing
+            cleaned_data = clean_collection_data_for_storage(collection_data)
             return {
-                "shopId": collection_data["shopId"],
-                "collectionId": collection_data["collectionId"],
-                "title": collection_data["title"],
-                "handle": collection_data["handle"],
-                "description": collection_data["description"],
-                "sortOrder": collection_data["sortOrder"],
-                "templateSuffix": collection_data["templateSuffix"],
-                "seoTitle": collection_data["seoTitle"],
-                "seoDescription": collection_data["seoDescription"],
-                "imageUrl": collection_data["imageUrl"],
-                "imageAlt": collection_data["imageAlt"],
-                "productCount": collection_data["productCount"],
-                "isAutomated": collection_data["isAutomated"],
+                "shopId": cleaned_data["shopId"],
+                "collectionId": cleaned_data["collectionId"],
+                "title": cleaned_data["title"],
+                "handle": cleaned_data["handle"],
+                "description": cleaned_data["description"],
+                "sortOrder": cleaned_data["sortOrder"],
+                "templateSuffix": cleaned_data["templateSuffix"],
+                "seoTitle": cleaned_data["seoTitle"],
+                "seoDescription": cleaned_data["seoDescription"],
+                "imageUrl": cleaned_data["imageUrl"],
+                "imageAlt": cleaned_data["imageAlt"],
+                "productCount": cleaned_data["productCount"],
+                "isAutomated": cleaned_data["isAutomated"],
                 "metafields": (
-                    Json(collection_data["metafields"])
-                    if collection_data["metafields"]
+                    Json(cleaned_data["metafields"])
+                    if cleaned_data["metafields"]
                     else Json({})
                 ),
             }
@@ -1690,11 +1765,12 @@ class MainTableStorageService:
             )
             for collection_data in collection_data_list:
                 prepared_data = prepare_collection_data(collection_data)
+                cleaned_data = clean_collection_data_for_storage(collection_data)
                 await db.collectiondata.upsert(
                     where={
                         "shopId_collectionId": {
-                            "shopId": collection_data["shopId"],
-                            "collectionId": collection_data["collectionId"],
+                            "shopId": cleaned_data["shopId"],
+                            "collectionId": cleaned_data["collectionId"],
                         }
                     },
                     data=prepared_data,
