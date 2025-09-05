@@ -25,6 +25,8 @@ from ..generators import (
     CollectionFeatureGenerator,
     ShopFeatureGenerator,
 )
+from ..generators.interaction_feature_generator import InteractionFeatureGenerator
+from ..generators.session_feature_generator import SessionFeatureGenerator
 
 logger = get_logger(__name__)
 
@@ -84,6 +86,10 @@ class FeaturePipeline(IFeaturePipeline):
         self.order_generator = OrderFeatureGenerator()
         self.collection_generator = CollectionFeatureGenerator()
         self.shop_generator = ShopFeatureGenerator()
+
+        # Initialize enhanced feature generators
+        self.interaction_generator = InteractionFeatureGenerator()
+        self.session_generator = SessionFeatureGenerator()
 
     async def run_feature_pipeline_for_shop(
         self, shop_id: str, batch_size: int = 500, incremental: bool = True
@@ -450,6 +456,12 @@ class FeaturePipeline(IFeaturePipeline):
                 features = await self.customer_generator.generate_features(
                     customer, context
                 )
+
+                # Generate enhanced session features
+                session_features = await self.session_generator.generate_features(
+                    customer, context
+                )
+                features.update(session_features)
 
                 # UserFeatures batch
                 user_features_batch.append(
@@ -841,3 +853,108 @@ class FeaturePipeline(IFeaturePipeline):
             logger.info(f"Processed {len(collections)} collections in batches")
         except Exception as e:
             logger.error(f"Failed to process collections batch: {str(e)}")
+
+    async def compute_and_save_interaction_features_batch(
+        self,
+        shop_id: str,
+        customers: List[ShopifyCustomer],
+        products: List[ShopifyProduct],
+        orders: List[ShopifyOrder],
+        events: List[BehavioralEvent],
+    ) -> Dict[str, Any]:
+        """Compute and save customer-product interaction features in batch"""
+        try:
+            logger.info(
+                f"Computing interaction features for {len(customers)} customers and {len(products)} products"
+            )
+
+            # Group data by customer for efficient lookup
+            orders_by_customer = {}
+            events_by_customer = {}
+
+            for order in orders:
+                customer_id = order.customerId
+                if customer_id:
+                    if customer_id not in orders_by_customer:
+                        orders_by_customer[customer_id] = []
+                    orders_by_customer[customer_id].append(order)
+
+            for event in events:
+                customer_id = event.customerId
+                if customer_id:
+                    if customer_id not in events_by_customer:
+                        events_by_customer[customer_id] = []
+                    events_by_customer[customer_id].append(event)
+
+            # Prepare batch data for interaction features
+            interaction_features_batch = []
+            processed_count = 0
+
+            # For each customer-product pair, compute interaction features
+            for customer in customers:
+                customer_id = customer.id
+                customer_orders = orders_by_customer.get(customer_id, [])
+                customer_events = events_by_customer.get(customer_id, [])
+
+                # Only process customers with some interaction history
+                if not customer_orders and not customer_events:
+                    continue
+
+                context = {
+                    "shop_id": shop_id,
+                    "orders": customer_orders,
+                    "events": customer_events,
+                    "products": products,
+                }
+
+                # Compute interaction features for each product
+                for product in products:
+                    try:
+                        interaction_features = (
+                            await self.interaction_generator.generate_features(
+                                customer, product, context
+                            )
+                        )
+
+                        if interaction_features:
+                            interaction_features_batch.append(
+                                (
+                                    shop_id,
+                                    customer_id,
+                                    product.id,
+                                    interaction_features,
+                                    now_utc(),
+                                )
+                            )
+                            processed_count += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to compute interaction features for customer {customer_id}, product {product.id}: {str(e)}"
+                        )
+                        continue
+
+            # Save interaction features in batch
+            saved_count = 0
+            if interaction_features_batch:
+                saved_count = await self.repository.save_interaction_features_batch(
+                    interaction_features_batch
+                )
+                logger.info(f"Saved {saved_count} interaction features")
+
+            return {
+                "processed_count": processed_count,
+                "saved_count": saved_count,
+                "total_customers": len(customers),
+                "total_products": len(products),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to compute interaction features batch: {str(e)}")
+            return {
+                "processed_count": 0,
+                "saved_count": 0,
+                "total_customers": len(customers),
+                "total_products": len(products),
+                "error": str(e),
+            }
