@@ -390,7 +390,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of products for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -403,7 +403,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of orders for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -416,7 +416,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of customers for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -429,7 +429,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of collections for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCollection" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -444,7 +444,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of events for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyEvent" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "ShopifyE" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -472,7 +472,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of orders created since timestamp"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "createdAt" > $2 ORDER BY "createdAt" LIMIT $3 OFFSET $4'
+            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "createdAt" > $2::timestamp ORDER BY "createdAt" LIMIT $3 OFFSET $4'
             result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -487,7 +487,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of products updated since timestamp"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
             result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -502,7 +502,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of customers updated since timestamp"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
             result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -517,7 +517,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of collections updated since timestamp"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyCollection" WHERE "shopId" = $1 AND "updatedAt" > $2 ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
+            query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
             result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -532,7 +532,7 @@ class FeatureRepository(IFeatureRepository):
         """Get orders created since timestamp"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "createdAt" > $2 ORDER BY "createdAt"'
+            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "createdAt" > $2::timestamp ORDER BY "createdAt"'
             result = await db.query_raw(query, shop_id, since_timestamp)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -545,12 +545,10 @@ class FeatureRepository(IFeatureRepository):
         """Get the last feature computation timestamp for a shop"""
         try:
             db = await self._get_database()
-            query = (
-                'SELECT "lastFeatureComputationAt" FROM "ShopifyShop" WHERE "id" = $1'
-            )
+            query = 'SELECT "lastAnalysisAt" FROM "Shop" WHERE "id" = $1'
             result = await db.query_raw(query, shop_id)
-            if result and result[0].get("lastFeatureComputationAt"):
-                return result[0]["lastFeatureComputationAt"]
+            if result and result[0].get("lastAnalysisAt"):
+                return result[0]["lastAnalysisAt"]
             # Return a very old timestamp for first run
             return "1970-01-01T00:00:00Z"
         except Exception as e:
@@ -565,7 +563,7 @@ class FeatureRepository(IFeatureRepository):
         """Update the last feature computation timestamp for a shop"""
         try:
             db = await self._get_database()
-            query = 'UPDATE "ShopifyShop" SET "lastFeatureComputationAt" = $1 WHERE "id" = $2'
+            query = 'UPDATE "Shop" SET "lastAnalysisAt" = $1 WHERE "id" = $2'
             await db.execute_raw(query, timestamp, shop_id)
         except Exception as e:
             logger.error(
@@ -580,16 +578,17 @@ class FeatureRepository(IFeatureRepository):
             db = await self._get_database()
 
             # Query to get all unique product and customer IDs from new orders
+            # Note: lineItems are stored as JSON in OrderData table
             query = """
             SELECT DISTINCT 
                 o."customerId",
-                li."productId"
-            FROM "ShopifyOrder" o
-            JOIN "ShopifyLineItem" li ON o."id" = li."orderId"
+                jsonb_array_elements(o."lineItems")->>'productId' as "productId"
+            FROM "OrderData" o
             WHERE o."shopId" = $1 
-            AND o."createdAt" > $2
+            AND o."createdAt" > $2::timestamp
             AND o."customerId" IS NOT NULL
-            AND li."productId" IS NOT NULL
+            AND o."lineItems" IS NOT NULL
+            AND jsonb_array_length(o."lineItems") > 0
             """
 
             result = await db.query_raw(query, shop_id, since_timestamp)
@@ -627,7 +626,7 @@ class FeatureRepository(IFeatureRepository):
 
             # Create placeholders for the IN clause
             placeholders = ",".join([f"${i+2}" for i in range(len(product_ids))])
-            query = f'SELECT * FROM "ShopifyProduct" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
+            query = f'SELECT * FROM "ProductData" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
 
             result = await db.query_raw(query, shop_id, *product_ids)
             return [dict(row) for row in result] if result else []
@@ -648,7 +647,7 @@ class FeatureRepository(IFeatureRepository):
 
             # Create placeholders for the IN clause
             placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "ShopifyCustomer" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
+            query = f'SELECT * FROM "CustomerData" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
 
             result = await db.query_raw(query, shop_id, *customer_ids)
             return [dict(row) for row in result] if result else []
@@ -669,7 +668,7 @@ class FeatureRepository(IFeatureRepository):
 
             # Create placeholders for the IN clause
             placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "ShopifyOrder" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
+            query = f'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
 
             result = await db.query_raw(query, shop_id, *customer_ids)
             return [dict(row) for row in result] if result else []

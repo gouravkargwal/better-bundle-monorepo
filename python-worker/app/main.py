@@ -292,45 +292,101 @@ async def get_data_status(shop_id: str):
 # Feature computation endpoints
 @app.post("/api/features/compute")
 async def compute_features(
-    shop_id: str,
-    batch_size: int = 100,
-    background_tasks: BackgroundTasks = None,
+    request: Request,
+    background_tasks: BackgroundTasks,
 ):
-    """Compute features for a shop"""
+    """Trigger feature computation consumer via Redis stream"""
     try:
-        # Lazy load feature engineering service
-        feature_service = await get_service("feature_engineering")
+        from app.core.redis_client import streams_manager
+        from app.shared.helpers import now_utc
 
-        if background_tasks:
-            # Start feature computation in background
-            background_tasks.add_task(
-                feature_service.run_feature_pipeline_for_shop,
-                shop_id,
-                batch_size,
-            )
+        # Extract parameters from request body (JSON) or form data
+        try:
+            body = await request.json()
+        except:
+            # Fallback to form data
+            form_data = await request.form()
+            body = dict(form_data)
 
-            return {
-                "message": "Feature computation started",
-                "shop_id": shop_id,
-                "batch_size": batch_size,
-                "status": "processing",
-                "timestamp": now_utc().isoformat(),
-            }
-        else:
-            # Run synchronously
-            result = await feature_service.run_feature_pipeline_for_shop(
-                shop_id, batch_size
-            )
+        shop_id = body.get("shop_id")
+        batch_size = int(body.get("batch_size", 100))
+        features_ready = body.get("features_ready", False)
 
-            return {
-                "message": "Feature computation completed",
-                "shop_id": shop_id,
-                "result": result,
-                "timestamp": now_utc().isoformat(),
-            }
+        # Validate required parameters
+        if not shop_id:
+            raise HTTPException(status_code=400, detail="shop_id is required")
+
+        # Generate a unique job ID
+        job_id = f"feature_compute_{shop_id}_{int(now_utc().timestamp())}"
+
+        # Prepare event metadata
+        metadata = {
+            "batch_size": batch_size,
+            "trigger_source": "api_endpoint",
+            "timestamp": now_utc().isoformat(),
+            "processed_count": 0,  # Will be updated by the consumer
+        }
+
+        # Publish the feature computation event to Redis stream
+        event_id = await streams_manager.publish_features_computed_event(
+            job_id=job_id,
+            shop_id=shop_id,
+            features_ready=features_ready,
+            metadata=metadata,
+        )
+
+        logger.info(
+            f"Triggered feature computation consumer",
+            job_id=job_id,
+            shop_id=shop_id,
+            batch_size=batch_size,
+            event_id=event_id,
+        )
+
+        return {
+            "message": "Feature computation consumer triggered",
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "batch_size": batch_size,
+            "event_id": event_id,
+            "status": "queued",
+            "timestamp": now_utc().isoformat(),
+        }
 
     except Exception as e:
-        logger.error(f"Failed to compute features: {e}")
+        logger.error(f"Failed to trigger feature computation consumer: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/features/status/{shop_id}")
+async def get_feature_computation_status(shop_id: str):
+    """Get feature computation status for a shop"""
+    try:
+        # Get the feature computation consumer from services
+        if "feature_computation_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Feature computation consumer not available"
+            )
+
+        consumer = services["feature_computation_consumer"]
+
+        # Get active jobs for this shop
+        active_jobs = {
+            job_id: job_info
+            for job_id, job_info in consumer.active_feature_jobs.items()
+            if job_info.get("shop_id") == shop_id
+        }
+
+        return {
+            "shop_id": shop_id,
+            "consumer_status": consumer.status.value,
+            "active_jobs": len(active_jobs),
+            "jobs": active_jobs,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get feature computation status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -366,57 +422,6 @@ async def get_feature_architecture_status():
         }
     except Exception as e:
         logger.error(f"Failed to get architecture status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/features/compute/batch")
-async def compute_features_batch(
-    shop_id: str,
-    entity_types: List[str] = ["products", "customers", "collections"],
-    batch_size: int = 100,
-    background_tasks: BackgroundTasks = None,
-):
-    """Compute features for specific entity types using the new architecture"""
-    try:
-        # Lazy load feature engineering service
-        feature_service = await get_service("feature_engineering")
-
-        # Using refactored architecture by default
-
-        if background_tasks:
-            # Start feature computation in background
-            background_tasks.add_task(
-                feature_service.pipeline.run_feature_pipeline_for_shop,
-                shop_id,
-                batch_size,
-            )
-
-            return {
-                "message": "Batch feature computation started",
-                "shop_id": shop_id,
-                "entity_types": entity_types,
-                "batch_size": batch_size,
-                "architecture": "refactored",
-                "status": "processing",
-                "timestamp": now_utc().isoformat(),
-            }
-        else:
-            # Run synchronously
-            result = await feature_service.pipeline.run_feature_pipeline_for_shop(
-                shop_id, batch_size
-            )
-
-            return {
-                "message": "Batch feature computation completed",
-                "shop_id": shop_id,
-                "entity_types": entity_types,
-                "result": result,
-                "architecture": "refactored",
-                "timestamp": now_utc().isoformat(),
-            }
-
-    except Exception as e:
-        logger.error(f"Failed to compute batch features: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -125,16 +125,22 @@ class FeatureComputationConsumer(BaseConsumer):
                 )
 
                 # Log feature computation results
-                for feature_type, feature_result in result["results"].items():
-                    if "saved_count" in feature_result:
-                        self.logger.info(
-                            f"Feature computation result",
-                            job_id=job_id,
-                            shop_id=shop_id,
-                            feature_type=feature_type,
-                            saved_count=feature_result["saved_count"],
-                            total_processed=feature_result.get("total_processed", 0),
-                        )
+                if "results" in result and isinstance(result["results"], dict):
+                    for feature_type, feature_result in result["results"].items():
+                        if (
+                            isinstance(feature_result, dict)
+                            and "saved_count" in feature_result
+                        ):
+                            self.logger.info(
+                                f"Feature computation result",
+                                job_id=job_id,
+                                shop_id=shop_id,
+                                feature_type=feature_type,
+                                saved_count=feature_result["saved_count"],
+                                total_processed=feature_result.get(
+                                    "total_processed", 0
+                                ),
+                            )
             else:
                 self.logger.error(
                     f"Feature computation failed",

@@ -101,7 +101,12 @@ class FeaturePipeline(IFeaturePipeline):
 
         except Exception as e:
             logger.error(f"Failed to run feature pipeline for shop {shop_id}: {str(e)}")
-            return {"error": str(e)}
+            return {
+                "success": False,
+                "error": str(e),
+                "shop_id": shop_id,
+                "timestamp": now_utc().isoformat(),
+            }
 
     async def _run_incremental_pipeline(
         self, shop_id: str, batch_size: int
@@ -183,13 +188,23 @@ class FeaturePipeline(IFeaturePipeline):
             )
 
             logger.info(f"Completed incremental feature pipeline for shop: {shop_id}")
-            return results
+            return {
+                "success": True,
+                "results": results,
+                "shop_id": shop_id,
+                "timestamp": now_utc().isoformat(),
+            }
 
         except Exception as e:
             logger.error(
                 f"Failed to run incremental pipeline for shop {shop_id}: {str(e)}"
             )
-            return {"error": str(e)}
+            return {
+                "success": False,
+                "error": str(e),
+                "shop_id": shop_id,
+                "timestamp": now_utc().isoformat(),
+            }
 
     async def _run_full_pipeline(self, shop_id: str, batch_size: int) -> Dict[str, Any]:
         """Run full feature pipeline processing all data"""
@@ -324,11 +339,21 @@ class FeaturePipeline(IFeaturePipeline):
                     results["interactions"] = interaction_result
 
             logger.info(f"Completed feature pipeline for shop: {shop_id}")
-            return results
+            return {
+                "success": True,
+                "results": results,
+                "shop_id": shop_id,
+                "timestamp": now_utc().isoformat(),
+            }
 
         except Exception as e:
             logger.error(f"Failed to run feature pipeline for shop {shop_id}: {str(e)}")
-            return {"error": str(e)}
+            return {
+                "success": False,
+                "error": str(e),
+                "shop_id": shop_id,
+                "timestamp": now_utc().isoformat(),
+            }
 
     async def compute_and_save_product_features_batch(
         self, shop_id: str, products: List[Dict[str, Any]], shop_id_param: str
