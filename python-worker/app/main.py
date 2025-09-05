@@ -624,6 +624,105 @@ async def get_performance_recommendations(shop_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Data collection consumer endpoints
+@app.post("/api/data-collection/trigger")
+async def trigger_data_collection_consumer(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger data collection consumer via Redis stream"""
+    try:
+        from app.core.redis_client import streams_manager
+        from app.shared.helpers import now_utc
+
+        # Extract parameters from request body (JSON) or form data
+        try:
+            body = await request.json()
+        except:
+            # Fallback to form data
+            form_data = await request.form()
+            body = dict(form_data)
+
+        shop_id = body.get("shop_id")
+        shop_domain = body.get("shop_domain")
+        access_token = body.get("access_token")
+        job_type = body.get("job_type", "data_collection")
+
+        # Validate required parameters
+        if not shop_id:
+            raise HTTPException(status_code=400, detail="shop_id is required")
+        if not shop_domain:
+            raise HTTPException(status_code=400, detail="shop_domain is required")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="access_token is required")
+
+        # Generate a unique job ID
+        job_id = f"data_collection_{shop_id}_{int(now_utc().timestamp())}"
+
+        # Publish the data collection job to Redis stream
+        event_id = await streams_manager.publish_data_job_event(
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+            access_token=access_token,
+            job_type=job_type,
+        )
+
+        logger.info(
+            f"Triggered data collection consumer",
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+            event_id=event_id,
+        )
+
+        return {
+            "message": "Data collection consumer triggered",
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "shop_domain": shop_domain,
+            "event_id": event_id,
+            "status": "queued",
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to trigger data collection consumer: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/data-collection/status/{shop_id}")
+async def get_data_collection_status(shop_id: str):
+    """Get data collection status for a shop"""
+    try:
+        # Get the data collection consumer from services
+        if "data_collection_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Data collection consumer not available"
+            )
+
+        consumer = services["data_collection_consumer"]
+
+        # Get active jobs for this shop
+        active_jobs = {
+            job_id: job_info
+            for job_id, job_info in consumer.active_jobs.items()
+            if job_info.get("shop_id") == shop_id
+        }
+
+        return {
+            "shop_id": shop_id,
+            "consumer_status": consumer.status.value,
+            "active_jobs": len(active_jobs),
+            "jobs": active_jobs,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get data collection status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Consumer monitoring endpoints
 @app.get("/api/consumers/status")
 async def get_consumers_status():

@@ -7,13 +7,13 @@ from .product import ShopifyProduct
 from .order import ShopifyOrder
 from .customer import ShopifyCustomer
 from .collection import ShopifyCollection
-from .customer_event import ShopifyCustomerEvent
+from .behavioral_event import BehavioralEvent
 
 __all__ = [
     "ShopifyShop",
     "ShopifyProduct",
-    "ShopifyOrder", 
+    "ShopifyOrder",
     "ShopifyCustomer",
     "ShopifyCollection",
-    "ShopifyCustomerEvent",
+    "BehavioralEvent",
 ]

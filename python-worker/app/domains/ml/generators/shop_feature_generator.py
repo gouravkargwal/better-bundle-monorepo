@@ -13,7 +13,7 @@ from app.domains.shopify.models import (
     ShopifyOrder,
     ShopifyCustomer,
     ShopifyCollection,
-    ShopifyCustomerEvent,
+    BehavioralEvent,
 )
 
 from .base_feature_generator import BaseFeatureGenerator
@@ -212,7 +212,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_event_features(
-        self, shop: ShopifyShop, events: List[ShopifyCustomerEvent]
+        self, shop: ShopifyShop, events: List[BehavioralEvent]
     ) -> Dict[str, Any]:
         """Compute event-related shop features"""
         if not events:

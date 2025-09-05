@@ -683,7 +683,7 @@ class FeatureRepository(IFeatureRepository):
     async def get_events_for_customer_ids(
         self, shop_id: str, customer_ids: List[str]
     ) -> List[Dict[str, Any]]:
-        """Get all events for a batch of customer IDs"""
+        """Get all behavioral events for a batch of customer IDs"""
         try:
             if not customer_ids:
                 return []
@@ -692,13 +692,13 @@ class FeatureRepository(IFeatureRepository):
 
             # Create placeholders for the IN clause
             placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "ShopifyCustomerEvent" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
+            query = f'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 AND "customerId" IN ({placeholders}) ORDER BY "occurredAt" DESC'
 
             result = await db.query_raw(query, shop_id, *customer_ids)
             return [dict(row) for row in result] if result else []
 
         except Exception as e:
             logger.error(
-                f"Failed to get events for customer IDs for shop {shop_id}: {str(e)}"
+                f"Failed to get behavioral events for customer IDs for shop {shop_id}: {str(e)}"
             )
             return []

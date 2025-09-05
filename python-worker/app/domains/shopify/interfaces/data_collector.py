@@ -12,7 +12,6 @@ from ..models import (
     ShopifyOrder,
     ShopifyCustomer,
     ShopifyCollection,
-    ShopifyCustomerEvent,
 )
 
 
@@ -115,28 +114,6 @@ class IShopifyDataCollector(ABC):
         pass
 
     @abstractmethod
-    async def collect_customer_events(
-        self,
-        shop_domain: str,
-        limit: Optional[int] = None,
-        since_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-    ) -> List[ShopifyCustomerEvent]:
-        """
-        Collect customer events data from Shopify API
-
-        Args:
-            shop_domain: Shop domain to collect data from
-            limit: Maximum number of events to collect
-            since_id: Collect events after this ID (for incremental updates)
-            event_type: Filter events by type
-
-        Returns:
-            List of ShopifyCustomerEvent instances
-        """
-        pass
-
-    @abstractmethod
     async def collect_all_data(
         self,
         shop_domain: str,
@@ -144,7 +121,6 @@ class IShopifyDataCollector(ABC):
         include_orders: bool = True,
         include_customers: bool = True,
         include_collections: bool = True,
-        include_customer_events: bool = True,
     ) -> Dict[str, Any]:
         """
         Collect all available data from Shopify API
@@ -155,7 +131,6 @@ class IShopifyDataCollector(ABC):
             include_orders: Whether to collect orders data
             include_customers: Whether to collect customers data
             include_collections: Whether to collect collections data
-            include_customer_events: Whether to collect customer events data
 
         Returns:
             Dictionary containing all collected data

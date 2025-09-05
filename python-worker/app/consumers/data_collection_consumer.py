@@ -137,7 +137,6 @@ class DataCollectionConsumer(BaseConsumer):
                 include_orders=True,
                 include_customers=True,
                 include_collections=True,
-                include_customer_events=True,
             )
 
             self.logger.info(

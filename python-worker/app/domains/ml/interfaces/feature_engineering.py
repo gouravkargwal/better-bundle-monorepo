@@ -12,7 +12,7 @@ from app.domains.shopify.models import (
     ShopifyOrder,
     ShopifyCustomer,
     ShopifyCollection,
-    ShopifyCustomerEvent,
+    BehavioralEvent,
 )
 from app.domains.ml.models import MLFeatures
 
@@ -48,7 +48,7 @@ class IFeatureEngineeringService(ABC):
         customer: ShopifyCustomer,
         shop: ShopifyShop,
         orders: Optional[List[ShopifyOrder]] = None,
-        events: Optional[List[ShopifyCustomerEvent]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
         """
         Compute ML features for a customer
@@ -112,7 +112,7 @@ class IFeatureEngineeringService(ABC):
         orders: Optional[List[ShopifyOrder]] = None,
         customers: Optional[List[ShopifyCustomer]] = None,
         collections: Optional[List[ShopifyCollection]] = None,
-        events: Optional[List[ShopifyCustomerEvent]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
         """
         Compute ML features for a shop
@@ -138,7 +138,7 @@ class IFeatureEngineeringService(ABC):
         orders: List[ShopifyOrder],
         customers: List[ShopifyCustomer],
         collections: List[ShopifyCollection],
-        events: List[ShopifyCustomerEvent],
+        events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
         """
         Compute cross-entity ML features

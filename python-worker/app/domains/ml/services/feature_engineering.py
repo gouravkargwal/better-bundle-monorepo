@@ -17,7 +17,7 @@ from app.domains.shopify.models import (
     ShopifyOrder,
     ShopifyCustomer,
     ShopifyCollection,
-    ShopifyCustomerEvent,
+    BehavioralEvent,
 )
 
 from .feature_pipeline import FeaturePipeline, IFeaturePipeline
@@ -88,7 +88,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         customer: ShopifyCustomer,
         shop: ShopifyShop,
         orders: Optional[List[ShopifyOrder]] = None,
-        events: Optional[List[ShopifyCustomerEvent]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
         """Compute ML features for a customer using the customer generator"""
         try:
@@ -149,7 +149,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         orders: Optional[List[ShopifyOrder]] = None,
         customers: Optional[List[ShopifyCustomer]] = None,
         collections: Optional[List[ShopifyCollection]] = None,
-        events: Optional[List[ShopifyCustomerEvent]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
         """Compute ML features for a shop using the shop generator"""
         try:
@@ -172,7 +172,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         orders: List[ShopifyOrder],
         customers: List[ShopifyCustomer],
         collections: List[ShopifyCollection],
-        events: List[ShopifyCustomerEvent],
+        events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
         """Compute cross-entity ML features"""
         try:
@@ -533,7 +533,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         self,
         customers: List[ShopifyCustomer],
         orders: List[ShopifyOrder],
-        events: List[ShopifyCustomerEvent],
+        events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
         """Compute customer segment features"""
         # Implementation extracted from original service
@@ -555,7 +555,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         }
 
     def _compute_time_series_features(
-        self, orders: List[ShopifyOrder], events: List[ShopifyCustomerEvent]
+        self, orders: List[ShopifyOrder], events: List[BehavioralEvent]
     ) -> Dict[str, Any]:
         """Compute time series features"""
         # Implementation extracted from original service

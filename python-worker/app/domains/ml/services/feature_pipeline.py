@@ -14,7 +14,7 @@ from app.domains.shopify.models import (
     ShopifyOrder,
     ShopifyCustomer,
     ShopifyCollection,
-    ShopifyCustomerEvent,
+    BehavioralEvent,
 )
 
 from ..repositories.feature_repository import FeatureRepository, IFeatureRepository
@@ -52,7 +52,7 @@ class IFeaturePipeline(ABC):
         shop_id: str,
         customers: List[ShopifyCustomer],
         orders: List[ShopifyOrder],
-        events: List[ShopifyCustomerEvent],
+        events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
         """Compute and save customer features in batch with actual orders and events"""
         pass
@@ -276,9 +276,7 @@ class FeaturePipeline(IFeaturePipeline):
                         ShopifyCustomer(**customer) for customer in customers_batch
                     ]
                     orders_models = [ShopifyOrder(**order) for order in orders_raw]
-                    events_models = [
-                        ShopifyCustomerEvent(**event) for event in events_raw
-                    ]
+                    events_models = [BehavioralEvent(**event) for event in events_raw]
 
                     batch_result = await self.compute_and_save_customer_features_batch(
                         shop_id, customers_models, orders_models, events_models
@@ -387,7 +385,7 @@ class FeaturePipeline(IFeaturePipeline):
         shop_id: str,
         customers: List[ShopifyCustomer],
         orders: List[ShopifyOrder],
-        events: List[ShopifyCustomerEvent],
+        events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
         """Compute and save customer features in batch with actual orders and events"""
         try:
@@ -773,7 +771,7 @@ class FeaturePipeline(IFeaturePipeline):
                 # Convert raw data to Pydantic models
                 batch_models = [ShopifyCustomer(**customer) for customer in batch_raw]
                 orders_models = [ShopifyOrder(**order) for order in orders_raw]
-                events_models = [ShopifyCustomerEvent(**event) for event in events_raw]
+                events_models = [BehavioralEvent(**event) for event in events_raw]
 
                 batch_result = await self.compute_and_save_customer_features_batch(
                     shop_id, batch_models, orders_models, events_models

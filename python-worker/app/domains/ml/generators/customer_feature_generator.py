@@ -11,7 +11,7 @@ from app.domains.shopify.models import (
     ShopifyCustomer,
     ShopifyShop,
     ShopifyOrder,
-    ShopifyCustomerEvent,
+    BehavioralEvent,
 )
 
 from .base_feature_generator import BaseFeatureGenerator
@@ -157,9 +157,9 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_behavioral_features(
-        self, customer: ShopifyCustomer, events: List[ShopifyCustomerEvent]
+        self, customer: ShopifyCustomer, events: List[BehavioralEvent]
     ) -> Dict[str, Any]:
-        """Compute behavioral features from customer events"""
+        """Compute rich behavioral features from customer events"""
         if not events:
             return {
                 "event_count": 0,
@@ -167,10 +167,27 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
                 "last_event_days": 0,
                 "event_frequency": 0,
                 "engagement_score": 0,
+                "page_views": 0,
+                "product_views": 0,
+                "cart_additions": 0,
+                "collection_views": 0,
+                "search_queries": 0,
+                "checkout_starts": 0,
+                "checkout_completions": 0,
+                "unique_products_viewed": 0,
+                "unique_collections_viewed": 0,
+                "total_cart_value": 0.0,
+                "average_product_price_viewed": 0.0,
+                "search_diversity": 0.0,
+                "conversion_rate": 0.0,
+                "cart_abandonment_rate": 0.0,
+                "browsing_intensity": 0.0,
+                "purchase_intent_score": 0.0,
             }
 
+        # Basic event metrics
         event_types = [event.event_type for event in events]
-        event_dates = [event.created_at for event in events]
+        event_dates = [event.occurred_at for event in events]
         event_dates.sort()
 
         # Calculate time between events
@@ -179,16 +196,111 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             days_diff = (event_dates[i] - event_dates[i - 1]).days
             time_between_events.append(days_diff)
 
+        # Event type counts
+        page_views = sum(1 for event in events if event.is_page_viewed)
+        product_views = sum(1 for event in events if event.is_product_viewed)
+        cart_additions = sum(1 for event in events if event.is_product_added_to_cart)
+        collection_views = sum(1 for event in events if event.is_collection_viewed)
+        search_queries = sum(1 for event in events if event.is_search_submitted)
+        checkout_starts = sum(1 for event in events if event.is_checkout_started)
+        checkout_completions = sum(1 for event in events if event.is_checkout_completed)
+
+        # Unique items viewed
+        unique_products = set()
+        unique_collections = set()
+        search_terms = set()
+        cart_values = []
+        product_prices = []
+
+        for event in events:
+            # Track unique products viewed
+            product_id = event.get_product_id()
+            if product_id:
+                unique_products.add(product_id)
+
+            # Track unique collections viewed
+            collection_id = event.get_collection_id()
+            if collection_id:
+                unique_collections.add(collection_id)
+
+            # Track search terms
+            search_query = event.get_search_query()
+            if search_query:
+                search_terms.add(search_query.lower().strip())
+
+            # Track cart values
+            cart_value = event.get_cart_value()
+            if cart_value is not None:
+                cart_values.append(cart_value)
+
+            # Track product prices viewed
+            product_price = event.get_product_price()
+            if product_price is not None:
+                product_prices.append(product_price)
+
+        # Calculate derived metrics
+        total_cart_value = sum(cart_values) if cart_values else 0.0
+        average_product_price_viewed = (
+            statistics.mean(product_prices) if product_prices else 0.0
+        )
+        search_diversity = (
+            len(search_terms) / max(search_queries, 1) if search_queries > 0 else 0.0
+        )
+
+        # Conversion metrics
+        conversion_rate = (
+            checkout_completions / max(product_views, 1) if product_views > 0 else 0.0
+        )
+        cart_abandonment_rate = (
+            (checkout_starts - checkout_completions) / max(checkout_starts, 1)
+            if checkout_starts > 0
+            else 0.0
+        )
+
+        # Engagement metrics
+        browsing_intensity = (product_views + collection_views + page_views) / max(
+            len(events), 1
+        )
+        purchase_intent_score = (
+            (cart_additions + checkout_starts) / max(product_views, 1)
+            if product_views > 0
+            else 0.0
+        )
+
+        # Overall engagement score (normalized 0-1)
+        engagement_score = min(
+            (len(events) + len(unique_products) + len(unique_collections)) / 20.0, 1.0
+        )
+
         return {
+            # Basic metrics
             "event_count": len(events),
             "unique_event_types": len(set(event_types)),
             "last_event_days": (now_utc() - event_dates[-1]).days if event_dates else 0,
             "event_frequency": (
                 statistics.mean(time_between_events) if time_between_events else 0
             ),
-            "engagement_score": min(
-                len(events) / 10.0, 1.0
-            ),  # Normalized engagement score
+            "engagement_score": engagement_score,
+            # Event type counts
+            "page_views": page_views,
+            "product_views": product_views,
+            "cart_additions": cart_additions,
+            "collection_views": collection_views,
+            "search_queries": search_queries,
+            "checkout_starts": checkout_starts,
+            "checkout_completions": checkout_completions,
+            # Unique items
+            "unique_products_viewed": len(unique_products),
+            "unique_collections_viewed": len(unique_collections),
+            # Financial metrics
+            "total_cart_value": total_cart_value,
+            "average_product_price_viewed": average_product_price_viewed,
+            # Behavioral metrics
+            "search_diversity": search_diversity,
+            "conversion_rate": conversion_rate,
+            "cart_abandonment_rate": cart_abandonment_rate,
+            "browsing_intensity": browsing_intensity,
+            "purchase_intent_score": purchase_intent_score,
         }
 
     def _compute_address_features(self, customer: ShopifyCustomer) -> Dict[str, Any]:
