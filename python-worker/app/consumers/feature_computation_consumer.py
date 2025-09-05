@@ -112,8 +112,12 @@ class FeatureComputationConsumer(BaseConsumer):
             )
 
             # Run the feature engineering pipeline
+            # Use full processing for initial computation, incremental for updates
+            incremental = metadata.get(
+                "incremental", False
+            )  # Default to full processing
             result = await self.feature_service.run_feature_pipeline_for_shop(
-                shop_id=shop_id, batch_size=batch_size
+                shop_id=shop_id, batch_size=batch_size, incremental=incremental
             )
 
             if result["success"]:

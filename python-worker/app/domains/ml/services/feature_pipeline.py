@@ -217,19 +217,17 @@ class FeaturePipeline(IFeaturePipeline):
         try:
             # Get entity counts for pagination
             product_count = await self.repository.get_entity_count(
-                shop_id, "ShopifyProduct"
+                shop_id, "ProductData"
             )
-            order_count = await self.repository.get_entity_count(
-                shop_id, "ShopifyOrder"
-            )
+            order_count = await self.repository.get_entity_count(shop_id, "OrderData")
             customer_count = await self.repository.get_entity_count(
-                shop_id, "ShopifyCustomer"
+                shop_id, "CustomerData"
             )
             collection_count = await self.repository.get_entity_count(
-                shop_id, "ShopifyCollection"
+                shop_id, "CollectionData"
             )
             event_count = await self.repository.get_entity_count(
-                shop_id, "ShopifyEvent"
+                shop_id, "BehavioralEvent"
             )
 
             if product_count == 0 and order_count == 0 and customer_count == 0:

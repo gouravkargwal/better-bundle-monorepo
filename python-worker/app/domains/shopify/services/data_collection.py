@@ -690,10 +690,23 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     }
 
                     # Fire event to trigger ML feature computation
-                    if (
-                        main_storage_result.success
-                        and main_storage_result.processed_count > 0
-                    ):
+                    # Trigger if: 1) new data was processed, OR 2) no features computed yet
+                    should_trigger_initial = (
+                        await self._should_trigger_initial_feature_computation(
+                            internal_shop_id
+                        )
+                    )
+                    should_trigger_ml = main_storage_result.success and (
+                        main_storage_result.processed_count > 0
+                        or should_trigger_initial
+                    )
+
+                    logger.info(
+                        f"Feature computation trigger decision: processed_count={main_storage_result.processed_count}, "
+                        f"should_trigger_initial={should_trigger_initial}, should_trigger_ml={should_trigger_ml}"
+                    )
+
+                    if should_trigger_ml:
                         try:
                             from app.core.redis_client import streams_manager
 
@@ -701,11 +714,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                             feature_job_id = f"feature_compute_{internal_shop_id}_{int(now_utc().timestamp())}"
 
                             # Publish ML training event to trigger feature computation
+                            # Use full processing for initial computation
+                            incremental = main_storage_result.processed_count > 0
                             event_id = await streams_manager.publish_ml_training_event(
                                 job_id=feature_job_id,
                                 shop_id=internal_shop_id,
                                 shop_domain=shop_domain,
                                 data_collection_completed=True,
+                                incremental=incremental,
                             )
 
                             logger.info(
@@ -737,7 +753,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         )
                         collection_results["ml_event"] = {
                             "success": False,
-                            "error": "No data processed",
+                            "error": "No data processed and features already computed",
                         }
                 except Exception as e:
                     logger.error(f"Failed to store data in main tables: {str(e)}")
@@ -1501,3 +1517,66 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 return None
 
         return None
+
+    async def _should_trigger_initial_feature_computation(self, shop_id: str) -> bool:
+        """Check if features need to be computed by comparing data update time vs feature computation time"""
+        try:
+            from app.core.database.simple_db_client import get_database
+
+            db = await get_database()
+
+            # Get the latest data update time across all main tables
+            data_update_query = """
+                SELECT GREATEST(
+                    COALESCE((SELECT MAX("updatedAt") FROM "ProductData" WHERE "shopId" = $1), '1970-01-01'::timestamp),
+                    COALESCE((SELECT MAX("updatedAt") FROM "CustomerData" WHERE "shopId" = $1), '1970-01-01'::timestamp),
+                    COALESCE((SELECT MAX("updatedAt") FROM "OrderData" WHERE "shopId" = $1), '1970-01-01'::timestamp),
+                    COALESCE((SELECT MAX("updatedAt") FROM "CollectionData" WHERE "shopId" = $1), '1970-01-01'::timestamp)
+                ) as last_data_update
+            """
+            data_result = await db.query_raw(data_update_query, shop_id)
+
+            # Get the last feature computation time
+            feature_time_query = 'SELECT "lastAnalysisAt" FROM "Shop" WHERE "id" = $1'
+            feature_result = await db.query_raw(feature_time_query, shop_id)
+
+            if data_result and data_result[0]:
+                last_data_update = data_result[0].get("last_data_update")
+                last_feature_computation = (
+                    feature_result[0].get("lastAnalysisAt")
+                    if feature_result and feature_result[0]
+                    else None
+                )
+
+                if last_feature_computation is None:
+                    # No features computed yet
+                    logger.info(
+                        f"No features computed yet for shop {shop_id}, will trigger computation"
+                    )
+                    return True
+                elif last_data_update > last_feature_computation:
+                    # Data is newer than features
+                    logger.info(
+                        f"Data updated after last feature computation for shop {shop_id}: "
+                        f"data={last_data_update}, features={last_feature_computation}, will trigger computation"
+                    )
+                    return True
+                else:
+                    # Features are up to date
+                    logger.info(
+                        f"Features are up to date for shop {shop_id}: "
+                        f"data={last_data_update}, features={last_feature_computation}"
+                    )
+                    return False
+            else:
+                logger.info(
+                    f"No data found for shop {shop_id}, will trigger computation"
+                )
+                return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to check feature computation status for shop {shop_id}: {e}"
+            )
+            # If we can't determine, err on the side of triggering computation
+            return True
