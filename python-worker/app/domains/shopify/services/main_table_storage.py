@@ -198,6 +198,18 @@ class MainTableStorageService:
             self._db_client = await get_database()
         return self._db_client
 
+    def _extract_shopify_id(self, gid: str) -> Optional[str]:
+        """Extract numeric ID from Shopify GraphQL GID"""
+        if not gid:
+            return None
+        try:
+            # Handle GID format: gid://shopify/Order/123456789
+            if gid.startswith("gid://shopify/"):
+                return gid.split("/")[-1]
+            return gid
+        except Exception:
+            return None
+
     async def _get_processed_shopify_ids(self, shop_id: str, data_type: str) -> set:
         """Get all Shopify IDs that have already been processed in the main table using efficient raw SQL queries"""
         try:
@@ -318,7 +330,13 @@ class MainTableStorageService:
                 f'SELECT "{config["raw_id_field"]}" FROM "{config["raw_table"]}" WHERE "shopId" = $1 AND "{config["raw_id_field"]}" IS NOT NULL ORDER BY "extractedAt" ASC',
                 shop_id,
             )
-            raw_ids = [row[config["raw_id_field"]] for row in raw_result]
+            # Extract numeric IDs from Shopify GID format for comparison
+            raw_ids = [
+                self._extract_shopify_id(row[config["raw_id_field"]])
+                for row in raw_result
+                if row[config["raw_id_field"]]
+            ]
+            raw_ids = [id for id in raw_ids if id]  # Filter out None values
 
             total_raw_count = len(raw_ids)
             self.logger.info(
