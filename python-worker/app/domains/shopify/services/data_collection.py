@@ -230,10 +230,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if access_token:
             await self.api_client.set_access_token(shop_domain, access_token)
 
-        # Check permissions ONCE at the top level to avoid recursion
-        permissions = await self.permission_service.check_shop_permissions(
-            shop_domain, access_token
-        )
+            # Check permissions ONCE at the top level to avoid recursion
+            permissions = await self.permission_service.check_shop_permissions(
+                shop_domain, access_token
+            )
 
         return permissions
 
@@ -321,7 +321,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         storage_result = await storage_method(result, internal_shop_id)
 
                         logger.info(
-                            f"Successfully stored {data_type} data: {storage_result.new_items} new, {storage_result.updated_items} updated"
+                            f"Successfully stored {data_type} data: {storage_result['new']} new, {storage_result['updated']} updated"
                         )
                 except Exception as storage_error:
                     logger.error(
@@ -440,7 +440,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             # Small delay to respect rate limits
             await asyncio.sleep(0.1)
 
-        logger.info(
-            f"{data_type.title()} collection completed | shop_domain={shop_domain} | total_{data_type}={len(raw_items)}"
-        )
+            logger.info(
+                f"{data_type.title()} collection completed | shop_domain={shop_domain} | total_{data_type}={len(raw_items)}"
+            )
         return raw_items

@@ -404,6 +404,43 @@ class StorageResult:
     duration_ms: int
 
 
+# Configuration for different data types
+DATA_TYPE_CONFIG = {
+    "orders": {
+        "raw_table": "RawOrder",
+        "main_table": "OrderData",
+        "id_field": "orderId",
+        "raw_id_field": "shopifyId",
+        "clean_function": clean_order_data_for_storage,
+        "batch_size": 1000,
+    },
+    "products": {
+        "raw_table": "RawProduct",
+        "main_table": "ProductData",
+        "id_field": "productId",
+        "raw_id_field": "shopifyId",
+        "clean_function": clean_product_data_for_storage,
+        "batch_size": 1000,
+    },
+    "customers": {
+        "raw_table": "RawCustomer",
+        "main_table": "CustomerData",
+        "id_field": "customerId",
+        "raw_id_field": "shopifyId",
+        "clean_function": clean_customer_data_for_storage,
+        "batch_size": 1000,
+    },
+    "collections": {
+        "raw_table": "RawCollection",
+        "main_table": "CollectionData",
+        "id_field": "collectionId",
+        "raw_id_field": "shopifyId",
+        "clean_function": clean_collection_data_for_storage,
+        "batch_size": 1000,
+    },
+}
+
+
 class MainTableStorageService:
     """Service for storing structured data in main tables"""
 

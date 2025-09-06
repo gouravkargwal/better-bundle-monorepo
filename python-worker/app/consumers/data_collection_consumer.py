@@ -36,6 +36,70 @@ class DataCollectionConsumer(BaseConsumer):
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         self.job_timeout = 1800  # 30 minutes
 
+    async def _process_single_message(self, message: Dict[str, Any]):
+        """Process a single data collection job message"""
+        try:
+            # Extract message data
+            job_id = message.get("job_id")
+            shop_id = message.get("shop_id")
+            shop_domain = message.get("shop_domain")
+            access_token = message.get("access_token")
+            job_type = message.get("job_type")
+
+            # Check if this is a data collection job
+            if job_type != "data_collection":
+                # This might be an analysis job from the scheduler - skip it
+                self.logger.debug(
+                    f"Skipping non-data-collection job: {job_type}",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                )
+                return
+
+            # Validate required fields for data collection jobs
+            if not job_id or not shop_id or not shop_domain or not access_token:
+                self.logger.error(
+                    "Invalid data collection message: missing required fields",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                    shop_domain=shop_domain,
+                    has_access_token=bool(access_token),
+                )
+                return
+
+            self.logger.info(
+                f"Processing data collection job",
+                job_id=job_id,
+                shop_id=shop_id,
+                shop_domain=shop_domain,
+            )
+
+            # Track job
+            self.active_jobs[job_id] = {
+                "status": "processing",
+                "shop_id": shop_id,
+                "shop_domain": shop_domain,
+                "started_at": datetime.utcnow(),
+            }
+
+            # Process the data collection job
+            await self._process_data_collection_job(
+                job_id, shop_id, shop_domain, access_token
+            )
+
+            # Mark job as completed
+            await self._mark_job_completed(job_id)
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to process data collection message",
+                job_id=message.get("job_id"),
+                error=str(e),
+            )
+            if job_id:
+                await self._mark_job_failed(job_id, str(e))
+            raise
+
     async def _process_data_collection_job(
         self, job_id: str, shop_id: str, shop_domain: str, access_token: str
     ):
