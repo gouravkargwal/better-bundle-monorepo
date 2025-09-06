@@ -140,15 +140,31 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "avg_inventory": 0,
             }
 
-        prices = [v.get("price", 0.0) for v in variants if v.get("price") is not None]
-        weights = [
-            v.get("weight", 0.0) for v in variants if v.get("weight") is not None
-        ]
-        inventory = [
-            v.get("inventoryQuantity", 0)
-            for v in variants
-            if v.get("inventoryQuantity") is not None
-        ]
+        prices = []
+        for v in variants:
+            price = v.get("price")
+            if price is not None:
+                try:
+                    prices.append(float(price))
+                except (ValueError, TypeError):
+                    prices.append(0.0)
+
+        weights = []
+        for v in variants:
+            weight = v.get("weight")
+            if weight is not None:
+                try:
+                    weights.append(float(weight))
+                except (ValueError, TypeError):
+                    weights.append(0.0)
+        inventory = []
+        for v in variants:
+            inv_qty = v.get("inventoryQuantity")
+            if inv_qty is not None:
+                try:
+                    inventory.append(int(inv_qty))
+                except (ValueError, TypeError):
+                    inventory.append(0)
 
         return {
             "variant_count": len(variants),
@@ -233,10 +249,14 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             for line_item in order.get("lineItems", []):
                 if line_item.get("productId") == product.get("id"):
                     product_orders.append(order)
-                    total_quantity += line_item.get("quantity", 0)
-                    total_revenue += line_item.get("price", 0.0) * line_item.get(
-                        "quantity", 0
-                    )
+                    try:
+                        quantity = int(line_item.get("quantity", 0))
+                        price = float(line_item.get("price", 0.0))
+                        total_quantity += quantity
+                        total_revenue += price * quantity
+                    except (ValueError, TypeError):
+                        # Skip this line item if conversion fails
+                        continue
 
         return {
             "total_orders": len(product_orders),
@@ -486,9 +506,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         style_affinity = self._calculate_style_affinity(product, fbt_products)
 
         # Bundle opportunity
-        bundle_score = self._calculate_bundle_opportunity(
-            product, fbt_products, viewed_together
-        )
+        bundle_score = self._calculate_bundle_opportunity(fbt_products, viewed_together)
 
         return {
             "frequently_bought_together_count": len(fbt_products),
@@ -527,7 +545,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         product_events = [e for e in events if e.get("productId") == product.get("id")]
 
         # Seasonal analysis
-        seasonal_score = self._calculate_seasonal_score(product, product_orders)
+        seasonal_score = self._calculate_seasonal_score(product_orders)
         current_relevance = self._calculate_current_season_relevance(product)
         holiday_relevance = self._calculate_holiday_relevance(product)
         weather_sensitivity = self._calculate_weather_sensitivity(
@@ -561,9 +579,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         for order in product_orders:
             for line_item in order.get("lineItems", []):
                 if line_item.get("productId") != product.get("id"):
-                    co_purchased[line_item.product_id] = (
-                        co_purchased.get(line_item.product_id, 0) + 1
-                    )
+                    product_id = line_item.get("productId")
+                    co_purchased[product_id] = co_purchased.get(product_id, 0) + 1
 
         if not co_purchased:
             return 0.0
@@ -589,18 +606,24 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Calculate total inventory
-        total_inventory = sum(v.get("inventoryQuantity", 0) for v in variants)
+        total_inventory = 0
+        for v in variants:
+            inv_qty = v.get("inventoryQuantity", 0)
+            try:
+                total_inventory += int(inv_qty)
+            except (ValueError, TypeError):
+                total_inventory += 0
 
         # Calculate sales velocity (units sold per day)
         if product_orders:
-            total_quantity_sold = sum(
-                sum(
-                    li.get("quantity", 0)
-                    for li in order.get("lineItems", [])
-                    if li.get("productId") == product.get("id")
-                )
-                for order in product_orders
-            )
+            total_quantity_sold = 0
+            for order in product_orders:
+                for li in order.get("lineItems", []):
+                    if li.get("productId") == product.get("id"):
+                        try:
+                            total_quantity_sold += int(li.get("quantity", 0))
+                        except (ValueError, TypeError):
+                            continue
             # Parse dates from strings
             last_order_date = product_orders[-1].get("orderDate")
             first_order_date = product_orders[0].get("orderDate")
@@ -714,7 +737,16 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         sessions = {}
         for event in events:
             # Use a simple session grouping based on time proximity
-            session_key = f"{event.customer_id}_{event.occurred_at.date()}"
+            customer_id = event.get("customerId", "unknown")
+            occurred_at = event.get("occurredAt")
+            if isinstance(occurred_at, str):
+                try:
+                    occurred_at = datetime.fromisoformat(
+                        occurred_at.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    occurred_at = now_utc()
+            session_key = f"{customer_id}_{occurred_at.date()}"
             if session_key not in sessions:
                 sessions[session_key] = []
             sessions[session_key].append(event)
@@ -725,7 +757,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         for session_events in sessions.values():
             session_products = set()
             for event in session_events:
-                product_id = event.get_product_id()
+                product_id = event.get("productId")
                 if product_id:
                     session_products.add(product_id)
 

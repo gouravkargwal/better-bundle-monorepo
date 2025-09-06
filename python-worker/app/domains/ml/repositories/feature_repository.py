@@ -171,47 +171,74 @@ class FeatureRepository(IFeatureRepository):
         return self._db_client
 
     async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert product features using a single query with multiple VALUES"""
+        """Bulk upsert product features using Prisma native methods"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Build a single query with multiple VALUES clauses
-            values_clauses = []
-            params = []
-            param_index = 1
-
+            # Convert tuple data to Prisma format
+            create_data = []
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, NOW())"
-                values_clauses.append(values_clause)
-                params.extend(data[:-1])  # Remove the last element (timestamp)
-                param_index += 10
+                if len(data) != 11:
+                    logger.error(
+                        f"Invalid batch data length: {len(data)}, expected 11. Data: {data}"
+                    )
+                    continue
 
-            bulk_upsert_query = f"""
-            INSERT INTO "ProductFeatures" (
-                "shopId", "productId", "popularity", "priceTier", "category",
-                "variantComplexity", "imageRichness", "tagDiversity", 
-                "categoryEncoded", "vendorScore", "lastComputedAt"
-            ) VALUES {', '.join(values_clauses)}
-            ON CONFLICT ("shopId", "productId") 
-            DO UPDATE SET
-                "popularity" = EXCLUDED."popularity",
-                "priceTier" = EXCLUDED."priceTier",
-                "category" = EXCLUDED."category",
-                "variantComplexity" = EXCLUDED."variantComplexity",
-                "imageRichness" = EXCLUDED."imageRichness",
-                "tagDiversity" = EXCLUDED."tagDiversity",
-                "categoryEncoded" = EXCLUDED."categoryEncoded",
-                "vendorScore" = EXCLUDED."vendorScore",
-                "lastComputedAt" = NOW()
-            """
+                # Convert tuple to dict format expected by Prisma
+                feature_data = {
+                    "shopId": data[0],
+                    "productId": data[1],
+                    "popularity": data[2],
+                    "priceTier": data[3],
+                    "category": data[4],
+                    "variantComplexity": data[5],
+                    "imageRichness": data[6],
+                    "tagDiversity": data[7],
+                    "categoryEncoded": data[8],
+                    "vendorScore": data[9],
+                    # lastComputedAt will be set automatically by the database
+                }
+                create_data.append(feature_data)
 
-            # Execute single bulk query
-            await db.execute_raw(bulk_upsert_query, *params)
+            if not create_data:
+                return 0
 
-            return len(batch_data)
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.productfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.productfeatures.upsert(
+                            where={
+                                "shopId_productId": {
+                                    "shopId": feature_data["shopId"],
+                                    "productId": feature_data["productId"],
+                                }
+                            },
+                            data=feature_data,
+                            update=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert product feature {feature_data.get('productId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert product features: {str(e)}")
@@ -220,77 +247,116 @@ class FeatureRepository(IFeatureRepository):
     async def bulk_upsert_customer_features(
         self, user_features_batch: List[tuple], behavior_features_batch: List[tuple]
     ) -> int:
-        """Bulk upsert customer features using single queries with multiple VALUES"""
+        """Bulk upsert customer features using Prisma native methods"""
         try:
             total_saved = 0
             db = await self._get_database()
 
             # Bulk upsert user features
             if user_features_batch:
-                # Build a single query with multiple VALUES clauses for user features
-                values_clauses = []
-                params = []
-                param_index = 1
-
+                user_create_data = []
                 for data in user_features_batch:
-                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, NOW())"
-                    values_clauses.append(values_clause)
-                    params.extend(data[:-1])  # Remove the last element (timestamp)
-                    param_index += 7
+                    if len(data) != 8:  # 7 fields + timestamp
+                        logger.error(
+                            f"Invalid user features batch data length: {len(data)}, expected 8"
+                        )
+                        continue
 
-                user_upsert_query = f"""
-                INSERT INTO "UserFeatures" (
-                    "shopId", "customerId", "totalPurchases", "totalSpent", "recencyDays",
-                    "avgPurchaseIntervalDays", "preferredCategory", "lastComputedAt"
-                ) VALUES {', '.join(values_clauses)}
-                ON CONFLICT ("shopId", "customerId") 
-                DO UPDATE SET
-                    "totalPurchases" = EXCLUDED."totalPurchases",
-                    "totalSpent" = EXCLUDED."totalSpent",
-                    "recencyDays" = EXCLUDED."recencyDays",
-                    "avgPurchaseIntervalDays" = EXCLUDED."avgPurchaseIntervalDays",
-                    "preferredCategory" = EXCLUDED."preferredCategory",
-                    "lastComputedAt" = NOW()
-                """
+                    user_data = {
+                        "shopId": data[0],
+                        "customerId": data[1],
+                        "totalPurchases": data[2],
+                        "totalSpent": data[3],
+                        "recencyDays": data[4],
+                        "avgPurchaseIntervalDays": data[5],
+                        "preferredCategory": data[6],
+                    }
+                    user_create_data.append(user_data)
 
-                await db.execute_raw(user_upsert_query, *params)
-                total_saved += len(user_features_batch)
+                if user_create_data:
+                    try:
+                        await db.userfeatures.create_many(
+                            data=user_create_data, skip_duplicates=True
+                        )
+                        total_saved += len(user_create_data)
+                    except Exception as create_error:
+                        logger.warning(
+                            f"User features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                        )
+
+                        for user_data in user_create_data:
+                            try:
+                                await db.userfeatures.upsert(
+                                    where={
+                                        "shopId_customerId": {
+                                            "shopId": user_data["shopId"],
+                                            "customerId": user_data["customerId"],
+                                        }
+                                    },
+                                    data=user_data,
+                                    update=user_data,
+                                )
+                                total_saved += 1
+                            except Exception as upsert_error:
+                                logger.error(
+                                    f"Failed to upsert user feature {user_data.get('customerId')}: {str(upsert_error)}"
+                                )
+                                continue
 
             # Bulk upsert behavior features
             if behavior_features_batch:
-                # Build a single query with multiple VALUES clauses for behavior features
-                values_clauses = []
-                params = []
-                param_index = 1
-
+                behavior_create_data = []
                 for data in behavior_features_batch:
-                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10}, NOW())"
-                    values_clauses.append(values_clause)
-                    params.extend(data[:-1])  # Remove the last element (timestamp)
-                    param_index += 11
+                    if len(data) != 12:  # 11 fields + timestamp
+                        logger.error(
+                            f"Invalid behavior features batch data length: {len(data)}, expected 12"
+                        )
+                        continue
 
-                behavior_upsert_query = f"""
-                INSERT INTO "CustomerBehaviorFeatures" (
-                    "shopId", "customerId", "eventDiversity", "eventFrequency", "daysSinceFirstEvent",
-                    "daysSinceLastEvent", "purchaseFrequency", "engagementScore", "recencyScore", 
-                    "diversityScore", "behavioralScore", "lastComputedAt"
-                ) VALUES {', '.join(values_clauses)}
-                ON CONFLICT ("shopId", "customerId") 
-                DO UPDATE SET
-                    "eventDiversity" = EXCLUDED."eventDiversity",
-                    "eventFrequency" = EXCLUDED."eventFrequency",
-                    "daysSinceFirstEvent" = EXCLUDED."daysSinceFirstEvent",
-                    "daysSinceLastEvent" = EXCLUDED."daysSinceLastEvent",
-                    "purchaseFrequency" = EXCLUDED."purchaseFrequency",
-                    "engagementScore" = EXCLUDED."engagementScore",
-                    "recencyScore" = EXCLUDED."recencyScore",
-                    "diversityScore" = EXCLUDED."diversityScore",
-                    "behavioralScore" = EXCLUDED."behavioralScore",
-                    "lastComputedAt" = NOW()
-                """
+                    behavior_data = {
+                        "shopId": data[0],
+                        "customerId": data[1],
+                        "eventDiversity": data[2],
+                        "eventFrequency": data[3],
+                        "daysSinceFirstEvent": data[4],
+                        "daysSinceLastEvent": data[5],
+                        "purchaseFrequency": data[6],
+                        "engagementScore": data[7],
+                        "recencyScore": data[8],
+                        "diversityScore": data[9],
+                        "behavioralScore": data[10],
+                    }
+                    behavior_create_data.append(behavior_data)
 
-                await db.execute_raw(behavior_upsert_query, *params)
-                total_saved += len(behavior_features_batch)
+                if behavior_create_data:
+                    try:
+                        await db.customerbehaviorfeatures.create_many(
+                            data=behavior_create_data, skip_duplicates=True
+                        )
+                        total_saved += len(behavior_create_data)
+                    except Exception as create_error:
+                        logger.warning(
+                            f"Behavior features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                        )
+
+                        for behavior_data in behavior_create_data:
+                            try:
+                                await db.customerbehaviorfeatures.upsert(
+                                    where={
+                                        "shopId_customerId": {
+                                            "shopId": behavior_data["shopId"],
+                                            "customerId": behavior_data["customerId"],
+                                        }
+                                    },
+                                    data=behavior_data,
+                                    update=behavior_data,
+                                )
+                                total_saved += 1
+                            except Exception as upsert_error:
+                                logger.error(
+                                    f"Failed to upsert behavior feature {behavior_data.get('customerId')}: {str(upsert_error)}"
+                                )
+                                continue
 
             return total_saved
 
