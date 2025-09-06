@@ -184,10 +184,10 @@ class FeatureRepository(IFeatureRepository):
             param_index = 1
 
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10})"
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, NOW())"
                 values_clauses.append(values_clause)
-                params.extend(data)
-                param_index += 11
+                params.extend(data[:-1])  # Remove the last element (timestamp)
+                param_index += 10
 
             bulk_upsert_query = f"""
             INSERT INTO "ProductFeatures" (
@@ -205,7 +205,7 @@ class FeatureRepository(IFeatureRepository):
                 "tagDiversity" = EXCLUDED."tagDiversity",
                 "categoryEncoded" = EXCLUDED."categoryEncoded",
                 "vendorScore" = EXCLUDED."vendorScore",
-                "lastComputedAt" = EXCLUDED."lastComputedAt"
+                "lastComputedAt" = NOW()
             """
 
             # Execute single bulk query
@@ -233,10 +233,10 @@ class FeatureRepository(IFeatureRepository):
                 param_index = 1
 
                 for data in user_features_batch:
-                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7})"
+                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, NOW())"
                     values_clauses.append(values_clause)
-                    params.extend(data)
-                    param_index += 8
+                    params.extend(data[:-1])  # Remove the last element (timestamp)
+                    param_index += 7
 
                 user_upsert_query = f"""
                 INSERT INTO "UserFeatures" (
@@ -250,7 +250,7 @@ class FeatureRepository(IFeatureRepository):
                     "recencyDays" = EXCLUDED."recencyDays",
                     "avgPurchaseIntervalDays" = EXCLUDED."avgPurchaseIntervalDays",
                     "preferredCategory" = EXCLUDED."preferredCategory",
-                    "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    "lastComputedAt" = NOW()
                 """
 
                 await db.execute_raw(user_upsert_query, *params)
@@ -264,10 +264,10 @@ class FeatureRepository(IFeatureRepository):
                 param_index = 1
 
                 for data in behavior_features_batch:
-                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10}, ${param_index + 11})"
+                    values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7}, ${param_index + 8}, ${param_index + 9}, ${param_index + 10}, NOW())"
                     values_clauses.append(values_clause)
-                    params.extend(data)
-                    param_index += 12
+                    params.extend(data[:-1])  # Remove the last element (timestamp)
+                    param_index += 11
 
                 behavior_upsert_query = f"""
                 INSERT INTO "CustomerBehaviorFeatures" (
@@ -286,7 +286,7 @@ class FeatureRepository(IFeatureRepository):
                     "recencyScore" = EXCLUDED."recencyScore",
                     "diversityScore" = EXCLUDED."diversityScore",
                     "behavioralScore" = EXCLUDED."behavioralScore",
-                    "lastComputedAt" = EXCLUDED."lastComputedAt"
+                    "lastComputedAt" = NOW()
                 """
 
                 await db.execute_raw(behavior_upsert_query, *params)
@@ -312,10 +312,10 @@ class FeatureRepository(IFeatureRepository):
             param_index = 1
 
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, ${param_index + 7})"
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, NOW())"
                 values_clauses.append(values_clause)
-                params.extend(data)
-                param_index += 8
+                params.extend(data[:-1])  # Remove the last element (timestamp)
+                param_index += 7
 
             collection_upsert_query = f"""
             INSERT INTO "CollectionFeatures" (
@@ -329,7 +329,7 @@ class FeatureRepository(IFeatureRepository):
                 "performanceScore" = EXCLUDED."performanceScore",
                 "seoScore" = EXCLUDED."seoScore",
                 "imageScore" = EXCLUDED."imageScore",
-                "lastComputedAt" = EXCLUDED."lastComputedAt"
+                "lastComputedAt" = NOW()
             """
 
             # Execute single bulk query
@@ -355,10 +355,10 @@ class FeatureRepository(IFeatureRepository):
             param_index = 1
 
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6})"
+                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, NOW())"
                 values_clauses.append(values_clause)
-                params.extend(data)
-                param_index += 7
+                params.extend(data[:-1])  # Remove the last element (timestamp)
+                param_index += 6
 
             interaction_upsert_query = f"""
             INSERT INTO "InteractionFeatures" (
@@ -370,7 +370,7 @@ class FeatureRepository(IFeatureRepository):
                 "purchaseCount" = EXCLUDED."purchaseCount",
                 "lastPurchaseDate" = EXCLUDED."lastPurchaseDate",
                 "timeDecayedWeight" = EXCLUDED."timeDecayedWeight",
-                "lastComputedAt" = EXCLUDED."lastComputedAt"
+                "lastComputedAt" = NOW()
             """
 
             # Execute single bulk query

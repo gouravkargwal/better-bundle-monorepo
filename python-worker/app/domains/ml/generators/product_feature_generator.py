@@ -103,6 +103,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         self, product: ShopifyProduct
     ) -> Dict[str, Any]:
         """Compute basic product features"""
+        # Safely get lists, ensuring they're not None
+        variants = product.get("variants") or []
+        tags = product.get("tags") or []
+        collections = product.get("collections") or []
+        images = product.get("images") or []
+
         return {
             "product_id": product.get("id", ""),
             "title_length": len(product.get("title", "")),
@@ -115,17 +121,17 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             ),
             "status_encoded": 1 if product.get("status") == "active" else 0,
             "is_published": 1 if product.get("status") == "active" else 0,
-            "variant_count": len(product.get("variants", [])),
-            "has_multiple_variants": 1 if len(product.get("variants", [])) > 1 else 0,
-            "tag_count": len(product.get("tags", [])),
-            "collection_count": len(product.get("collections", [])),
-            "has_images": 1 if product.get("images") else 0,
-            "image_count": len(product.get("images", [])),
+            "variant_count": len(variants),
+            "has_multiple_variants": 1 if len(variants) > 1 else 0,
+            "tag_count": len(tags),
+            "collection_count": len(collections),
+            "has_images": 1 if images else 0,
+            "image_count": len(images),
         }
 
     def _compute_variant_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute variant-related features"""
-        variants = product.get("variants", [])
+        variants = product.get("variants") or []
         if not variants:
             return {
                 "variant_count": 0,
@@ -165,7 +171,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_image_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute image-related features"""
-        images = product.get("images", [])
+        images = product.get("images") or []
         if not images:
             return {
                 "image_count": 0,
@@ -183,7 +189,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_tag_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Compute tag and category features"""
-        tags = product.get("tags", [])
+        tags = product.get("tags") or []
 
         return {
             "tag_count": len(tags),
@@ -212,10 +218,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return {
             "collection_count": len(product_collections),
             "avg_collection_size": statistics.mean(
-                [c.products_count for c in product_collections]
+                [c.get("products_count", 0) for c in product_collections]
             ),
             "is_in_featured_collection": (
-                1 if any(c.is_featured for c in product_collections) else 0
+                1
+                if any(c.get("is_featured", False) for c in product_collections)
+                else 0
             ),
         }
 
@@ -284,11 +292,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             quality_score += 1
 
         # Tag quality
-        if product.get("tags") and len(product.get("tags", [])) > 2:
+        tags = product.get("tags") or []
+        if tags and len(tags) > 2:
             quality_score += 1
 
         # Variant quality
-        if len(product.get("variants", [])) > 0:
+        variants = product.get("variants") or []
+        if len(variants) > 0:
             quality_score += 1
 
         return {

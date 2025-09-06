@@ -60,7 +60,12 @@ class IFeaturePipeline(ABC):
 
     @abstractmethod
     async def compute_and_save_interaction_features_batch(
-        self, shop_id: str, orders: List[Dict[str, Any]]
+        self,
+        shop_id: str,
+        customers: List[Dict[str, Any]],
+        products: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute and save interaction features in batch"""
         pass
@@ -314,9 +319,20 @@ class FeaturePipeline(IFeaturePipeline):
                 # Get all orders for interaction features (this is typically smaller than other entities)
                 orders = await self.repository.get_orders_batch(shop_id, 0, order_count)
                 if orders:
+                    # Get customers and products for interaction features
+                    customers = await self.repository.get_customers_batch(
+                        shop_id, 0, customer_count
+                    )
+                    products = await self.repository.get_products_batch(
+                        shop_id, 0, product_count
+                    )
+                    events = await self.repository.get_events_batch(
+                        shop_id, 0, event_count
+                    )
+
                     interaction_result = (
                         await self.compute_and_save_interaction_features_batch(
-                            shop_id, orders
+                            shop_id, customers, products, orders, events
                         )
                     )
                     results["interactions"] = interaction_result
@@ -373,7 +389,7 @@ class FeaturePipeline(IFeaturePipeline):
                         ],
                         1 if product.get("productType") else 0,
                         1 if product.get("vendor") else 0,
-                        now_utc().isoformat(),
+                        datetime.now().isoformat(),
                     )
                 )
 
@@ -450,7 +466,7 @@ class FeaturePipeline(IFeaturePipeline):
                         features.get("days_since_creation", 0),
                         features.get("average_order_value", 0),
                         None,  # preferred_category - simplified
-                        now_utc().isoformat(),
+                        datetime.now().isoformat(),
                     )
                 )
 
@@ -468,7 +484,7 @@ class FeaturePipeline(IFeaturePipeline):
                         features.get("engagement_score", 0),  # recency_score
                         features.get("unique_event_types", 0) / 10.0,  # diversity_score
                         features.get("engagement_score", 0),  # behavioral_score
-                        now_utc().isoformat(),
+                        datetime.now().isoformat(),
                     )
                 )
 
@@ -500,13 +516,13 @@ class FeaturePipeline(IFeaturePipeline):
                 batch_data.append(
                     (
                         shop_id,
-                        collection.id,
+                        collection.get("id", ""),
                         features.get("products_count", 0),
-                        1 if collection.is_automated else 0,
+                        collection.get("isAutomated", False),
                         features.get("seo_score", 0),
                         features.get("seo_score", 0),  # seo_score
                         features.get("seo_score", 0),  # image_score
-                        now_utc().isoformat(),
+                        datetime.now().isoformat(),
                     )
                 )
 
@@ -521,71 +537,6 @@ class FeaturePipeline(IFeaturePipeline):
 
         except Exception as e:
             logger.error(f"Failed to save collection features batch: {str(e)}")
-            return {"saved_count": 0, "error": str(e)}
-
-    async def compute_and_save_interaction_features_batch(
-        self, shop_id: str, orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute and save interaction features in batch"""
-        try:
-            # Group interactions by customer-product pairs
-            interactions = {}
-            for order in orders:
-                customer_id = order.customer_id
-                if not customer_id:
-                    continue
-
-                for line_item in order.line_items:
-                    product_id = line_item.product_id
-                    if not product_id:
-                        continue
-
-                    key = f"{customer_id}_{product_id}"
-                    if key not in interactions:
-                        interactions[key] = {
-                            "customerId": customer_id,
-                            "productId": product_id,
-                            "purchaseCount": 0,
-                            "lastPurchaseDate": None,
-                        }
-
-                    interactions[key]["purchaseCount"] += line_item.quantity
-                    interactions[key]["lastPurchaseDate"] = order.created_at
-
-            # Prepare batch data
-            batch_data = []
-            for interaction in interactions.values():
-                # Calculate time decayed weight
-                days_since_purchase = (
-                    (now_utc() - interaction["lastPurchaseDate"]).days
-                    if interaction["lastPurchaseDate"]
-                    else 0
-                )
-                time_decayed_weight = max(0, 1 - (days_since_purchase / 365))
-
-                batch_data.append(
-                    (
-                        shop_id,
-                        interaction["customerId"],
-                        interaction["productId"],
-                        interaction["purchaseCount"],
-                        interaction["lastPurchaseDate"],
-                        time_decayed_weight,
-                        now_utc().isoformat(),
-                    )
-                )
-
-            if not batch_data:
-                return {"saved_count": 0, "total_interactions": 0}
-
-            # Use repository to save features
-            saved_count = await self.repository.bulk_upsert_interaction_features(
-                batch_data
-            )
-            return {"saved_count": saved_count, "total_interactions": len(interactions)}
-
-        except Exception as e:
-            logger.error(f"Failed to save interaction features batch: {str(e)}")
             return {"saved_count": 0, "error": str(e)}
 
     async def _process_orders_incremental(
@@ -611,10 +562,30 @@ class FeaturePipeline(IFeaturePipeline):
                 offset += batch_size
 
             if all_orders:
+                # Get counts for interaction features
+                customer_count = await self.repository.get_entity_count(
+                    shop_id, "CustomerData"
+                )
+                product_count = await self.repository.get_entity_count(
+                    shop_id, "ProductData"
+                )
+                event_count = await self.repository.get_entity_count(
+                    shop_id, "BehavioralEvents"
+                )
+
+                # Get customers, products, and events for interaction features
+                customers = await self.repository.get_customers_batch(
+                    shop_id, 0, customer_count
+                )
+                products = await self.repository.get_products_batch(
+                    shop_id, 0, product_count
+                )
+                events = await self.repository.get_events_batch(shop_id, 0, event_count)
+
                 # Process all orders for interactions
                 interaction_result = (
                     await self.compute_and_save_interaction_features_batch(
-                        shop_id, all_orders
+                        shop_id, customers, products, all_orders, events
                     )
                 )
                 results["interactions"] = interaction_result
@@ -892,7 +863,7 @@ class FeaturePipeline(IFeaturePipeline):
                                     customer_id,
                                     product.id,
                                     interaction_features,
-                                    now_utc().isoformat(),
+                                    datetime.now().isoformat(),
                                 )
                             )
                             processed_count += 1
