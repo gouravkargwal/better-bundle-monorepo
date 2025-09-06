@@ -1,10 +1,12 @@
 """
-Product feature generator for ML feature engineering
+Product Feature Generator for Gorse integration
+Computes features from products, orders, and behavioral events
 """
 
+import datetime
 from typing import Dict, Any, List, Optional
 import statistics
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -15,965 +17,500 @@ logger = get_logger(__name__)
 
 
 class ProductFeatureGenerator(BaseFeatureGenerator):
-    """Feature generator for Shopify products"""
+    """Feature generator for product features"""
 
     async def generate_features(
-        self, product: Dict[str, Any], context: Dict[str, Any]
+        self,
+        shop_id: str,
+        product_id: str,
+        context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Generate features for a product
+        Generate product features
 
         Args:
-            product: The product to generate features for
-            context: Additional context data (shop, orders, collections, etc.)
+            shop_id: The shop ID
+            product_id: The product ID
+            context: Contains product_data, orders, behavioral_events, collections
 
         Returns:
-            Dictionary of generated features
+            Dictionary matching ProductFeatures table schema
         """
         try:
             logger.debug(
-                f"Computing features for product: {product.get('id', 'unknown')}"
+                f"Computing product features for shop: {shop_id}, product: {product_id}"
             )
 
-            features = {}
-            shop = context.get("shop")
+            # Get data from context
+            product_data = context.get("product_data", {})
             orders = context.get("orders", [])
+            behavioral_events = context.get("behavioral_events", [])
             collections = context.get("collections", [])
 
-            # Basic product features
-            features.update(self._compute_basic_product_features(product))
+            # Compute 30-day metrics
+            metrics_30d = self._compute_30day_metrics(
+                product_id, orders, behavioral_events
+            )
 
-            # Variant features
-            features.update(self._compute_variant_features(product))
+            # Compute conversion metrics
+            conversion_metrics = self._compute_conversion_metrics(metrics_30d)
 
-            # Image features
-            features.update(self._compute_image_features(product))
+            # Compute temporal metrics
+            temporal_metrics = self._compute_temporal_metrics(
+                product_id, orders, behavioral_events
+            )
 
-            # Tag and category features
-            features.update(self._compute_tag_features(product))
+            # Compute price and inventory metrics
+            price_inventory_metrics = self._compute_price_inventory_metrics(
+                product_data, orders
+            )
 
-            # Collection features
-            if collections:
-                features.update(self._compute_collection_features(product, collections))
+            # Compute metadata scores
+            metadata_scores = self._compute_metadata_scores(product_data)
 
-            # Historical performance features (if orders available)
-            if orders:
-                features.update(self._compute_performance_features(product, orders))
+            # Compute popularity and trending scores
+            popularity_trending = self._compute_popularity_trending_scores(
+                metrics_30d, temporal_metrics
+            )
 
-            # Shop context features
-            if shop:
-                features.update(self._compute_shop_context_features(product, shop))
-
-            # Time-based features
-            features.update(self._compute_time_features(product))
-
-            # Quality features
-            features.update(self._compute_quality_features(product))
-
-            # Enhanced popularity and trend features
-            features.update(self._compute_popularity_features(product, context))
-
-            # Cross-selling and relationship features
-            features.update(self._compute_relationship_features(product, context))
-
-            # Seasonal and temporal features
-            features.update(self._compute_seasonal_features(product, context))
-
-            # Validate and clean features
-            features = self.validate_features(features)
+            features = {
+                "shopId": shop_id,
+                "productId": product_id,
+                # 30-day metrics
+                "viewCount30d": metrics_30d["view_count"],
+                "uniqueViewers30d": metrics_30d["unique_viewers"],
+                "cartAddCount30d": metrics_30d["cart_add_count"],
+                "purchaseCount30d": metrics_30d["purchase_count"],
+                "uniquePurchasers30d": metrics_30d["unique_purchasers"],
+                # Conversion metrics
+                "viewToCartRate": conversion_metrics["view_to_cart_rate"],
+                "cartToPurchaseRate": conversion_metrics["cart_to_purchase_rate"],
+                "overallConversionRate": conversion_metrics["overall_conversion_rate"],
+                # Temporal metrics
+                "lastViewedAt": temporal_metrics["last_viewed_at"],
+                "lastPurchasedAt": temporal_metrics["last_purchased_at"],
+                "firstPurchasedAt": temporal_metrics["first_purchased_at"],
+                "daysSinceFirstPurchase": temporal_metrics["days_since_first_purchase"],
+                "daysSinceLastPurchase": temporal_metrics["days_since_last_purchase"],
+                # Price & Inventory
+                "avgSellingPrice": price_inventory_metrics["avg_selling_price"],
+                "priceVariance": price_inventory_metrics["price_variance"],
+                "inventoryTurnover": price_inventory_metrics["inventory_turnover"],
+                "stockVelocity": price_inventory_metrics["stock_velocity"],
+                "priceTier": price_inventory_metrics["price_tier"],
+                # Metadata scores
+                "variantComplexity": metadata_scores["variant_complexity"],
+                "imageRichness": metadata_scores["image_richness"],
+                "tagDiversity": metadata_scores["tag_diversity"],
+                "metafieldUtilization": metadata_scores["metafield_utilization"],
+                # Computed scores
+                "popularityScore": popularity_trending["popularity_score"],
+                "trendingScore": popularity_trending["trending_score"],
+                "lastComputedAt": now_utc(),
+            }
 
             logger.debug(
-                f"Computed {len(features)} features for product: {product.get('id', 'unknown')}"
+                f"Computed product features for product: {product_id} - "
+                f"Views: {features['viewCount30d']}, Purchases: {features['purchaseCount30d']}"
             )
+
             return features
 
         except Exception as e:
-            logger.error(
-                f"Failed to compute product features for {product.get('id', 'unknown')}: {str(e)}"
-            )
-            return {}
+            logger.error(f"Failed to compute product features: {str(e)}")
+            return self._get_default_features(shop_id, product_id)
 
-    def _compute_basic_product_features(
-        self, product: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute basic product features"""
-        # Safely get lists, ensuring they're not None
-        variants = product.get("variants") or []
-        tags = product.get("tags") or []
-        collections = product.get("collections") or []
-        images = product.get("images") or []
-
-        return {
-            "product_id": product.get("id", ""),
-            "title_length": len(product.get("title") or ""),
-            "description_length": len(product.get("descriptionHtml") or ""),
-            "vendor_encoded": self._encode_categorical_feature(
-                product.get("vendor", "")
-            ),
-            "product_type_encoded": self._encode_categorical_feature(
-                product.get("productType", "")
-            ),
-            "status_encoded": 1 if product.get("status") == "active" else 0,
-            "is_published": 1 if product.get("status") == "active" else 0,
-            "variant_count": len(variants),
-            "has_multiple_variants": 1 if len(variants) > 1 else 0,
-            "tag_count": len(tags),
-            "collection_count": len(collections),
-            "has_images": 1 if images else 0,
-            "image_count": len(images),
-        }
-
-    def _compute_variant_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute variant-related features"""
-        variants = product.get("variants") or []
-        if not variants:
-            return {
-                "variant_count": 0,
-                "price_range": 0,
-                "price_std": 0,
-                "avg_price": 0,
-                "min_price": 0,
-                "max_price": 0,
-                "weight_range": 0,
-                "avg_weight": 0,
-                "inventory_total": 0,
-                "avg_inventory": 0,
-            }
-
-        prices = []
-        for v in variants:
-            price = v.get("price")
-            if price is not None:
-                try:
-                    prices.append(float(price))
-                except (ValueError, TypeError):
-                    prices.append(0.0)
-
-        weights = []
-        for v in variants:
-            weight = v.get("weight")
-            if weight is not None:
-                try:
-                    weights.append(float(weight))
-                except (ValueError, TypeError):
-                    weights.append(0.0)
-        inventory = []
-        for v in variants:
-            inv_qty = v.get("inventoryQuantity")
-            if inv_qty is not None:
-                try:
-                    inventory.append(int(inv_qty))
-                except (ValueError, TypeError):
-                    inventory.append(0)
-
-        return {
-            "variant_count": len(variants),
-            "price_range": max(prices) - min(prices) if prices else 0,
-            "price_std": statistics.stdev(prices) if len(prices) > 1 else 0,
-            "avg_price": statistics.mean(prices) if prices else 0,
-            "min_price": min(prices) if prices else 0,
-            "max_price": max(prices) if prices else 0,
-            "weight_range": max(weights) - min(weights) if weights else 0,
-            "avg_weight": statistics.mean(weights) if weights else 0,
-            "inventory_total": sum(inventory) if inventory else 0,
-            "avg_inventory": statistics.mean(inventory) if inventory else 0,
-        }
-
-    def _compute_image_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute image-related features"""
-        images = product.get("images") or []
-        if not images:
-            return {
-                "image_count": 0,
-                "has_images": 0,
-                "image_alt_text_coverage": 0,
-            }
-
-        alt_text_count = sum(1 for img in images if img.get("altText"))
-
-        return {
-            "image_count": len(images),
-            "has_images": 1,
-            "image_alt_text_coverage": alt_text_count / len(images),
-        }
-
-    def _compute_tag_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute tag and category features"""
-        tags = product.get("tags") or []
-
-        return {
-            "tag_count": len(tags),
-            "tag_diversity": len(set(tags)),
-            "has_tags": 1 if tags else 0,
-            "tag_encoded": self._encode_categorical_feature("|".join(tags)),
-        }
-
-    def _compute_collection_features(
-        self, product: Dict[str, Any], collections: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute collection-related features"""
-        product_collections = [
-            c
-            for c in collections
-            if product.get("id") in [p.get("id") for p in c.get("products", [])]
-        ]
-
-        if not product_collections:
-            return {
-                "collection_count": 0,
-                "avg_collection_size": 0,
-                "is_in_featured_collection": 0,
-            }
-
-        return {
-            "collection_count": len(product_collections),
-            "avg_collection_size": statistics.mean(
-                [c.get("products_count", 0) for c in product_collections]
-            ),
-            "is_in_featured_collection": (
-                1
-                if any(c.get("is_featured", False) for c in product_collections)
-                else 0
-            ),
-        }
-
-    def _compute_performance_features(
-        self, product: Dict[str, Any], orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute historical performance features"""
-        product_orders = []
-        total_quantity = 0
-        total_revenue = 0
-
-        for order in orders:
-            for line_item in order.get("lineItems", []):
-                if line_item.get("productId") == product.get("id"):
-                    product_orders.append(order)
-                    try:
-                        quantity = int(line_item.get("quantity", 0))
-                        price = float(line_item.get("price", 0.0))
-                        total_quantity += quantity
-                        total_revenue += price * quantity
-                    except (ValueError, TypeError):
-                        # Skip this line item if conversion fails
-                        continue
-
-        return {
-            "total_orders": len(product_orders),
-            "total_quantity_sold": total_quantity,
-            "total_revenue": total_revenue,
-            "avg_order_value": (
-                total_revenue / len(product_orders) if product_orders else 0
-            ),
-            "conversion_rate": len(product_orders) / len(orders) if orders else 0,
-        }
-
-    def _compute_shop_context_features(self, shop: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute shop context features"""
-        return {
-            "shop_plan_encoded": self._encode_categorical_feature(
-                shop.get("plan_name", "") or ""
-            ),
-            "shop_currency_encoded": self._encode_categorical_feature(
-                shop.get("currency", "") or ""
-            ),
-            "shop_country_encoded": self._encode_categorical_feature(
-                shop.get("country", "") or ""
-            ),
-        }
-
-    def _compute_time_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute time-based features"""
-        return self._compute_time_based_features(
-            product.get("productCreatedAt"), product.get("productUpdatedAt")
-        )
-
-    def _compute_quality_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute product quality features"""
-        quality_score = 0
-
-        # Title quality
-        title = product.get("title") or ""
-        if title and len(title) > 10:
-            quality_score += 1
-
-        # Description quality
-        description = product.get("descriptionHtml") or ""
-        if description and len(description) > 50:
-            quality_score += 1
-
-        # Image quality
-        if product.get("images"):
-            quality_score += 1
-
-        # Tag quality
-        tags = product.get("tags") or []
-        if tags and len(tags) > 2:
-            quality_score += 1
-
-        # Variant quality
-        variants = product.get("variants") or []
-        if len(variants) > 0:
-            quality_score += 1
-
-        return {
-            "quality_score": quality_score,
-            "quality_tier": (
-                "high"
-                if quality_score >= 4
-                else "medium" if quality_score >= 2 else "low"
-            ),
-        }
-
-    def _compute_popularity_features(
-        self, product: Dict[str, Any], context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute product popularity and trend features"""
-        events = context.get("events", [])
-        orders = context.get("orders", [])
-
-        if not events and not orders:
-            return {
-                "view_velocity": 0.0,
-                "cart_velocity": 0.0,
-                "purchase_velocity": 0.0,
-                "trending_score": 0.0,
-                "search_popularity": 0.0,
-                "collection_featured_count": 0,
-                "cross_sell_opportunity_score": 0.0,
-                "inventory_velocity": 0.0,
-                "stockout_risk": 0.0,
-                "overstock_risk": 0.0,
-                "reorder_urgency": 0.0,
-                "seasonal_demand_multiplier": 1.0,
-            }
-
-        # Calculate velocities (events per hour)
-        product_events = [e for e in events if e.get("productId") == product.get("id")]
-        product_orders = []
-        for order in orders:
-            for line_item in order.get("lineItems", []):
-                if line_item.get("productId") == product.get("id"):
-                    product_orders.append(order)
-                    break
-
-        # Time-based calculations
-        now = now_utc()
-        last_24h = now - timedelta(hours=24)
-        last_7d = now - timedelta(days=7)
-        last_30d = now - timedelta(days=30)
-
-        # View velocity (views per hour in last 24h)
-        recent_views = []
-        for e in product_events:
-            if e.get("isProductViewed", False):
-                occurred_at = e.get("occurredAt")
-                if isinstance(occurred_at, str):
-                    try:
-                        occurred_at = datetime.fromisoformat(
-                            occurred_at.replace("Z", "+00:00")
-                        )
-                    except (ValueError, TypeError):
-                        occurred_at = None
-                if occurred_at and occurred_at >= last_24h:
-                    recent_views.append(e)
-        view_velocity = len(recent_views) / 24.0
-
-        # Cart velocity (cart additions per hour in last 24h)
-        recent_carts = []
-        for e in product_events:
-            if e.get("isProductAddedToCart", False):
-                occurred_at = e.get("occurredAt")
-                if isinstance(occurred_at, str):
-                    try:
-                        occurred_at = datetime.fromisoformat(
-                            occurred_at.replace("Z", "+00:00")
-                        )
-                    except (ValueError, TypeError):
-                        occurred_at = None
-                if occurred_at and occurred_at >= last_24h:
-                    recent_carts.append(e)
-        cart_velocity = len(recent_carts) / 24.0
-
-        # Purchase velocity (purchases per hour in last 24h)
-        recent_orders = []
-        for o in product_orders:
-            order_date = o.get("orderDate")
-            if isinstance(order_date, str):
-                try:
-                    order_date = datetime.fromisoformat(
-                        order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    order_date = None
-            if order_date and order_date >= last_24h:
-                recent_orders.append(o)
-        purchase_velocity = len(recent_orders) / 24.0
-
-        # Trending score (velocity change over time)
-        old_views = []
-        for e in product_events:
-            if e.get("isProductViewed", False):
-                occurred_at = e.get("occurredAt")
-                if isinstance(occurred_at, str):
-                    occurred_at = datetime.fromisoformat(
-                        occurred_at.replace("Z", "+00:00")
-                    )
-                if occurred_at and last_7d <= occurred_at < last_24h:
-                    old_views.append(e)
-        old_view_velocity = len(old_views) / 24.0
-        trending_score = (view_velocity - old_view_velocity) / max(
-            old_view_velocity, 1.0
-        )
-
-        # Search popularity (how often appears in search results)
-        search_events = [e for e in events if e.is_search_submitted]
-        search_appearances = 0
-        for search_event in search_events:
-            if search_event.event_data:
-                search_result = search_event.event_data.get("searchResult", {})
-                product_variants = search_result.get("productVariants", [])
-                for variant in product_variants:
-                    if variant.get("product", {}).get("id") == product.get("id"):
-                        search_appearances += 1
-                        break
-        search_popularity = search_appearances / max(len(search_events), 1)
-
-        # Collection featured count
-        collections = context.get("collections", [])
-        featured_count = sum(
-            1
-            for c in collections
-            if product.get("id") in [p.get("id") for p in c.get("products", [])]
-            and c.get("isFeatured")
-        )
-
-        # Cross-sell opportunity score
-        cross_sell_score = self._calculate_cross_sell_opportunity(
-            product, product_orders, orders
-        )
-
-        # Inventory features
-        inventory_features = self._compute_inventory_features(product, product_orders)
-
-        # Seasonal demand multiplier
-        seasonal_multiplier = self._calculate_seasonal_demand(product, product_orders)
-
-        return {
-            "view_velocity": view_velocity,
-            "cart_velocity": cart_velocity,
-            "purchase_velocity": purchase_velocity,
-            "trending_score": trending_score,
-            "search_popularity": search_popularity,
-            "collection_featured_count": featured_count,
-            "cross_sell_opportunity_score": cross_sell_score,
-            **inventory_features,
-            "seasonal_demand_multiplier": seasonal_multiplier,
-        }
-
-    def _compute_relationship_features(
-        self, product: Dict[str, Any], context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute product relationship and cross-selling features"""
-        orders = context.get("orders", [])
-        events = context.get("events", [])
-
-        if not orders and not events:
-            return {
-                "frequently_bought_together_count": 0,
-                "viewed_together_score": 0.0,
-                "category_complementarity": 0.0,
-                "price_point_affinity": 0.0,
-                "style_affinity": 0.0,
-                "bundle_opportunity_score": 0.0,
-            }
-
-        # Frequently bought together
-        fbt_products = self._find_frequently_bought_together(product, orders)
-
-        # Viewed together (in same sessions)
-        viewed_together = self._find_viewed_together(product, events)
-
-        # Category complementarity
-        category_complementarity = self._calculate_category_complementarity(
-            product, fbt_products
-        )
-
-        # Price point affinity
-        price_affinity = self._calculate_price_affinity(product, fbt_products)
-
-        # Style affinity (based on tags and categories)
-        style_affinity = self._calculate_style_affinity(product, fbt_products)
-
-        # Bundle opportunity
-        bundle_score = self._calculate_bundle_opportunity(fbt_products, viewed_together)
-
-        return {
-            "frequently_bought_together_count": len(fbt_products),
-            "viewed_together_score": viewed_together,
-            "category_complementarity": category_complementarity,
-            "price_point_affinity": price_affinity,
-            "style_affinity": style_affinity,
-            "bundle_opportunity_score": bundle_score,
-        }
-
-    def _compute_seasonal_features(
-        self, product: Dict[str, Any], context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute seasonal and temporal product features"""
-        orders = context.get("orders", [])
-        events = context.get("events", [])
-
-        if not orders and not events:
-            return {
-                "seasonal_score": 0.0,
-                "current_season_relevance": 0.0,
-                "holiday_relevance": 0.0,
-                "weather_sensitivity": 0.0,
-                "monthly_demand_pattern": [0.0] * 12,
-                "peak_season": 0,
-            }
-
-        # Get product orders and events
-        product_orders = []
-        for order in orders:
-            for line_item in order.get("lineItems", []):
-                if line_item.get("productId") == product.get("id"):
-                    product_orders.append(order)
-                    break
-
-        product_events = [e for e in events if e.get("productId") == product.get("id")]
-
-        # Seasonal analysis
-        seasonal_score = self._calculate_seasonal_score(product_orders)
-        current_relevance = self._calculate_current_season_relevance(product)
-        holiday_relevance = self._calculate_holiday_relevance(product)
-        weather_sensitivity = self._calculate_weather_sensitivity(
-            product, product_orders
-        )
-
-        # Monthly demand pattern
-        monthly_pattern = self._calculate_monthly_demand_pattern(product_orders)
-        peak_season = (
-            monthly_pattern.index(max(monthly_pattern)) if monthly_pattern else 0
-        )
-
-        return {
-            "seasonal_score": seasonal_score,
-            "current_season_relevance": current_relevance,
-            "holiday_relevance": holiday_relevance,
-            "weather_sensitivity": weather_sensitivity,
-            "monthly_demand_pattern": monthly_pattern,
-            "peak_season": peak_season,
-        }
-
-    def _calculate_cross_sell_opportunity(
-        self, product: Dict[str, Any], product_orders: List, all_orders: List
-    ) -> float:
-        """Calculate cross-selling opportunity score"""
-        if not product_orders:
-            return 0.0
-
-        # Find products frequently bought with this product
-        co_purchased = {}
-        for order in product_orders:
-            for line_item in order.get("lineItems", []):
-                if line_item.get("productId") != product.get("id"):
-                    product_id = line_item.get("productId")
-                    co_purchased[product_id] = co_purchased.get(product_id, 0) + 1
-
-        if not co_purchased:
-            return 0.0
-
-        # Calculate opportunity score based on frequency and diversity
-        max_frequency = max(co_purchased.values())
-        diversity = len(co_purchased)
-        opportunity_score = (max_frequency / len(product_orders)) * (diversity / 10.0)
-
-        return min(opportunity_score, 1.0)
-
-    def _compute_inventory_features(
-        self, product: Dict[str, Any], product_orders: List
-    ) -> Dict[str, Any]:
-        """Compute inventory-related features"""
-        variants = product.get("variants") or []
-        if not variants:
-            return {
-                "inventory_velocity": 0.0,
-                "stockout_risk": 0.0,
-                "overstock_risk": 0.0,
-                "reorder_urgency": 0.0,
-            }
-
-        # Calculate total inventory
-        total_inventory = 0
-        for v in variants:
-            inv_qty = v.get("inventoryQuantity", 0)
-            try:
-                total_inventory += int(inv_qty)
-            except (ValueError, TypeError):
-                total_inventory += 0
-
-        # Calculate sales velocity (units sold per day)
-        if product_orders:
-            total_quantity_sold = 0
-            for order in product_orders:
-                for li in order.get("lineItems", []):
-                    if li.get("productId") == product.get("id"):
-                        try:
-                            total_quantity_sold += int(li.get("quantity", 0))
-                        except (ValueError, TypeError):
-                            continue
-            # Parse dates from strings
-            last_order_date = product_orders[-1].get("orderDate")
-            first_order_date = product_orders[0].get("orderDate")
-
-            # Ensure both dates are datetime objects
-            if isinstance(last_order_date, str):
-                try:
-                    last_order_date = datetime.fromisoformat(
-                        last_order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    last_order_date = datetime.now()
-
-            if isinstance(first_order_date, str):
-                try:
-                    first_order_date = datetime.fromisoformat(
-                        first_order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    first_order_date = datetime.now()
-
-            # Calculate days span safely
-            try:
-                days_span = (last_order_date - first_order_date).days
-            except (TypeError, AttributeError):
-                days_span = 1  # Default to 1 day to avoid division by zero
-            inventory_velocity = total_quantity_sold / max(days_span, 1)
-        else:
-            inventory_velocity = 0.0
-
-        # Stockout risk (probability of running out in next 30 days)
-        if inventory_velocity > 0:
-            days_until_stockout = total_inventory / inventory_velocity
-            stockout_risk = max(0, 1 - (days_until_stockout / 30))
-        else:
-            stockout_risk = 0.0
-
-        # Overstock risk (inventory too high for demand)
-        if inventory_velocity > 0:
-            optimal_inventory = inventory_velocity * 30  # 30 days of inventory
-            overstock_risk = max(
-                0, (total_inventory - optimal_inventory) / optimal_inventory
-            )
-        else:
-            overstock_risk = 0.0
-
-        # Reorder urgency
-        reorder_urgency = min(stockout_risk + (1 - overstock_risk), 1.0)
-
-        return {
-            "inventory_velocity": inventory_velocity,
-            "stockout_risk": stockout_risk,
-            "overstock_risk": overstock_risk,
-            "reorder_urgency": reorder_urgency,
-        }
-
-    def _calculate_seasonal_demand(
-        self, product: Dict[str, Any], product_orders: List
-    ) -> float:
-        """Calculate seasonal demand multiplier"""
-        if not product_orders:
-            return 1.0
-
-        # Analyze seasonal patterns in product orders
-        monthly_orders = [0] * 12
-        for order in product_orders:
-            order_date = order.get("orderDate", now_utc())
-            if isinstance(order_date, str):
-                try:
-                    order_date = datetime.fromisoformat(
-                        order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    order_date = now_utc()
-            month = order_date.month - 1
-            monthly_orders[month] += 1
-
-        # Calculate seasonal variation
-        if monthly_orders:
-            avg_orders = sum(monthly_orders) / 12
-            current_month = now_utc().month - 1
-            current_demand = monthly_orders[current_month]
-            seasonal_multiplier = current_demand / max(avg_orders, 1)
-        else:
-            seasonal_multiplier = 1.0
-
-        return seasonal_multiplier
-
-    def _find_frequently_bought_together(
-        self, product: Dict[str, Any], orders: List
-    ) -> List[str]:
-        """Find products frequently bought together with this product"""
-        co_purchased = {}
-
-        for order in orders:
-            order_products = [li.get("productId") for li in order.get("lineItems", [])]
-            if product.get("id") in order_products:
-                for other_product in order_products:
-                    if other_product != product.get("id"):
-                        co_purchased[other_product] = (
-                            co_purchased.get(other_product, 0) + 1
-                        )
-
-        # Return top 5 most frequently bought together
-        sorted_products = sorted(co_purchased.items(), key=lambda x: x[1], reverse=True)
-        return [product_id for product_id, _ in sorted_products[:5]]
-
-    def _find_viewed_together(self, product: Dict[str, Any], events: List) -> float:
-        """Calculate how often this product is viewed together with others in sessions"""
-        # Group events by session (simplified)
-        sessions = {}
-        for event in events:
-            # Use a simple session grouping based on time proximity
-            customer_id = event.get("customerId", "unknown")
-            occurred_at = event.get("occurredAt")
-            if isinstance(occurred_at, str):
-                try:
-                    occurred_at = datetime.fromisoformat(
-                        occurred_at.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    occurred_at = now_utc()
-            session_key = f"{customer_id}_{occurred_at.date()}"
-            if session_key not in sessions:
-                sessions[session_key] = []
-            sessions[session_key].append(event)
-
-        viewed_together_count = 0
-        total_sessions_with_product = 0
-
-        for session_events in sessions.values():
-            session_products = set()
-            for event in session_events:
-                product_id = event.get("productId")
-                if product_id:
-                    session_products.add(product_id)
-
-            if product.get("id") in session_products:
-                total_sessions_with_product += 1
-                if len(session_products) > 1:
-                    viewed_together_count += 1
-
-        return viewed_together_count / max(total_sessions_with_product, 1)
-
-    def _calculate_category_complementarity(
-        self, product: Dict[str, Any], fbt_products: List[str]
-    ) -> float:
-        """Calculate how well this product's category complements others"""
-        if not fbt_products:
-            return 0.0
-
-        # This is a simplified version - in practice, you'd have category relationship data
-        product_category = product.get("productType", "")
-
-        # Define complementary categories (simplified)
-        complementary_categories = {
-            "Clothing": ["Accessories", "Shoes"],
-            "Electronics": ["Accessories", "Cases"],
-            "Home": ["Decor", "Furniture"],
-        }
-
-        complement_count = 0
-        for fbt_product_id in fbt_products:
-            # In practice, you'd look up the category of fbt_product_id
-            # For now, we'll use a simplified approach
-            complement_count += 1  # Placeholder
-
-        return complement_count / len(fbt_products)
-
-    def _calculate_price_affinity(
-        self, product: Dict[str, Any], fbt_products: List[str]
-    ) -> float:
-        """Calculate price point affinity with frequently bought together products"""
-        if not fbt_products or not product.get("variants"):
-            return 0.0
-
-        variants = product.get("variants") or [{}]
-        product_price = variants[0].get("price", 0.0) if variants else 0.0
-
-        # In practice, you'd look up prices of fbt_products
-        # For now, we'll use a simplified approach
-        price_variance = 0.2  # Assume 20% variance is acceptable
-
-        return 1.0 - price_variance  # Higher score for similar price points
-
-    def _calculate_style_affinity(
-        self, product: Dict[str, Any], fbt_products: List[str]
-    ) -> float:
-        """Calculate style affinity based on tags and categories"""
-        if not fbt_products:
-            return 0.0
-
-        product_tags = set(product.get("tags") or [])
-        product_vendor = product.get("vendor", "")
-
-        # In practice, you'd compare with fbt_products' tags and vendors
-        # For now, we'll use a simplified approach
-        style_similarity = 0.7  # Placeholder
-
-        return style_similarity
-
-    def _calculate_bundle_opportunity(
-        self, fbt_products: List[str], viewed_together: float
-    ) -> float:
-        """Calculate bundle opportunity score"""
-        if not fbt_products:
-            return 0.0
-
-        # Combine frequently bought together and viewed together scores
-        fbt_score = len(fbt_products) / 10.0  # Normalize to 0-1
-        bundle_score = (fbt_score + viewed_together) / 2.0
-
-        return min(bundle_score, 1.0)
-
-    def _calculate_seasonal_score(self, product_orders: List) -> float:
-        """Calculate how seasonal this product is"""
-        if not product_orders:
-            return 0.0
-
-        # Analyze order distribution across months
-        monthly_orders = [0] * 12
-        for order in product_orders:
-            order_date = order.get("orderDate", now_utc())
-            if isinstance(order_date, str):
-                try:
-                    order_date = datetime.fromisoformat(
-                        order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    order_date = now_utc()
-            month = order_date.month - 1
-            monthly_orders[month] += 1
-
-        if not any(monthly_orders):
-            return 0.0
-
-        # Calculate coefficient of variation (higher = more seasonal)
-        mean_orders = sum(monthly_orders) / 12
-        if mean_orders == 0:
-            return 0.0
-
-        variance = sum((x - mean_orders) ** 2 for x in monthly_orders) / 12
-        std_dev = variance**0.5
-        seasonal_score = std_dev / mean_orders
-
-        return min(seasonal_score, 1.0)
-
-    def _calculate_current_season_relevance(self, product: Dict[str, Any]) -> float:
-        """Calculate how relevant this product is for the current season"""
-        current_month = now_utc().month
-
-        # Define seasonal relevance (simplified)
-        seasonal_keywords = {
-            "summer": ["swim", "beach", "sun", "hot", "light"],
-            "winter": ["warm", "cold", "snow", "heavy", "coat"],
-            "spring": ["fresh", "light", "colorful", "renewal"],
-            "fall": ["autumn", "warm", "cozy", "harvest"],
-        }
-
-        product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags") or []).lower()
-        product_text = f"{product_title} {product_tags}"
-
-        # Determine current season
-        if current_month in [6, 7, 8]:
-            current_season = "summer"
-        elif current_month in [12, 1, 2]:
-            current_season = "winter"
-        elif current_month in [3, 4, 5]:
-            current_season = "spring"
-        else:
-            current_season = "fall"
-
-        # Check for seasonal keywords
-        season_keywords = seasonal_keywords.get(current_season, [])
-        relevance_score = sum(
-            1 for keyword in season_keywords if keyword in product_text
-        )
-        relevance_score = (
-            relevance_score / len(season_keywords) if season_keywords else 0.0
-        )
-
-        return relevance_score
-
-    def _calculate_holiday_relevance(self, product: Dict[str, Any]) -> float:
-        """Calculate how relevant this product is for upcoming holidays"""
-        current_month = now_utc().month
-
-        # Define holiday relevance
-        holiday_keywords = {
-            12: ["christmas", "holiday", "gift", "winter", "festive"],
-            2: ["valentine", "love", "romantic", "heart"],
-            10: ["halloween", "spooky", "costume", "trick"],
-            11: ["thanksgiving", "grateful", "family", "harvest"],
-        }
-
-        product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags") or []).lower()
-        product_text = f"{product_title} {product_tags}"
-
-        keywords = holiday_keywords.get(current_month, [])
-        if not keywords:
-            return 0.0
-
-        relevance_score = sum(1 for keyword in keywords if keyword in product_text)
-        return relevance_score / len(keywords)
-
-    def _calculate_weather_sensitivity(
+    def _compute_30day_metrics(
         self,
-        product: Dict[str, Any],
-    ) -> float:
-        """Calculate how much weather affects demand for this product"""
-        # This is a simplified version - in practice, you'd correlate with weather data
-        product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags") or []).lower()
-        product_text = f"{product_title} {product_tags}"
+        product_id: str,
+        orders: List[Dict[str, Any]],
+        behavioral_events: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Compute 30-day window metrics"""
 
-        weather_keywords = [
-            "rain",
-            "sun",
-            "snow",
-            "wind",
-            "hot",
-            "cold",
-            "weather",
-            "outdoor",
-            "indoor",
-        ]
-        weather_mentions = sum(
-            1 for keyword in weather_keywords if keyword in product_text
+        now = now_utc()
+        thirty_days_ago = now - timedelta(days=30)
+
+        # Filter events in 30-day window
+        recent_events = []
+        for event in behavioral_events:
+            event_time = self._parse_date(event.get("occurredAt"))
+            if event_time and event_time >= thirty_days_ago:
+                event_product_id = self._extract_product_id_from_event(event)
+                if event_product_id == product_id:
+                    recent_events.append(event)
+
+        # Count views and unique viewers
+        view_count = 0
+        unique_viewers = set()
+        cart_add_count = 0
+
+        for event in recent_events:
+            event_type = event.get("eventType", "")
+
+            if event_type == "product_viewed":
+                view_count += 1
+                customer_id = event.get("customerId")
+                if customer_id:
+                    unique_viewers.add(customer_id)
+                else:
+                    # Use session ID for anonymous users
+                    session_id = self._extract_session_id(event)
+                    if session_id:
+                        unique_viewers.add(f"session_{session_id}")
+
+            elif event_type == "product_added_to_cart":
+                cart_add_count += 1
+
+        # Filter orders in 30-day window
+        recent_orders = []
+        unique_purchasers = set()
+
+        for order in orders:
+            order_date = self._parse_date(order.get("orderDate"))
+            if order_date and order_date >= thirty_days_ago:
+                # Check if this order contains the product
+                for line_item in order.get("lineItems", []):
+                    item_product_id = self._extract_product_id_from_line_item(line_item)
+                    if item_product_id == product_id:
+                        recent_orders.append(order)
+                        customer_id = order.get("customerId")
+                        if customer_id:
+                            unique_purchasers.add(customer_id)
+                        break
+
+        return {
+            "view_count": view_count,
+            "unique_viewers": len(unique_viewers),
+            "cart_add_count": cart_add_count,
+            "purchase_count": len(recent_orders),
+            "unique_purchasers": len(unique_purchasers),
+        }
+
+    def _compute_conversion_metrics(
+        self, metrics_30d: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute conversion rates from 30-day metrics"""
+
+        view_count = metrics_30d["view_count"]
+        cart_add_count = metrics_30d["cart_add_count"]
+        purchase_count = metrics_30d["purchase_count"]
+
+        view_to_cart_rate = (
+            cart_add_count / max(view_count, 1) if view_count > 0 else 0.0
+        )
+        cart_to_purchase_rate = (
+            purchase_count / max(cart_add_count, 1) if cart_add_count > 0 else 0.0
+        )
+        overall_conversion_rate = (
+            purchase_count / max(view_count, 1) if view_count > 0 else 0.0
         )
 
-        return weather_mentions / len(weather_keywords)
+        return {
+            "view_to_cart_rate": round(view_to_cart_rate, 4),
+            "cart_to_purchase_rate": round(cart_to_purchase_rate, 4),
+            "overall_conversion_rate": round(overall_conversion_rate, 4),
+        }
 
-    def _calculate_monthly_demand_pattern(self, product_orders: List) -> List[float]:
-        """Calculate monthly demand pattern"""
-        monthly_orders = [0.0] * 12
+    def _compute_temporal_metrics(
+        self,
+        product_id: str,
+        orders: List[Dict[str, Any]],
+        behavioral_events: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Compute temporal metrics"""
 
-        for order in product_orders:
-            order_date = order.get("orderDate", now_utc())
-            if isinstance(order_date, str):
-                try:
-                    order_date = datetime.fromisoformat(
-                        order_date.replace("Z", "+00:00")
-                    )
-                except (ValueError, TypeError):
-                    order_date = now_utc()
-            month = order_date.month - 1
-            monthly_orders[month] += 1
+        # Find last view
+        last_viewed_at = None
+        for event in behavioral_events:
+            if event.get("eventType") == "product_viewed":
+                event_product_id = self._extract_product_id_from_event(event)
+                if event_product_id == product_id:
+                    event_time = self._parse_date(event.get("occurredAt"))
+                    if event_time:
+                        if not last_viewed_at or event_time > last_viewed_at:
+                            last_viewed_at = event_time
 
-        # Normalize to 0-1 scale
-        max_orders = max(monthly_orders) if monthly_orders else 1
-        return [orders / max_orders for orders in monthly_orders]
+        # Find first and last purchase
+        first_purchased_at = None
+        last_purchased_at = None
+
+        for order in orders:
+            for line_item in order.get("lineItems", []):
+                item_product_id = self._extract_product_id_from_line_item(line_item)
+                if item_product_id == product_id:
+                    order_date = self._parse_date(order.get("orderDate"))
+                    if order_date:
+                        if not first_purchased_at or order_date < first_purchased_at:
+                            first_purchased_at = order_date
+                        if not last_purchased_at or order_date > last_purchased_at:
+                            last_purchased_at = order_date
+                    break
+
+        # Calculate days since
+        days_since_first_purchase = None
+        days_since_last_purchase = None
+
+        if first_purchased_at:
+            days_since_first_purchase = (now_utc() - first_purchased_at).days
+
+        if last_purchased_at:
+            days_since_last_purchase = (now_utc() - last_purchased_at).days
+
+        return {
+            "last_viewed_at": last_viewed_at,
+            "last_purchased_at": last_purchased_at,
+            "first_purchased_at": first_purchased_at,
+            "days_since_first_purchase": days_since_first_purchase,
+            "days_since_last_purchase": days_since_last_purchase,
+        }
+
+    def _compute_price_inventory_metrics(
+        self, product_data: Dict[str, Any], orders: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute price and inventory metrics"""
+
+        # Get actual selling prices from orders
+        selling_prices = []
+        total_quantity_sold = 0
+
+        for order in orders:
+            for line_item in order.get("lineItems", []):
+                item_product_id = self._extract_product_id_from_line_item(line_item)
+                if item_product_id == product_data.get("productId"):
+                    price = float(line_item.get("price", 0.0))
+                    quantity = int(line_item.get("quantity", 1))
+                    selling_prices.extend([price] * quantity)
+                    total_quantity_sold += quantity
+
+        # Calculate price metrics
+        if selling_prices:
+            avg_selling_price = statistics.mean(selling_prices)
+            price_variance = (
+                statistics.variance(selling_prices) if len(selling_prices) > 1 else 0.0
+            )
+        else:
+            # Use product data price as fallback
+            avg_selling_price = float(product_data.get("price", 0.0))
+            price_variance = 0.0
+
+        # Calculate inventory turnover
+        total_inventory = int(product_data.get("totalInventory", 0))
+        if total_inventory > 0 and total_quantity_sold > 0:
+            # Simplified: assuming data covers 30 days
+            inventory_turnover = total_quantity_sold / total_inventory
+            stock_velocity = total_quantity_sold / 30.0  # Units per day
+        else:
+            inventory_turnover = 0.0
+            stock_velocity = 0.0
+
+        # Determine price tier
+        price_tier = self._calculate_price_tier(avg_selling_price)
+
+        return {
+            "avg_selling_price": round(avg_selling_price, 2),
+            "price_variance": round(price_variance, 2),
+            "inventory_turnover": round(inventory_turnover, 4),
+            "stock_velocity": round(stock_velocity, 2),
+            "price_tier": price_tier,
+        }
+
+    def _compute_metadata_scores(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute product metadata richness scores (0-1 normalized)"""
+
+        # Variant complexity
+        variants = product_data.get("variants", [])
+        if isinstance(variants, str):
+            try:
+                import json
+
+                variants = json.loads(variants)
+            except:
+                variants = []
+
+        variant_count = len(variants) if isinstance(variants, list) else 0
+        variant_complexity = min(variant_count / 10.0, 1.0)  # Normalize to 0-1
+
+        # Image richness
+        images = product_data.get("images", [])
+        if isinstance(images, str):
+            try:
+                import json
+
+                images = json.loads(images)
+            except:
+                images = []
+
+        image_count = len(images) if isinstance(images, list) else 0
+        image_richness = min(image_count / 5.0, 1.0)  # Normalize to 0-1
+
+        # Tag diversity
+        tags = product_data.get("tags", [])
+        if isinstance(tags, str):
+            try:
+                import json
+
+                tags = json.loads(tags)
+            except:
+                tags = []
+
+        tag_count = len(tags) if isinstance(tags, list) else 0
+        tag_diversity = min(tag_count / 10.0, 1.0)  # Normalize to 0-1
+
+        # Metafield utilization
+        metafields = product_data.get("metafields", [])
+        if isinstance(metafields, str):
+            try:
+                import json
+
+                metafields = json.loads(metafields)
+            except:
+                metafields = []
+
+        metafield_count = len(metafields) if isinstance(metafields, list) else 0
+        metafield_utilization = min(metafield_count / 5.0, 1.0)  # Normalize to 0-1
+
+        return {
+            "variant_complexity": round(variant_complexity, 3),
+            "image_richness": round(image_richness, 3),
+            "tag_diversity": round(tag_diversity, 3),
+            "metafield_utilization": round(metafield_utilization, 3),
+        }
+
+    def _compute_popularity_trending_scores(
+        self, metrics_30d: Dict[str, Any], temporal_metrics: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute popularity and trending scores"""
+
+        # Popularity score based on views and purchases
+        view_score = min(metrics_30d["view_count"] / 100.0, 1.0)  # Normalize
+        purchase_score = min(metrics_30d["purchase_count"] / 10.0, 1.0)  # Normalize
+
+        # Weighted combination
+        popularity_score = (view_score * 0.3) + (purchase_score * 0.7)
+
+        # Trending score based on recency
+        trending_score = 0.0
+
+        if temporal_metrics["last_viewed_at"]:
+            days_since_view = (now_utc() - temporal_metrics["last_viewed_at"]).days
+            view_recency = max(0, 1 - (days_since_view / 7))  # Decay over 7 days
+            trending_score += view_recency * 0.5
+
+        if temporal_metrics["last_purchased_at"]:
+            days_since_purchase = (
+                now_utc() - temporal_metrics["last_purchased_at"]
+            ).days
+            purchase_recency = max(
+                0, 1 - (days_since_purchase / 7)
+            )  # Decay over 7 days
+            trending_score += purchase_recency * 0.5
+
+        return {
+            "popularity_score": round(popularity_score, 3),
+            "trending_score": round(trending_score, 3),
+        }
+
+    def _calculate_price_tier(self, price: float) -> str:
+        """Calculate price tier"""
+        if price < 25:
+            return "budget"
+        elif price < 75:
+            return "mid"
+        elif price < 200:
+            return "premium"
+        else:
+            return "luxury"
+
+    def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
+        """Extract product ID from behavioral event"""
+        event_type = event.get("eventType", "")
+        event_data = event.get("eventData", {})
+
+        if event_type == "product_viewed":
+            product_variant = event_data.get("data", {}).get("productVariant", {})
+            product = product_variant.get("product", {})
+            return self._extract_id_from_gid(product.get("id", ""))
+
+        elif event_type == "product_added_to_cart":
+            cart_line = event_data.get("data", {}).get("cartLine", {})
+            merchandise = cart_line.get("merchandise", {})
+            product = merchandise.get("product", {})
+            return self._extract_id_from_gid(product.get("id", ""))
+
+        return None
+
+    def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
+        """Extract product ID from order line item"""
+        if "productId" in line_item:
+            return str(line_item["productId"])
+
+        if "variant" in line_item and isinstance(line_item["variant"], dict):
+            product = line_item["variant"].get("product", {})
+            if isinstance(product, dict):
+                return self._extract_id_from_gid(product.get("id", ""))
+
+        return ""
+
+    def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
+        """Extract session ID from event"""
+        event_data = event.get("eventData", {})
+        return event_data.get("clientId")
+
+    def _extract_id_from_gid(self, gid: str) -> str:
+        """Extract numeric ID from Shopify GID"""
+        if not gid:
+            return ""
+        if "/" in gid:
+            return gid.split("/")[-1]
+        return gid
+
+    def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
+        """Parse date from various formats"""
+        if not date_value:
+            return None
+
+        if isinstance(date_value, datetime.datetime):
+            return date_value
+
+        if isinstance(date_value, str):
+            try:
+                return datetime.datetime.fromisoformat(
+                    date_value.replace("Z", "+00:00")
+                )
+            except:
+                return None
+
+        return None
+
+    def _get_default_features(self, shop_id: str, product_id: str) -> Dict[str, Any]:
+        """Return default features when computation fails"""
+        return {
+            "shopId": shop_id,
+            "productId": product_id,
+            "viewCount30d": 0,
+            "uniqueViewers30d": 0,
+            "cartAddCount30d": 0,
+            "purchaseCount30d": 0,
+            "uniquePurchasers30d": 0,
+            "viewToCartRate": None,
+            "cartToPurchaseRate": None,
+            "overallConversionRate": None,
+            "lastViewedAt": None,
+            "lastPurchasedAt": None,
+            "firstPurchasedAt": None,
+            "daysSinceFirstPurchase": None,
+            "daysSinceLastPurchase": None,
+            "avgSellingPrice": None,
+            "priceVariance": None,
+            "inventoryTurnover": None,
+            "stockVelocity": None,
+            "priceTier": None,
+            "variantComplexity": None,
+            "imageRichness": None,
+            "tagDiversity": None,
+            "metafieldUtilization": None,
+            "popularityScore": 0.0,
+            "trendingScore": 0.0,
+            "lastComputedAt": now_utc(),
+        }
