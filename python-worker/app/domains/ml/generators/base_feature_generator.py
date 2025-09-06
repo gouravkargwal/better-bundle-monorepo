@@ -62,7 +62,32 @@ class BaseFeatureGenerator(ABC):
         self, created_at, updated_at=None
     ) -> Dict[str, int]:
         """Compute time-based features"""
+        from datetime import datetime
+
         now = now_utc()
+
+        # Handle both datetime objects and string timestamps
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                created_at = None
+
+        if isinstance(updated_at, str):
+            try:
+                updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                updated_at = None
+
+        if created_at is None:
+            return {
+                "days_since_creation": 0,
+                "is_recent": 0,
+                "is_old": 0,
+                "days_since_update": 0,
+                "is_recently_updated": 0,
+            }
+
         days_since_creation = (now - created_at).days
 
         features = {
@@ -77,6 +102,13 @@ class BaseFeatureGenerator(ABC):
                 {
                     "days_since_update": days_since_update,
                     "is_recently_updated": 1 if days_since_update < 7 else 0,
+                }
+            )
+        else:
+            features.update(
+                {
+                    "days_since_update": 0,
+                    "is_recently_updated": 0,
                 }
             )
 

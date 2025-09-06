@@ -355,7 +355,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         cart_velocity = len(recent_carts) / 24.0
 
         # Purchase velocity (purchases per hour in last 24h)
-        recent_orders = [o for o in product_orders if o.created_at >= last_24h]
+        recent_orders = [o for o in product_orders if o.get("orderDate") >= last_24h]
         purchase_velocity = len(recent_orders) / 24.0
 
         # Trending score (velocity change over time)
@@ -565,7 +565,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 for order in product_orders
             )
             days_span = (
-                product_orders[-1].created_at - product_orders[0].created_at
+                product_orders[-1].get("orderDate") - product_orders[0].get("orderDate")
             ).days
             inventory_velocity = total_quantity_sold / max(days_span, 1)
         else:

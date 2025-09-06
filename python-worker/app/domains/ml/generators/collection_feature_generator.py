@@ -74,7 +74,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             return {}
 
     def _compute_basic_collection_features(
-        self, collection: ShopifyCollection
+        self, collection: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute basic collection features"""
         return {
@@ -154,7 +154,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_collection_time_features(
-        self, collection: ShopifyCollection
+        self, collection: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute time-based collection features"""
         return self._compute_time_based_features(

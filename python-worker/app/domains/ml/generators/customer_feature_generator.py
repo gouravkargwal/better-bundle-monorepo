@@ -361,11 +361,13 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         address = customer.get("defaultAddress", {})
         return {
             "has_address": 1,
-            "country_encoded": self._encode_categorical_feature(address.country or ""),
-            "province_encoded": self._encode_categorical_feature(
-                address.province or ""
+            "country_encoded": self._encode_categorical_feature(
+                address.get("country", "")
             ),
-            "city_encoded": self._encode_categorical_feature(address.city or ""),
+            "province_encoded": self._encode_categorical_feature(
+                address.get("province", "")
+            ),
+            "city_encoded": self._encode_categorical_feature(address.get("city", "")),
         }
 
     def _compute_customer_time_features(

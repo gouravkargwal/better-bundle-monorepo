@@ -16,7 +16,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify shops"""
 
     async def generate_features(
-        self, shop: ShopifyShop, context: Dict[str, Any]
+        self, shop: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate features for a shop
@@ -29,7 +29,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features
         """
         try:
-            logger.debug(f"Computing features for shop: {shop.id}")
+            logger.debug(f"Computing features for shop: {shop.get('id', 'unknown')}")
 
             features = {}
             products = context.get("products", [])
@@ -66,26 +66,34 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
-            logger.debug(f"Computed {len(features)} features for shop: {shop.id}")
+            logger.debug(
+                f"Computed {len(features)} features for shop: {shop.get('id', 'unknown')}"
+            )
             return features
 
         except Exception as e:
-            logger.error(f"Failed to compute shop features for {shop.id}: {str(e)}")
+            logger.error(
+                f"Failed to compute shop features for {shop.get('id', 'unknown')}: {str(e)}"
+            )
             return {}
 
     def _compute_basic_shop_features(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         """Compute basic shop features"""
         return {
-            "shop_id": shop.id,
-            "shop_name_length": len(shop.name or ""),
-            "domain_encoded": self._encode_categorical_feature(shop.domain or ""),
-            "plan_encoded": self._encode_categorical_feature(shop.plan_name or ""),
-            "currency_encoded": self._encode_categorical_feature(shop.currency or ""),
-            "country_encoded": self._encode_categorical_feature(shop.country or ""),
-            "timezone_encoded": self._encode_categorical_feature(
-                shop.iana_timezone or ""
+            "shop_id": shop.get("id", ""),
+            "shop_name_length": len(shop.get("name", "")),
+            "domain_encoded": self._encode_categorical_feature(shop.get("domain", "")),
+            "plan_encoded": self._encode_categorical_feature(shop.get("planName", "")),
+            "currency_encoded": self._encode_categorical_feature(
+                shop.get("currencyCode", "")
             ),
-            "is_shopify_plus": 1 if shop.plan_name == "shopify_plus" else 0,
+            "country_encoded": self._encode_categorical_feature(
+                shop.get("country", "")
+            ),
+            "timezone_encoded": self._encode_categorical_feature(
+                shop.get("timezone", "")
+            ),
+            "is_shopify_plus": 1 if shop.get("planName") == "shopify_plus" else 0,
         }
 
     def _compute_shop_product_features(
@@ -203,7 +211,7 @@ class ShopFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_shop_event_features(
-        self, shop: ShopifyShop, events: List[BehavioralEvent]
+        self, shop: Dict[str, Any], events: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute event-related shop features"""
         if not events:

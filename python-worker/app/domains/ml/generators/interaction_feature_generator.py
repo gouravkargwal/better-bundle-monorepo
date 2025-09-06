@@ -25,8 +25,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     async def generate_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
@@ -42,7 +42,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         """
         try:
             logger.debug(
-                f"Computing interaction features for customer: {customer.id}, product: {product.id}"
+                f"Computing interaction features for customer: {customer.get('id', 'unknown')}, product: {product.get('id', 'unknown')}"
             )
 
             features = {}
@@ -78,35 +78,36 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             features = self.validate_features(features)
 
             logger.debug(
-                f"Computed {len(features)} interaction features for customer: {customer.id}, product: {product.id}"
+                f"Computed {len(features)} interaction features for customer: {customer.get('id', 'unknown')}, product: {product.get('id', 'unknown')}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute interaction features for customer: {customer.id}, product: {product.id}: {str(e)}"
+                f"Failed to compute interaction features for customer: {customer.get('id', 'unknown')}, product: {product.get('id', 'unknown')}: {str(e)}"
             )
             return {}
 
     def _compute_affinity_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute customer-product affinity features"""
         # Get customer's interaction with this specific product
         product_events = [
             e
             for e in events
-            if e.customer_id == customer.id and e.get_product_id() == product.id
+            if e.get("customerId") == customer.get("id")
+            and e.get("productId") == product.get("id")
         ]
         product_orders = []
         for order in orders:
-            if order.customer_id == customer.id:
-                for line_item in order.line_items:
-                    if line_item.product_id == product.id:
+            if order.get("customerId") == customer.get("id"):
+                for line_item in order.get("lineItems", []):
+                    if line_item.get("productId") == product.get("id"):
                         product_orders.append(order)
                         break
 
@@ -154,9 +155,9 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_purchase_history_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        orders: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute purchase history features for this customer-product pair"""
         # Get customer's orders containing this product
@@ -165,12 +166,14 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         total_spent = 0.0
 
         for order in orders:
-            if order.customer_id == customer.id:
-                for line_item in order.line_items:
-                    if line_item.product_id == product.id:
+            if order.get("customerId") == customer.get("id"):
+                for line_item in order.get("lineItems", []):
+                    if line_item.get("productId") == product.get("id"):
                         product_orders.append(order)
-                        total_quantity += line_item.quantity
-                        total_spent += line_item.price * line_item.quantity
+                        total_quantity += line_item.get("quantity", 0)
+                        total_spent += line_item.get("price", 0.0) * line_item.get(
+                            "quantity", 0
+                        )
 
         if not product_orders:
             return {
@@ -185,7 +188,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Calculate purchase patterns
-        order_dates = [order.created_at for order in product_orders]
+        order_dates = [order.get("orderDate") for order in product_orders]
         order_dates.sort()
 
         # Purchase frequency (purchases per month)
@@ -222,16 +225,17 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_behavioral_interaction_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute behavioral interaction features"""
         # Get customer's events for this product
         product_events = [
             e
             for e in events
-            if e.customer_id == customer.id and e.get_product_id() == product.id
+            if e.get("customerId") == customer.get("id")
+            and e.get("productId") == product.get("id")
         ]
 
         if not product_events:
@@ -270,7 +274,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         # Session participation (how many sessions included this product)
         total_customer_sessions = len(
             self._group_events_by_session(
-                [e for e in events if e.customer_id == customer.id]
+                [e for e in events if e.get("customerId") == customer.get("id")]
             )
         )
         session_participation = len(sessions) / max(total_customer_sessions, 1)
@@ -309,23 +313,24 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_temporal_interaction_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute temporal interaction features"""
         # Get customer's events and orders for this product
         product_events = [
             e
             for e in events
-            if e.customer_id == customer.id and e.get_product_id() == product.id
+            if e.get("customerId") == customer.get("id")
+            and e.get("productId") == product.get("id")
         ]
         product_orders = []
         for order in orders:
-            if order.customer_id == customer.id:
-                for line_item in order.line_items:
-                    if line_item.product_id == product.id:
+            if order.get("customerId") == customer.get("id"):
+                for line_item in order.get("lineItems", []):
+                    if line_item.get("productId") == product.get("id"):
                         product_orders.append(order)
                         break
 
@@ -346,7 +351,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         for event in product_events:
             all_interactions.append(("event", event.occurred_at))
         for order in product_orders:
-            all_interactions.append(("order", order.created_at))
+            all_interactions.append(("order", order.get("orderDate")))
 
         all_interactions.sort(key=lambda x: x[1])
 
@@ -408,16 +413,17 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _compute_intent_features(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute intent and engagement features"""
         # Get customer's events for this product
         product_events = [
             e
             for e in events
-            if e.customer_id == customer.id and e.get_product_id() == product.id
+            if e.get("customerId") == customer.get("id")
+            and e.get("productId") == product.get("id")
         ]
 
         if not product_events:
@@ -480,13 +486,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _calculate_category_affinity(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
     ) -> float:
         """Calculate customer's affinity for this product's category"""
-        product_category = product.product_type or ""
+        product_category = product.get("productType", "") or ""
         if not product_category:
             return 0.0
 
@@ -495,11 +501,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         total_interactions = 0
 
         for event in events:
-            if event.customer_id == customer.id:
+            if event.get("customerId") == customer.get("id", ""):
                 total_interactions += 1
-                if event.event_data:
-                    event_product = event.event_data.get("productVariant", {}).get(
-                        "product", {}
+                if event.get("eventData"):
+                    event_product = (
+                        event.get("eventData", {})
+                        .get("productVariant", {})
+                        .get("product", {})
                     )
                     if event_product.get("type") == product_category:
                         category_interactions += 1
@@ -508,25 +516,25 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _calculate_price_affinity(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
     ) -> float:
         """Calculate customer's affinity for this product's price point"""
-        if not product.variants:
+        if not product.get("variants", []):
             return 0.0
 
-        product_price = product.variants[0].price or 0
+        product_price = product.get("variants", [{}])[0].get("price", 0.0)
         if product_price == 0:
             return 0.0
 
         # Get customer's purchase history prices
         customer_prices = []
         for order in orders:
-            if order.customer_id == customer.id:
-                for line_item in order.line_items:
-                    customer_prices.append(line_item.price)
+            if order.get("customerId") == customer.get("id"):
+                for line_item in order.get("lineItems", []):
+                    customer_prices.append(line_item.get("price", 0.0))
 
         if not customer_prices:
             return 0.0
@@ -547,13 +555,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _calculate_brand_affinity(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
-        orders: List[ShopifyOrder],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
     ) -> float:
         """Calculate customer's affinity for this product's brand/vendor"""
-        product_vendor = product.vendor or ""
+        product_vendor = product.get("vendor", "") or ""
         if not product_vendor:
             return 0.0
 
@@ -562,11 +570,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         total_interactions = 0
 
         for event in events:
-            if event.customer_id == customer.id:
+            if event.get("customerId") == customer.get("id", ""):
                 total_interactions += 1
-                if event.event_data:
-                    event_product = event.event_data.get("productVariant", {}).get(
-                        "product", {}
+                if event.get("eventData"):
+                    event_product = (
+                        event.get("eventData", {})
+                        .get("productVariant", {})
+                        .get("product", {})
                     )
                     if event_product.get("vendor") == product_vendor:
                         vendor_interactions += 1
@@ -574,8 +584,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return vendor_interactions / max(total_interactions, 1)
 
     def _group_events_by_session(
-        self, events: List[BehavioralEvent]
-    ) -> List[List[BehavioralEvent]]:
+        self, events: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
         """Group events by session using time proximity"""
         if not events:
             return []
@@ -603,7 +613,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return sessions
 
     def _analyze_abandonment_points(
-        self, product_events: List[BehavioralEvent]
+        self, product_events: List[Dict[str, Any]]
     ) -> List[str]:
         """Analyze where customer abandons the product journey"""
         abandonment_points = []
@@ -623,7 +633,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
         return abandonment_points
 
-    def _count_recovery_actions(self, product_events: List[BehavioralEvent]) -> int:
+    def _count_recovery_actions(self, product_events: List[Dict[str, Any]]) -> int:
         """Count recovery actions (return visits after abandonment)"""
         # This is a simplified version - in practice, you'd track more sophisticated recovery patterns
         sessions = self._group_events_by_session(product_events)
@@ -659,19 +669,18 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _calculate_price_sensitivity_for_product(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
     ) -> float:
         """Calculate price sensitivity for this specific product"""
         # Get all product prices this customer has viewed
         prices_viewed = []
         for event in events:
-            if (
-                event.customer_id == customer.id
-                and event.get_product_id() == product.id
-            ):
-                price = event.get_product_price()
+            if event.get("customerId") == customer.get("id", "") and event.get(
+                "productId"
+            ) == product.get("id", ""):
+                price = event.get("productPrice")
                 if price is not None:
                     prices_viewed.append(price)
 
@@ -687,7 +696,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return std_price / mean_price
 
     def _calculate_social_proof_sensitivity(
-        self, product_events: List[BehavioralEvent]
+        self, product_events: List[Dict[str, Any]]
     ) -> float:
         """Calculate social proof sensitivity (placeholder)"""
         # In practice, you'd track review viewing, social sharing, etc.
@@ -695,7 +704,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return min(len(product_events) / 10.0, 1.0)
 
     def _calculate_impulse_tendency(
-        self, product_events: List[BehavioralEvent]
+        self, product_events: List[Dict[str, Any]]
     ) -> float:
         """Calculate impulse buy tendency"""
         if not product_events:
@@ -718,9 +727,9 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _calculate_loyalty_score(
         self,
-        customer: ShopifyCustomer,
-        product: ShopifyProduct,
-        events: List[BehavioralEvent],
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
+        events: List[Dict[str, Any]],
     ) -> float:
         """Calculate loyalty score for this customer-product relationship"""
         if not events:
@@ -730,7 +739,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         product_events = [
             e
             for e in events
-            if e.customer_id == customer.id and e.get_product_id() == product.id
+            if e.get("customerId") == customer.get("id")
+            and e.get("productId") == product.get("id")
         ]
 
         if not product_events:

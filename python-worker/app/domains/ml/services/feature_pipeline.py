@@ -219,7 +219,7 @@ class FeaturePipeline(IFeaturePipeline):
                 shop_id, "CollectionData"
             )
             event_count = await self.repository.get_entity_count(
-                shop_id, "BehavioralEvent"
+                shop_id, "BehavioralEvents"
             )
 
             if product_count == 0 and order_count == 0 and customer_count == 0:
@@ -312,7 +312,7 @@ class FeaturePipeline(IFeaturePipeline):
             # Process interactions (using orders data)
             if order_count > 0:
                 # Get all orders for interaction features (this is typically smaller than other entities)
-                orders = await self.repository.get_orders_for_shop(shop_id)
+                orders = await self.repository.get_orders_batch(shop_id, 0, order_count)
                 if orders:
                     interaction_result = (
                         await self.compute_and_save_interaction_features_batch(
@@ -371,9 +371,9 @@ class FeaturePipeline(IFeaturePipeline):
                         / self.product_generator.normalization_divisors[
                             "tag_diversity"
                         ],
-                        1 if product.product_type else 0,
-                        1 if product.vendor else 0,
-                        now_utc(),
+                        1 if product.get("productType") else 0,
+                        1 if product.get("vendor") else 0,
+                        now_utc().isoformat(),
                     )
                 )
 
@@ -420,7 +420,7 @@ class FeaturePipeline(IFeaturePipeline):
             behavior_features_batch = []
 
             for customer in customers:
-                customer_id = customer.id
+                customer_id = customer.get("id", "")
                 customer_orders = orders_by_customer.get(customer_id, [])
                 customer_events = events_by_customer.get(customer_id, [])
 
@@ -444,13 +444,13 @@ class FeaturePipeline(IFeaturePipeline):
                 user_features_batch.append(
                     (
                         shop_id,
-                        customer.id,
+                        customer.get("id", ""),
                         features.get("total_orders", 0),
                         features.get("total_spent", 0),
                         features.get("days_since_creation", 0),
                         features.get("average_order_value", 0),
                         None,  # preferred_category - simplified
-                        now_utc(),
+                        now_utc().isoformat(),
                     )
                 )
 
@@ -458,7 +458,7 @@ class FeaturePipeline(IFeaturePipeline):
                 behavior_features_batch.append(
                     (
                         shop_id,
-                        customer.id,
+                        customer.get("id", ""),
                         features.get("unique_event_types", 0),
                         features.get("event_count", 0),
                         features.get("days_since_creation", 0),
@@ -468,7 +468,7 @@ class FeaturePipeline(IFeaturePipeline):
                         features.get("engagement_score", 0),  # recency_score
                         features.get("unique_event_types", 0) / 10.0,  # diversity_score
                         features.get("engagement_score", 0),  # behavioral_score
-                        now_utc(),
+                        now_utc().isoformat(),
                     )
                 )
 
@@ -506,7 +506,7 @@ class FeaturePipeline(IFeaturePipeline):
                         features.get("seo_score", 0),
                         features.get("seo_score", 0),  # seo_score
                         features.get("seo_score", 0),  # image_score
-                        now_utc(),
+                        now_utc().isoformat(),
                     )
                 )
 
@@ -571,7 +571,7 @@ class FeaturePipeline(IFeaturePipeline):
                         interaction["purchaseCount"],
                         interaction["lastPurchaseDate"],
                         time_decayed_weight,
-                        now_utc(),
+                        now_utc().isoformat(),
                     )
                 )
 
@@ -861,7 +861,7 @@ class FeaturePipeline(IFeaturePipeline):
 
             # For each customer-product pair, compute interaction features
             for customer in customers:
-                customer_id = customer.id
+                customer_id = customer.get("id", "")
                 customer_orders = orders_by_customer.get(customer_id, [])
                 customer_events = events_by_customer.get(customer_id, [])
 
@@ -892,7 +892,7 @@ class FeaturePipeline(IFeaturePipeline):
                                     customer_id,
                                     product.id,
                                     interaction_features,
-                                    now_utc(),
+                                    now_utc().isoformat(),
                                 )
                             )
                             processed_count += 1

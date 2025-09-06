@@ -714,14 +714,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                             feature_job_id = f"feature_compute_{internal_shop_id}_{int(now_utc().timestamp())}"
 
                             # Publish ML training event to trigger feature computation
-                            # Use full processing for initial computation
-                            incremental = main_storage_result.processed_count > 0
                             event_id = await streams_manager.publish_ml_training_event(
                                 job_id=feature_job_id,
                                 shop_id=internal_shop_id,
                                 shop_domain=shop_domain,
                                 data_collection_completed=True,
-                                incremental=incremental,
                             )
 
                             logger.info(

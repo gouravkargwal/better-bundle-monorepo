@@ -2,17 +2,9 @@
 Session Feature Generator for ML feature engineering
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import statistics
-from datetime import timedelta
-
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyCustomer,
-    BehavioralEvent,
-)
-
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -22,7 +14,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for user sessions"""
 
     async def generate_features(
-        self, customer: ShopifyCustomer, context: Dict[str, Any]
+        self, customer: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate session-based features for a customer
@@ -35,13 +27,17 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated session features
         """
         try:
-            logger.debug(f"Computing session features for customer: {customer.id}")
+            logger.debug(
+                f"Computing session features for customer: {customer.get('id', 'unknown')}"
+            )
 
             features = {}
             events = context.get("events", [])
 
             # Get customer's events
-            customer_events = [e for e in events if e.customer_id == customer.id]
+            customer_events = [
+                e for e in events if e.get("customerId") == customer.get("id")
+            ]
 
             if not customer_events:
                 return self._get_empty_session_features()
@@ -71,13 +67,13 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             features = self.validate_features(features)
 
             logger.debug(
-                f"Computed {len(features)} session features for customer: {customer.id}"
+                f"Computed {len(features)} session features for customer: {customer.get('id', 'unknown')}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute session features for customer: {customer.id}: {str(e)}"
+                f"Failed to compute session features for customer: {customer.get('id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -104,8 +100,8 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _group_events_by_session(
-        self, events: List[BehavioralEvent]
-    ) -> List[List[BehavioralEvent]]:
+        self, events: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
         """Group events by session using time proximity and clientId"""
         if not events:
             return []
@@ -135,7 +131,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         return sessions
 
     def _compute_session_level_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute basic session-level features"""
         if not sessions:
@@ -180,7 +176,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_journey_pattern_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute journey pattern features"""
         if not sessions:
@@ -202,7 +198,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         journey_types = []
 
         for session in sessions:
-            session_event_types = [event.event_type for event in session]
+            session_event_types = [event.get("eventType") for event in session]
 
             # Count event types in this session
             search_count = session_event_types.count("search_submitted")
@@ -242,7 +238,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_engagement_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute engagement features"""
         if not sessions:
@@ -305,7 +301,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_conversion_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute conversion-related features"""
         if not sessions:
@@ -323,7 +319,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         sessions_with_product_view = 0
 
         for session in sessions:
-            event_types = [event.event_type for event in session]
+            event_types = [event.get("eventType") for event in session]
 
             if "product_viewed" in event_types:
                 sessions_with_product_view += 1
@@ -357,7 +353,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_temporal_session_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute temporal session features"""
         if not sessions:
@@ -408,7 +404,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_context_features(
-        self, sessions: List[List[BehavioralEvent]]
+        self, sessions: List[List[Dict[str, Any]]]
     ) -> Dict[str, Any]:
         """Compute device and context features"""
         if not sessions:
