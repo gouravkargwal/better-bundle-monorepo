@@ -130,7 +130,6 @@ FIELD_MAPPINGS = {
         "json_fields": ["metafields"],
         "optional_fields": [
             "description",
-            "sortOrder",
             "templateSuffix",
             "seoTitle",
             "seoDescription",

@@ -41,120 +41,110 @@ class MainTableProcessingConsumer(BaseConsumer):
 
     async def _process_single_message(self, message: Dict[str, Any]):
         """Process a single main table processing job message"""
-        try:
-            # Extract message data
-            job_id = message.get("job_id")
-            shop_id = message.get("shop_id")
-            shop_domain = message.get("shop_domain")
-            job_type = message.get("job_type")
+        job_id = message.get("job_id")
+        shop_id = message.get("shop_id")
+        shop_domain = message.get("shop_domain")
+        job_type = message.get("job_type")
 
-            # Check if this is a main table processing job
-            if job_type != "main_table_processing":
-                # Skip non-main-table-processing jobs
-                self.logger.debug(
-                    f"Skipping non-main-table-processing job: {job_type}",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                )
-                return
+        # Check if this is a main table processing job
+        if job_type != "main_table_processing":
+            # Skip non-main-table-processing jobs
+            self.logger.debug(
+                f"Skipping non-main-table-processing job: {job_type}",
+                job_id=job_id,
+                shop_id=shop_id,
+            )
+            return
 
-            # Validate required fields for main table processing jobs
-            if not job_id or not shop_id or not shop_domain:
-                self.logger.error(
-                    "Invalid main table processing message: missing required fields",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    shop_domain=shop_domain,
-                )
-                return
-
-            self.logger.info(
-                f"Processing main table processing job",
+        # Validate required fields for main table processing jobs
+        if not job_id or not shop_id or not shop_domain:
+            self.logger.error(
+                "Invalid main table processing message: missing required fields",
                 job_id=job_id,
                 shop_id=shop_id,
                 shop_domain=shop_domain,
             )
+            raise ValueError("Missing required fields for main table processing job")
 
-            # Track job
-            self.active_jobs[job_id] = {
-                "status": "processing",
-                "shop_id": shop_id,
-                "shop_domain": shop_domain,
-                "started_at": datetime.utcnow(),
-            }
+        self.logger.info(
+            f"Processing main table processing job",
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+        )
 
+        # Track job BEFORE processing starts
+        self.active_jobs[job_id] = {
+            "status": "processing",
+            "shop_id": shop_id,
+            "shop_domain": shop_domain,
+            "started_at": datetime.utcnow(),
+        }
+
+        try:
             # Process the main table processing job
             await self._process_main_table_job(job_id, shop_id, shop_domain)
 
-            # Mark job as completed
+            # Mark job as completed ONLY if processing succeeded
             await self._mark_job_completed(job_id)
 
         except Exception as e:
+            # Mark job as failed if processing failed
+            await self._mark_job_failed(job_id, str(e))
+
             self.logger.error(
                 f"Failed to process main table processing message",
-                job_id=message.get("job_id"),
+                job_id=job_id,
                 error=str(e),
             )
-            if job_id:
-                await self._mark_job_failed(job_id, str(e))
+            # Re-raise the exception so the base consumer can handle retries
             raise
 
     async def _process_main_table_job(
         self, job_id: str, shop_id: str, shop_domain: str
     ):
         """Process main table storage for a shop"""
-        try:
+        self.logger.info(
+            f"Starting main table processing",
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+        )
+
+        # Run main table storage with incremental processing
+        result = await self.main_table_service.store_all_data(
+            shop_id=shop_id, incremental=True
+        )
+
+        if result.success:
             self.logger.info(
-                f"Starting main table processing",
+                f"Main table processing completed successfully",
                 job_id=job_id,
                 shop_id=shop_id,
                 shop_domain=shop_domain,
+                processed_count=result.processed_count,
+                error_count=result.error_count,
+                duration_ms=result.duration_ms,
             )
 
-            # Run main table storage with incremental processing
-            result = await self.main_table_service.store_all_data(
-                shop_id=shop_id, incremental=True
-            )
-
-            if result.success:
-                self.logger.info(
-                    f"Main table processing completed successfully",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    shop_domain=shop_domain,
-                    processed_count=result.processed_count,
-                    error_count=result.error_count,
-                    duration_ms=result.duration_ms,
-                )
-
-                # Update job tracking with results
-                if job_id in self.active_jobs:
-                    self.active_jobs[job_id]["result"] = {
-                        "processed_count": result.processed_count,
-                        "error_count": result.error_count,
-                        "duration_ms": result.duration_ms,
-                        "errors": result.errors,
-                    }
-            else:
-                error_msg = f"Main table processing failed: {result.errors}"
-                self.logger.error(
-                    f"Main table processing failed",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    shop_domain=shop_domain,
-                    errors=result.errors,
-                )
-                raise Exception(error_msg)
-
-        except Exception as e:
+            # Update job tracking with results
+            if job_id in self.active_jobs:
+                self.active_jobs[job_id]["result"] = {
+                    "processed_count": result.processed_count,
+                    "error_count": result.error_count,
+                    "duration_ms": result.duration_ms,
+                    "errors": result.errors,
+                }
+        else:
+            error_msg = f"Main table processing failed: {result.errors}"
             self.logger.error(
-                f"Main table processing error",
+                f"Main table processing failed",
                 job_id=job_id,
                 shop_id=shop_id,
                 shop_domain=shop_domain,
-                error=str(e),
+                errors=result.errors,
             )
-            raise
+            raise Exception(error_msg)
 
     async def _mark_job_completed(self, job_id: str):
         """Mark a job as completed"""
@@ -173,6 +163,10 @@ class MainTableProcessingConsumer(BaseConsumer):
         """Get the status of a main table processing job"""
         return self.active_jobs.get(job_id)
 
+    async def _periodic_cleanup(self):
+        """Override base class cleanup to handle job tracking"""
+        await self.cleanup_old_jobs()
+
     async def cleanup_old_jobs(self):
         """Clean up old completed jobs to prevent memory leaks"""
         current_time = datetime.utcnow()
@@ -180,7 +174,7 @@ class MainTableProcessingConsumer(BaseConsumer):
 
         for job_id, job_data in self.active_jobs.items():
             # Remove jobs older than timeout or completed more than 1 hour ago
-            if job_data["status"] in ["completed", "failed"]:
+            if job_data["status"] in ["completed", "failed", "timeout"]:
                 completed_at = job_data.get("completed_at") or job_data.get(
                     "failed_at", current_time
                 )
@@ -191,6 +185,8 @@ class MainTableProcessingConsumer(BaseConsumer):
             ).total_seconds() > self.job_timeout:
                 # Mark timed out jobs as failed
                 job_data["status"] = "timeout"
+                job_data["failed_at"] = current_time
+                job_data["error"] = "Job timed out"
                 jobs_to_remove.append(job_id)
 
         for job_id in jobs_to_remove:

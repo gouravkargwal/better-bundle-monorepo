@@ -181,6 +181,10 @@ class BaseConsumer(ABC):
         self.last_health_check = datetime.utcnow()
         self.health_check_interval = 30  # seconds
 
+        # Cleanup tracking
+        self.last_cleanup = datetime.utcnow()
+        self.cleanup_interval = 300  # 5 minutes
+
     async def start(self):
         """Start the consumer"""
         if self.status != ConsumerStatus.STOPPED:
@@ -251,8 +255,8 @@ class BaseConsumer(ABC):
                 if messages:
                     await self._process_messages(messages)
                 else:
-                    # No messages, wait a bit
-                    await asyncio.sleep(0.1)
+                    # No messages, wait a bit to avoid high CPU usage
+                    await asyncio.sleep(1.0)  # Increased from 0.1 to 1.0 seconds
 
                 # Reset consecutive failures on success
                 self.consecutive_failures = 0
@@ -307,25 +311,35 @@ class BaseConsumer(ABC):
     async def _process_messages(self, messages: List[Dict[str, Any]]):
         """Process a batch of messages"""
         for message in messages:
-            try:
-                start_time = time.time()
+            message_processed = False
+            start_time = time.time()
 
+            try:
                 # Process message with circuit breaker
                 await self.circuit_breaker.acall(self._process_single_message, message)
+
+                # Only acknowledge if processing succeeded
+                message_processed = True
 
                 # Update metrics
                 processing_time = time.time() - start_time
                 self.metrics.update_processing_time(processing_time)
 
-                # Acknowledge message
+                # Acknowledge message only after successful processing
                 await self._acknowledge_message(message)
+
+                self.logger.debug(
+                    f"Successfully processed message",
+                    message_id=message.get("_message_id"),
+                    processing_time=processing_time,
+                )
 
             except Exception as e:
                 self.logger.error(f"Failed to process message: {e}")
                 self.metrics.update_failure()
 
-                # Retry logic
-                await self._handle_message_failure(message, e)
+                # Handle message failure (retry logic, dead letter queue, etc.)
+                await self._handle_message_failure(message, e, message_processed)
 
     async def _acknowledge_message(self, message: Dict[str, Any]):
         """Acknowledge message processing"""
@@ -339,18 +353,77 @@ class BaseConsumer(ABC):
         except Exception as e:
             self.logger.error(f"Failed to acknowledge message: {e}")
 
-    async def _handle_message_failure(self, message: Dict[str, Any], error: Exception):
-        """Handle message processing failure"""
+    async def _handle_message_failure(
+        self, message: Dict[str, Any], error: Exception, message_processed: bool = False
+    ):
+        """Handle message processing failure with retry logic"""
+        message_id = message.get("_message_id")
+
         # Log failure details
         self.logger.error(
             f"Message processing failed",
-            message_id=message.get("_message_id"),
+            message_id=message_id,
             error=str(error),
-            message_data=message,  # Redis streams return data directly
+            message_data=message,
+            message_processed=message_processed,
         )
 
-        # Could implement dead letter queue here
-        # For now, just log and continue
+        # If message was processed but failed, we need to handle it differently
+        if message_processed:
+            # Message was processed but failed - this is a business logic failure
+            # We should acknowledge it to prevent infinite retries
+            self.logger.warning(
+                f"Message processed but failed business logic - acknowledging to prevent infinite retry",
+                message_id=message_id,
+            )
+            await self._acknowledge_message(message)
+        else:
+            # Message processing failed before completion - implement retry logic
+            retry_count = message.get("_retry_count", 0)
+            max_retries = self.max_retries
+
+            if retry_count < max_retries:
+                # Retry the message
+                retry_count += 1
+                message["_retry_count"] = retry_count
+
+                self.logger.info(
+                    f"Retrying message (attempt {retry_count}/{max_retries})",
+                    message_id=message_id,
+                    retry_count=retry_count,
+                )
+
+                # Wait before retry with exponential backoff
+                retry_delay = self.retry_delay * (2 ** (retry_count - 1))
+                await asyncio.sleep(retry_delay)
+
+                # Retry processing
+                try:
+                    await self._process_single_message(message)
+                    await self._acknowledge_message(message)
+                    self.logger.info(f"Message retry successful", message_id=message_id)
+                except Exception as retry_error:
+                    self.logger.error(
+                        f"Message retry failed",
+                        message_id=message_id,
+                        retry_count=retry_count,
+                        error=str(retry_error),
+                    )
+                    # If this was the last retry, acknowledge to prevent infinite retries
+                    if retry_count >= max_retries:
+                        self.logger.error(
+                            f"Max retries exceeded - acknowledging failed message",
+                            message_id=message_id,
+                        )
+                        await self._acknowledge_message(message)
+            else:
+                # Max retries exceeded - acknowledge to prevent infinite retries
+                self.logger.error(
+                    f"Max retries exceeded - acknowledging failed message",
+                    message_id=message_id,
+                    max_retries=max_retries,
+                )
+                await self._acknowledge_message(message)
 
     async def _ensure_consumer_group(self):
         """Ensure consumer group exists"""
@@ -383,7 +456,7 @@ class BaseConsumer(ABC):
         }
 
     async def _health_check(self):
-        """Perform health check"""
+        """Perform health check and periodic cleanup"""
         now = datetime.utcnow()
         if (now - self.last_health_check).seconds >= self.health_check_interval:
             self.last_health_check = now
@@ -392,6 +465,16 @@ class BaseConsumer(ABC):
             self.metrics.uptime_seconds = (
                 now - self.metrics.start_time
             ).total_seconds()
+
+        # Perform periodic cleanup
+        if (now - self.last_cleanup).seconds >= self.cleanup_interval:
+            self.last_cleanup = now
+            await self._periodic_cleanup()
+
+    async def _periodic_cleanup(self):
+        """Perform periodic cleanup tasks - override in subclasses"""
+        # Base implementation does nothing - subclasses can override
+        pass
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""

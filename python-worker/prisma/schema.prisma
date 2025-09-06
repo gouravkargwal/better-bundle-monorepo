@@ -15,35 +15,6 @@ enum ProductStatus {
   DRAFT
 }
 
-enum OrderStatus {
-  PENDING
-  CONFIRMED
-  PAID
-  PARTIALLY_PAID
-  PARTIALLY_REFUNDED
-  REFUNDED
-  VOIDED
-  CANCELLED
-  ACTIVE
-  INACTIVE
-  DRAFT
-}
-
-enum CollectionSortOrder {
-  MANUAL
-  BEST_SELLING
-  CREATED
-  CREATED_DESC
-  ID
-  ID_DESC
-  PRICE
-  PRICE_DESC
-  TITLE
-  TITLE_DESC
-  UPDATED_AT
-  UPDATED_AT_DESC
-}
-
 model RawOrder {
   id                String    @id @default(cuid())
   shopId            String
@@ -206,7 +177,6 @@ model OrderData {
   processedAt DateTime?
   cancelledAt DateTime?
   cancelReason String? @db.VarChar(500) @default("")
-  orderStatus OrderStatus? @default(PENDING)
   orderLocale String? @db.VarChar(10) @default("en")
   currencyCode String? @db.VarChar(10) @default("USD")
   presentmentCurrencyCode String? @db.VarChar(10) @default("USD")
@@ -227,7 +197,6 @@ model OrderData {
   @@index([shopId, orderDate])
   @@index([shopId, customerId])
   @@index([shopId, customerEmail])
-  @@index([shopId, orderStatus])
   @@index([shopId, currencyCode])
   @@map("OrderData")
 }
@@ -314,7 +283,6 @@ model CollectionData {
   title           String   @db.VarChar(500)
   handle          String   @db.VarChar(255)
   description     String?  @db.Text @default("")
-  sortOrder       CollectionSortOrder? @default(MANUAL)
   templateSuffix  String?  @db.VarChar(100) @default("")
   seoTitle        String?  @db.VarChar(500) @default("")
   seoDescription  String?  @db.Text @default("")

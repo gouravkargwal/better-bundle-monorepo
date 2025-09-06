@@ -84,9 +84,6 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             "handle_encoded": self._encode_categorical_feature(
                 collection.get("handle", "")
             ),
-            "sort_order_encoded": self._encode_categorical_feature(
-                collection.get("sortOrder", "")
-            ),
             "is_published": 1 if collection.get("isPublished") else 0,
             "products_count": collection.get("productCount", 0),
             "is_automated": 1 if collection.get("isAutomated") else 0,

@@ -728,7 +728,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         description
                         descriptionHtml
                         updatedAt
-                        sortOrder
                         templateSuffix
                         seo {
                             title

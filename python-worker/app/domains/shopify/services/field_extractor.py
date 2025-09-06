@@ -113,9 +113,6 @@ class FieldExtractorService:
                 "processedAt": self._parse_datetime(order_data.get("processedAt")),
                 "cancelledAt": self._parse_datetime(order_data.get("cancelledAt")),
                 "cancelReason": order_data.get("cancelReason"),
-                "orderStatus": (
-                    "cancelled" if order_data.get("cancelledAt") else "active"
-                ),
                 "orderLocale": order_data.get("customerLocale"),
                 "currencyCode": order_data.get("currencyCode", "USD"),
                 "presentmentCurrencyCode": order_data.get("presentmentCurrencyCode"),
@@ -347,7 +344,6 @@ class FieldExtractorService:
                 "title": title,
                 "handle": handle,
                 "description": collection_data.get("description"),
-                "sortOrder": collection_data.get("sortOrder"),
                 "templateSuffix": collection_data.get("templateSuffix"),
                 "seoTitle": seo.get("title"),
                 "seoDescription": seo.get("description"),

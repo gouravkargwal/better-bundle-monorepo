@@ -38,7 +38,7 @@ class DataCleaningService:
                     "date_fields": ["orderDate", "processedAt", "cancelledAt"],
                     "boolean_fields": ["confirmed", "test"],
                     "tag_fields": ["tags"],
-                    "defaults": {"orderStatus": "pending", "currencyCode": "USD"},
+                    "defaults": {"currencyCode": "USD"},
                 },
                 "products": {
                     "numeric_fields": [
@@ -65,7 +65,7 @@ class DataCleaningService:
                     "date_fields": ["createdAt", "updatedAt"],
                     "boolean_fields": ["isAutomated"],
                     "tag_fields": ["tags"],
-                    "defaults": {"sortOrder": "MANUAL", "bodyHtml": ""},
+                    "defaults": {"bodyHtml": ""},
                 },
             }
 
