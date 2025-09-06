@@ -164,9 +164,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             await self._store_raw_data(raw_data_results, internal_shop_id)
 
             # Step 5: Fire event for main table processing
-            main_table_event_result = await self._trigger_main_table_processing(
-                internal_shop_id, shop_domain
-            )
+            # main_table_event_result = await self._trigger_main_table_processing(
+            #     internal_shop_id, shop_domain
+            # )
 
             # Step 6: Return simple success result
             total_items = sum(len(result) for result in raw_data_results.values())
@@ -174,7 +174,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             return {
                 "success": True,
                 "total_items": total_items,
-                "main_table_event": main_table_event_result,
+                # "main_table_event": main_table_event_result,
             }
 
         except Exception as e:
