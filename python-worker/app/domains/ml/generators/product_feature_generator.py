@@ -4,16 +4,10 @@ Product feature generator for ML feature engineering
 
 from typing import Dict, Any, List, Optional
 import statistics
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyProduct,
-    ShopifyShop,
-    ShopifyOrder,
-    ShopifyCollection,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -100,7 +94,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             return {}
 
     def _compute_basic_product_features(
-        self, product: ShopifyProduct
+        self, product: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute basic product features"""
         # Safely get lists, ensuring they're not None
@@ -111,8 +105,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
         return {
             "product_id": product.get("id", ""),
-            "title_length": len(product.get("title", "")),
-            "description_length": len(product.get("descriptionHtml", "")),
+            "title_length": len(product.get("title") or ""),
+            "description_length": len(product.get("descriptionHtml") or ""),
             "vendor_encoded": self._encode_categorical_feature(
                 product.get("vendor", "")
             ),
@@ -239,8 +233,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             for line_item in order.get("lineItems", []):
                 if line_item.get("productId") == product.get("id"):
                     product_orders.append(order)
-                    total_quantity += line_item.quantity
-                    total_revenue += line_item.price * line_item.quantity
+                    total_quantity += line_item.get("quantity", 0)
+                    total_revenue += line_item.get("price", 0.0) * line_item.get(
+                        "quantity", 0
+                    )
 
         return {
             "total_orders": len(product_orders),
@@ -252,17 +248,17 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "conversion_rate": len(product_orders) / len(orders) if orders else 0,
         }
 
-    def _compute_shop_context_features(
-        self, product: ShopifyProduct, shop: ShopifyShop
-    ) -> Dict[str, Any]:
+    def _compute_shop_context_features(self, shop: Dict[str, Any]) -> Dict[str, Any]:
         """Compute shop context features"""
         return {
-            "shop_plan_encoded": self._encode_categorical_feature(shop.plan_name or ""),
+            "shop_plan_encoded": self._encode_categorical_feature(
+                shop.get("plan_name", "") or ""
+            ),
             "shop_currency_encoded": self._encode_categorical_feature(
-                shop.currency or ""
+                shop.get("currency", "") or ""
             ),
             "shop_country_encoded": self._encode_categorical_feature(
-                shop.country or ""
+                shop.get("country", "") or ""
             ),
         }
 
@@ -277,14 +273,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         quality_score = 0
 
         # Title quality
-        if product.get("title") and len(product.get("title", "")) > 10:
+        title = product.get("title") or ""
+        if title and len(title) > 10:
             quality_score += 1
 
         # Description quality
-        if (
-            product.get("descriptionHtml")
-            and len(product.get("descriptionHtml", "")) > 50
-        ):
+        description = product.get("descriptionHtml") or ""
+        if description and len(description) > 50:
             quality_score += 1
 
         # Image quality
@@ -311,7 +306,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_popularity_features(
-        self, product: ShopifyProduct, context: Dict[str, Any]
+        self, product: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute product popularity and trend features"""
         events = context.get("events", [])
@@ -349,31 +344,63 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         last_30d = now - timedelta(days=30)
 
         # View velocity (views per hour in last 24h)
-        recent_views = [
-            e
-            for e in product_events
-            if e.is_product_viewed and e.occurred_at >= last_24h
-        ]
+        recent_views = []
+        for e in product_events:
+            if e.get("isProductViewed", False):
+                occurred_at = e.get("occurredAt")
+                if isinstance(occurred_at, str):
+                    try:
+                        occurred_at = datetime.fromisoformat(
+                            occurred_at.replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        occurred_at = None
+                if occurred_at and occurred_at >= last_24h:
+                    recent_views.append(e)
         view_velocity = len(recent_views) / 24.0
 
         # Cart velocity (cart additions per hour in last 24h)
-        recent_carts = [
-            e
-            for e in product_events
-            if e.is_product_added_to_cart and e.occurred_at >= last_24h
-        ]
+        recent_carts = []
+        for e in product_events:
+            if e.get("isProductAddedToCart", False):
+                occurred_at = e.get("occurredAt")
+                if isinstance(occurred_at, str):
+                    try:
+                        occurred_at = datetime.fromisoformat(
+                            occurred_at.replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        occurred_at = None
+                if occurred_at and occurred_at >= last_24h:
+                    recent_carts.append(e)
         cart_velocity = len(recent_carts) / 24.0
 
         # Purchase velocity (purchases per hour in last 24h)
-        recent_orders = [o for o in product_orders if o.get("orderDate") >= last_24h]
+        recent_orders = []
+        for o in product_orders:
+            order_date = o.get("orderDate")
+            if isinstance(order_date, str):
+                try:
+                    order_date = datetime.fromisoformat(
+                        order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    order_date = None
+            if order_date and order_date >= last_24h:
+                recent_orders.append(o)
         purchase_velocity = len(recent_orders) / 24.0
 
         # Trending score (velocity change over time)
-        old_views = [
-            e
-            for e in product_events
-            if e.is_product_viewed and last_7d <= e.occurred_at < last_24h
-        ]
+        old_views = []
+        for e in product_events:
+            if e.get("isProductViewed", False):
+                occurred_at = e.get("occurredAt")
+                if isinstance(occurred_at, str):
+                    occurred_at = datetime.fromisoformat(
+                        occurred_at.replace("Z", "+00:00")
+                    )
+                if occurred_at and last_7d <= occurred_at < last_24h:
+                    old_views.append(e)
         old_view_velocity = len(old_views) / 24.0
         trending_score = (view_velocity - old_view_velocity) / max(
             old_view_velocity, 1.0
@@ -425,7 +452,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_relationship_features(
-        self, product: ShopifyProduct, context: Dict[str, Any]
+        self, product: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute product relationship and cross-selling features"""
         orders = context.get("orders", [])
@@ -473,7 +500,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_seasonal_features(
-        self, product: ShopifyProduct, context: Dict[str, Any]
+        self, product: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute seasonal and temporal product features"""
         orders = context.get("orders", [])
@@ -523,7 +550,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _calculate_cross_sell_opportunity(
-        self, product: ShopifyProduct, product_orders: List, all_orders: List
+        self, product: Dict[str, Any], product_orders: List, all_orders: List
     ) -> float:
         """Calculate cross-selling opportunity score"""
         if not product_orders:
@@ -549,10 +576,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return min(opportunity_score, 1.0)
 
     def _compute_inventory_features(
-        self, product: ShopifyProduct, product_orders: List
+        self, product: Dict[str, Any], product_orders: List
     ) -> Dict[str, Any]:
         """Compute inventory-related features"""
-        variants = product.get("variants", [])
+        variants = product.get("variants") or []
         if not variants:
             return {
                 "inventory_velocity": 0.0,
@@ -574,9 +601,32 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 )
                 for order in product_orders
             )
-            days_span = (
-                product_orders[-1].get("orderDate") - product_orders[0].get("orderDate")
-            ).days
+            # Parse dates from strings
+            last_order_date = product_orders[-1].get("orderDate")
+            first_order_date = product_orders[0].get("orderDate")
+
+            # Ensure both dates are datetime objects
+            if isinstance(last_order_date, str):
+                try:
+                    last_order_date = datetime.fromisoformat(
+                        last_order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    last_order_date = datetime.now()
+
+            if isinstance(first_order_date, str):
+                try:
+                    first_order_date = datetime.fromisoformat(
+                        first_order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    first_order_date = datetime.now()
+
+            # Calculate days span safely
+            try:
+                days_span = (last_order_date - first_order_date).days
+            except (TypeError, AttributeError):
+                days_span = 1  # Default to 1 day to avoid division by zero
             inventory_velocity = total_quantity_sold / max(days_span, 1)
         else:
             inventory_velocity = 0.0
@@ -608,7 +658,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _calculate_seasonal_demand(
-        self, product: ShopifyProduct, product_orders: List
+        self, product: Dict[str, Any], product_orders: List
     ) -> float:
         """Calculate seasonal demand multiplier"""
         if not product_orders:
@@ -617,7 +667,15 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Analyze seasonal patterns in product orders
         monthly_orders = [0] * 12
         for order in product_orders:
-            month = order.get("orderDate", now_utc()).month - 1
+            order_date = order.get("orderDate", now_utc())
+            if isinstance(order_date, str):
+                try:
+                    order_date = datetime.fromisoformat(
+                        order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    order_date = now_utc()
+            month = order_date.month - 1
             monthly_orders[month] += 1
 
         # Calculate seasonal variation
@@ -632,7 +690,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return seasonal_multiplier
 
     def _find_frequently_bought_together(
-        self, product: ShopifyProduct, orders: List
+        self, product: Dict[str, Any], orders: List
     ) -> List[str]:
         """Find products frequently bought together with this product"""
         co_purchased = {}
@@ -679,7 +737,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return viewed_together_count / max(total_sessions_with_product, 1)
 
     def _calculate_category_complementarity(
-        self, product: ShopifyProduct, fbt_products: List[str]
+        self, product: Dict[str, Any], fbt_products: List[str]
     ) -> float:
         """Calculate how well this product's category complements others"""
         if not fbt_products:
@@ -704,13 +762,14 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return complement_count / len(fbt_products)
 
     def _calculate_price_affinity(
-        self, product: ShopifyProduct, fbt_products: List[str]
+        self, product: Dict[str, Any], fbt_products: List[str]
     ) -> float:
         """Calculate price point affinity with frequently bought together products"""
         if not fbt_products or not product.get("variants"):
             return 0.0
 
-        product_price = product.get("variants", [{}])[0].get("price", 0.0)
+        variants = product.get("variants") or [{}]
+        product_price = variants[0].get("price", 0.0) if variants else 0.0
 
         # In practice, you'd look up prices of fbt_products
         # For now, we'll use a simplified approach
@@ -719,13 +778,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return 1.0 - price_variance  # Higher score for similar price points
 
     def _calculate_style_affinity(
-        self, product: ShopifyProduct, fbt_products: List[str]
+        self, product: Dict[str, Any], fbt_products: List[str]
     ) -> float:
         """Calculate style affinity based on tags and categories"""
         if not fbt_products:
             return 0.0
 
-        product_tags = set(product.get("tags", []))
+        product_tags = set(product.get("tags") or [])
         product_vendor = product.get("vendor", "")
 
         # In practice, you'd compare with fbt_products' tags and vendors
@@ -735,7 +794,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return style_similarity
 
     def _calculate_bundle_opportunity(
-        self, product: ShopifyProduct, fbt_products: List[str], viewed_together: float
+        self, fbt_products: List[str], viewed_together: float
     ) -> float:
         """Calculate bundle opportunity score"""
         if not fbt_products:
@@ -747,9 +806,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
         return min(bundle_score, 1.0)
 
-    def _calculate_seasonal_score(
-        self, product: ShopifyProduct, product_orders: List
-    ) -> float:
+    def _calculate_seasonal_score(self, product_orders: List) -> float:
         """Calculate how seasonal this product is"""
         if not product_orders:
             return 0.0
@@ -757,7 +814,15 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Analyze order distribution across months
         monthly_orders = [0] * 12
         for order in product_orders:
-            month = order.get("orderDate", now_utc()).month - 1
+            order_date = order.get("orderDate", now_utc())
+            if isinstance(order_date, str):
+                try:
+                    order_date = datetime.fromisoformat(
+                        order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    order_date = now_utc()
+            month = order_date.month - 1
             monthly_orders[month] += 1
 
         if not any(monthly_orders):
@@ -787,7 +852,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
         product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags", [])).lower()
+        product_tags = " ".join(product.get("tags") or []).lower()
         product_text = f"{product_title} {product_tags}"
 
         # Determine current season
@@ -824,7 +889,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         }
 
         product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags", [])).lower()
+        product_tags = " ".join(product.get("tags") or []).lower()
         product_text = f"{product_title} {product_tags}"
 
         keywords = holiday_keywords.get(current_month, [])
@@ -835,12 +900,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return relevance_score / len(keywords)
 
     def _calculate_weather_sensitivity(
-        self, product: ShopifyProduct, product_orders: List
+        self,
+        product: Dict[str, Any],
     ) -> float:
         """Calculate how much weather affects demand for this product"""
         # This is a simplified version - in practice, you'd correlate with weather data
         product_title = (product.get("title", "")).lower()
-        product_tags = " ".join(product.get("tags", [])).lower()
+        product_tags = " ".join(product.get("tags") or []).lower()
         product_text = f"{product_title} {product_tags}"
 
         weather_keywords = [
@@ -865,7 +931,15 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         monthly_orders = [0.0] * 12
 
         for order in product_orders:
-            month = order.get("orderDate", now_utc()).month - 1
+            order_date = order.get("orderDate", now_utc())
+            if isinstance(order_date, str):
+                try:
+                    order_date = datetime.fromisoformat(
+                        order_date.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    order_date = now_utc()
+            month = order_date.month - 1
             monthly_orders[month] += 1
 
         # Normalize to 0-1 scale

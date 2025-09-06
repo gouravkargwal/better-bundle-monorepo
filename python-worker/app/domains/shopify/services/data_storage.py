@@ -57,7 +57,7 @@ class StorageMetrics:
 class StorageConfig:
     """Configuration for data storage"""
 
-    batch_size: int = 200  # Batch size for processing
+    batch_size: int = 100  # Reduced batch size for better query performance
     retry_attempts: int = 3
     retry_delay: float = 1.0
     cache_ttl_seconds: int = 300  # 5 minutes
@@ -282,9 +282,13 @@ class ShopifyDataStorageService:
             return metrics
 
         except Exception as e:
+            import traceback
+
             metrics.failed_items = len(products)
             metrics.end_time = now_utc()
             logger.error(f"Failed to store products data: {e}")
+            logger.error(f"Products data storage error details: {type(e).__name__}")
+            logger.error(f"Products data storage traceback: {traceback.format_exc()}")
             raise DataStorageError(f"Products data storage failed: {e}")
 
     async def _process_products_batch(
@@ -305,7 +309,13 @@ class ShopifyDataStorageService:
             return batch_metrics
 
         except Exception as e:
-            logger.error(f"Batch processing failed: {e}")
+            import traceback
+
+            logger.error(f"Fast batch processing failed: {e}")
+            logger.error(f"Products batch processing error details: {type(e).__name__}")
+            logger.error(
+                f"Products batch processing traceback: {traceback.format_exc()}"
+            )
             raise
 
     async def _process_orders_batch(
@@ -326,7 +336,11 @@ class ShopifyDataStorageService:
             return batch_metrics
 
         except Exception as e:
-            logger.error(f"Batch processing failed: {e}")
+            import traceback
+
+            logger.error(f"Fast batch processing failed: {e}")
+            logger.error(f"Orders batch processing error details: {type(e).__name__}")
+            logger.error(f"Orders batch processing traceback: {traceback.format_exc()}")
             raise
 
     async def _process_products_in_transaction(
@@ -390,15 +404,18 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
-                # Batch lookup all existing products in a single query
+                # Batch lookup all existing products in smaller chunks to avoid timeout
                 existing_products = {}
                 if product_ids:
-                    existing_records = await db_client.rawproduct.find_many(
-                        where={"shopId": shop_id, "shopifyId": {"in": product_ids}}
-                    )
-                    existing_products = {
-                        record.shopifyId: record for record in existing_records
-                    }
+                    # Split large IN queries into smaller chunks for better performance
+                    chunk_size = 50  # Smaller chunks to avoid query timeout
+                    for i in range(0, len(product_ids), chunk_size):
+                        chunk_ids = product_ids[i : i + chunk_size]
+                        existing_records = await db_client.rawproduct.find_many(
+                            where={"shopId": shop_id, "shopifyId": {"in": chunk_ids}}
+                        )
+                        for record in existing_records:
+                            existing_products[record.shopifyId] = record
 
                 # Process each product using the batch lookup results
                 for product_id, product_data in product_data_map.items():
@@ -448,8 +465,16 @@ class ShopifyDataStorageService:
                     batch_metrics["updated"] = len(updated_products)
 
         except Exception as e:
+            import traceback
+
             logger.error(f"Fast batch processing failed: {e}")
+            logger.error(f"Products batch processing error details: {type(e).__name__}")
+            logger.error(
+                f"Products batch processing traceback: {traceback.format_exc()}"
+            )
+
             # Fallback to individual inserts if batch fails
+            individual_errors = []
             for product in products:
                 try:
                     await db_client.rawproduct.create(
@@ -461,10 +486,17 @@ class ShopifyDataStorageService:
                     )
                     batch_metrics["new"] += 1
                 except Exception as individual_error:
-                    logger.error(
-                        f"Failed to process product {product.id}: {individual_error}"
-                    )
+                    error_msg = f"Failed to process product {getattr(product, 'id', 'unknown')}: {individual_error}"
+                    logger.error(error_msg)
+                    individual_errors.append(error_msg)
                     continue
+
+            # If all individual inserts also failed, re-raise the original exception
+            if individual_errors and batch_metrics["new"] == 0:
+                logger.error(
+                    f"All individual product inserts failed. Original error: {e}"
+                )
+                raise e
 
         return batch_metrics
 
@@ -752,15 +784,18 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
-                # Batch lookup all existing orders in a single query
+                # Batch lookup all existing orders in smaller chunks to avoid timeout
                 existing_orders = {}
                 if order_ids:
-                    existing_records = await db_client.raworder.find_many(
-                        where={"shopId": shop_id, "shopifyId": {"in": order_ids}}
-                    )
-                    existing_orders = {
-                        record.shopifyId: record for record in existing_records
-                    }
+                    # Split large IN queries into smaller chunks for better performance
+                    chunk_size = 50  # Smaller chunks to avoid query timeout
+                    for i in range(0, len(order_ids), chunk_size):
+                        chunk_ids = order_ids[i : i + chunk_size]
+                        existing_records = await db_client.raworder.find_many(
+                            where={"shopId": shop_id, "shopifyId": {"in": chunk_ids}}
+                        )
+                        for record in existing_records:
+                            existing_orders[record.shopifyId] = record
 
                 # Process each order using the batch lookup results
                 for order_id, order_data in order_data_map.items():
@@ -810,8 +845,14 @@ class ShopifyDataStorageService:
                     batch_metrics["updated"] = len(updated_orders)
 
         except Exception as e:
+            import traceback
+
             logger.error(f"Timestamp-based processing failed: {e}")
-            # Fallback to individual inserts if batch fails
+            logger.error(f"Orders batch processing error details: {type(e).__name__}")
+            logger.error(f"Orders batch processing traceback: {traceback.format_exc()}")
+
+            # Fallback to individual inserts if xbatch fails
+            individual_errors = []
             for order in orders:
                 try:
                     order_id = self._extract_order_id(order)
@@ -832,9 +873,18 @@ class ShopifyDataStorageService:
                     )
                     batch_metrics["new"] += 1
                 except Exception as individual_error:
-                    logger.error(f"Failed to process order: {individual_error}")
+                    error_msg = f"Failed to process order {getattr(order, 'id', 'unknown')}: {individual_error}"
+                    logger.error(error_msg)
+                    individual_errors.append(error_msg)
                     batch_metrics["failed"] = batch_metrics.get("failed", 0) + 1
                     continue
+
+            # If all individual inserts also failed, re-raise the original exception
+            if individual_errors and batch_metrics["new"] == 0:
+                logger.error(
+                    f"All individual order inserts failed. Original error: {e}"
+                )
+                raise e
 
         return batch_metrics
 
@@ -933,15 +983,18 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
-                # Batch lookup all existing customers in a single query
+                # Batch lookup all existing customers in smaller chunks to avoid timeout
                 existing_customers = {}
                 if customer_ids:
-                    existing_records = await db_client.rawcustomer.find_many(
-                        where={"shopId": shop_id, "shopifyId": {"in": customer_ids}}
-                    )
-                    existing_customers = {
-                        record.shopifyId: record for record in existing_records
-                    }
+                    # Split large IN queries into smaller chunks for better performance
+                    chunk_size = 50  # Smaller chunks to avoid query timeout
+                    for i in range(0, len(customer_ids), chunk_size):
+                        chunk_ids = customer_ids[i : i + chunk_size]
+                        existing_records = await db_client.rawcustomer.find_many(
+                            where={"shopId": shop_id, "shopifyId": {"in": chunk_ids}}
+                        )
+                        for record in existing_records:
+                            existing_customers[record.shopifyId] = record
 
                 # Process each customer using the batch lookup results
                 for customer_id, customer_data in customer_data_map.items():
@@ -1100,15 +1153,18 @@ class ShopifyDataStorageService:
                         "shopifyUpdatedAt": updated_at,
                     }
 
-                # Batch lookup all existing collections in a single query
+                # Batch lookup all existing collections in smaller chunks to avoid timeout
                 existing_collections = {}
                 if collection_ids:
-                    existing_records = await db.rawcollection.find_many(
-                        where={"shopId": shop_id, "shopifyId": {"in": collection_ids}}
-                    )
-                    existing_collections = {
-                        record.shopifyId: record for record in existing_records
-                    }
+                    # Split large IN queries into smaller chunks for better performance
+                    chunk_size = 50  # Smaller chunks to avoid query timeout
+                    for i in range(0, len(collection_ids), chunk_size):
+                        chunk_ids = collection_ids[i : i + chunk_size]
+                        existing_records = await db.rawcollection.find_many(
+                            where={"shopId": shop_id, "shopifyId": {"in": chunk_ids}}
+                        )
+                        for record in existing_records:
+                            existing_collections[record.shopifyId] = record
 
                 # Process each collection using the batch lookup results
                 for collection_id, collection_data in collection_data_map.items():
@@ -1261,9 +1317,13 @@ class ShopifyDataStorageService:
             return metrics
 
         except Exception as e:
+            import traceback
+
             metrics.failed_items = len(orders)
             metrics.end_time = now_utc()
             logger.error(f"Failed to store orders data: {e}")
+            logger.error(f"Orders data storage error details: {type(e).__name__}")
+            logger.error(f"Orders data storage traceback: {traceback.format_exc()}")
             raise DataStorageError(f"Orders data storage failed: {e}")
 
     async def store_customers_data(

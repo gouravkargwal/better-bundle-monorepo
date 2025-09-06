@@ -204,7 +204,6 @@ async def get_service(service_name: str):
 async def cleanup_services():
     """Cleanup all services"""
     try:
-        logger.info("Cleaning up services...")
 
         # Stop consumer manager
         await consumer_manager.stop()
@@ -224,8 +223,6 @@ async def cleanup_services():
 
         # Clear services dictionary
         services.clear()
-
-        logger.info("Services cleaned up successfully")
 
     except Exception as e:
         logger.error(f"Failed to cleanup services: {e}")

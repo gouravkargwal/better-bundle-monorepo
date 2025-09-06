@@ -2,18 +2,13 @@
 Customer-Product Interaction Feature Generator for ML feature engineering
 """
 
+import datetime
 from typing import Dict, Any, List, Optional
 import statistics
 from datetime import timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyCustomer,
-    ShopifyProduct,
-    ShopifyOrder,
-    BehavioralEvent,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -112,8 +107,10 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                         break
 
         # Calculate affinity scores
-        view_count = sum(1 for e in product_events if e.is_product_viewed)
-        cart_count = sum(1 for e in product_events if e.is_product_added_to_cart)
+        view_count = sum(1 for e in product_events if e.get("isProductViewed", False))
+        cart_count = sum(
+            1 for e in product_events if e.get("isProductAddedToCart", False)
+        )
         purchase_count = len(product_orders)
 
         # Total interactions
@@ -204,7 +201,12 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         avg_quantity = total_quantity / len(product_orders)
 
         # Days since last purchase
-        days_since_last = (now_utc() - order_dates[-1]).days
+        last_order_date = order_dates[-1]
+        if isinstance(last_order_date, str):
+            last_order_date = datetime.fromisoformat(
+                last_order_date.replace("Z", "+00:00")
+            )
+        days_since_last = (now_utc() - last_order_date).days
 
         # Purchase recency score (higher = more recent)
         recency_score = max(0, 1 - (days_since_last / 365))  # Decay over a year
@@ -268,7 +270,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             engagement_intensity = 0.0
 
         # Estimated browsing time (assume 30 seconds per view)
-        view_events = [e for e in product_events if e.is_product_viewed]
+        view_events = [e for e in product_events if e.get("isProductViewed", False)]
         browsing_time = len(view_events) * 30.0
 
         # Session participation (how many sessions included this product)
@@ -280,10 +282,18 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         session_participation = len(sessions) / max(total_customer_sessions, 1)
 
         # Conversion rates
-        search_events = sum(1 for e in product_events if e.is_search_submitted)
-        view_events_count = sum(1 for e in product_events if e.is_product_viewed)
-        cart_events = sum(1 for e in product_events if e.is_product_added_to_cart)
-        purchase_events = sum(1 for e in product_events if e.is_checkout_completed)
+        search_events = sum(
+            1 for e in product_events if e.get("isSearchSubmitted", False)
+        )
+        view_events_count = sum(
+            1 for e in product_events if e.get("isProductViewed", False)
+        )
+        cart_events = sum(
+            1 for e in product_events if e.get("isProductAddedToCart", False)
+        )
+        purchase_events = sum(
+            1 for e in product_events if e.get("isCheckoutCompleted", False)
+        )
 
         search_to_view = (
             view_events_count / max(search_events, 1) if search_events > 0 else 0.0
@@ -360,6 +370,16 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
         first_interaction = all_interactions[0][1]
         last_interaction = all_interactions[-1][1]
+
+        # Parse dates if they are strings
+        if isinstance(first_interaction, str):
+            first_interaction = datetime.fromisoformat(
+                first_interaction.replace("Z", "+00:00")
+            )
+        if isinstance(last_interaction, str):
+            last_interaction = datetime.fromisoformat(
+                last_interaction.replace("Z", "+00:00")
+            )
 
         first_interaction_days = (now_utc() - first_interaction).days
         last_interaction_days = (now_utc() - last_interaction).days
@@ -438,9 +458,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Purchase intent score (based on progression through funnel)
-        view_count = sum(1 for e in product_events if e.is_product_viewed)
-        cart_count = sum(1 for e in product_events if e.is_product_added_to_cart)
-        checkout_count = sum(1 for e in product_events if e.is_checkout_started)
+        view_count = sum(1 for e in product_events if e.get("isProductViewed", False))
+        cart_count = sum(
+            1 for e in product_events if e.get("isProductAddedToCart", False)
+        )
+        checkout_count = sum(
+            1 for e in product_events if e.get("isCheckoutStarted", False)
+        )
 
         if view_count > 0:
             intent_score = (cart_count * 0.4 + checkout_count * 0.6) / view_count
@@ -448,14 +472,22 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             intent_score = 0.0
 
         # Urgency score (based on recent activity and checkout behavior)
-        recent_events = [
-            e for e in product_events if (now_utc() - e.occurred_at).days <= 7
-        ]
-        recent_checkouts = sum(1 for e in recent_events if e.is_checkout_started)
+        recent_events = []
+        for e in product_events:
+            occurred_at = e.get("occurredAt")
+            if isinstance(occurred_at, str):
+                occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            if occurred_at and (now_utc() - occurred_at).days <= 7:
+                recent_events.append(e)
+        recent_checkouts = sum(
+            1 for e in recent_events if e.get("isCheckoutStarted", False)
+        )
         urgency_score = min(recent_checkouts / max(len(recent_events), 1), 1.0)
 
         # Research depth (how much they research before buying)
-        search_count = sum(1 for e in product_events if e.is_search_submitted)
+        search_count = sum(
+            1 for e in product_events if e.get("isSearchSubmitted", False)
+        )
         research_depth = search_count / max(view_count, 1)
 
         # Price sensitivity (based on price comparison behavior)
@@ -590,7 +622,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         if not events:
             return []
 
-        sorted_events = sorted(events, key=lambda e: e.occurred_at)
+        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
         sessions = []
         current_session = [sorted_events[0]]
 
@@ -619,10 +651,10 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         abandonment_points = []
 
         # Check for common abandonment patterns
-        has_viewed = any(e.is_product_viewed for e in product_events)
-        has_carted = any(e.is_product_added_to_cart for e in product_events)
-        has_checkout = any(e.is_checkout_started for e in product_events)
-        has_purchased = any(e.is_checkout_completed for e in product_events)
+        has_viewed = any(e.get("isProductViewed", False) for e in product_events)
+        has_carted = any(e.get("isProductAddedToCart", False) for e in product_events)
+        has_checkout = any(e.get("isCheckoutStarted", False) for e in product_events)
+        has_purchased = any(e.get("isCheckoutCompleted", False) for e in product_events)
 
         if has_viewed and not has_carted:
             abandonment_points.append("after_view")
@@ -711,9 +743,13 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             return 0.0
 
         # Quick purchases without much research
-        view_count = sum(1 for e in product_events if e.is_product_viewed)
-        cart_count = sum(1 for e in product_events if e.is_product_added_to_cart)
-        search_count = sum(1 for e in product_events if e.is_search_submitted)
+        view_count = sum(1 for e in product_events if e.get("isProductViewed", False))
+        cart_count = sum(
+            1 for e in product_events if e.get("isProductAddedToCart", False)
+        )
+        search_count = sum(
+            1 for e in product_events if e.get("isSearchSubmitted", False)
+        )
 
         if view_count == 0:
             return 0.0

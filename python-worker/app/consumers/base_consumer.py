@@ -327,11 +327,6 @@ class BaseConsumer(ABC):
                 # Retry logic
                 await self._handle_message_failure(message, e)
 
-    @abstractmethod
-    async def _process_single_message(self, message: Dict[str, Any]):
-        """Process a single message - to be implemented by subclasses"""
-        pass
-
     async def _acknowledge_message(self, message: Dict[str, Any]):
         """Acknowledge message processing"""
         try:
@@ -370,7 +365,9 @@ class BaseConsumer(ABC):
         """Manually reset the circuit breaker and consecutive failures"""
         self.circuit_breaker.reset()
         self.consecutive_failures = 0
-        self.logger.info(f"Circuit breaker and consecutive failures reset for {self.consumer_name}")
+        self.logger.info(
+            f"Circuit breaker and consecutive failures reset for {self.consumer_name}"
+        )
 
     def get_circuit_breaker_status(self) -> Dict[str, Any]:
         """Get current circuit breaker status"""

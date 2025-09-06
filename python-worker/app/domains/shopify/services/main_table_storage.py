@@ -21,6 +21,44 @@ from app.core.config.settings import settings
 logger = get_logger(__name__)
 
 
+def _parse_datetime_global(date_value: Any) -> Optional[datetime]:
+    """Parse various date formats to datetime object"""
+    if date_value is None:
+        return None
+
+    if isinstance(date_value, datetime):
+        return date_value
+
+    if isinstance(date_value, str):
+        try:
+            # Handle ISO format with Z suffix
+            if date_value.endswith("Z"):
+                date_value = date_value.replace("Z", "+00:00")
+            return datetime.fromisoformat(date_value)
+        except (ValueError, TypeError):
+            logger.warning(f"Failed to parse datetime: {date_value}")
+            return None
+
+    return None
+
+
+def _parse_boolean(bool_value: Any) -> bool:
+    """Parse various boolean representations to bool"""
+    if bool_value is None:
+        return False
+
+    if isinstance(bool_value, bool):
+        return bool_value
+
+    if isinstance(bool_value, str):
+        return bool_value.lower() in ("true", "1", "yes", "on")
+
+    if isinstance(bool_value, (int, float)):
+        return bool(bool_value)
+
+    return False
+
+
 def clean_product_data_for_storage(product_data: Dict[str, Any]) -> Dict[str, Any]:
     """Clean and fix product data before storing in main tables"""
     try:
@@ -47,15 +85,90 @@ def clean_product_data_for_storage(product_data: Dict[str, Any]) -> Dict[str, An
         if product_data.get("metafields") is None:
             product_data["metafields"] = []
 
-        # Fix variants - ensure each variant has product_id
+        # Convert numeric fields to proper types (only if not already converted)
+        # Convert main product price fields
+        if product_data.get("price") is not None and not isinstance(
+            product_data["price"], (int, float)
+        ):
+            try:
+                product_data["price"] = float(product_data["price"])
+            except (ValueError, TypeError):
+                product_data["price"] = 0.0
+
+        if product_data.get("compareAtPrice") is not None and not isinstance(
+            product_data["compareAtPrice"], (int, float)
+        ):
+            try:
+                product_data["compareAtPrice"] = float(product_data["compareAtPrice"])
+            except (ValueError, TypeError):
+                product_data["compareAtPrice"] = None
+
+        if product_data.get("totalInventory") is not None and not isinstance(
+            product_data["totalInventory"], int
+        ):
+            try:
+                product_data["totalInventory"] = int(product_data["totalInventory"])
+            except (ValueError, TypeError):
+                product_data["totalInventory"] = 0
+
+        # Convert date fields to proper types
+        if product_data.get("productCreatedAt") is not None:
+            product_data["productCreatedAt"] = _parse_datetime_global(
+                product_data["productCreatedAt"]
+            )
+
+        if product_data.get("productUpdatedAt") is not None:
+            product_data["productUpdatedAt"] = _parse_datetime_global(
+                product_data["productUpdatedAt"]
+            )
+
+        # Convert boolean fields
+        if "isActive" in product_data:
+            product_data["isActive"] = _parse_boolean(product_data["isActive"])
+
+        # Fix variants - ensure each variant has product_id and convert numeric fields
         variants = product_data.get("variants", [])
         for variant in variants:
             if not variant.get("product_id") and product_data.get("productId"):
                 variant["product_id"] = product_data["productId"]
 
+            # Convert variant numeric fields (only if not already converted)
+            if variant.get("price") is not None and not isinstance(
+                variant["price"], (int, float)
+            ):
+                try:
+                    variant["price"] = float(variant["price"])
+                except (ValueError, TypeError):
+                    variant["price"] = 0.0
+
+            if variant.get("compareAtPrice") is not None and not isinstance(
+                variant["compareAtPrice"], (int, float)
+            ):
+                try:
+                    variant["compareAtPrice"] = float(variant["compareAtPrice"])
+                except (ValueError, TypeError):
+                    variant["compareAtPrice"] = None
+
+            if variant.get("inventoryQuantity") is not None and not isinstance(
+                variant["inventoryQuantity"], int
+            ):
+                try:
+                    variant["inventoryQuantity"] = int(variant["inventoryQuantity"])
+                except (ValueError, TypeError):
+                    variant["inventoryQuantity"] = 0
+
+            if variant.get("weight") is not None and not isinstance(
+                variant["weight"], (int, float)
+            ):
+                try:
+                    variant["weight"] = float(variant["weight"])
+                except (ValueError, TypeError):
+                    variant["weight"] = None
+
         return product_data
     except Exception as e:
         logger.warning(f"Failed to clean product data: {str(e)}")
+        # Return the original data if cleaning fails to prevent storage failures
         return product_data
 
 
@@ -66,9 +179,56 @@ def clean_customer_data_for_storage(customer_data: Dict[str, Any]) -> Dict[str, 
         if customer_data.get("addresses") is None:
             customer_data["addresses"] = []
 
+        # Convert numeric fields to proper types (only if not already converted)
+        if customer_data.get("totalSpent") is not None and not isinstance(
+            customer_data["totalSpent"], (int, float)
+        ):
+            try:
+                customer_data["totalSpent"] = float(customer_data["totalSpent"])
+            except (ValueError, TypeError):
+                customer_data["totalSpent"] = 0.0
+
+        if customer_data.get("orderCount") is not None and not isinstance(
+            customer_data["orderCount"], int
+        ):
+            try:
+                customer_data["orderCount"] = int(customer_data["orderCount"])
+            except (ValueError, TypeError):
+                customer_data["orderCount"] = 0
+
+        # Convert date fields to proper types
+        if customer_data.get("lastOrderDate") is not None:
+            customer_data["lastOrderDate"] = _parse_datetime_global(
+                customer_data["lastOrderDate"]
+            )
+
+        if customer_data.get("createdAt") is not None:
+            customer_data["createdAt"] = _parse_datetime_global(
+                customer_data["createdAt"]
+            )
+
+        # Convert boolean fields
+        if "verifiedEmail" in customer_data:
+            customer_data["verifiedEmail"] = _parse_boolean(
+                customer_data["verifiedEmail"]
+            )
+
+        if "taxExempt" in customer_data:
+            customer_data["taxExempt"] = _parse_boolean(customer_data["taxExempt"])
+
+        # Process tags - convert string to array if needed
+        tags = customer_data.get("tags", [])
+        if isinstance(tags, str):
+            # Split comma-separated tags and clean them
+            tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        elif not isinstance(tags, list):
+            tags = []
+        customer_data["tags"] = tags
+
         return customer_data
     except Exception as e:
         logger.warning(f"Failed to clean customer data: {str(e)}")
+        # Return the original data if cleaning fails to prevent storage failures
         return customer_data
 
 
@@ -83,10 +243,9 @@ def clean_collection_data_for_storage(
 
         # Fix isAutomated boolean type
         if "isAutomated" in collection_data:
-            if isinstance(collection_data["isAutomated"], (int, str)):
-                collection_data["isAutomated"] = bool(
-                    int(collection_data["isAutomated"])
-                )
+            collection_data["isAutomated"] = _parse_boolean(
+                collection_data["isAutomated"]
+            )
 
         # Fix sortOrder - map to ENUM values
         sort_order = collection_data.get("sortOrder", "").lower()
@@ -117,9 +276,30 @@ def clean_collection_data_for_storage(
         else:
             collection_data["sortOrder"] = "manual"  # Default to manual
 
+        # Convert date fields to proper types
+        if collection_data.get("createdAt") is not None:
+            collection_data["createdAt"] = _parse_datetime_global(
+                collection_data["createdAt"]
+            )
+
+        if collection_data.get("updatedAt") is not None:
+            collection_data["updatedAt"] = _parse_datetime_global(
+                collection_data["updatedAt"]
+            )
+
+        # Process tags - convert string to array if needed
+        tags = collection_data.get("tags", [])
+        if isinstance(tags, str):
+            # Split comma-separated tags and clean them
+            tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        elif not isinstance(tags, list):
+            tags = []
+        collection_data["tags"] = tags
+
         return collection_data
     except Exception as e:
         logger.warning(f"Failed to clean collection data: {str(e)}")
+        # Return the original data if cleaning fails to prevent storage failures
         return collection_data
 
 
@@ -147,9 +327,69 @@ def clean_order_data_for_storage(order_data: Dict[str, Any]) -> Dict[str, Any]:
         else:
             order_data["orderStatus"] = "pending"  # Default to pending
 
+        # Convert numeric fields to proper types
+        numeric_fields = [
+            "totalAmount",
+            "subtotalAmount",
+            "totalTaxAmount",
+            "totalShippingAmount",
+            "totalRefundedAmount",
+            "totalOutstandingAmount",
+        ]
+
+        for field in numeric_fields:
+            if order_data.get(field) is not None and not isinstance(
+                order_data[field], (int, float)
+            ):
+                try:
+                    order_data[field] = float(order_data[field])
+                except (ValueError, TypeError):
+                    order_data[field] = 0.0
+
+        # Convert date fields to proper types
+        if order_data.get("orderDate") is not None:
+            order_data["orderDate"] = _parse_datetime_global(order_data["orderDate"])
+
+        if order_data.get("processedAt") is not None:
+            order_data["processedAt"] = _parse_datetime_global(
+                order_data["processedAt"]
+            )
+
+        if order_data.get("cancelledAt") is not None:
+            order_data["cancelledAt"] = _parse_datetime_global(
+                order_data["cancelledAt"]
+            )
+
+        # Convert boolean fields
+        if "confirmed" in order_data:
+            order_data["confirmed"] = _parse_boolean(order_data["confirmed"])
+
+        if "test" in order_data:
+            order_data["test"] = _parse_boolean(order_data["test"])
+
+        # Clean line items if they exist
+        if order_data.get("lineItems"):
+            for line_item in order_data["lineItems"]:
+                if line_item.get("quantity") is not None and not isinstance(
+                    line_item["quantity"], int
+                ):
+                    try:
+                        line_item["quantity"] = int(line_item["quantity"])
+                    except (ValueError, TypeError):
+                        line_item["quantity"] = 0
+
+                if line_item.get("price") is not None and not isinstance(
+                    line_item["price"], (int, float)
+                ):
+                    try:
+                        line_item["price"] = float(line_item["price"])
+                    except (ValueError, TypeError):
+                        line_item["price"] = 0.0
+
         return order_data
     except Exception as e:
         logger.warning(f"Failed to clean order data: {str(e)}")
+        # Return the original data if cleaning fails to prevent storage failures
         return order_data
 
 
@@ -529,8 +769,12 @@ class MainTableStorageService:
 
         except Exception as e:
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
+            import traceback
+
             error_msg = f"Failed to store orders: {str(e)}"
             self.logger.error(error_msg)
+            self.logger.error(f"Orders storage error details: {type(e).__name__}")
+            self.logger.error(f"Orders storage traceback: {traceback.format_exc()}")
             return StorageResult(
                 success=False,
                 processed_count=processed_count,
@@ -683,8 +927,12 @@ class MainTableStorageService:
 
         except Exception as e:
             duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
+            import traceback
+
             error_msg = f"Failed to store products: {str(e)}"
             self.logger.error(error_msg)
+            self.logger.error(f"Products storage error details: {type(e).__name__}")
+            self.logger.error(f"Products storage traceback: {traceback.format_exc()}")
             return StorageResult(
                 success=False,
                 processed_count=processed_count,
@@ -1355,9 +1603,7 @@ class MainTableStorageService:
                     customer_data.get("lastOrderDate")
                 ),
                 "tags": tags,
-                "createdAtShopify": self._parse_datetime(
-                    customer_data.get("createdAt")
-                ),
+                "createdAt": self._parse_datetime(customer_data.get("createdAt")),
                 "lastOrderId": customer_data.get("lastOrderId"),
                 "location": (
                     {
@@ -1471,6 +1717,8 @@ class MainTableStorageService:
                     and isinstance(collection_data.get("ruleSet"), dict)
                     else False
                 ),
+                "createdAt": collection_data.get("createdAt"),
+                "updatedAt": collection_data.get("updatedAt"),
                 "metafields": metafields,
             }
 
@@ -1546,6 +1794,12 @@ class MainTableStorageService:
             """Prepare product data for database insertion"""
             # Clean the data before processing
             cleaned_data = clean_product_data_for_storage(product_data)
+
+            # Validate required fields
+            if not cleaned_data.get("shopId") or not cleaned_data.get("productId"):
+                raise ValueError(
+                    f"Missing required fields: shopId={cleaned_data.get('shopId')}, productId={cleaned_data.get('productId')}"
+                )
             data = {
                 "shopId": cleaned_data["shopId"],
                 "productId": cleaned_data["productId"],
@@ -1594,8 +1848,16 @@ class MainTableStorageService:
 
         except Exception as e:
             # Fallback to individual upserts if batch insert fails
+            import traceback
+
             self.logger.warning(
-                f"Batch insert failed, falling back to individual upserts: {str(e)}"
+                f"Product batch insert failed, falling back to individual upserts: {str(e)}"
+            )
+            self.logger.warning(
+                f"Product batch insert error details: {type(e).__name__}"
+            )
+            self.logger.warning(
+                f"Product batch insert traceback: {traceback.format_exc()}"
             )
             for product_data in product_data_list:
                 prepared_data = prepare_product_data(product_data)
@@ -1627,6 +1889,12 @@ class MainTableStorageService:
             """Prepare order data for database insertion"""
             # Clean the data first
             cleaned_data = clean_order_data_for_storage(order_data)
+
+            # Validate required fields
+            if not cleaned_data.get("shopId") or not cleaned_data.get("orderId"):
+                raise ValueError(
+                    f"Missing required fields: shopId={cleaned_data.get('shopId')}, orderId={cleaned_data.get('orderId')}"
+                )
             return {
                 "shopId": cleaned_data["shopId"],
                 "orderId": cleaned_data["orderId"],
@@ -1681,8 +1949,14 @@ class MainTableStorageService:
 
         except Exception as e:
             # Fallback to individual upserts if batch insert fails
+            import traceback
+
             self.logger.warning(
-                f"Batch insert failed, falling back to individual upserts: {str(e)}"
+                f"Order batch insert failed, falling back to individual upserts: {str(e)}"
+            )
+            self.logger.warning(f"Order batch insert error details: {type(e).__name__}")
+            self.logger.warning(
+                f"Order batch insert traceback: {traceback.format_exc()}"
             )
             for order_data in order_data_list:
                 prepared_data = prepare_order_data(order_data)
@@ -1724,7 +1998,7 @@ class MainTableStorageService:
                 "orderCount": cleaned_data["orderCount"],
                 "lastOrderDate": cleaned_data["lastOrderDate"],
                 "tags": Json(cleaned_data["tags"]),
-                "createdAtShopify": cleaned_data["createdAtShopify"],
+                "createdAtShopify": cleaned_data["createdAt"],
                 "lastOrderId": cleaned_data["lastOrderId"],
                 "state": cleaned_data["state"],
                 "verifiedEmail": cleaned_data["verifiedEmail"],

@@ -36,6 +36,8 @@ async def get_database() -> Prisma:
             # Double-check pattern to avoid race conditions
             if _db_instance is None:
                 logger.info("Creating new Prisma database connection")
+
+                # Create Prisma instance (connection pool settings are configured via environment variables)
                 _db_instance = Prisma()
 
                 try:
@@ -94,6 +96,7 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
     This provides the same retry functionality as the original database.py
     but works with the simplified client.
     """
+    global _db_instance
     max_retries = settings.MAX_RETRIES
     retry_delay = settings.RETRY_DELAY
 
@@ -103,17 +106,25 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
             return result
 
         except PrismaError as e:
-            # Check if it's a connection error
-            if "connection" in str(e).lower() and attempt < max_retries:
+            # Check if it's a connection or timeout error
+            error_str = str(e).lower()
+            is_retryable_error = (
+                "connection" in error_str
+                or "timeout" in error_str
+                or "pool" in error_str
+                or "readtimeout" in error_str
+            )
+
+            if is_retryable_error and attempt < max_retries:
                 logger.warning(
-                    f"Database connection error on attempt {attempt + 1}, retrying",
+                    f"Database error on attempt {attempt + 1}, retrying",
                     error=str(e),
                     attempt=attempt + 1,
                     max_retries=max_retries,
+                    error_type=type(e).__name__,
                 )
 
                 # Reset connection and retry
-                global _db_instance
                 if _db_instance:
                     try:
                         await _db_instance.disconnect()
@@ -134,6 +145,35 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
             raise
 
         except Exception as e:
+            # Check if it's an httpx timeout error (which Prisma uses internally)
+            error_str = str(e).lower()
+            is_retryable_error = (
+                "readtimeout" in error_str
+                or "connecttimeout" in error_str
+                or "pooltimeout" in error_str
+                or "timeout" in error_str
+            )
+
+            if is_retryable_error and attempt < max_retries:
+                logger.warning(
+                    f"Database timeout error on attempt {attempt + 1}, retrying",
+                    error=str(e),
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    error_type=type(e).__name__,
+                )
+
+                # Reset connection and retry
+                if _db_instance:
+                    try:
+                        await _db_instance.disconnect()
+                    except Exception:
+                        pass
+                    _db_instance = None
+
+                await asyncio.sleep(retry_delay * (settings.RETRY_BACKOFF**attempt))
+                continue
+
             logger.error(
                 f"Database operation {operation_name} failed on attempt {attempt + 1}: {e}",
                 operation=operation_name,

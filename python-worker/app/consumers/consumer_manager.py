@@ -155,8 +155,6 @@ class ConsumerManager:
             if self._manager_task and not self._manager_task.done():
                 await asyncio.wait_for(self._manager_task, timeout=30.0)
 
-            self.logger.info("Consumer manager stopped")
-
         except Exception as e:
             self.logger.error(f"Failed to stop consumer manager: {e}")
             raise
@@ -210,7 +208,6 @@ class ConsumerManager:
     async def _restart_consumer(self, name: str, consumer: BaseConsumer):
         """Restart a consumer"""
         try:
-            self.logger.info(f"Restarting consumer {name}")
 
             # Stop the consumer
             await consumer.stop()

@@ -2,6 +2,7 @@
 Session Feature Generator for ML feature engineering
 """
 
+import datetime
 from typing import Dict, Any, List
 import statistics
 from app.core.logging import get_logger
@@ -107,7 +108,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             return []
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.occurred_at)
+        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
 
         sessions = []
         current_session = [sorted_events[0]]
@@ -117,9 +118,19 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             previous_event = sorted_events[i - 1]
 
             # If more than 30 minutes gap, start new session
-            time_gap = (
-                current_event.occurred_at - previous_event.occurred_at
-            ).total_seconds() / 60
+            current_occurred_at = current_event.get("occurredAt")
+            previous_occurred_at = previous_event.get("occurredAt")
+
+            if isinstance(current_occurred_at, str):
+                current_occurred_at = datetime.fromisoformat(
+                    current_occurred_at.replace("Z", "+00:00")
+                )
+            if isinstance(previous_occurred_at, str):
+                previous_occurred_at = datetime.fromisoformat(
+                    previous_occurred_at.replace("Z", "+00:00")
+                )
+
+            time_gap = (current_occurred_at - previous_occurred_at).total_seconds() / 60
 
             if time_gap > 30:  # 30 minutes session timeout
                 sessions.append(current_session)
@@ -148,8 +159,20 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
             # Session duration
             if depth > 1:
+                last_occurred_at = session[-1].get("occurredAt")
+                first_occurred_at = session[0].get("occurredAt")
+
+                if isinstance(last_occurred_at, str):
+                    last_occurred_at = datetime.fromisoformat(
+                        last_occurred_at.replace("Z", "+00:00")
+                    )
+                if isinstance(first_occurred_at, str):
+                    first_occurred_at = datetime.fromisoformat(
+                        first_occurred_at.replace("Z", "+00:00")
+                    )
+
                 duration = (
-                    session[-1].occurred_at - session[0].occurred_at
+                    last_occurred_at - first_occurred_at
                 ).total_seconds() / 60  # minutes
                 session_durations.append(duration)
             else:
@@ -158,7 +181,19 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
         # Calculate session frequency (sessions per week)
         if len(sessions) > 1:
-            time_span = (sessions[-1][-1].occurred_at - sessions[0][0].occurred_at).days
+            last_session_last_event = sessions[-1][-1].get("occurredAt")
+            first_session_first_event = sessions[0][0].get("occurredAt")
+
+            if isinstance(last_session_last_event, str):
+                last_session_last_event = datetime.fromisoformat(
+                    last_session_last_event.replace("Z", "+00:00")
+                )
+            if isinstance(first_session_first_event, str):
+                first_session_first_event = datetime.fromisoformat(
+                    first_session_first_event.replace("Z", "+00:00")
+                )
+
+            time_span = (last_session_last_event - first_session_first_event).days
             session_frequency = len(sessions) / max(time_span / 7, 1)  # per week
         else:
             session_frequency = 0.0
@@ -262,9 +297,19 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             session_depths.append(depth)
 
             if depth > 1:
-                duration = (
-                    session[-1].occurred_at - session[0].occurred_at
-                ).total_seconds() / 60
+                last_occurred_at = session[-1].get("occurredAt")
+                first_occurred_at = session[0].get("occurredAt")
+
+                if isinstance(last_occurred_at, str):
+                    last_occurred_at = datetime.fromisoformat(
+                        last_occurred_at.replace("Z", "+00:00")
+                    )
+                if isinstance(first_occurred_at, str):
+                    first_occurred_at = datetime.fromisoformat(
+                        first_occurred_at.replace("Z", "+00:00")
+                    )
+
+                duration = (last_occurred_at - first_occurred_at).total_seconds() / 60
                 session_durations.append(duration)
             else:
                 session_durations.append(0)

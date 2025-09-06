@@ -54,21 +54,6 @@ class BehavioralEventsConsumer(BaseConsumer):
                 )
                 return
 
-            self.logger.info(
-                f"Processing behavioral event",
-                event_id=event_id,
-                shop_id=shop_id,
-                received_at=received_at,
-            )
-
-            # Track the event
-            self.active_events[event_id] = {
-                "shop_id": shop_id,
-                "started_at": datetime.utcnow(),
-                "status": "processing",
-                "received_at": received_at,
-            }
-
             # Parse payload if it's a string
             if isinstance(payload, str):
                 payload = json.loads(payload)
@@ -81,13 +66,6 @@ class BehavioralEventsConsumer(BaseConsumer):
                 self.active_events[event_id]["status"] = "completed"
                 self.active_events[event_id]["completed_at"] = datetime.utcnow()
                 self.active_events[event_id]["result"] = result
-
-            self.logger.info(
-                f"Behavioral event processed successfully",
-                event_id=event_id,
-                shop_id=shop_id,
-                result=result.get("status"),
-            )
 
         except Exception as e:
             self.logger.error(

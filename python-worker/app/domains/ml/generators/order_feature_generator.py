@@ -6,12 +6,6 @@ from typing import Dict, Any, List, Optional
 import statistics
 
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyOrder,
-    ShopifyShop,
-    ShopifyProduct,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -337,12 +331,13 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
         # Category diversity
         categories = set()
         for _, product in line_item_products:
-            if product.product_type:
-                categories.add(product.product_type)
+            product_type = product.get("productType")
+            if product_type:
+                categories.add(product_type)
         category_diversity = len(categories) / max(len(line_item_products), 1)
 
         # Price range in basket
-        prices = [li[0].price for li in line_item_products]
+        prices = [li.get("price", 0.0) for li, _ in line_item_products]
         if len(prices) > 1:
             price_range = (max(prices) - min(prices)) / max(prices)
         else:
@@ -442,7 +437,9 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
 
         # Simple bundle detection based on complementary categories
         categories = [
-            li[1].product_type for li in line_item_products if li[1].product_type
+            li[1].get("productType")
+            for li in line_item_products
+            if li[1].get("productType")
         ]
 
         # Define complementary category pairs
@@ -467,9 +464,11 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
 
         # Simple complementarity based on category diversity and price consistency
         categories = [
-            li[1].product_type for li in line_item_products if li[1].product_type
+            li[1].get("productType")
+            for li in line_item_products
+            if li[1].get("productType")
         ]
-        prices = [li[0].price for li in line_item_products]
+        prices = [li.get("price", 0.0) for li, _ in line_item_products]
 
         # Category diversity (some diversity is good, too much might indicate random selection)
         category_diversity = len(set(categories)) / len(categories)
@@ -497,7 +496,9 @@ class OrderFeatureGenerator(BaseFeatureGenerator):
 
         # Multiple items with very different categories might be impulse
         categories = [
-            li[1].product_type for li in line_item_products if li[1].product_type
+            li[1].get("productType")
+            for li in line_item_products
+            if li[1].get("productType")
         ]
         if len(set(categories)) == len(categories):  # All different categories
             return 0.6

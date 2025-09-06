@@ -36,78 +36,6 @@ class DataCollectionConsumer(BaseConsumer):
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         self.job_timeout = 1800  # 30 minutes
 
-    async def _process_single_message(self, message: Dict[str, Any]):
-        """Process a single data collection job message"""
-        try:
-            # Extract message data - Redis streams return data directly
-            message_data = message  # No need to get "data" field
-
-            # Handle both camelCase (from Shopify app) and snake_case (from manual events) field names
-            job_id = message_data.get("job_id") or message_data.get("jobId")
-            shop_id = message_data.get("shop_id") or message_data.get("shopId")
-            shop_domain = message_data.get("shop_domain") or message_data.get(
-                "shopDomain"
-            )
-            access_token = message_data.get("access_token") or message_data.get(
-                "accessToken"
-            )
-            job_type = message_data.get("job_type") or message_data.get(
-                "type", "data_collection"
-            )
-
-            if not all([job_id, shop_id, shop_domain]):
-                raise ValueError(
-                    "Missing required job fields: job_id/shop_id/shop_domain (or jobId/shopId/shopDomain)"
-                )
-
-            self.logger.info(
-                f"Processing data collection job",
-                job_id=job_id,
-                shop_id=shop_id,
-                shop_domain=shop_domain,
-                job_type=job_type,
-            )
-
-            # Track active job
-            self.active_jobs[job_id] = {
-                "started_at": datetime.utcnow(),
-                "shop_id": shop_id,
-                "shop_domain": shop_domain,
-                "status": "processing",
-            }
-
-            # Process based on job type
-            if job_type == "data_collection":
-                await self._process_data_collection_job(
-                    job_id, shop_id, shop_domain, access_token
-                )
-            elif job_type == "products_only":
-                await self._process_products_collection_job(
-                    job_id, shop_id, shop_domain, access_token
-                )
-            elif job_type == "orders_only":
-                await self._process_orders_collection_job(
-                    job_id, shop_id, shop_domain, access_token
-                )
-            elif job_type == "customers_only":
-                await self._process_customers_collection_job(
-                    job_id, shop_id, shop_domain, access_token
-                )
-            else:
-                self.logger.warning(f"Unknown job type: {job_type}")
-                await self._mark_job_failed(job_id, f"Unknown job type: {job_type}")
-
-            # Mark job as completed
-            await self._mark_job_completed(job_id)
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to process data collection job",
-                job_id=message.get("job_id"),  # Redis streams return data directly
-                error=str(e),
-            )
-            raise
-
     async def _process_data_collection_job(
         self, job_id: str, shop_id: str, shop_domain: str, access_token: str
     ):
@@ -140,13 +68,6 @@ class DataCollectionConsumer(BaseConsumer):
                 include_collections=True,
             )
 
-            self.logger.info(
-                f"Data collection completed",
-                job_id=job_id,
-                shop_id=shop_id,
-                total_items=result.get("total_items", 0),
-            )
-
             # Update job tracking
             if job_id in self.active_jobs:
                 self.active_jobs[job_id]["status"] = "completed"
@@ -156,96 +77,6 @@ class DataCollectionConsumer(BaseConsumer):
         except Exception as e:
             self.logger.error(
                 f"Data collection job failed",
-                job_id=job_id,
-                shop_id=shop_id,
-                error=str(e),
-            )
-            await self._mark_job_failed(job_id, str(e))
-            raise
-
-    async def _process_products_collection_job(
-        self, job_id: str, shop_id: str, shop_domain: str, access_token: str
-    ):
-        """Process products-only collection job"""
-        try:
-            self.logger.info(f"Starting products collection", job_id=job_id)
-
-            products = await self.shopify_service.collect_products(shop_domain)
-
-            self.logger.info(
-                f"Products collection completed",
-                job_id=job_id,
-                shop_id=shop_id,
-                products_count=len(products),
-            )
-
-            # Update job tracking
-            if job_id in self.active_jobs:
-                self.active_jobs[job_id]["status"] = "completed"
-                self.active_jobs[job_id]["result"] = {"products": len(products)}
-                self.active_jobs[job_id]["completed_at"] = datetime.utcnow()
-
-        except Exception as e:
-            self.logger.error(
-                f"Products collection job failed",
-                job_id=job_id,
-                shop_id=shop_id,
-                error=str(e),
-            )
-            await self._mark_job_failed(job_id, str(e))
-            raise
-
-    async def _process_orders_collection_job(
-        self, job_id: str, shop_id: str, shop_domain: str, access_token: str
-    ):
-        """Process orders-only collection job"""
-        try:
-            self.logger.info(f"Starting orders collection", job_id=job_id)
-
-            # Note: This method doesn't exist yet in the service
-            # You'd need to implement it or use a different approach
-            self.logger.warning(
-                f"Orders-only collection not implemented yet", job_id=job_id
-            )
-
-            # For now, mark as completed with warning
-            if job_id in self.active_jobs:
-                self.active_jobs[job_id]["status"] = "completed"
-                self.active_jobs[job_id]["result"] = {"message": "Not implemented yet"}
-                self.active_jobs[job_id]["completed_at"] = datetime.utcnow()
-
-        except Exception as e:
-            self.logger.error(
-                f"Orders collection job failed",
-                job_id=job_id,
-                shop_id=shop_id,
-                error=str(e),
-            )
-            await self._mark_job_failed(job_id, str(e))
-            raise
-
-    async def _process_customers_collection_job(
-        self, job_id: str, shop_id: str, shop_domain: str, access_token: str
-    ):
-        """Process customers-only collection job"""
-        try:
-            self.logger.info(f"Starting customers collection", job_id=job_id)
-
-            # Note: This method doesn't exist yet in the service
-            # You'd need to implement it or use a different approach
-            self.logger.warning(
-                f"Customers-only collection not implemented yet", job_id=job_id
-            )
-
-            # For now, mark as completed with warning
-            if job_id in self.active_jobs:
-                self.active_jobs[job_id]["status"] = "completed"
-                self.active_jobs[job_id]["result"] = {"message": "Not implemented yet"}
-                self.active_jobs[job_id]["completed_at"] = datetime.utcnow()
-
-        except Exception as e:
-            self.logger.error(
-                f"Customers collection job failed",
                 job_id=job_id,
                 shop_id=shop_id,
                 error=str(e),

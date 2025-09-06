@@ -2,17 +2,12 @@
 Customer feature generator for ML feature engineering
 """
 
-from typing import Dict, Any, List, Optional
+import datetime
+from typing import Dict, Any, List
 import statistics
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.domains.shopify.models import (
-    ShopifyCustomer,
-    ShopifyShop,
-    ShopifyOrder,
-    BehavioralEvent,
-)
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -90,7 +85,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             return {}
 
     def _compute_basic_customer_features(
-        self, customer: ShopifyCustomer
+        self, customer: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute basic customer features"""
         return {
@@ -135,14 +130,26 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
                 "order_consistency": 0,
             }
 
-        total_spent = sum(order.total_price for order in orders)
-        order_dates = [order.created_at for order in orders]
+        total_spent = sum(order.get("totalPrice", 0.0) for order in orders)
+        order_dates = [order.get("createdAt", "") for order in orders]
         order_dates.sort()
 
         # Calculate time between orders
         time_between_orders = []
         for i in range(1, len(order_dates)):
-            days_diff = (order_dates[i] - order_dates[i - 1]).days
+            current_date = order_dates[i]
+            previous_date = order_dates[i - 1]
+
+            if isinstance(current_date, str):
+                current_date = datetime.fromisoformat(
+                    current_date.replace("Z", "+00:00")
+                )
+            if isinstance(previous_date, str):
+                previous_date = datetime.fromisoformat(
+                    previous_date.replace("Z", "+00:00")
+                )
+
+            days_diff = (current_date - previous_date).days
             time_between_orders.append(days_diff)
 
         return {
@@ -150,7 +157,16 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             "total_spent": total_spent,
             "average_order_value": total_spent / len(orders),
             "days_since_last_order": (
-                (now_utc() - order_dates[-1]).days if order_dates else 0
+                (
+                    now_utc()
+                    - (
+                        datetime.fromisoformat(order_dates[-1].replace("Z", "+00:00"))
+                        if isinstance(order_dates[-1], str)
+                        else order_dates[-1]
+                    )
+                ).days
+                if order_dates
+                else 0
             ),
             "order_frequency": (
                 statistics.mean(time_between_orders) if time_between_orders else 0
@@ -167,7 +183,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_behavioral_features(
-        self, customer: ShopifyCustomer, events: List[BehavioralEvent]
+        self, customer: Dict[str, Any], events: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute rich behavioral features from customer events"""
         if not events:
@@ -220,24 +236,48 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Basic event metrics
-        event_types = [event.event_type for event in events]
-        event_dates = [event.occurred_at for event in events]
+        event_types = [event.get("eventType", "") for event in events]
+        event_dates = [event.get("occurredAt", "") for event in events]
         event_dates.sort()
 
         # Calculate time between events
         time_between_events = []
         for i in range(1, len(event_dates)):
-            days_diff = (event_dates[i] - event_dates[i - 1]).days
+            current_date = event_dates[i]
+            previous_date = event_dates[i - 1]
+
+            if isinstance(current_date, str):
+                current_date = datetime.fromisoformat(
+                    current_date.replace("Z", "+00:00")
+                )
+            if isinstance(previous_date, str):
+                previous_date = datetime.fromisoformat(
+                    previous_date.replace("Z", "+00:00")
+                )
+
+            days_diff = (current_date - previous_date).days
             time_between_events.append(days_diff)
 
         # Event type counts
-        page_views = sum(1 for event in events if event.is_page_viewed)
-        product_views = sum(1 for event in events if event.is_product_viewed)
-        cart_additions = sum(1 for event in events if event.is_product_added_to_cart)
-        collection_views = sum(1 for event in events if event.is_collection_viewed)
-        search_queries = sum(1 for event in events if event.is_search_submitted)
-        checkout_starts = sum(1 for event in events if event.is_checkout_started)
-        checkout_completions = sum(1 for event in events if event.is_checkout_completed)
+        page_views = sum(1 for event in events if event.get("isPageViewed", False))
+        product_views = sum(
+            1 for event in events if event.get("isProductViewed", False)
+        )
+        cart_additions = sum(
+            1 for event in events if event.get("isProductAddedToCart", False)
+        )
+        collection_views = sum(
+            1 for event in events if event.get("isCollectionViewed", False)
+        )
+        search_queries = sum(
+            1 for event in events if event.get("isSearchSubmitted", False)
+        )
+        checkout_starts = sum(
+            1 for event in events if event.get("isCheckoutStarted", False)
+        )
+        checkout_completions = sum(
+            1 for event in events if event.get("isCheckoutCompleted", False)
+        )
 
         # Enhanced session-based analysis
         session_features = self._compute_session_features(events)
@@ -254,27 +294,27 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
         for event in events:
             # Track unique products viewed
-            product_id = event.get_product_id()
+            product_id = event.get("productId", "")
             if product_id:
                 unique_products.add(product_id)
 
             # Track unique collections viewed
-            collection_id = event.get_collection_id()
+            collection_id = event.get("collectionId", "")
             if collection_id:
                 unique_collections.add(collection_id)
 
             # Track search terms
-            search_query = event.get_search_query()
+            search_query = event.get("searchQuery", "")
             if search_query:
                 search_terms.add(search_query.lower().strip())
 
             # Track cart values
-            cart_value = event.get_cart_value()
+            cart_value = event.get("cartValue", 0.0)
             if cart_value is not None:
                 cart_values.append(cart_value)
 
             # Track product prices viewed
-            product_price = event.get_product_price()
+            product_price = event.get("productPrice", 0.0)
             if product_price is not None:
                 product_prices.append(product_price)
 
@@ -316,7 +356,18 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             # Basic metrics
             "event_count": len(events),
             "unique_event_types": len(set(event_types)),
-            "last_event_days": (now_utc() - event_dates[-1]).days if event_dates else 0,
+            "last_event_days": (
+                (
+                    now_utc()
+                    - (
+                        datetime.fromisoformat(event_dates[-1].replace("Z", "+00:00"))
+                        if isinstance(event_dates[-1], str)
+                        else event_dates[-1]
+                    )
+                ).days
+                if event_dates
+                else 0
+            ),
             "event_frequency": (
                 statistics.mean(time_between_events) if time_between_events else 0
             ),
@@ -371,7 +422,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_customer_time_features(
-        self, customer: ShopifyCustomer
+        self, customer: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute time-based features for customer"""
         return self._compute_time_based_features(
@@ -411,9 +462,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             ),
         }
 
-    def _compute_session_features(
-        self, events: List[BehavioralEvent]
-    ) -> Dict[str, Any]:
+    def _compute_session_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute session-based behavioral features"""
         if not events:
             return {
@@ -444,21 +493,33 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
             # Calculate session duration
             if len(session) > 1:
-                duration = (
-                    session[-1].occurred_at - session[0].occurred_at
-                ).total_seconds() / 60
+                last_occurred_at = session[-1].get("occurredAt")
+                first_occurred_at = session[0].get("occurredAt")
+
+                if isinstance(last_occurred_at, str):
+                    last_occurred_at = datetime.fromisoformat(
+                        last_occurred_at.replace("Z", "+00:00")
+                    )
+                if isinstance(first_occurred_at, str):
+                    first_occurred_at = datetime.fromisoformat(
+                        first_occurred_at.replace("Z", "+00:00")
+                    )
+
+                duration = (last_occurred_at - first_occurred_at).total_seconds() / 60
                 session_durations.append(duration)
             else:
                 bounce_sessions += 1
                 session_durations.append(0)
 
             # Count page views and products in session
-            page_views_in_session = sum(1 for e in session if e.is_page_viewed)
+            page_views_in_session = sum(
+                1 for e in session if e.get("isPageViewed", False)
+            )
             products_in_session = len(
-                set(e.get_product_id() for e in session if e.get_product_id())
+                set(e.get("productId", "") for e in session if e.get("productId", ""))
             )
             cart_interactions_in_session = sum(
-                1 for e in session if e.is_product_added_to_cart
+                1 for e in session if e.get("isProductAddedToCart", False)
             )
 
             total_page_views += page_views_in_session
@@ -466,12 +527,16 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             total_cart_interactions += cart_interactions_in_session
 
             # Search refinements (multiple searches in same session)
-            searches_in_session = sum(1 for e in session if e.is_search_submitted)
+            searches_in_session = sum(
+                1 for e in session if e.get("isSearchSubmitted", False)
+            )
             if searches_in_session > 1:
                 search_refinements += searches_in_session - 1
 
             # Collection browsing depth
-            collections_in_session = sum(1 for e in session if e.is_collection_viewed)
+            collections_in_session = sum(
+                1 for e in session if e.get("isCollectionViewed", False)
+            )
             collection_depths.append(collections_in_session)
 
         num_sessions = len(sessions)
@@ -498,7 +563,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_temporal_features(
-        self, events: List[BehavioralEvent]
+        self, events: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute temporal and seasonality features"""
         if not events:
@@ -515,9 +580,18 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Analyze temporal patterns
-        hours = [event.occurred_at.hour for event in events]
-        days_of_week = [event.occurred_at.weekday() for event in events]
-        months = [event.occurred_at.month for event in events]
+        hours = []
+        days_of_week = []
+        months = []
+
+        for event in events:
+            occurred_at = event.get("occurredAt")
+            if isinstance(occurred_at, str):
+                occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            if occurred_at:
+                hours.append(occurred_at.hour)
+                days_of_week.append(occurred_at.weekday())
+                months.append(occurred_at.month)
 
         # Most common patterns
         most_common_hour = max(set(hours), key=hours.count) if hours else 12
@@ -538,15 +612,28 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
         # Visit frequency
         if len(events) > 1:
-            time_span = (events[-1].occurred_at - events[0].occurred_at).days
-            visit_frequency = time_span / len(events) if len(events) > 0 else 0
+            last_event = events[-1].get("occurredAt")
+            first_event = events[0].get("occurredAt")
+            if isinstance(last_event, str):
+                last_event = datetime.fromisoformat(last_event.replace("Z", "+00:00"))
+            if isinstance(first_event, str):
+                first_event = datetime.fromisoformat(first_event.replace("Z", "+00:00"))
+            if last_event and first_event:
+                time_span = (last_event - first_event).days
+                visit_frequency = time_span / len(events) if len(events) > 0 else 0
+            else:
+                visit_frequency = 0
         else:
             visit_frequency = 0
 
         # Time since last visit
-        time_since_last = (
-            (now_utc() - events[-1].occurred_at).total_seconds() / 3600 if events else 0
-        )
+        time_since_last = 0
+        if events:
+            occurred_at = events[-1].get("occurredAt")
+            if isinstance(occurred_at, str):
+                occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            if occurred_at:
+                time_since_last = (now_utc() - occurred_at).total_seconds() / 3600
 
         # Peak shopping hours (9-17)
         peak_hour_events = sum(1 for hour in hours if 9 <= hour <= 17)
@@ -564,7 +651,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             "peak_shopping_hours": peak_shopping,
         }
 
-    def _compute_device_features(self, events: List[BehavioralEvent]) -> Dict[str, Any]:
+    def _compute_device_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute device and browser features"""
         if not events:
             return {
@@ -581,10 +668,11 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         referrers = []
 
         for event in events:
-            if event.event_data:
+            event_data = event.get("eventData", {})
+            if event_data:
                 # Device type from user agent
                 user_agent = (
-                    event.event_data.get("context", {})
+                    event_data.get("context", {})
                     .get("navigator", {})
                     .get("userAgent", "")
                 )
@@ -592,7 +680,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
                 device_types.append(device_type)
 
                 # Screen resolution
-                window = event.event_data.get("context", {}).get("window", {})
+                window = event_data.get("context", {}).get("window", {})
                 width = window.get("innerWidth", 0)
                 height = window.get("innerHeight", 0)
                 resolution_tier = self._classify_resolution(width, height)
@@ -600,7 +688,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
                 # Language
                 language = (
-                    event.event_data.get("context", {})
+                    event_data.get("context", {})
                     .get("navigator", {})
                     .get("language", "en-US")
                 )
@@ -608,7 +696,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
                 # Referrer
                 referrer = (
-                    event.event_data.get("context", {})
+                    event_data.get("context", {})
                     .get("document", {})
                     .get("referrer", "")
                 )
@@ -640,9 +728,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             "referrer_type_encoded": most_common_referrer,
         }
 
-    def _compute_journey_features(
-        self, events: List[BehavioralEvent]
-    ) -> Dict[str, Any]:
+    def _compute_journey_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute user journey and intent features"""
         if not events:
             return {
@@ -660,7 +746,7 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Analyze journey patterns
-        event_sequence = [event.event_type for event in events]
+        event_sequence = [event.get("eventType", "") for event in events]
 
         # Journey type classification
         journey_type = self._classify_journey_type(event_sequence)
@@ -674,14 +760,15 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         # Category exploration breadth
         categories_viewed = set()
         for event in events:
-            if event.event_data:
-                product = event.event_data.get("productVariant", {}).get("product", {})
+            event_data = event.get("eventData", {})
+            if event_data:
+                product = event_data.get("productVariant", {}).get("product", {})
                 if product.get("type"):
                     categories_viewed.add(product["type"])
         category_breadth = len(categories_viewed) / max(len(events), 1)
 
         # Time spent on product pages (estimated)
-        product_view_events = [e for e in events if e.is_product_viewed]
+        product_view_events = [e for e in events if e.get("isProductViewed", False)]
         time_on_products = len(product_view_events) * 30  # Assume 30 seconds per view
 
         # Return visitor (has multiple sessions)
@@ -690,7 +777,19 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
         # Session frequency
         if len(events) > 1:
-            time_span_days = (events[-1].occurred_at - events[0].occurred_at).days
+            last_event_occurred_at = events[-1].get("occurredAt")
+            first_event_occurred_at = events[0].get("occurredAt")
+
+            if isinstance(last_event_occurred_at, str):
+                last_event_occurred_at = datetime.fromisoformat(
+                    last_event_occurred_at.replace("Z", "+00:00")
+                )
+            if isinstance(first_event_occurred_at, str):
+                first_event_occurred_at = datetime.fromisoformat(
+                    first_event_occurred_at.replace("Z", "+00:00")
+                )
+
+            time_span_days = (last_event_occurred_at - first_event_occurred_at).days
             session_frequency = (
                 len(sessions) / max(time_span_days, 1) * 7
             )  # sessions per week
@@ -699,7 +798,9 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
         # Purchase intent urgency (based on checkout behavior)
         checkout_events = sum(
-            1 for e in events if e.is_checkout_started or e.is_checkout_completed
+            1
+            for e in events
+            if e.get("isCheckoutStarted", False) or e.get("isCheckoutCompleted", False)
         )
         purchase_intent_urgency = checkout_events / max(len(events), 1)
 
@@ -708,15 +809,16 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
 
         # Research depth (based on search and product view patterns)
         research_depth = (
-            sum(1 for e in events if e.is_search_submitted)
-            + sum(1 for e in events if e.is_product_viewed)
+            sum(1 for e in events if e.get("isSearchSubmitted", False))
+            + sum(1 for e in events if e.get("isProductViewed", False))
         ) / max(len(events), 1)
 
         # Brand loyalty (based on vendor consistency)
         vendors = []
         for event in events:
-            if event.event_data:
-                product = event.event_data.get("productVariant", {}).get("product", {})
+            event_data = event.get("eventData", {})
+            if event_data:
+                product = event_data.get("productVariant", {}).get("product", {})
                 if product.get("vendor"):
                     vendors.append(product["vendor"])
         brand_loyalty = len(set(vendors)) / max(len(vendors), 1) if vendors else 0
@@ -736,14 +838,14 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _group_events_by_session(
-        self, events: List[BehavioralEvent]
-    ) -> List[List[BehavioralEvent]]:
+        self, events: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
         """Group events by session using time proximity and clientId"""
         if not events:
             return []
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.occurred_at)
+        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
 
         sessions = []
         current_session = [sorted_events[0]]
@@ -753,9 +855,19 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
             previous_event = sorted_events[i - 1]
 
             # If more than 30 minutes gap, start new session
-            time_gap = (
-                current_event.occurred_at - previous_event.occurred_at
-            ).total_seconds() / 60
+            current_occurred_at = current_event.get("occurredAt")
+            previous_occurred_at = previous_event.get("occurredAt")
+
+            if isinstance(current_occurred_at, str):
+                current_occurred_at = datetime.fromisoformat(
+                    current_occurred_at.replace("Z", "+00:00")
+                )
+            if isinstance(previous_occurred_at, str):
+                previous_occurred_at = datetime.fromisoformat(
+                    previous_occurred_at.replace("Z", "+00:00")
+                )
+
+            time_gap = (current_occurred_at - previous_occurred_at).total_seconds() / 60
 
             if time_gap > 30:  # 30 minutes session timeout
                 sessions.append(current_session)
@@ -829,10 +941,10 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         else:
             return 0  # Browser
 
-    def _classify_discovery_method(self, events: List[BehavioralEvent]) -> int:
+    def _classify_discovery_method(self, events: List[Dict[str, Any]]) -> int:
         """Classify product discovery method (0=search, 1=collection, 2=direct)"""
-        search_events = sum(1 for e in events if e.is_search_submitted)
-        collection_events = sum(1 for e in events if e.is_collection_viewed)
+        search_events = sum(1 for e in events if e.get("isSearchSubmitted", False))
+        collection_events = sum(1 for e in events if e.get("isCollectionViewed", False))
 
         if search_events > collection_events:
             return 0  # Search
@@ -841,11 +953,11 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         else:
             return 2  # Direct
 
-    def _calculate_price_sensitivity(self, events: List[BehavioralEvent]) -> float:
+    def _calculate_price_sensitivity(self, events: List[Dict[str, Any]]) -> float:
         """Calculate price sensitivity based on price comparison behavior"""
         prices_viewed = []
         for event in events:
-            price = event.get_product_price()
+            price = event.get("productPrice", 0.0)
             if price is not None:
                 prices_viewed.append(price)
 
@@ -861,14 +973,15 @@ class CustomerFeatureGenerator(BaseFeatureGenerator):
         return std_price / mean_price
 
     def _calculate_price_comparison_behavior(
-        self, events: List[BehavioralEvent]
+        self, events: List[Dict[str, Any]]
     ) -> float:
         """Calculate price comparison behavior score"""
         # Count how many times user views multiple products in same category
         category_views = {}
         for event in events:
-            if event.event_data:
-                product = event.event_data.get("productVariant", {}).get("product", {})
+            event_data = event.get("eventData", {})
+            if event_data:
+                product = event_data.get("productVariant", {}).get("product", {})
                 category = product.get("type")
                 if category:
                     if category not in category_views:
