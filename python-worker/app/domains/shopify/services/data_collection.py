@@ -13,7 +13,6 @@ from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
 from ..interfaces.permission_service import IShopifyPermissionService
 from .data_storage import ShopifyDataStorageService
-from .main_table_storage import MainTableStorageService
 
 logger = get_logger(__name__)
 
@@ -26,14 +25,12 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         api_client: IShopifyAPIClient,
         permission_service: IShopifyPermissionService,
         data_storage: ShopifyDataStorageService = None,
-        main_table_storage: MainTableStorageService = None,
     ):
         self.api_client = api_client
         self.permission_service = permission_service
 
-        # Inject storage services or create defaults
+        # Inject storage service or create default
         self.data_storage = data_storage or ShopifyDataStorageService()
-        self.main_table_storage = main_table_storage
 
         # Collection settings
         self.default_batch_size = 250  # Increased from 50 to 250 for faster API calls
@@ -171,12 +168,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 internal_shop_id, shop_domain
             )
 
-            # Step 6: Assemble and return the final report
-            collection_results = self._build_final_report(
-                raw_data_results, main_table_event_result
-            )
+            # Step 6: Return simple success result
+            total_items = sum(len(result) for result in raw_data_results.values())
 
-            return collection_results
+            return {
+                "success": True,
+                "total_items": total_items,
+                "main_table_event": main_table_event_result,
+            }
 
         except Exception as e:
             logger.error(
@@ -339,117 +338,47 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             elif not result or len(result) == 0:
                 logger.info(f"No {data_type} data to store (empty result)")
 
-    async def _process_main_tables(self, internal_shop_id: str) -> Dict[str, Any]:
-        """Process data into main tables."""
-        try:
-            logger.info(f"Starting main table storage for shop {internal_shop_id}")
-
-            # Use injected main table storage service
-            if not self.main_table_storage:
-                raise ValueError(
-                    "MainTableStorageService must be injected as a dependency"
-                )
-
-            # Pass the collection start time for incremental processing
-            main_storage_result = await self.main_table_storage.store_all_data(
-                internal_shop_id, incremental=True
-            )
-            logger.info(
-                f"Main table storage completed: {main_storage_result.processed_count} processed, "
-                f"{main_storage_result.error_count} errors, {main_storage_result.duration_ms}ms"
-            )
-
-            return {
-                "success": main_storage_result.success,
-                "processed_count": main_storage_result.processed_count,
-                "error_count": main_storage_result.error_count,
-                "duration_ms": main_storage_result.duration_ms,
-                "errors": main_storage_result.errors,
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to store data in main tables: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-            }
-
-    async def _trigger_feature_computation(
-        self,
-        internal_shop_id: str,
-        shop_domain: str,
-        main_storage_result: Dict[str, Any],
+    async def _trigger_main_table_processing(
+        self, internal_shop_id: str, shop_domain: str
     ) -> Dict[str, Any]:
-        """Always trigger feature computation event - let the feature computation service decide whether to run."""
+        """Fire event to trigger main table processing."""
         try:
             from app.core.redis_client import streams_manager
 
-            # Generate a unique job ID for feature computation
-            feature_job_id = (
-                f"feature_compute_{internal_shop_id}_{int(now_utc().timestamp())}"
+            # Generate a unique job ID for main table processing
+            main_table_job_id = (
+                f"main_table_processing_{internal_shop_id}_{int(now_utc().timestamp())}"
             )
 
-            # Always publish ML training event - feature computation service will decide whether to run
-            event_id = await streams_manager.publish_ml_training_event(
-                job_id=feature_job_id,
+            # Publish main table processing event
+            event_id = await streams_manager.publish_data_job_event(
+                job_id=main_table_job_id,
                 shop_id=internal_shop_id,
                 shop_domain=shop_domain,
-                data_collection_completed=True,
+                access_token="",  # Not needed for main table processing
+                job_type="main_table_processing",
             )
 
             logger.info(
-                f"Published feature computation event",
+                f"Published main table processing event",
                 event_id=event_id,
-                job_id=feature_job_id,
+                job_id=main_table_job_id,
                 shop_id=internal_shop_id,
                 shop_domain=shop_domain,
             )
 
             return {
                 "event_id": event_id,
-                "job_id": feature_job_id,
+                "job_id": main_table_job_id,
                 "status": "published",
             }
 
         except Exception as e:
-            logger.error(f"Failed to publish feature computation event: {str(e)}")
+            logger.error(f"Failed to publish main table processing event: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
             }
-
-    def _build_final_report(
-        self,
-        raw_data_results: Dict[str, Any],
-        main_storage_result: Dict[str, Any],
-        ml_event_result: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Build the final collection report."""
-        # Create strategy object for compatibility
-        collectable_data = list(raw_data_results.keys())
-        strategy = {
-            "collectable_data": collectable_data,
-            "collection_method": "full" if len(collectable_data) >= 3 else "partial",
-            "collection_priority": collectable_data,
-        }
-
-        # Calculate total items
-        total_items = sum(len(result) for result in raw_data_results.values())
-
-        return {
-            "shop": None,  # Will be set by caller if needed
-            "products": raw_data_results.get("products", []),
-            "orders": raw_data_results.get("orders", []),
-            "customers": raw_data_results.get("customers", []),
-            "collections": raw_data_results.get("collections", []),
-            "collection_strategy": strategy,
-            "collection_stats": {},
-            "started_at": now_utc().isoformat(),
-            "completed_at": now_utc().isoformat(),
-            "total_items": total_items,
-            "main_storage": main_storage_result,
-            "ml_event": ml_event_result,
-        }
 
     async def _collect_data_generic(
         self,
