@@ -2,9 +2,9 @@
 Session Feature Generator for ML feature engineering
 """
 
-import datetime
-from typing import Dict, Any, List
-import statistics
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+import json
 from app.core.logging import get_logger
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -12,563 +12,352 @@ logger = get_logger(__name__)
 
 
 class SessionFeatureGenerator(BaseFeatureGenerator):
-    """Feature generator for user sessions"""
+    """Feature generator for individual user sessions to match SessionFeatures schema"""
 
     async def generate_features(
-        self, customer: Dict[str, Any], context: Dict[str, Any]
+        self, session_data: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Generate session-based features for a customer
+        Generate features for a single session to match SessionFeatures schema
 
         Args:
-            customer: The customer
-            context: Additional context data (events, etc.)
+            session_data: Dictionary containing:
+                - sessionId: Unique session identifier
+                - customerId: Customer ID (optional, can be None for anonymous)
+                - events: List of BehavioralEvents for this session
+            context: Additional context data:
+                - shop: Shop data
+                - order_data: List of OrderData (to match orderValue)
 
         Returns:
-            Dictionary of generated session features
+            Dictionary of generated session features matching SessionFeatures schema
         """
         try:
-            logger.debug(
-                f"Computing session features for customer: {customer.get('id', 'unknown')}"
-            )
+            session_id = session_data.get("sessionId", "")
+            customer_id = session_data.get("customerId")
+            events = session_data.get("events", [])
+
+            logger.debug(f"Computing session features for session: {session_id}")
+
+            if not events:
+                return self._get_empty_session_features(session_data, context)
 
             features = {}
-            events = context.get("events", [])
+            shop = context.get("shop", {})
+            order_data = context.get("order_data", [])
 
-            # Get customer's events
-            customer_events = [
-                e for e in events if e.get("customerId") == customer.get("id")
-            ]
+            # Basic session identification
+            features.update(self._compute_basic_session_features(session_data, shop))
 
-            if not customer_events:
-                return self._get_empty_session_features()
+            # Session timing
+            features.update(self._compute_session_timing(events))
 
-            # Group events into sessions
-            sessions = self._group_events_by_session(customer_events)
+            # Event counts
+            features.update(self._compute_event_counts(events))
 
-            # Session-level features
-            features.update(self._compute_session_level_features(sessions))
+            # Conversion metrics
+            features.update(self._compute_conversion_metrics(events, order_data))
 
-            # Journey pattern features
-            features.update(self._compute_journey_pattern_features(sessions))
-
-            # Engagement features
-            features.update(self._compute_engagement_features(sessions))
-
-            # Conversion features
-            features.update(self._compute_conversion_features(sessions))
-
-            # Temporal session features
-            features.update(self._compute_temporal_session_features(sessions))
-
-            # Device and context features
-            features.update(self._compute_context_features(sessions))
+            # Context features (device, referrer, pages)
+            features.update(self._compute_context_features(events))
 
             # Validate and clean features
             features = self.validate_features(features)
 
             logger.debug(
-                f"Computed {len(features)} session features for customer: {customer.get('id', 'unknown')}"
+                f"Computed {len(features)} session features for session: {session_id}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute session features for customer: {customer.get('id', 'unknown')}: {str(e)}"
+                f"Failed to compute session features for session: {session_data.get('sessionId', 'unknown')}: {str(e)}"
             )
             return {}
 
-    def _get_empty_session_features(self) -> Dict[str, Any]:
+    def _get_empty_session_features(
+        self, session_data: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Return empty session features when no events exist"""
+        shop = context.get("shop", {})
         return {
-            "total_sessions": 0,
-            "avg_session_duration": 0.0,
-            "avg_session_depth": 0.0,
-            "bounce_rate": 0.0,
-            "session_frequency": 0.0,
-            "journey_type_encoded": 0,
-            "conversion_rate": 0.0,
-            "cart_abandonment_rate": 0.0,
-            "search_usage_rate": 0.0,
-            "collection_browsing_rate": 0.0,
-            "product_view_rate": 0.0,
-            "engagement_score": 0.0,
-            "session_consistency": 0.0,
-            "peak_session_hour": 0,
-            "weekend_session_ratio": 0.0,
-            "mobile_session_ratio": 0.0,
-            "direct_traffic_ratio": 0.0,
+            "shopId": shop.get("id", ""),
+            "sessionId": session_data.get("sessionId", ""),
+            "customerId": session_data.get("customerId"),
+            "startTime": None,
+            "endTime": None,
+            "durationSeconds": 0,
+            "eventCount": 0,
+            "pageViewCount": 0,
+            "productViewCount": 0,
+            "collectionViewCount": 0,
+            "searchCount": 0,
+            "cartAddCount": 0,
+            "checkoutStarted": False,
+            "checkoutCompleted": False,
+            "orderValue": None,
+            "deviceType": None,
+            "referrerDomain": None,
+            "landingPage": None,
+            "exitPage": None,
         }
 
-    def _group_events_by_session(
-        self, events: List[Dict[str, Any]]
-    ) -> List[List[Dict[str, Any]]]:
-        """Group events by session using time proximity and clientId"""
+    def _compute_basic_session_features(
+        self, session_data: Dict[str, Any], shop: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute basic session identification features"""
+        return {
+            "shopId": shop.get("id", ""),
+            "sessionId": session_data.get("sessionId", ""),
+            "customerId": session_data.get("customerId"),  # Can be None for anonymous
+        }
+
+    def _compute_session_timing(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Compute session timing features"""
         if not events:
-            return []
+            return {
+                "startTime": None,
+                "endTime": None,
+                "durationSeconds": 0,
+            }
 
         # Sort events by time
         sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
 
-        sessions = []
-        current_session = [sorted_events[0]]
+        start_time_str = sorted_events[0].get("occurredAt")
+        end_time_str = sorted_events[-1].get("occurredAt")
 
-        for i in range(1, len(sorted_events)):
-            current_event = sorted_events[i]
-            previous_event = sorted_events[i - 1]
+        # Parse datetime strings
+        start_time = None
+        end_time = None
 
-            # If more than 30 minutes gap, start new session
-            current_occurred_at = current_event.get("occurredAt")
-            previous_occurred_at = previous_event.get("occurredAt")
+        if isinstance(start_time_str, str):
+            start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+        elif isinstance(start_time_str, datetime):
+            start_time = start_time_str
 
-            if isinstance(current_occurred_at, str):
-                current_occurred_at = datetime.fromisoformat(
-                    current_occurred_at.replace("Z", "+00:00")
-                )
-            if isinstance(previous_occurred_at, str):
-                previous_occurred_at = datetime.fromisoformat(
-                    previous_occurred_at.replace("Z", "+00:00")
-                )
+        if isinstance(end_time_str, str):
+            end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+        elif isinstance(end_time_str, datetime):
+            end_time = end_time_str
 
-            time_gap = (current_occurred_at - previous_occurred_at).total_seconds() / 60
-
-            if time_gap > 30:  # 30 minutes session timeout
-                sessions.append(current_session)
-                current_session = [current_event]
-            else:
-                current_session.append(current_event)
-
-        sessions.append(current_session)
-        return sessions
-
-    def _compute_session_level_features(
-        self, sessions: List[List[Dict[str, Any]]]
-    ) -> Dict[str, Any]:
-        """Compute basic session-level features"""
-        if not sessions:
-            return {}
-
-        session_durations = []
-        session_depths = []
-        bounce_sessions = 0
-
-        for session in sessions:
-            # Session depth (number of events)
-            depth = len(session)
-            session_depths.append(depth)
-
-            # Session duration
-            if depth > 1:
-                last_occurred_at = session[-1].get("occurredAt")
-                first_occurred_at = session[0].get("occurredAt")
-
-                if isinstance(last_occurred_at, str):
-                    last_occurred_at = datetime.fromisoformat(
-                        last_occurred_at.replace("Z", "+00:00")
-                    )
-                if isinstance(first_occurred_at, str):
-                    first_occurred_at = datetime.fromisoformat(
-                        first_occurred_at.replace("Z", "+00:00")
-                    )
-
-                duration = (
-                    last_occurred_at - first_occurred_at
-                ).total_seconds() / 60  # minutes
-                session_durations.append(duration)
-            else:
-                bounce_sessions += 1
-                session_durations.append(0)
-
-        # Calculate session frequency (sessions per week)
-        if len(sessions) > 1:
-            last_session_last_event = sessions[-1][-1].get("occurredAt")
-            first_session_first_event = sessions[0][0].get("occurredAt")
-
-            if isinstance(last_session_last_event, str):
-                last_session_last_event = datetime.fromisoformat(
-                    last_session_last_event.replace("Z", "+00:00")
-                )
-            if isinstance(first_session_first_event, str):
-                first_session_first_event = datetime.fromisoformat(
-                    first_session_first_event.replace("Z", "+00:00")
-                )
-
-            time_span = (last_session_last_event - first_session_first_event).days
-            session_frequency = len(sessions) / max(time_span / 7, 1)  # per week
-        else:
-            session_frequency = 0.0
+        # Calculate duration in seconds
+        duration_seconds = 0
+        if start_time and end_time:
+            duration_seconds = int((end_time - start_time).total_seconds())
 
         return {
-            "total_sessions": len(sessions),
-            "avg_session_duration": (
-                statistics.mean(session_durations) if session_durations else 0.0
-            ),
-            "avg_session_depth": (
-                statistics.mean(session_depths) if session_depths else 0.0
-            ),
-            "bounce_rate": bounce_sessions / len(sessions) if sessions else 0.0,
-            "session_frequency": session_frequency,
+            "startTime": start_time,
+            "endTime": end_time,
+            "durationSeconds": duration_seconds,
         }
 
-    def _compute_journey_pattern_features(
-        self, sessions: List[List[Dict[str, Any]]]
-    ) -> Dict[str, Any]:
-        """Compute journey pattern features"""
-        if not sessions:
-            return {
-                "journey_type_encoded": 0,
-                "search_usage_rate": 0.0,
-                "collection_browsing_rate": 0.0,
-                "product_view_rate": 0.0,
-                "direct_purchase_rate": 0.0,
-            }
+    def _compute_event_counts(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Compute event count features"""
+        event_count = len(events)
+        page_view_count = 0
+        product_view_count = 0
+        collection_view_count = 0
+        search_count = 0
+        cart_add_count = 0
 
-        # Analyze journey patterns across all sessions
-        total_events = sum(len(session) for session in sessions)
-        search_events = 0
-        collection_events = 0
-        product_view_events = 0
-        direct_purchases = 0
+        for event in events:
+            event_type = event.get("eventType", "")
 
-        journey_types = []
-
-        for session in sessions:
-            session_event_types = [event.get("eventType") for event in session]
-
-            # Count event types in this session
-            search_count = session_event_types.count("search_submitted")
-            collection_count = session_event_types.count("collection_viewed")
-            product_view_count = session_event_types.count("product_viewed")
-            checkout_count = session_event_types.count("checkout_started")
-
-            search_events += search_count
-            collection_events += collection_count
-            product_view_events += product_view_count
-
-            # Direct purchase (checkout without much browsing)
-            if checkout_count > 0 and len(session) < 5:
-                direct_purchases += 1
-
-            # Classify journey type for this session
-            journey_type = self._classify_session_journey_type(session_event_types)
-            journey_types.append(journey_type)
-
-        # Calculate rates
-        search_usage_rate = search_events / max(total_events, 1)
-        collection_browsing_rate = collection_events / max(total_events, 1)
-        product_view_rate = product_view_events / max(total_events, 1)
-        direct_purchase_rate = direct_purchases / len(sessions)
-
-        # Most common journey type
-        most_common_journey = (
-            max(set(journey_types), key=journey_types.count) if journey_types else 0
-        )
+            if event_type in ["page_viewed", "page_view"]:
+                page_view_count += 1
+            elif event_type in ["product_viewed", "product_view"]:
+                product_view_count += 1
+            elif event_type in ["collection_viewed", "collection_view"]:
+                collection_view_count += 1
+            elif event_type in ["search_submitted", "search"]:
+                search_count += 1
+            elif event_type in ["product_added_to_cart", "cart_add"]:
+                cart_add_count += 1
 
         return {
-            "journey_type_encoded": most_common_journey,
-            "search_usage_rate": search_usage_rate,
-            "collection_browsing_rate": collection_browsing_rate,
-            "product_view_rate": product_view_rate,
-            "direct_purchase_rate": direct_purchase_rate,
+            "eventCount": event_count,
+            "pageViewCount": page_view_count,
+            "productViewCount": product_view_count,
+            "collectionViewCount": collection_view_count,
+            "searchCount": search_count,
+            "cartAddCount": cart_add_count,
         }
 
-    def _compute_engagement_features(
-        self, sessions: List[List[Dict[str, Any]]]
-    ) -> Dict[str, Any]:
-        """Compute engagement features"""
-        if not sessions:
-            return {
-                "engagement_score": 0.0,
-                "session_consistency": 0.0,
-                "deep_session_ratio": 0.0,
-                "return_session_ratio": 0.0,
-            }
-
-        # Calculate engagement metrics
-        deep_sessions = 0  # Sessions with >5 events
-        long_sessions = 0  # Sessions >10 minutes
-        return_sessions = 0  # Multiple sessions (already calculated in session count)
-
-        session_depths = []
-        session_durations = []
-
-        for session in sessions:
-            depth = len(session)
-            session_depths.append(depth)
-
-            if depth > 1:
-                last_occurred_at = session[-1].get("occurredAt")
-                first_occurred_at = session[0].get("occurredAt")
-
-                if isinstance(last_occurred_at, str):
-                    last_occurred_at = datetime.fromisoformat(
-                        last_occurred_at.replace("Z", "+00:00")
-                    )
-                if isinstance(first_occurred_at, str):
-                    first_occurred_at = datetime.fromisoformat(
-                        first_occurred_at.replace("Z", "+00:00")
-                    )
-
-                duration = (last_occurred_at - first_occurred_at).total_seconds() / 60
-                session_durations.append(duration)
-            else:
-                session_durations.append(0)
-
-            if depth > 5:
-                deep_sessions += 1
-
-            if depth > 1 and session_durations[-1] > 10:
-                long_sessions += 1
-
-        # Engagement score (combination of depth, duration, and frequency)
-        avg_depth = statistics.mean(session_depths) if session_depths else 0
-        avg_duration = statistics.mean(session_durations) if session_durations else 0
-        session_count = len(sessions)
-
-        engagement_score = min(
-            (avg_depth / 10.0 + avg_duration / 30.0 + session_count / 20.0) / 3.0, 1.0
-        )
-
-        # Session consistency (how similar are session patterns)
-        if len(session_depths) > 1:
-            depth_consistency = 1 - (
-                statistics.stdev(session_depths)
-                / max(statistics.mean(session_depths), 1)
-            )
-        else:
-            depth_consistency = 0.0
-
-        return {
-            "engagement_score": engagement_score,
-            "session_consistency": depth_consistency,
-            "deep_session_ratio": deep_sessions / len(sessions),
-            "return_session_ratio": 1 if len(sessions) > 1 else 0,
-        }
-
-    def _compute_conversion_features(
-        self, sessions: List[List[Dict[str, Any]]]
+    def _compute_conversion_metrics(
+        self, events: List[Dict[str, Any]], order_data: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute conversion-related features"""
-        if not sessions:
-            return {
-                "conversion_rate": 0.0,
-                "cart_abandonment_rate": 0.0,
-                "checkout_abandonment_rate": 0.0,
-                "funnel_completion_rate": 0.0,
-            }
+        checkout_started = False
+        checkout_completed = False
+        order_value = None
 
-        total_sessions = len(sessions)
-        sessions_with_cart = 0
-        sessions_with_checkout = 0
-        sessions_with_purchase = 0
-        sessions_with_product_view = 0
+        # Check for checkout events
+        for event in events:
+            event_type = event.get("eventType", "")
+            if event_type in ["checkout_started", "checkout_begin"]:
+                checkout_started = True
+            elif event_type in ["checkout_completed", "purchase", "order_completed"]:
+                checkout_completed = True
 
-        for session in sessions:
-            event_types = [event.get("eventType") for event in session]
+        # Find order value if checkout was completed
+        if checkout_completed:
+            # Look for order in the same time window
+            session_start = None
+            session_end = None
 
-            if "product_viewed" in event_types:
-                sessions_with_product_view += 1
-            if "product_added_to_cart" in event_types:
-                sessions_with_cart += 1
-            if "checkout_started" in event_types:
-                sessions_with_checkout += 1
-            if "checkout_completed" in event_types:
-                sessions_with_purchase += 1
+            if events:
+                sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+                start_time_str = sorted_events[0].get("occurredAt")
+                end_time_str = sorted_events[-1].get("occurredAt")
 
-        # Calculate conversion rates
-        conversion_rate = sessions_with_purchase / max(total_sessions, 1)
-        cart_abandonment_rate = (sessions_with_cart - sessions_with_checkout) / max(
-            sessions_with_cart, 1
-        )
-        checkout_abandonment_rate = (
-            sessions_with_checkout - sessions_with_purchase
-        ) / max(sessions_with_checkout, 1)
+                if isinstance(start_time_str, str):
+                    session_start = datetime.fromisoformat(
+                        start_time_str.replace("Z", "+00:00")
+                    )
+                if isinstance(end_time_str, str):
+                    session_end = datetime.fromisoformat(
+                        end_time_str.replace("Z", "+00:00")
+                    )
 
-        # Funnel completion rate (view -> cart -> checkout -> purchase)
-        if sessions_with_product_view > 0:
-            funnel_completion_rate = sessions_with_purchase / sessions_with_product_view
-        else:
-            funnel_completion_rate = 0.0
+            # Find matching order
+            for order in order_data:
+                order_date = order.get("orderDate")
+                if isinstance(order_date, str):
+                    order_date = datetime.fromisoformat(
+                        order_date.replace("Z", "+00:00")
+                    )
 
-        return {
-            "conversion_rate": conversion_rate,
-            "cart_abandonment_rate": cart_abandonment_rate,
-            "checkout_abandonment_rate": checkout_abandonment_rate,
-            "funnel_completion_rate": funnel_completion_rate,
-        }
-
-    def _compute_temporal_session_features(
-        self, sessions: List[List[Dict[str, Any]]]
-    ) -> Dict[str, Any]:
-        """Compute temporal session features"""
-        if not sessions:
-            return {
-                "peak_session_hour": 0,
-                "weekend_session_ratio": 0.0,
-                "session_time_consistency": 0.0,
-                "seasonal_session_pattern": 0.0,
-            }
-
-        session_hours = []
-        weekend_sessions = 0
-        session_months = []
-
-        for session in sessions:
-            session_start = session[0].occurred_at
-            session_hours.append(session_start.hour)
-            session_months.append(session_start.month)
-
-            # Weekend sessions (Saturday=5, Sunday=6)
-            if session_start.weekday() >= 5:
-                weekend_sessions += 1
-
-        # Peak session hour
-        peak_hour = (
-            max(set(session_hours), key=session_hours.count) if session_hours else 12
-        )
-
-        # Weekend session ratio
-        weekend_ratio = weekend_sessions / len(sessions)
-
-        # Session time consistency (how consistent are session times)
-        if len(session_hours) > 1:
-            hour_consistency = 1 - (
-                statistics.stdev(session_hours) / max(statistics.mean(session_hours), 1)
-            )
-        else:
-            hour_consistency = 0.0
-
-        # Seasonal session pattern
-        seasonal_pattern = self._calculate_seasonal_session_pattern(session_months)
+                # Check if order is within session timeframe (with some buffer)
+                if (
+                    session_start
+                    and session_end
+                    and order_date
+                    and session_start
+                    <= order_date
+                    <= session_end + timedelta(minutes=30)
+                ):
+                    order_value = float(order.get("totalAmount", 0))
+                    break
 
         return {
-            "peak_session_hour": peak_hour,
-            "weekend_session_ratio": weekend_ratio,
-            "session_time_consistency": hour_consistency,
-            "seasonal_session_pattern": seasonal_pattern,
+            "checkoutStarted": checkout_started,
+            "checkoutCompleted": checkout_completed,
+            "orderValue": order_value,
         }
 
-    def _compute_context_features(
-        self, sessions: List[List[Dict[str, Any]]]
-    ) -> Dict[str, Any]:
+    def _compute_context_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute device and context features"""
-        if not sessions:
+        if not events:
             return {
-                "mobile_session_ratio": 0.0,
-                "desktop_session_ratio": 0.0,
-                "direct_traffic_ratio": 0.0,
-                "search_traffic_ratio": 0.0,
-                "social_traffic_ratio": 0.0,
+                "deviceType": None,
+                "referrerDomain": None,
+                "landingPage": None,
+                "exitPage": None,
             }
 
-        mobile_sessions = 0
-        desktop_sessions = 0
-        direct_sessions = 0
-        search_sessions = 0
-        social_sessions = 0
+        # Sort events by time
+        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        first_event = sorted_events[0]
+        last_event = sorted_events[-1]
 
-        for session in sessions:
-            # Analyze first event for context
-            first_event = session[0]
+        # Extract device type from first event
+        device_type = None
+        event_data = first_event.get("eventData", {})
 
-            if first_event.event_data:
-                # Device type
-                user_agent = (
-                    first_event.event_data.get("context", {})
-                    .get("navigator", {})
-                    .get("userAgent", "")
-                )
-                if self._is_mobile_device(user_agent):
-                    mobile_sessions += 1
-                else:
-                    desktop_sessions += 1
+        if isinstance(event_data, str):
+            try:
+                event_data = json.loads(event_data)
+            except:
+                event_data = {}
 
-                # Traffic source
-                referrer = (
-                    first_event.event_data.get("context", {})
-                    .get("document", {})
-                    .get("referrer", "")
-                )
-                traffic_source = self._classify_traffic_source(referrer)
+        # Try to get device type from various possible locations in event data
+        user_agent = ""
+        if "context" in event_data:
+            context = event_data["context"]
+            if "navigator" in context:
+                user_agent = context["navigator"].get("userAgent", "")
+            elif "userAgent" in context:
+                user_agent = context.get("userAgent", "")
+        elif "userAgent" in event_data:
+            user_agent = event_data.get("userAgent", "")
+        elif "device" in event_data:
+            device_type = event_data["device"].get("type")
 
-                if traffic_source == "direct":
-                    direct_sessions += 1
-                elif traffic_source == "search":
-                    search_sessions += 1
-                elif traffic_source == "social":
-                    social_sessions += 1
+        # Classify device type from user agent if not already set
+        if not device_type and user_agent:
+            device_type = self._classify_device_type(user_agent)
 
-        total_sessions = len(sessions)
+        # Extract referrer domain
+        referrer_domain = None
+        if "context" in event_data and "document" in event_data["context"]:
+            referrer = event_data["context"]["document"].get("referrer", "")
+            referrer_domain = self._extract_domain(referrer)
+        elif "referrer" in event_data:
+            referrer_domain = self._extract_domain(event_data.get("referrer", ""))
+
+        # Extract landing page (from first event)
+        landing_page = None
+        if "context" in event_data and "page" in event_data["context"]:
+            landing_page = event_data["context"]["page"].get("url")
+        elif "page" in event_data:
+            landing_page = event_data["page"].get("url")
+        elif "url" in event_data:
+            landing_page = event_data.get("url")
+
+        # Extract exit page (from last event)
+        exit_page = None
+        last_event_data = last_event.get("eventData", {})
+        if isinstance(last_event_data, str):
+            try:
+                last_event_data = json.loads(last_event_data)
+            except:
+                last_event_data = {}
+
+        if "context" in last_event_data and "page" in last_event_data["context"]:
+            exit_page = last_event_data["context"]["page"].get("url")
+        elif "page" in last_event_data:
+            exit_page = last_event_data["page"].get("url")
+        elif "url" in last_event_data:
+            exit_page = last_event_data.get("url")
 
         return {
-            "mobile_session_ratio": mobile_sessions / total_sessions,
-            "desktop_session_ratio": desktop_sessions / total_sessions,
-            "direct_traffic_ratio": direct_sessions / total_sessions,
-            "search_traffic_ratio": search_sessions / total_sessions,
-            "social_traffic_ratio": social_sessions / total_sessions,
+            "deviceType": device_type,
+            "referrerDomain": referrer_domain,
+            "landingPage": landing_page,
+            "exitPage": exit_page,
         }
 
-    def _classify_session_journey_type(self, event_types: List[str]) -> int:
-        """Classify journey type for a session (0=browser, 1=searcher, 2=direct_buyer)"""
-        search_count = event_types.count("search_submitted")
-        product_views = event_types.count("product_viewed")
-        cart_adds = event_types.count("product_added_to_cart")
-        checkouts = event_types.count("checkout_started")
-
-        if checkouts > 0 and len(event_types) < 5:
-            return 2  # Direct buyer
-        elif search_count > product_views * 0.3:
-            return 1  # Searcher
-        else:
-            return 0  # Browser
-
-    def _calculate_seasonal_session_pattern(self, session_months: List[int]) -> float:
-        """Calculate seasonal session pattern strength"""
-        if not session_months:
-            return 0.0
-
-        # Count sessions by season
-        seasonal_counts = {"spring": 0, "summer": 0, "fall": 0, "winter": 0}
-
-        for month in session_months:
-            if month in [3, 4, 5]:
-                seasonal_counts["spring"] += 1
-            elif month in [6, 7, 8]:
-                seasonal_counts["summer"] += 1
-            elif month in [9, 10, 11]:
-                seasonal_counts["fall"] += 1
-            else:
-                seasonal_counts["winter"] += 1
-
-        # Calculate pattern strength (how concentrated in one season)
-        total_sessions = sum(seasonal_counts.values())
-        if total_sessions == 0:
-            return 0.0
-
-        max_season_count = max(seasonal_counts.values())
-        pattern_strength = max_season_count / total_sessions
-
-        return pattern_strength
-
-    def _is_mobile_device(self, user_agent: str) -> bool:
-        """Check if user agent indicates mobile device"""
+    def _classify_device_type(self, user_agent: str) -> str:
+        """Classify device type from user agent string"""
         user_agent_lower = user_agent.lower()
-        mobile_indicators = ["mobile", "android", "iphone", "ipad", "tablet"]
-        return any(indicator in user_agent_lower for indicator in mobile_indicators)
 
-    def _classify_traffic_source(self, referrer: str) -> str:
-        """Classify traffic source from referrer"""
-        if not referrer:
-            return "direct"
-        elif any(
-            search in referrer.lower()
-            for search in ["google", "bing", "yahoo", "search"]
+        if any(
+            mobile in user_agent_lower for mobile in ["mobile", "android", "iphone"]
         ):
-            return "search"
-        elif any(
-            social in referrer.lower()
-            for social in ["facebook", "twitter", "instagram", "pinterest"]
-        ):
-            return "social"
+            return "mobile"
+        elif any(tablet in user_agent_lower for tablet in ["ipad", "tablet"]):
+            return "tablet"
         else:
-            return "other"
+            return "desktop"
+
+    def _extract_domain(self, url: str) -> Optional[str]:
+        """Extract domain from URL"""
+        if not url:
+            return None
+
+        try:
+            # Remove protocol
+            if "://" in url:
+                url = url.split("://", 1)[1]
+
+            # Extract domain (before first slash)
+            domain = url.split("/")[0]
+
+            # Remove www prefix
+            if domain.startswith("www."):
+                domain = domain[4:]
+
+            return domain if domain else None
+        except:
+            return None

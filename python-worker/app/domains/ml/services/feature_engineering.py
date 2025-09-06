@@ -24,10 +24,13 @@ from .feature_pipeline import FeaturePipeline, IFeaturePipeline
 from ..repositories.feature_repository import FeatureRepository, IFeatureRepository
 from ..generators import (
     ProductFeatureGenerator,
-    CustomerFeatureGenerator,
-    OrderFeatureGenerator,
     CollectionFeatureGenerator,
-    ShopFeatureGenerator,
+    UserFeatureGenerator,
+    InteractionFeatureGenerator,
+    SessionFeatureGenerator,
+    CustomerBehaviorFeatureGenerator,
+    SearchProductFeatureGenerator,
+    ProductPairFeatureGenerator,
 )
 
 logger = get_logger(__name__)
@@ -47,10 +50,13 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         # Initialize feature generators for individual feature computation
         self.product_generator = ProductFeatureGenerator()
-        self.customer_generator = CustomerFeatureGenerator()
-        self.order_generator = OrderFeatureGenerator()
+        self.user_generator = UserFeatureGenerator()
+        self.interaction_generator = InteractionFeatureGenerator()
         self.collection_generator = CollectionFeatureGenerator()
-        self.shop_generator = ShopFeatureGenerator()
+        self.session_generator = SessionFeatureGenerator()
+        self.customer_behavior_generator = CustomerBehaviorFeatureGenerator()
+        self.search_product_generator = SearchProductFeatureGenerator()
+        self.product_pair_generator = ProductPairFeatureGenerator()
 
         # Feature computation settings
         self.max_features_per_entity = 100
@@ -83,42 +89,52 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             return {}
 
-    async def compute_customer_features(
+    async def compute_user_features(
         self,
         customer: ShopifyCustomer,
         shop: ShopifyShop,
         orders: Optional[List[ShopifyOrder]] = None,
         events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
-        """Compute ML features for a customer using the customer generator"""
+        """Compute ML features for a user/customer using the user generator"""
         try:
             context = {
                 "shop": shop,
                 "orders": orders or [],
                 "events": events or [],
             }
-            return await self.customer_generator.generate_features(customer, context)
+            return await self.user_generator.generate_features(customer, context)
         except Exception as e:
-            logger.error(
-                f"Failed to compute customer features for {customer.id}: {str(e)}"
-            )
+            logger.error(f"Failed to compute user features for {customer.id}: {str(e)}")
             return {}
 
-    async def compute_order_features(
+    async def compute_interaction_features(
         self,
-        order: ShopifyOrder,
+        customer: ShopifyCustomer,
+        product: ShopifyProduct,
         shop: ShopifyShop,
-        products: Optional[List[ShopifyProduct]] = None,
+        orders: Optional[List[ShopifyOrder]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
     ) -> Dict[str, Any]:
-        """Compute ML features for an order using the order generator"""
+        """Compute ML features for customer-product interactions using the interaction generator"""
         try:
+            # Create interaction data structure
+            interaction_data = {
+                "customerId": customer.id,
+                "productId": product.id,
+            }
             context = {
                 "shop": shop,
-                "products": products or [],
+                "orders": orders or [],
+                "events": events or [],
             }
-            return await self.order_generator.generate_features(order, context)
+            return await self.interaction_generator.generate_features(
+                interaction_data, context
+            )
         except Exception as e:
-            logger.error(f"Failed to compute order features for {order.id}: {str(e)}")
+            logger.error(
+                f"Failed to compute interaction features for {customer.id}-{product.id}: {str(e)}"
+            )
             return {}
 
     async def compute_collection_features(
@@ -126,12 +142,18 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         collection: ShopifyCollection,
         shop: ShopifyShop,
         products: Optional[List[ShopifyProduct]] = None,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        order_data: Optional[List[ShopifyOrder]] = None,
+        shop_analytics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compute ML features for a collection using the collection generator"""
         try:
             context = {
                 "shop": shop,
                 "products": products or [],
+                "behavioral_events": behavioral_events or [],
+                "order_data": order_data or [],
+                "shop_analytics": shop_analytics or {},
             }
             return await self.collection_generator.generate_features(
                 collection, context
@@ -142,28 +164,541 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             return {}
 
-    async def compute_shop_features(
+    async def compute_session_features(
+        self,
+        session_data: Dict[str, Any],
+        shop: ShopifyShop,
+        order_data: Optional[List[ShopifyOrder]] = None,
+    ) -> Dict[str, Any]:
+        """Compute ML features for a session using the session generator"""
+        try:
+            context = {
+                "shop": shop,
+                "order_data": order_data or [],
+            }
+            return await self.session_generator.generate_features(session_data, context)
+        except Exception as e:
+            logger.error(
+                f"Failed to compute session features for {session_data.get('sessionId', 'unknown')}: {str(e)}"
+            )
+            return {}
+
+    async def compute_customer_behavior_features(
+        self,
+        customer: ShopifyCustomer,
+        shop: ShopifyShop,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Any]:
+        """Compute ML features for customer behavior using the customer behavior generator"""
+        try:
+            context = {
+                "shop": shop,
+                "behavioral_events": behavioral_events or [],
+            }
+            return await self.customer_behavior_generator.generate_features(
+                customer, context
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to compute customer behavior features for {customer.id}: {str(e)}"
+            )
+            return {}
+
+    async def compute_search_product_features(
+        self,
+        search_query: str,
+        product_id: str,
+        shop: ShopifyShop,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Any]:
+        """Compute ML features for search-product combination using the search product generator"""
+        try:
+            search_product_data = {
+                "searchQuery": search_query,
+                "productId": product_id,
+            }
+            context = {
+                "shop": shop,
+                "behavioral_events": behavioral_events or [],
+            }
+            return await self.search_product_generator.generate_features(
+                search_product_data, context
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to compute search-product features for '{search_query}' + {product_id}: {str(e)}"
+            )
+            return {}
+
+    async def compute_product_pair_features(
+        self,
+        product_id1: str,
+        product_id2: str,
+        shop: ShopifyShop,
+        orders: Optional[List[ShopifyOrder]] = None,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Any]:
+        """Compute ML features for product pairs using the product pair generator"""
+        try:
+            context = {
+                "orders": orders or [],
+                "behavioral_events": behavioral_events or [],
+            }
+            return await self.product_pair_generator.generate_features(
+                shop.id, product_id1, product_id2, context
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to compute product pair features for {product_id1}-{product_id2}: {str(e)}"
+            )
+            return {}
+
+    # Batch processing methods for efficiency
+    async def compute_all_product_features(
+        self,
+        products: List[ShopifyProduct],
+        shop: ShopifyShop,
+        orders: Optional[List[ShopifyOrder]] = None,
+        collections: Optional[List[ShopifyCollection]] = None,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch compute features for multiple products"""
+        try:
+            results = {}
+            context = {
+                "shop": shop,
+                "orders": orders or [],
+                "collections": collections or [],
+                "behavioral_events": behavioral_events or [],
+            }
+            
+            for product in products:
+                try:
+                    features = await self.product_generator.generate_features(product, context)
+                    results[product.id] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute features for product {product.id}: {str(e)}")
+                    results[product.id] = {}
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to batch compute product features: {str(e)}")
+            return {}
+
+    async def compute_all_user_features(
+        self,
+        customers: List[ShopifyCustomer],
+        shop: ShopifyShop,
+        orders: Optional[List[ShopifyOrder]] = None,
+        events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch compute features for multiple customers/users"""
+        try:
+            results = {}
+            context = {
+                "shop": shop,
+                "orders": orders or [],
+                "events": events or [],
+            }
+            
+            for customer in customers:
+                try:
+                    features = await self.user_generator.generate_features(customer, context)
+                    results[customer.id] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute user features for {customer.id}: {str(e)}")
+                    results[customer.id] = {}
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to batch compute user features: {str(e)}")
+            return {}
+
+    async def compute_all_collection_features(
+        self,
+        collections: List[ShopifyCollection],
+        shop: ShopifyShop,
+        products: Optional[List[ShopifyProduct]] = None,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        order_data: Optional[List[ShopifyOrder]] = None,
+        shop_analytics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch compute features for multiple collections"""
+        try:
+            results = {}
+            context = {
+                "shop": shop,
+                "products": products or [],
+                "behavioral_events": behavioral_events or [],
+                "order_data": order_data or [],
+                "shop_analytics": shop_analytics or {},
+            }
+            
+            for collection in collections:
+                try:
+                    features = await self.collection_generator.generate_features(collection, context)
+                    results[collection.id] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute collection features for {collection.id}: {str(e)}")
+                    results[collection.id] = {}
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to batch compute collection features: {str(e)}")
+            return {}
+
+    async def compute_all_customer_behavior_features(
+        self,
+        customers: List[ShopifyCustomer],
+        shop: ShopifyShop,
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch compute customer behavior features"""
+        try:
+            results = {}
+            
+            for customer in customers:
+                try:
+                    # Filter events for this customer
+                    customer_events = [
+                        event for event in (behavioral_events or [])
+                        if event.customerId == customer.id
+                    ]
+                    
+                    context = {
+                        "shop": shop,
+                        "behavioral_events": customer_events,
+                    }
+                    
+                    features = await self.customer_behavior_generator.generate_features(customer, context)
+                    results[customer.id] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute customer behavior features for {customer.id}: {str(e)}")
+                    results[customer.id] = {}
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to batch compute customer behavior features: {str(e)}")
+            return {}
+
+    async def generate_session_features_from_events(
+        self,
+        behavioral_events: List[BehavioralEvent],
+        shop: ShopifyShop,
+        order_data: Optional[List[ShopifyOrder]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Generate session features by grouping behavioral events into sessions"""
+        try:
+            results = {}
+            
+            # Group events by session/customer
+            sessions = self._group_events_into_sessions(behavioral_events)
+            
+            context = {
+                "shop": shop,
+                "order_data": order_data or [],
+            }
+            
+            for session_id, session_info in sessions.items():
+                try:
+                    session_data = {
+                        "sessionId": session_id,
+                        "customerId": session_info.get("customerId"),
+                        "events": session_info.get("events", []),
+                    }
+                    
+                    features = await self.session_generator.generate_features(session_data, context)
+                    results[session_id] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute session features for {session_id}: {str(e)}")
+                    results[session_id] = {}
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to generate session features from events: {str(e)}")
+            return {}
+
+    def _group_events_into_sessions(
+        self, events: List[BehavioralEvent], session_timeout_minutes: int = 30
+    ) -> Dict[str, Dict[str, Any]]:
+        """Group behavioral events into sessions"""
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+        
+        sessions = defaultdict(lambda: {"events": [], "customerId": None})
+        
+        # Sort events by time
+        sorted_events = sorted(events, key=lambda e: e.occurredAt if e.occurredAt else datetime.min)
+        
+        current_sessions = {}  # customer_id -> current_session_id
+        
+        for event in sorted_events:
+            customer_id = event.customerId or "anonymous"
+            event_time = event.occurredAt
+            
+            # Check if we need to start a new session for this customer
+            should_start_new_session = True
+            
+            if customer_id in current_sessions:
+                current_session_id = current_sessions[customer_id]
+                last_event_time = sessions[current_session_id]["events"][-1].occurredAt if sessions[current_session_id]["events"] else None
+                
+                if last_event_time and event_time:
+                    time_diff = (event_time - last_event_time).total_seconds() / 60
+                    if time_diff <= session_timeout_minutes:
+                        should_start_new_session = False
+            
+            if should_start_new_session:
+                # Create new session
+                import uuid
+                session_id = f"{customer_id}_{event_time.strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}" if event_time else f"{customer_id}_{str(uuid.uuid4())[:8]}"
+                current_sessions[customer_id] = session_id
+                sessions[session_id]["customerId"] = customer_id if customer_id != "anonymous" else None
+            
+            # Add event to current session
+            current_session_id = current_sessions[customer_id]
+            sessions[current_session_id]["events"].append(event)
+        
+        return dict(sessions)
+
+    async def compute_all_features_for_shop(
         self,
         shop: ShopifyShop,
         products: Optional[List[ShopifyProduct]] = None,
         orders: Optional[List[ShopifyOrder]] = None,
         customers: Optional[List[ShopifyCustomer]] = None,
         collections: Optional[List[ShopifyCollection]] = None,
-        events: Optional[List[BehavioralEvent]] = None,
-    ) -> Dict[str, Any]:
-        """Compute ML features for a shop using the shop generator"""
+        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        shop_analytics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Comprehensive feature computation for all entities in a shop"""
         try:
-            context = {
-                "products": products or [],
-                "orders": orders or [],
-                "customers": customers or [],
-                "collections": collections or [],
-                "events": events or [],
-            }
-            return await self.shop_generator.generate_features(shop, context)
+            all_features = {}
+            
+            # Prepare data
+            products = products or []
+            orders = orders or []
+            customers = customers or []
+            collections = collections or []
+            behavioral_events = behavioral_events or []
+            shop_analytics = shop_analytics or {}
+            
+            logger.info(f"Computing comprehensive features for shop {shop.id}")
+            
+            # 1. Product Features
+            logger.info("Computing product features...")
+            product_features = await self.compute_all_product_features(
+                products, shop, orders, collections, behavioral_events
+            )
+            all_features["products"] = product_features
+            
+            # 2. User/Customer Features
+            logger.info("Computing user features...")
+            user_features = await self.compute_all_user_features(
+                customers, shop, orders, behavioral_events
+            )
+            all_features["users"] = user_features
+            
+            # 3. Collection Features
+            logger.info("Computing collection features...")
+            collection_features = await self.compute_all_collection_features(
+                collections, shop, products, behavioral_events, orders, shop_analytics
+            )
+            all_features["collections"] = collection_features
+            
+            # 4. Customer Behavior Features
+            logger.info("Computing customer behavior features...")
+            behavior_features = await self.compute_all_customer_behavior_features(
+                customers, shop, behavioral_events
+            )
+            all_features["customer_behaviors"] = behavior_features
+            
+            # 5. Session Features
+            logger.info("Computing session features...")
+            session_features = await self.generate_session_features_from_events(
+                behavioral_events, shop, orders
+            )
+            all_features["sessions"] = session_features
+            
+            # 6. Interaction Features (sample of customer-product pairs)
+            logger.info("Computing interaction features...")
+            interaction_features = await self._compute_sample_interaction_features(
+                customers, products, shop, orders, behavioral_events
+            )
+            all_features["interactions"] = interaction_features
+            
+            # 7. Product Pair Features (top product pairs)
+            logger.info("Computing product pair features...")
+            product_pair_features = await self._compute_top_product_pair_features(
+                products, shop, orders, behavioral_events
+            )
+            all_features["product_pairs"] = product_pair_features
+            
+            # 8. Search Product Features (from search events)
+            logger.info("Computing search product features...")
+            search_product_features = await self._compute_search_product_features_from_events(
+                behavioral_events, shop
+            )
+            all_features["search_products"] = search_product_features
+            
+            logger.info(f"Completed comprehensive feature computation for shop {shop.id}")
+            return all_features
+            
         except Exception as e:
-            logger.error(f"Failed to compute shop features for {shop.id}: {str(e)}")
+            logger.error(f"Failed to compute comprehensive shop features: {str(e)}")
             return {}
+
+    async def _compute_sample_interaction_features(
+        self,
+        customers: List[ShopifyCustomer],
+        products: List[ShopifyProduct],
+        shop: ShopifyShop,
+        orders: List[ShopifyOrder],
+        behavioral_events: List[BehavioralEvent],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute interaction features for customer-product pairs that have actual interactions"""
+        try:
+            results = {}
+            
+            # Find customer-product pairs that have interactions
+            interaction_pairs = set()
+            
+            # From orders
+            for order in orders:
+                if order.customer_id:
+                    for line_item in order.line_items:
+                        if hasattr(line_item, 'product_id'):
+                            interaction_pairs.add((order.customer_id, line_item.product_id))
+            
+            # From behavioral events
+            for event in behavioral_events:
+                if event.customerId and hasattr(event, 'eventData'):
+                    product_id = self._extract_product_id_from_event(event)
+                    if product_id:
+                        interaction_pairs.add((event.customerId, product_id))
+            
+            # Compute features for these pairs (limit to prevent excessive computation)
+            limited_pairs = list(interaction_pairs)[:1000]  # Limit to 1000 pairs
+            
+            for customer_id, product_id in limited_pairs:
+                try:
+                    # Find customer and product objects
+                    customer = next((c for c in customers if c.id == customer_id), None)
+                    product = next((p for p in products if p.id == product_id), None)
+                    
+                    if customer and product:
+                        features = await self.compute_interaction_features(
+                            customer, product, shop, orders, behavioral_events
+                        )
+                        results[f"{customer_id}-{product_id}"] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute interaction features for {customer_id}-{product_id}: {str(e)}")
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to compute sample interaction features: {str(e)}")
+            return {}
+
+    async def _compute_top_product_pair_features(
+        self,
+        products: List[ShopifyProduct],
+        shop: ShopifyShop,
+        orders: List[ShopifyOrder],
+        behavioral_events: List[BehavioralEvent],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute product pair features for frequently co-occurring products"""
+        try:
+            results = {}
+            
+            # Find frequently co-occurring product pairs from orders
+            co_occurrence_counts = {}
+            
+            for order in orders:
+                product_ids = [item.product_id for item in order.line_items if hasattr(item, 'product_id')]
+                
+                # Create pairs
+                for i in range(len(product_ids)):
+                    for j in range(i + 1, len(product_ids)):
+                        pair = tuple(sorted([product_ids[i], product_ids[j]]))
+                        co_occurrence_counts[pair] = co_occurrence_counts.get(pair, 0) + 1
+            
+            # Get top pairs (limit to prevent excessive computation)
+            top_pairs = sorted(co_occurrence_counts.items(), key=lambda x: x[1], reverse=True)[:100]
+            
+            for (product_id1, product_id2), count in top_pairs:
+                try:
+                    features = await self.compute_product_pair_features(
+                        product_id1, product_id2, shop, orders, behavioral_events
+                    )
+                    results[f"{product_id1}-{product_id2}"] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute product pair features for {product_id1}-{product_id2}: {str(e)}")
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to compute top product pair features: {str(e)}")
+            return {}
+
+    async def _compute_search_product_features_from_events(
+        self,
+        behavioral_events: List[BehavioralEvent],
+        shop: ShopifyShop,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute search-product features from search events"""
+        try:
+            results = {}
+            
+            # Find search query - product combinations
+            search_product_combinations = set()
+            
+            for event in behavioral_events:
+                if event.eventType == "search_submitted" and hasattr(event, 'eventData'):
+                    # Extract search query
+                    query = self._extract_search_query_from_event(event)
+                    if query:
+                        # Look for product interactions after this search
+                        # For now, we'll use a simple approach
+                        search_product_combinations.add((query, "sample_product"))
+            
+            # Limit combinations
+            limited_combinations = list(search_product_combinations)[:100]
+            
+            for search_query, product_id in limited_combinations:
+                try:
+                    features = await self.compute_search_product_features(
+                        search_query, product_id, shop, behavioral_events
+                    )
+                    results[f"{search_query}-{product_id}"] = features
+                except Exception as e:
+                    logger.error(f"Failed to compute search-product features for {search_query}-{product_id}: {str(e)}")
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Failed to compute search-product features from events: {str(e)}")
+            return {}
+
+    def _extract_product_id_from_event(self, event: BehavioralEvent) -> Optional[str]:
+        """Extract product ID from behavioral event"""
+        try:
+            if hasattr(event, 'eventData') and event.eventData:
+                if isinstance(event.eventData, dict):
+                    return (event.eventData.get("productId") or 
+                           event.eventData.get("product_id"))
+            return None
+        except Exception:
+            return None
+
+    def _extract_search_query_from_event(self, event: BehavioralEvent) -> Optional[str]:
+        """Extract search query from search event"""
+        try:
+            if hasattr(event, 'eventData') and event.eventData:
+                if isinstance(event.eventData, dict):
+                    return (event.eventData.get("query") or 
+                           event.eventData.get("searchQuery") or
+                           event.eventData.get("q"))
+            return None
+        except Exception:
+            return None
 
     async def compute_cross_entity_features(
         self,
@@ -174,7 +709,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         collections: List[ShopifyCollection],
         events: List[BehavioralEvent],
     ) -> Dict[str, Any]:
-        """Compute cross-entity ML features"""
+        """Compute cross-entity ML features (legacy method - use compute_all_features_for_shop instead)"""
         try:
             features = {}
 

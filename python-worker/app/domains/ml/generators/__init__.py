@@ -4,16 +4,20 @@ Feature generators for ML feature engineering
 
 from .base_feature_generator import BaseFeatureGenerator
 from .product_feature_generator import ProductFeatureGenerator
-from .customer_feature_generator import CustomerFeatureGenerator
-from .order_feature_generator import OrderFeatureGenerator
 from .collection_feature_generator import CollectionFeatureGenerator
-from .shop_feature_generator import ShopFeatureGenerator
+from .interaction_feature_generator import InteractionFeatureGenerator
+from .product_pair_feature_generator import ProductPairFeatureGenerator
+from .search_product_feature_generator import SearchProductFeatureGenerator
+from .session_feature_generator import SessionFeatureGenerator
+from .customer_behavior_feature_generator import CustomerBehaviorFeatureGenerator
 
 __all__ = [
     "BaseFeatureGenerator",
     "ProductFeatureGenerator",
-    "CustomerFeatureGenerator",
-    "OrderFeatureGenerator",
     "CollectionFeatureGenerator",
-    "ShopFeatureGenerator",
+    "CustomerBehaviorFeatureGenerator",
+    "InteractionFeatureGenerator",
+    "ProductPairFeatureGenerator",
+    "SearchProductFeatureGenerator",
+    "SessionFeatureGenerator",
 ]
