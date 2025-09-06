@@ -10,35 +10,38 @@ datasource db {
 
 // Enums for better data validation
 enum ProductStatus {
-  active
-  archived
-  draft
+  ACTIVE
+  ARCHIVED
+  DRAFT
 }
 
 enum OrderStatus {
-  pending
-  confirmed
-  paid
-  partially_paid
-  partially_refunded
-  refunded
-  voided
-  cancelled
+  PENDING
+  CONFIRMED
+  PAID
+  PARTIALLY_PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED
+  CANCELLED
+  ACTIVE
+  INACTIVE
+  DRAFT
 }
 
 enum CollectionSortOrder {
-  manual
-  best_selling
-  created
-  created_desc
-  id
-  id_desc
-  price
-  price_desc
-  title
-  title_desc
-  updated_at
-  updated_at_desc
+  MANUAL
+  BEST_SELLING
+  CREATED
+  CREATED_DESC
+  ID
+  ID_DESC
+  PRICE
+  PRICE_DESC
+  TITLE
+  TITLE_DESC
+  UPDATED_AT
+  UPDATED_AT_DESC
 }
 
 model RawOrder {
@@ -203,7 +206,7 @@ model OrderData {
   processedAt DateTime?
   cancelledAt DateTime?
   cancelReason String? @db.VarChar(500) @default("")
-  orderStatus OrderStatus? @default(pending)
+  orderStatus OrderStatus? @default(PENDING)
   orderLocale String? @db.VarChar(10) @default("en")
   currencyCode String? @db.VarChar(10) @default("USD")
   presentmentCurrencyCode String? @db.VarChar(10) @default("USD")
@@ -240,7 +243,7 @@ model ProductData {
   productType String? @db.VarChar(100) @default("")
   vendor    String?  @db.VarChar(255) @default("")
   tags      Json?    @default("[]")
-  status    ProductStatus? @default(active)
+  status    ProductStatus? @default(ACTIVE)
   totalInventory Int? @default(0)
   price     Float    @default(0.0)
   compareAtPrice Float? @default(0.0)
@@ -311,7 +314,7 @@ model CollectionData {
   title           String   @db.VarChar(500)
   handle          String   @db.VarChar(255)
   description     String?  @db.Text @default("")
-  sortOrder       CollectionSortOrder? @default(manual)
+  sortOrder       CollectionSortOrder? @default(MANUAL)
   templateSuffix  String?  @db.VarChar(100) @default("")
   seoTitle        String?  @db.VarChar(500) @default("")
   seoDescription  String?  @db.Text @default("")

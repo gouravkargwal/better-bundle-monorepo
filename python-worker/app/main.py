@@ -37,6 +37,7 @@ from app.domains.ml.services.gorse_training_monitor import GorseTrainingMonitor
 # Consumer imports
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
+from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
 from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
@@ -110,6 +111,9 @@ async def initialize_services():
             shopify_service=services["shopify"]
         )
 
+        # Initialize main table processing consumer
+        services["main_table_processing_consumer"] = MainTableProcessingConsumer()
+
         # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
 
@@ -123,6 +127,7 @@ async def initialize_services():
         # Register and start consumers
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
+            main_table_processing_consumer=services["main_table_processing_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
         )
@@ -283,6 +288,101 @@ async def get_data_status(shop_id: str):
 
     except Exception as e:
         logger.error(f"Failed to get data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Main table processing endpoints
+@app.post("/api/main-table/process")
+async def trigger_main_table_processing(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger main table processing for a shop"""
+    try:
+        from app.core.redis_client import streams_manager
+        from app.shared.helpers import now_utc
+
+        # Extract parameters from request body (JSON) or form data
+        try:
+            body = await request.json()
+        except:
+            # Fallback to form data
+            form_data = await request.form()
+            body = dict(form_data)
+
+        shop_id = body.get("shop_id")
+        shop_domain = body.get("shop_domain", "")
+
+        # Validate required parameters
+        if not shop_id:
+            raise HTTPException(status_code=400, detail="shop_id is required")
+
+        # Generate a unique job ID for main table processing
+        job_id = f"main_table_processing_{shop_id}_{int(now_utc().timestamp())}"
+
+        # Publish the main table processing event to Redis stream
+        event_id = await streams_manager.publish_data_job_event(
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+            access_token="",  # Not needed for main table processing
+            job_type="main_table_processing",
+        )
+
+        logger.info(
+            f"Triggered main table processing",
+            job_id=job_id,
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+            event_id=event_id,
+        )
+
+        return {
+            "message": "Main table processing triggered",
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "shop_domain": shop_domain,
+            "event_id": event_id,
+            "status": "processing",
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to trigger main table processing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/main-table/status/{shop_id}")
+async def get_main_table_processing_status(shop_id: str):
+    """Get main table processing status for a shop"""
+    try:
+        if "main_table_processing_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Main table processing consumer not available"
+            )
+
+        # Get health status from the consumer
+        health_status = await services[
+            "main_table_processing_consumer"
+        ].get_health_status()
+
+        # Get active jobs for this shop
+        active_jobs = {}
+        for job_id, job_data in services[
+            "main_table_processing_consumer"
+        ].active_jobs.items():
+            if job_data.get("shop_id") == shop_id:
+                active_jobs[job_id] = job_data
+
+        return {
+            "shop_id": shop_id,
+            "consumer_status": health_status,
+            "active_jobs": active_jobs,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get main table processing status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

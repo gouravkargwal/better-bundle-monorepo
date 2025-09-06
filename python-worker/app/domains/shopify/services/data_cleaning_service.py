@@ -51,7 +51,7 @@ class DataCleaningService:
                     "boolean_fields": ["isActive"],
                     "tag_fields": ["tags"],
                     "array_fields": ["images", "metafields"],
-                    "defaults": {"productType": "Unknown", "status": "draft"},
+                    "defaults": {"productType": "Unknown", "status": "ACTIVE"},
                 },
                 "customers": {
                     "numeric_fields": ["totalSpent", "orderCount"],
@@ -65,7 +65,7 @@ class DataCleaningService:
                     "date_fields": ["createdAt", "updatedAt"],
                     "boolean_fields": ["isAutomated"],
                     "tag_fields": ["tags"],
-                    "defaults": {"sortOrder": "manual", "bodyHtml": ""},
+                    "defaults": {"sortOrder": "MANUAL", "bodyHtml": ""},
                 },
             }
 
