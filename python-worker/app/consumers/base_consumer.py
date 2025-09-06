@@ -393,17 +393,6 @@ class BaseConsumer(ABC):
                 now - self.metrics.start_time
             ).total_seconds()
 
-            # Log health status
-            self.logger.info(
-                f"Consumer health check",
-                status=self.status.value,
-                messages_processed=self.metrics.messages_processed,
-                messages_failed=self.metrics.messages_failed,
-                success_rate=self.metrics.get_success_rate(),
-                circuit_breaker_state=self.circuit_breaker.state,
-                uptime_seconds=self.metrics.uptime_seconds,
-            )
-
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""
         return {
