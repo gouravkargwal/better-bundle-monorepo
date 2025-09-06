@@ -38,6 +38,21 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
+    async def bulk_upsert_shop_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert shop features"""
+        pass
+
+    @abstractmethod
+    async def bulk_upsert_order_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert order features"""
+        pass
+
+    @abstractmethod
+    async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert session features"""
+        pass
+
+    @abstractmethod
     async def get_products_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
@@ -365,87 +380,348 @@ class FeatureRepository(IFeatureRepository):
             return 0
 
     async def bulk_upsert_collection_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert collection features using a single query with multiple VALUES"""
+        """Bulk upsert collection features using Prisma native methods"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Build a single query with multiple VALUES clauses
-            values_clauses = []
-            params = []
-            param_index = 1
-
+            # Prepare data for Prisma
+            create_data = []
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, ${param_index + 6}, NOW())"
-                values_clauses.append(values_clause)
-                params.extend(data[:-1])  # Remove the last element (timestamp)
-                param_index += 7
+                if len(data) != 8:  # 7 fields + timestamp
+                    logger.error(
+                        f"Invalid collection batch data length: {len(data)}, expected 8. Data: {data}"
+                    )
+                    continue
 
-            collection_upsert_query = f"""
-            INSERT INTO "CollectionFeatures" (
-                "shopId", "collectionId", "productCount", "isAutomated", "performanceScore",
-                "seoScore", "imageScore", "lastComputedAt"
-            ) VALUES {', '.join(values_clauses)}
-            ON CONFLICT ("shopId", "collectionId") 
-            DO UPDATE SET
-                "productCount" = EXCLUDED."productCount",
-                "isAutomated" = EXCLUDED."isAutomated",
-                "performanceScore" = EXCLUDED."performanceScore",
-                "seoScore" = EXCLUDED."seoScore",
-                "imageScore" = EXCLUDED."imageScore",
-                "lastComputedAt" = NOW()
-            """
+                create_data.append(
+                    {
+                        "shopId": data[0],
+                        "collectionId": data[1],
+                        "productCount": data[2],
+                        "isAutomated": data[3],
+                        "performanceScore": data[4],
+                        "seoScore": data[5],
+                        "imageScore": data[6],
+                    }
+                )
 
-            # Execute single bulk query
-            await db.execute_raw(collection_upsert_query, *params)
+            if not create_data:
+                return 0
 
-            return len(batch_data)
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.collectionfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Collection features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.collectionfeatures.upsert(
+                            where={
+                                "shopId_collectionId": {
+                                    "shopId": feature_data["shopId"],
+                                    "collectionId": feature_data["collectionId"],
+                                }
+                            },
+                            update=feature_data,
+                            create=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert collection feature {feature_data.get('collectionId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert collection features: {str(e)}")
             return 0
 
     async def bulk_upsert_interaction_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert interaction features using a single query with multiple VALUES"""
+        """Bulk upsert interaction features using Prisma native methods"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Build a single query with multiple VALUES clauses
-            values_clauses = []
-            params = []
-            param_index = 1
-
+            # Prepare data for Prisma
+            create_data = []
             for data in batch_data:
-                values_clause = f"(${param_index}, ${param_index + 1}, ${param_index + 2}, ${param_index + 3}, ${param_index + 4}, ${param_index + 5}, NOW())"
-                values_clauses.append(values_clause)
-                params.extend(data[:-1])  # Remove the last element (timestamp)
-                param_index += 6
+                if len(data) != 6:  # 5 fields + timestamp
+                    logger.error(
+                        f"Invalid interaction batch data length: {len(data)}, expected 6. Data: {data}"
+                    )
+                    continue
 
-            interaction_upsert_query = f"""
-            INSERT INTO "InteractionFeatures" (
-                "shopId", "customerId", "productId", "purchaseCount",
-                "lastPurchaseDate", "timeDecayedWeight", "lastComputedAt"
-            ) VALUES {', '.join(values_clauses)}
-            ON CONFLICT ("shopId", "customerId", "productId") 
-            DO UPDATE SET
-                "purchaseCount" = EXCLUDED."purchaseCount",
-                "lastPurchaseDate" = EXCLUDED."lastPurchaseDate",
-                "timeDecayedWeight" = EXCLUDED."timeDecayedWeight",
-                "lastComputedAt" = NOW()
-            """
+                create_data.append(
+                    {
+                        "shopId": data[0],
+                        "customerId": data[1],
+                        "productId": data[2],
+                        "purchaseCount": data[3],
+                        "lastPurchaseDate": data[4],
+                        "timeDecayedWeight": data[5],
+                    }
+                )
 
-            # Execute single bulk query
-            await db.execute_raw(interaction_upsert_query, *params)
+            if not create_data:
+                return 0
 
-            return len(batch_data)
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.interactionfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Interaction features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.interactionfeatures.upsert(
+                            where={
+                                "shopId_customerId_productId": {
+                                    "shopId": feature_data["shopId"],
+                                    "customerId": feature_data["customerId"],
+                                    "productId": feature_data["productId"],
+                                }
+                            },
+                            update=feature_data,
+                            create=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert interaction feature {feature_data.get('customerId')}-{feature_data.get('productId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert interaction features: {str(e)}")
+            return 0
+
+    async def bulk_upsert_shop_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert shop features using Prisma native methods"""
+        try:
+            if not batch_data:
+                return 0
+
+            db = await self._get_database()
+
+            # Prepare data for Prisma
+            create_data = []
+            for data in batch_data:
+                if len(data) != 8:  # 7 fields + timestamp
+                    logger.error(
+                        f"Invalid shop batch data length: {len(data)}, expected 8. Data: {data}"
+                    )
+                    continue
+
+                create_data.append(
+                    {
+                        "shopId": data[0],
+                        "totalProducts": data[1],
+                        "totalCustomers": data[2],
+                        "totalOrders": data[3],
+                        "avgOrderValue": data[4],
+                        "totalRevenue": data[5],
+                        "conversionRate": data[6],
+                    }
+                )
+
+            if not create_data:
+                return 0
+
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.shopfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Shop features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.shopfeatures.upsert(
+                            where={"shopId": feature_data["shopId"]},
+                            update=feature_data,
+                            create=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert shop feature {feature_data.get('shopId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
+
+        except Exception as e:
+            logger.error(f"Failed to bulk upsert shop features: {str(e)}")
+            return 0
+
+    async def bulk_upsert_order_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert order features using Prisma native methods"""
+        try:
+            if not batch_data:
+                return 0
+
+            db = await self._get_database()
+
+            # Prepare data for Prisma
+            create_data = []
+            for data in batch_data:
+                if len(data) != 9:  # 8 fields + timestamp
+                    logger.error(
+                        f"Invalid order batch data length: {len(data)}, expected 9. Data: {data}"
+                    )
+                    continue
+
+                create_data.append(
+                    {
+                        "shopId": data[0],
+                        "orderId": data[1],
+                        "customerId": data[2],
+                        "totalAmount": data[3],
+                        "itemCount": data[4],
+                        "discountAmount": data[5],
+                        "shippingCost": data[6],
+                        "taxAmount": data[7],
+                    }
+                )
+
+            if not create_data:
+                return 0
+
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.orderfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Order features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.orderfeatures.upsert(
+                            where={
+                                "shopId_orderId": {
+                                    "shopId": feature_data["shopId"],
+                                    "orderId": feature_data["orderId"],
+                                }
+                            },
+                            update=feature_data,
+                            create=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert order feature {feature_data.get('orderId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
+
+        except Exception as e:
+            logger.error(f"Failed to bulk upsert order features: {str(e)}")
+            return 0
+
+    async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert session features using Prisma native methods"""
+        try:
+            if not batch_data:
+                return 0
+
+            db = await self._get_database()
+
+            # Prepare data for Prisma
+            create_data = []
+            for data in batch_data:
+                if len(data) != 7:  # 6 fields + timestamp
+                    logger.error(
+                        f"Invalid session batch data length: {len(data)}, expected 7. Data: {data}"
+                    )
+                    continue
+
+                create_data.append(
+                    {
+                        "shopId": data[0],
+                        "sessionId": data[1],
+                        "customerId": data[2],
+                        "duration": data[3],
+                        "pageViews": data[4],
+                        "uniqueProducts": data[5],
+                    }
+                )
+
+            if not create_data:
+                return 0
+
+            # Use Prisma's create_many with skip_duplicates for bulk insert
+            try:
+                await db.sessionfeatures.create_many(
+                    data=create_data, skip_duplicates=True
+                )
+                return len(create_data)
+            except Exception as create_error:
+                # Fallback to individual upserts if batch insert fails
+                logger.warning(
+                    f"Session features batch insert failed, falling back to individual upserts: {str(create_error)}"
+                )
+
+                success_count = 0
+                for feature_data in create_data:
+                    try:
+                        await db.sessionfeatures.upsert(
+                            where={
+                                "shopId_sessionId": {
+                                    "shopId": feature_data["shopId"],
+                                    "sessionId": feature_data["sessionId"],
+                                }
+                            },
+                            update=feature_data,
+                            create=feature_data,
+                        )
+                        success_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert session feature {feature_data.get('sessionId')}: {str(upsert_error)}"
+                        )
+                        continue
+
+                return success_count
+
+        except Exception as e:
+            logger.error(f"Failed to bulk upsert session features: {str(e)}")
             return 0
 
     async def get_products_batch(
