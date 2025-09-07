@@ -374,6 +374,25 @@ class RedisStreamsManager:
 
         return await self.publish_event(settings.GORSE_SYNC_STREAM, event_data)
 
+    async def publish_gorse_training_event(
+        self,
+        job_id: str,
+        shop_id: str,
+        job_type: str = "full_training",
+        trigger_source: str = "api",
+        metadata: Dict[str, Any] = None,
+    ) -> str:
+        """Publish a Gorse training event"""
+        event_data = {
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "job_type": job_type,
+            "trigger_source": trigger_source,
+            "metadata": metadata or {},
+            "status": "queued",
+        }
+        return await self.publish_event("betterbundle:gorse-training", event_data)
+
 
 # Global streams manager instance
 streams_manager = RedisStreamsManager()

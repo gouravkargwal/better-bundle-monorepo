@@ -13,6 +13,7 @@ from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
 from app.consumers.gorse_sync_consumer import GorseSyncConsumer
+from app.consumers.gorse_training_consumer import GorseTrainingConsumer
 from app.core.logging import get_logger
 
 
@@ -50,6 +51,7 @@ class ConsumerManager:
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         behavioral_events_consumer: Optional[BehavioralEventsConsumer] = None,
         gorse_sync_consumer: Optional[GorseSyncConsumer] = None,
+        gorse_training_consumer: Optional[GorseTrainingConsumer] = None,
     ):
         """Register consumers with the manager (all parameters are optional)"""
         if data_collection_consumer:
@@ -64,6 +66,8 @@ class ConsumerManager:
             self.consumers["behavioral_events"] = behavioral_events_consumer
         if gorse_sync_consumer:
             self.consumers["gorse_sync"] = gorse_sync_consumer
+        if gorse_training_consumer:
+            self.consumers["gorse_training"] = gorse_training_consumer
 
     async def start_all_consumers(self):
         """Start all registered consumers"""
