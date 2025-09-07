@@ -504,6 +504,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 last_computation_time = (
                     await repository.get_last_feature_computation_time(shop_id)
                 )
+                logger.info(
+                    f"Using incremental processing since: {last_computation_time}"
+                )
 
                 # Load only data modified since last computation using chunked processing
                 products = await self.process_entities_in_chunks(
@@ -551,12 +554,24 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 if not any(
                     [products, customers, orders, collections, behavioral_events]
                 ):
+                    logger.info(
+                        f"No data changes detected since {last_computation_time}. Skipping feature computation."
+                    )
                     return {
                         "success": True,
                         "shop_id": shop_id,
-                        "message": "No recent data to process",
+                        "message": "No recent data to process - incremental processing skipped",
                         "incremental": True,
                         "timestamp": now_utc().isoformat(),
+                        "results": {
+                            "products": {"saved_count": 0, "total_processed": 0},
+                            "users": {"saved_count": 0, "total_processed": 0},
+                            "collections": {"saved_count": 0, "total_processed": 0},
+                            "customer_behaviors": {
+                                "saved_count": 0,
+                                "total_processed": 0,
+                            },
+                        },
                     }
             else:
                 # Load all data using chunked processing
@@ -596,10 +611,43 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 shop_id, all_features
             )
 
-            # Update timestamp for incremental processing
-            if incremental:
-                await repository.update_last_feature_computation_time(
-                    shop_id, now_utc()
+            # Check if all feature types succeeded for logging purposes
+            all_features_succeeded = True
+            expected_feature_types = [
+                "products",
+                "users",
+                "collections",
+                "customer_behaviors",
+                "interactions",
+                "sessions",
+                "product_pairs",
+                "search_products",
+            ]
+
+            for feature_type in expected_feature_types:
+                if feature_type in save_results:
+                    result = save_results[feature_type]
+                    if isinstance(result, dict) and result.get("saved_count", 0) == 0:
+                        logger.warning(
+                            f"Feature type {feature_type} had no successful saves"
+                        )
+                        # Don't mark as failed if there was no data to process
+                        if result.get("total_processed", 0) > 0:
+                            all_features_succeeded = False
+                else:
+                    logger.warning(
+                        f"Feature type {feature_type} missing from save results"
+                    )
+                    all_features_succeeded = False
+
+            # Log the overall success status (no timestamp update needed - features are self-tracking)
+            if all_features_succeeded:
+                logger.info(
+                    f"All feature types processed successfully for shop {shop_id}"
+                )
+            else:
+                logger.warning(
+                    f"Some feature types failed for shop {shop_id} - will retry on next run"
                 )
 
             return {
@@ -607,6 +655,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "shop_id": shop_id,
                 "results": save_results,
                 "incremental": incremental,
+                "all_features_succeeded": all_features_succeeded,
                 "data_loaded": {
                     "products": len(products),
                     "customers": len(customers),

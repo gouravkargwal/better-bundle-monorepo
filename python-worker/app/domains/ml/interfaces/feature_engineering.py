@@ -17,7 +17,7 @@ class IFeatureEngineeringService(ABC):
         self,
         shop_id: str,
         batch_size: int = 1000,
-        incremental: bool = False,
+        incremental: bool = True,
     ) -> Dict[str, Any]:
         """
         Run comprehensive feature computation pipeline for a shop

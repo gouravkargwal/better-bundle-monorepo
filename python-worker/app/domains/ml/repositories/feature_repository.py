@@ -109,13 +109,6 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def update_last_feature_computation_time(
-        self, shop_id: str, timestamp
-    ) -> None:
-        """Update the last feature computation timestamp for a shop"""
-        pass
-
-    @abstractmethod
     async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
         """Get shop data for processing"""
         pass
@@ -414,39 +407,50 @@ class FeatureRepository(IFeatureRepository):
             return []
 
     async def get_last_feature_computation_time(self, shop_id: str) -> str:
-        """Get the last feature computation timestamp for a shop"""
+        """Get the last feature computation timestamp for a shop by checking feature tables"""
         try:
             db = await self._get_database()
-            query = 'SELECT "lastAnalysisAt" FROM "Shop" WHERE "id" = $1'
-            result = await db.query_raw(query, shop_id)
-            if result and result[0].get("lastAnalysisAt"):
-                return result[0]["lastAnalysisAt"]
-            # Return a very old timestamp for first run
-            return "1970-01-01T00:00:00Z"
+
+            # Get the most recent feature computation time from all feature tables
+            feature_tables = [
+                db.productfeatures,
+                db.customerbehaviorfeatures,
+                db.collectionfeatures,
+                db.userfeatures,
+                db.interactionfeatures,
+                db.sessionfeatures,
+                db.productpairfeatures,
+                db.searchproductfeatures,
+            ]
+
+            latest_timestamp = None
+            for table in feature_tables:
+                try:
+                    # Get the most recent record for this shop
+                    latest_record = await table.find_first(
+                        where={"shopId": shop_id}, order={"createdAt": "desc"}
+                    )
+                    if latest_record and latest_record.createdAt:
+                        if (
+                            latest_timestamp is None
+                            or latest_record.createdAt > latest_timestamp
+                        ):
+                            latest_timestamp = latest_record.createdAt
+                except Exception as e:
+                    logger.warning(f"Could not check feature table {table}: {str(e)}")
+                    continue
+
+            if latest_timestamp:
+                return latest_timestamp.isoformat()
+            else:
+                # Return a very old timestamp for first run
+                return "1970-01-01T00:00:00Z"
+
         except Exception as e:
             logger.error(
                 f"Failed to get last computation time for shop {shop_id}: {str(e)}"
             )
             return "1970-01-01T00:00:00Z"
-
-    async def update_last_feature_computation_time(
-        self, shop_id: str, timestamp
-    ) -> None:
-        """Update the last feature computation timestamp for a shop"""
-        try:
-            db = await self._get_database()
-            # Convert timestamp to ISO format string if it's a datetime object
-            if hasattr(timestamp, "isoformat"):
-                timestamp_str = timestamp.isoformat()
-            else:
-                timestamp_str = str(timestamp)
-
-            query = 'UPDATE "Shop" SET "lastAnalysisAt" = $1 WHERE "id" = $2'
-            await db.execute_raw(query, timestamp_str, shop_id)
-        except Exception as e:
-            logger.error(
-                f"Failed to update last computation time for shop {shop_id}: {str(e)}"
-            )
 
     async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
         """Get shop data for processing"""
@@ -481,13 +485,19 @@ class FeatureRepository(IFeatureRepository):
         """Get products modified since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            query = """
-                SELECT * FROM "ProductData" 
-                WHERE "shopId" = $1 AND "updatedAt" > $2 
-                ORDER BY "updatedAt" ASC 
-                LIMIT $3 OFFSET $4
-            """
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            logger.info(f"Querying products since {since_timestamp} for shop {shop_id}")
+
+            # Use Prisma's native find_many with where conditions
+            result = await db.productdata.find_many(
+                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
+                order={"updatedAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
+
+            logger.info(
+                f"Found {len(result)} products modified since {since_timestamp}"
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
@@ -501,13 +511,13 @@ class FeatureRepository(IFeatureRepository):
         """Get customers modified since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            query = """
-                SELECT * FROM "CustomerData" 
-                WHERE "shopId" = $1 AND "updatedAt" > $2 
-                ORDER BY "updatedAt" ASC 
-                LIMIT $3 OFFSET $4
-            """
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            # Use Prisma's native find_many with where conditions
+            result = await db.customerdata.find_many(
+                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
+                order={"updatedAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
@@ -521,13 +531,13 @@ class FeatureRepository(IFeatureRepository):
         """Get orders modified since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            query = """
-                SELECT * FROM "OrderData" 
-                WHERE "shopId" = $1 AND "updatedAt" > $2 
-                ORDER BY "updatedAt" ASC 
-                LIMIT $3 OFFSET $4
-            """
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            # Use Prisma's native find_many with where conditions
+            result = await db.orderdata.find_many(
+                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
+                order={"updatedAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
@@ -541,13 +551,13 @@ class FeatureRepository(IFeatureRepository):
         """Get collections modified since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            query = """
-                SELECT * FROM "CollectionData" 
-                WHERE "shopId" = $1 AND "updatedAt" > $2 
-                ORDER BY "updatedAt" ASC 
-                LIMIT $3 OFFSET $4
-            """
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            # Use Prisma's native find_many with where conditions
+            result = await db.collectiondata.find_many(
+                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
+                order={"updatedAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
@@ -561,16 +571,55 @@ class FeatureRepository(IFeatureRepository):
         """Get behavioral events since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            query = """
-                SELECT * FROM "BehavioralEvents" 
-                WHERE "shopId" = $1 AND "occurredAt" > $2 
-                ORDER BY "occurredAt" ASC 
-                LIMIT $3 OFFSET $4
-            """
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            # Use Prisma's native find_many with where conditions
+            result = await db.behavioralevents.find_many(
+                where={"shopId": shop_id, "occurredAt": {"gt": since_timestamp}},
+                order={"occurredAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
                 f"Failed to get behavioral events batch since {since_timestamp} for shop {shop_id}: {str(e)}"
             )
             return []
+
+    async def get_feature_counts_for_shop(self, shop_id: str) -> Dict[str, int]:
+        """Get counts of existing features for a shop to determine if incremental processing is needed"""
+        try:
+            db = await self._get_database()
+
+            # Count features across all feature tables using Prisma
+            counts = {}
+            total_count = 0
+
+            # Use Prisma's count method for each feature table
+            feature_models = [
+                ("productfeatures", db.productfeatures),
+                ("userfeatures", db.userfeatures),
+                ("collectionfeatures", db.collectionfeatures),
+                ("customerbehaviorfeatures", db.customerbehaviorfeatures),
+                ("sessionfeatures", db.sessionfeatures),
+                ("interactionfeatures", db.interactionfeatures),
+                ("productpairfeatures", db.productpairfeatures),
+                ("searchproductfeatures", db.searchproductfeatures),
+            ]
+
+            for table_name, model in feature_models:
+                try:
+                    count = await model.count(where={"shopId": shop_id})
+                    counts[table_name] = count
+                    total_count += count
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to count features in {table_name}: {str(e)}"
+                    )
+                    counts[table_name] = 0
+
+            counts["total"] = total_count
+            return counts
+
+        except Exception as e:
+            logger.error(f"Failed to get feature counts for shop {shop_id}: {str(e)}")
+            return {"total": 0}

@@ -396,6 +396,7 @@ async def compute_features(
         shop_id = body.get("shop_id")
         batch_size = int(body.get("batch_size", 100))
         features_ready = body.get("features_ready", False)
+        incremental = body.get("incremental", True)  # Default to incremental processing
 
         # Validate required parameters
         if not shop_id:
@@ -407,6 +408,7 @@ async def compute_features(
         # Prepare event metadata
         metadata = {
             "batch_size": batch_size,
+            "incremental": incremental,
             "trigger_source": "api_endpoint",
             "timestamp": now_utc().isoformat(),
             "processed_count": 0,  # Will be updated by the consumer
@@ -1339,7 +1341,7 @@ async def debug_id_comparison(shop_id: str, data_type: str = "products"):
 
         # Import the module-level config
         from app.domains.shopify.services.main_table_storage import DATA_TYPE_CONFIG
-        
+
         # Get the config
         config = DATA_TYPE_CONFIG[data_type]
 

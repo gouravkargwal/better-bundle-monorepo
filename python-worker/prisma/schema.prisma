@@ -295,39 +295,6 @@ model CustomerAnalytics {
   @@map("CustomerAnalytics")
 }
 
-model AdvancedMLFeatures {
-  id     String @id @default(cuid())
-  shopId String
-
-  // Time-based patterns
-  monthlyPatterns Json? // Monthly revenue/order patterns
-  dailyPatterns   Json? // Day-of-week patterns
-  hourlyPatterns  Json? // Hourly patterns
-
-  // Customer segmentation
-  customerSegments Json? // High-value, frequent, recent, lapsed
-
-  // Product relationships
-  productSimilarities       Json? // Co-purchase similarity matrix
-  crossSellingOpportunities Json? // Frequent product combinations
-
-  // Category and price analysis
-  categoryPerformance Json? // Category revenue/quantity analysis
-  priceElasticity     Json? // Price range performance
-
-  // Analytics summary
-  totalSegments      Int      @default(0)
-  totalSimilarities  Int      @default(0)
-  totalOpportunities Int      @default(0)
-  lastComputedAt     DateTime @default(now())
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId])
-  @@index([shopId, lastComputedAt])
-  @@map("AdvancedMLFeatures")
-}
-
 model CollectionAnalytics {
   id     String @id @default(cuid())
   shopId String
@@ -699,7 +666,6 @@ model Shop {
   sessionFeatures           SessionFeatures[]
   productPairFeatures       ProductPairFeatures[]
   searchProductFeatures     SearchProductFeatures[]
-  advancedMLFeatures        AdvancedMLFeatures?
   collectionAnalytics       CollectionAnalytics?
   customerBehaviorAnalytics CustomerBehaviorAnalytics?
 
@@ -720,6 +686,10 @@ model UserFeatures {
   totalSpent     Float @default(0)
   avgOrderValue  Float @default(0)
   lifetimeValue  Float @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Time-based Metrics
   daysSinceFirstOrder    Int?
@@ -761,6 +731,10 @@ model ProductFeatures {
   cartAddCount30d     Int @default(0)
   purchaseCount30d    Int @default(0)
   uniquePurchasers30d Int @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Conversion Metrics
   viewToCartRate        Float? // cartAdds / views
@@ -815,6 +789,10 @@ model CollectionFeatures {
 
   // Engagement Metrics (30-day window)
   viewCount30d     Int    @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   uniqueViewers30d Int    @default(0)
   clickThroughRate Float? // Product clicks / collection views
   bounceRate       Float? // Single page visits / total visits
@@ -829,8 +807,8 @@ model CollectionFeatures {
   // Performance
   conversionRate      Float? // Purchases from collection / views
   revenueContribution Float? // % of total store revenue
-  topProducts         Json? // Array of top 5 product IDs
-  topVendors          Json? // Array of main vendors
+  topProducts         Json @default("[]") // Array of top 5 product IDs
+  topVendors          Json @default("[]") // Array of main vendors
 
   // Scores
   performanceScore Float @default(0)
@@ -858,6 +836,10 @@ model CustomerBehaviorFeatures {
   avgSessionDuration  Int? // seconds
   avgEventsPerSession Float?
 
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Event Counts
   totalEventCount     Int @default(0)
   productViewCount    Int @default(0)
@@ -876,8 +858,8 @@ model CustomerBehaviorFeatures {
   // Behavior Patterns
   uniqueProductsViewed    Int     @default(0)
   uniqueCollectionsViewed Int     @default(0)
-  searchTerms             Json? // Array of search queries
-  topCategories           Json? // Top 3 preferred categories
+  searchTerms             Json @default("[]") // Array of search queries
+  topCategories           Json @default("[]") // Top 3 preferred categories
   deviceType              String? @db.VarChar(20) // "mobile", "desktop", "tablet"
   primaryReferrer         String? @db.VarChar(255)
 
@@ -915,6 +897,10 @@ model InteractionFeatures {
   cartAddCount  Int @default(0)
   purchaseCount Int @default(0)
 
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Temporal Data
   firstViewDate     DateTime?
   lastViewDate      DateTime?
@@ -951,6 +937,10 @@ model SessionFeatures {
   startTime       DateTime
   endTime         DateTime
   durationSeconds Int
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Event Counts
   eventCount          Int @default(0)
@@ -994,6 +984,10 @@ model ProductPairFeatures {
   coViewCount     Int @default(0) // Same session
   coCartCount     Int @default(0) // Same cart
 
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Metrics
   supportScore     Float? // Confidence metric
   liftScore        Float? // Correlation strength
@@ -1022,6 +1016,10 @@ model SearchProductFeatures {
   clickCount      Int    @default(0) // Times clicked
   purchaseCount   Int    @default(0) // Times purchased after search
   avgPosition     Float? // Average position in results
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Rates
   clickThroughRate Float? // Clicks / impressions

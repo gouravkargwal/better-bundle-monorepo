@@ -140,9 +140,24 @@ class BaseFeatureGenerator(ABC):
         """Validate generated features"""
         validated_features = {}
 
+        # JSON fields that should preserve None values
+        json_fields = {
+            "searchTerms",
+            "topProducts",
+            "topVendors",
+            "topCategories",
+            "productPairs",
+            "interactionPatterns",
+            "sessionData",
+        }
+
         for key, value in features.items():
             if value is None:
-                validated_features[key] = 0
+                # Convert None to appropriate defaults
+                if key in json_fields:
+                    validated_features[key] = []  # Empty array for JSON list fields
+                else:
+                    validated_features[key] = 0
             elif isinstance(value, (int, float)):
                 # Handle NaN and infinity
                 if math.isnan(value) or math.isinf(value):

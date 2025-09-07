@@ -315,8 +315,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         return {
             "uniqueProductsViewed": len(unique_products),
             "uniqueCollectionsViewed": len(unique_collections),
-            "searchTerms": unique_search_terms,
-            "topCategories": top_categories,
+            "searchTerms": unique_search_terms if unique_search_terms else [],
+            "topCategories": top_categories if top_categories else [],
             "deviceType": device_types[0] if device_types else None,
             "primaryReferrer": referrers[0] if referrers else None,
         }
