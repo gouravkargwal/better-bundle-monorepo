@@ -5,6 +5,7 @@ Collection feature generator for ML feature engineering
 from typing import Dict, Any, List, Optional
 import statistics
 from datetime import datetime, timedelta
+from prisma import Json
 
 from app.core.logging import get_logger
 
@@ -60,6 +61,16 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             if order_data:
                 features.update(
                     self._compute_performance_metrics(collection, order_data, products)
+                )
+            else:
+                # Ensure JSON fields are always set even without order data
+                features.update(
+                    {
+                        "conversionRate": None,
+                        "revenueContribution": None,
+                        "topProducts": Json([]),
+                        "topVendors": Json([]),
+                    }
                 )
 
             # SEO and image scores
@@ -326,8 +337,8 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         return {
             "conversionRate": conversion_rate,
             "revenueContribution": revenue_contribution,
-            "topProducts": top_product_ids if top_product_ids else [],
-            "topVendors": top_vendor_names if top_vendor_names else [],
+            "topProducts": Json(top_product_ids if top_product_ids else []),
+            "topVendors": Json(top_vendor_names if top_vendor_names else []),
         }
 
     def _compute_seo_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:

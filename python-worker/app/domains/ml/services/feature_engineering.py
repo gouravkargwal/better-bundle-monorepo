@@ -148,8 +148,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         all_entities = []
         offset = 0
 
-        while offset < batch_size:
-            current_chunk_size = min(chunk_size, batch_size - offset)
+        while True:
+            current_chunk_size = min(chunk_size, batch_size)
 
             try:
                 if incremental and since_timestamp:

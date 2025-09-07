@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import json
 import statistics
 from collections import Counter
+from prisma import Json
 
 from app.core.logging import get_logger
 from .base_feature_generator import BaseFeatureGenerator
@@ -103,8 +104,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "mostActiveDay": None,
             "uniqueProductsViewed": 0,
             "uniqueCollectionsViewed": 0,
-            "searchTerms": None,
-            "topCategories": None,
+            "searchTerms": Json([]),
+            "topCategories": Json([]),
             "deviceType": None,
             "primaryReferrer": None,
             "browseToCartRate": None,
@@ -315,8 +316,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         return {
             "uniqueProductsViewed": len(unique_products),
             "uniqueCollectionsViewed": len(unique_collections),
-            "searchTerms": unique_search_terms if unique_search_terms else [],
-            "topCategories": top_categories if top_categories else [],
+            "searchTerms": Json(unique_search_terms if unique_search_terms else []),
+            "topCategories": Json(top_categories if top_categories else []),
             "deviceType": device_types[0] if device_types else None,
             "primaryReferrer": referrers[0] if referrers else None,
         }
