@@ -7,6 +7,7 @@ Uses ALL feature tables to build comprehensive user and item profiles
 import asyncio
 import json
 import math
+import random
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -14,8 +15,54 @@ from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from prisma import Json
+from prisma.errors import PrismaError, UniqueViolationError
 
 logger = get_logger(__name__)
+
+
+def retry_with_exponential_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exceptions: tuple = (PrismaError, asyncio.TimeoutError, ConnectionError),
+):
+    """Decorator for retrying operations with exponential backoff"""
+
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+
+                    if attempt == max_retries:
+                        logger.error(
+                            f"Operation {func.__name__} failed after {max_retries} retries: {str(e)}"
+                        )
+                        raise e
+
+                    # Calculate delay with exponential backoff and jitter
+                    delay = min(
+                        base_delay * (2**attempt) + random.uniform(0, 1), max_delay
+                    )
+                    logger.warning(
+                        f"Operation {func.__name__} failed (attempt {attempt + 1}/{max_retries + 1}): {str(e)}. Retrying in {delay:.2f}s"
+                    )
+                    await asyncio.sleep(delay)
+                except Exception as e:
+                    # Don't retry for non-transient errors
+                    logger.error(f"Non-retryable error in {func.__name__}: {str(e)}")
+                    raise e
+
+            # This should never be reached, but just in case
+            raise last_exception
+
+        return wrapper
+
+    return decorator
 
 
 class GorseSyncPipeline:
@@ -39,12 +86,14 @@ class GorseSyncPipeline:
             10  # Maximum parallel workers for concurrent operations
         )
 
+    @retry_with_exponential_backoff(max_retries=3, base_delay=0.5)
     async def _get_database(self):
-        """Get or initialize the database client"""
+        """Get or initialize the database client with retry logic"""
         if self._db_client is None:
             self._db_client = await get_database()
         return self._db_client
 
+    @retry_with_exponential_backoff(max_retries=2, base_delay=0.5)
     async def _get_last_sync_timestamp(self, shop_id: str) -> Optional[datetime]:
         """Get the last sync timestamp by checking feature table updates"""
         try:
@@ -72,9 +121,14 @@ class GorseSyncPipeline:
             if result and result[0]["last_sync"]:
                 return result[0]["last_sync"]
             return None
-        except Exception as e:
+        except (PrismaError, asyncio.TimeoutError, ConnectionError) as e:
             logger.warning(
-                f"Could not get last sync timestamp for shop {shop_id}: {str(e)}"
+                f"Database error getting last sync timestamp for shop {shop_id}: {str(e)}"
+            )
+            raise  # Let the retry decorator handle this
+        except Exception as e:
+            logger.error(
+                f"Unexpected error getting last sync timestamp for shop {shop_id}: {str(e)}"
             )
             return None
 
@@ -110,59 +164,169 @@ class GorseSyncPipeline:
         table_name: str,
         chunk_size: int = 100,
     ):
-        """Generic bulk upsert method for any Gorse table with parallel processing"""
+        """Generic bulk upsert method using raw SQL for better performance"""
         if not data_list:
             return
 
         try:
             db = await self._get_database()
-            table = table_accessor(db)
 
-            # Process in smaller chunks with parallel processing
-            semaphore = asyncio.Semaphore(self.max_parallel_workers)
+            # Use raw SQL with ON CONFLICT for true bulk upsert
+            # This is much more efficient than individual Prisma upserts
+            if table_name == "gorse_users":
+                await self._bulk_upsert_users_raw_sql(db, data_list, chunk_size)
+            elif table_name == "gorse_items":
+                await self._bulk_upsert_items_raw_sql(db, data_list, chunk_size)
+            else:
+                # Fallback to original method for other tables
+                await self._fallback_bulk_upsert(
+                    data_list, table_accessor, id_field, entity_name, chunk_size
+                )
 
-            async def upsert_chunk(chunk):
-                async with semaphore:
-                    return await asyncio.gather(
-                        *[
-                            table.upsert(
-                                where={id_field: item_data[id_field]},
-                                data={
-                                    "create": item_data,
-                                    "update": item_data,
-                                },
-                            )
-                            for item_data in chunk
-                        ],
-                        return_exceptions=True,
-                    )
-
-            # Process all chunks in parallel
-            chunk_tasks = []
-            for i in range(0, len(data_list), chunk_size):
-                chunk = data_list[i : i + chunk_size]
-                chunk_tasks.append(upsert_chunk(chunk))
-
-            # Wait for all chunks to complete
-            results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
-
-            # Count successful operations
-            successful_ops = 0
-            for result in results:
-                if isinstance(result, Exception):
-                    logger.error(f"Chunk upsert failed: {str(result)}")
-                else:
-                    successful_ops += len(
-                        [r for r in result if not isinstance(r, Exception)]
-                    )
-
-            logger.debug(
-                f"Bulk upserted {successful_ops}/{len(data_list)} {entity_name} to {table_name}"
+            logger.info(
+                f"Successfully upserted {len(data_list)} {entity_name} records using bulk SQL"
             )
 
         except Exception as e:
-            logger.error(f"Failed to bulk upsert Gorse {entity_name}: {str(e)}")
+            logger.error(f"Failed to bulk upsert {entity_name}: {str(e)}")
             raise
+
+    @retry_with_exponential_backoff(max_retries=2, base_delay=1.0)
+    async def _bulk_upsert_users_raw_sql(
+        self, db, data_list: List[Dict[str, Any]], chunk_size: int
+    ):
+        """Bulk upsert users using raw SQL with ON CONFLICT"""
+        for i in range(0, len(data_list), chunk_size):
+            chunk = data_list[i : i + chunk_size]
+
+            # Build VALUES clause for bulk insert
+            values_list = []
+            params = []
+            param_count = 1
+
+            for user_data in chunk:
+                values_list.append(
+                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}, ${param_count + 3})"
+                )
+                params.extend(
+                    [
+                        user_data["userId"],
+                        user_data["shopId"],
+                        user_data["labels"],
+                        user_data.get("updatedAt", datetime.utcnow()),
+                    ]
+                )
+                param_count += 4
+
+            values_clause = ", ".join(values_list)
+
+            query = f"""
+                INSERT INTO gorse_users ("userId", "shopId", labels, "updatedAt")
+                VALUES {values_clause}
+                ON CONFLICT ("userId") DO UPDATE SET
+                    "shopId" = EXCLUDED."shopId",
+                    labels = EXCLUDED.labels,
+                    "updatedAt" = EXCLUDED."updatedAt"
+            """
+
+            await db.query_raw(query, *params)
+
+    @retry_with_exponential_backoff(max_retries=2, base_delay=1.0)
+    async def _bulk_upsert_items_raw_sql(
+        self, db, data_list: List[Dict[str, Any]], chunk_size: int
+    ):
+        """Bulk upsert items using raw SQL with ON CONFLICT"""
+        for i in range(0, len(data_list), chunk_size):
+            chunk = data_list[i : i + chunk_size]
+
+            # Build VALUES clause for bulk insert
+            values_list = []
+            params = []
+            param_count = 1
+
+            for item_data in chunk:
+                values_list.append(
+                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}, ${param_count + 3}, ${param_count + 4})"
+                )
+                params.extend(
+                    [
+                        item_data["itemId"],
+                        item_data["shopId"],
+                        item_data["categories"],
+                        item_data["labels"],
+                        item_data.get("isHidden", False),
+                    ]
+                )
+                param_count += 5
+
+            values_clause = ", ".join(values_list)
+
+            query = f"""
+                INSERT INTO gorse_items ("itemId", "shopId", categories, labels, "isHidden")
+                VALUES {values_clause}
+                ON CONFLICT ("itemId") DO UPDATE SET
+                    "shopId" = EXCLUDED."shopId",
+                    categories = EXCLUDED.categories,
+                    labels = EXCLUDED.labels,
+                    "isHidden" = EXCLUDED."isHidden",
+                    "updatedAt" = NOW()
+            """
+
+            await db.query_raw(query, *params)
+
+    async def _fallback_bulk_upsert(
+        self,
+        data_list: List[Dict[str, Any]],
+        table_accessor: callable,
+        id_field: str,
+        entity_name: str,
+        chunk_size: int,
+    ):
+        """Fallback method using original Prisma upsert approach"""
+        db = await self._get_database()
+        table = table_accessor(db)
+
+        # Process in smaller chunks with parallel processing
+        semaphore = asyncio.Semaphore(self.max_parallel_workers)
+
+        async def upsert_chunk(chunk):
+            async with semaphore:
+                return await asyncio.gather(
+                    *[
+                        table.upsert(
+                            where={id_field: item_data[id_field]},
+                            data={
+                                "create": item_data,
+                                "update": item_data,
+                            },
+                        )
+                        for item_data in chunk
+                    ],
+                    return_exceptions=True,
+                )
+
+        # Process all chunks in parallel
+        chunk_tasks = []
+        for i in range(0, len(data_list), chunk_size):
+            chunk = data_list[i : i + chunk_size]
+            chunk_tasks.append(upsert_chunk(chunk))
+
+        # Wait for all chunks to complete
+        results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+
+        # Count successful operations
+        successful_ops = 0
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Chunk upsert failed: {str(result)}")
+            else:
+                successful_ops += len(
+                    [r for r in result if not isinstance(r, Exception)]
+                )
+
+        logger.debug(
+            f"Fallback upserted {successful_ops}/{len(data_list)} {entity_name} records"
+        )
 
     async def _generic_batch_processor(
         self,
@@ -216,7 +380,10 @@ class GorseSyncPipeline:
 
     async def sync_all(self, shop_id: str, incremental: bool = True):
         """
-        Main entry point - syncs all data for a shop to Gorse
+        Main entry point - syncs all data for a shop to Gorse with transactional integrity
+
+        For full syncs, wraps all operations in a database transaction to ensure consistency.
+        For incremental syncs, uses individual transactions per operation for better performance.
 
         Args:
             shop_id: Shop ID to sync
@@ -236,24 +403,129 @@ class GorseSyncPipeline:
                 else:
                     logger.info("No previous sync found, performing full sync")
 
-            # 1. Sync Users (combining multiple feature tables)
-            await self.sync_users(
-                shop_id, incremental=incremental, since_timestamp=last_sync_timestamp
-            )
-
-            # 2. Sync Items (combining multiple feature tables)
-            await self.sync_items(
-                shop_id, incremental=incremental, since_timestamp=last_sync_timestamp
-            )
-
-            # 3. Sync Feedback (from events, orders, and interaction features)
-            await self.sync_feedback(shop_id)
+            if incremental:
+                # For incremental syncs, use individual transactions for better performance
+                # Each operation is atomic but independent
+                await self._sync_all_incremental(shop_id, last_sync_timestamp)
+            else:
+                # For full syncs, use a single transaction to ensure consistency
+                await self._sync_all_full_transaction(shop_id)
 
             logger.info(f"Completed Gorse sync for shop: {shop_id}")
 
         except Exception as e:
             logger.error(f"Failed to sync shop {shop_id}: {str(e)}")
             raise
+
+    async def _sync_all_incremental(
+        self, shop_id: str, last_sync_timestamp: Optional[datetime]
+    ):
+        """
+        Perform incremental sync with individual transactions for each operation.
+        This provides better performance for incremental updates while maintaining atomicity per operation.
+        """
+        try:
+            # 1. Sync Users (combining multiple feature tables)
+            await self.sync_users(
+                shop_id, incremental=True, since_timestamp=last_sync_timestamp
+            )
+
+            # 2. Sync Items (combining multiple feature tables)
+            await self.sync_items(
+                shop_id, incremental=True, since_timestamp=last_sync_timestamp
+            )
+
+            # 3. Sync Feedback (from events, orders, and interaction features)
+            await self.sync_feedback(shop_id)
+
+        except Exception as e:
+            logger.error(f"Failed incremental sync for shop {shop_id}: {str(e)}")
+            raise
+
+    async def _sync_all_full_transaction(self, shop_id: str):
+        """
+        Perform full sync within a single database transaction to ensure consistency.
+        If any operation fails, the entire sync is rolled back.
+        """
+        db = await self._get_database()
+
+        try:
+            # Start a database transaction
+            async with db.tx() as transaction:
+                logger.info(f"Starting full sync transaction for shop: {shop_id}")
+
+                # Store the original database client and replace with transaction
+                original_db = self._db_client
+                self._db_client = transaction
+
+                try:
+                    # 1. Sync Users (combining multiple feature tables)
+                    await self.sync_users(
+                        shop_id, incremental=False, since_timestamp=None
+                    )
+
+                    # 2. Sync Items (combining multiple feature tables)
+                    await self.sync_items(
+                        shop_id, incremental=False, since_timestamp=None
+                    )
+
+                    # 3. Sync Feedback (from events, orders, and interaction features)
+                    await self.sync_feedback(shop_id)
+
+                    logger.info(
+                        f"Full sync transaction completed successfully for shop: {shop_id}"
+                    )
+
+                finally:
+                    # Restore the original database client
+                    self._db_client = original_db
+
+        except Exception as e:
+            logger.error(f"Full sync transaction failed for shop {shop_id}: {str(e)}")
+            logger.error("All changes have been rolled back")
+            raise
+
+    async def _execute_with_transaction(
+        self, operation_name: str, operation_func, *args, **kwargs
+    ):
+        """
+        Execute an operation within a database transaction for atomicity.
+        This is used for individual sync operations to ensure they are atomic.
+        """
+        db = await self._get_database()
+
+        try:
+            async with db.tx() as transaction:
+                logger.debug(f"Starting transaction for {operation_name}")
+
+                # Store the original database client and replace with transaction
+                original_db = self._db_client
+                self._db_client = transaction
+
+                try:
+                    result = await operation_func(*args, **kwargs)
+                    logger.debug(
+                        f"Transaction completed successfully for {operation_name}"
+                    )
+                    return result
+
+                finally:
+                    # Restore the original database client
+                    self._db_client = original_db
+
+        except Exception as e:
+            logger.error(f"Transaction failed for {operation_name}: {str(e)}")
+            raise
+
+    def _is_in_transaction(self) -> bool:
+        """
+        Check if we're currently within a database transaction.
+        This helps avoid nested transactions which can cause issues.
+        """
+        return (
+            hasattr(self._db_client, "_transaction")
+            and self._db_client._transaction is not None
+        )
 
     async def sync_users(
         self,
@@ -263,23 +535,31 @@ class GorseSyncPipeline:
     ):
         """
         Sync users combining UserFeatures, CustomerBehaviorFeatures, and InteractionFeatures
-        Uses batch processing to handle large datasets efficiently
+        Uses batch processing to handle large datasets efficiently with transactional integrity
 
         Args:
             shop_id: Shop ID to sync
             incremental: Whether to use incremental sync
             since_timestamp: Timestamp for incremental sync
         """
-        await self._generic_batch_processor(
-            shop_id=shop_id,
-            batch_size=self.user_batch_size,
-            fetch_batch_func=lambda shop_id, offset, limit: self._fetch_user_batch(
-                shop_id, offset, limit, since_timestamp if incremental else None
-            ),
-            process_batch_func=self._process_user_batch,
-            entity_name="users",
-            additional_processor=self._sync_anonymous_users,
-        )
+
+        async def _sync_users_operation():
+            return await self._generic_batch_processor(
+                shop_id=shop_id,
+                batch_size=self.user_batch_size,
+                fetch_batch_func=lambda shop_id, offset, limit: self._fetch_user_batch(
+                    shop_id, offset, limit, since_timestamp if incremental else None
+                ),
+                process_batch_func=self._process_user_batch,
+                entity_name="users",
+                additional_processor=self._sync_anonymous_users,
+            )
+
+        # Use transaction if not already in one
+        if self._is_in_transaction():
+            await _sync_users_operation()
+        else:
+            await self._execute_with_transaction("sync_users", _sync_users_operation)
 
     async def _fetch_user_batch(
         self,
@@ -363,19 +643,18 @@ class GorseSyncPipeline:
         try:
             db = await self._get_database()
 
-            # Create parameterized query for batch
-            placeholders = ",".join([f"${i+2}" for i in range(len(user_ids))])
-            query = f"""
+            # Use ANY for safer array parameterization
+            query = """
                 SELECT 
                     "customerId",
                     SUM("interactionScore") as total_interaction_score,
                     AVG("affinityScore") as avg_affinity_score
                 FROM "InteractionFeatures" 
-                WHERE "shopId" = $1 AND "customerId" IN ({placeholders})
+                WHERE "shopId" = $1 AND "customerId" = ANY($2)
                 GROUP BY "customerId"
             """
 
-            result = await db.query_raw(query, shop_id, *user_ids)
+            result = await db.query_raw(query, shop_id, user_ids)
 
             return (
                 {
@@ -405,19 +684,18 @@ class GorseSyncPipeline:
         try:
             db = await self._get_database()
 
-            # Create parameterized query for batch
-            placeholders = ",".join([f"${i+2}" for i in range(len(user_ids))])
-            query = f"""
+            # Use ANY for safer array parameterization
+            query = """
                 SELECT 
                     "customerId",
                     COUNT(*) FILTER (WHERE "checkoutCompleted" = true) as completed_sessions,
                     AVG("durationSeconds") as avg_session_duration
                 FROM "SessionFeatures" 
-                WHERE "shopId" = $1 AND "customerId" IN ({placeholders})
+                WHERE "shopId" = $1 AND "customerId" = ANY($2)
                 GROUP BY "customerId"
             """
 
-            result = await db.query_raw(query, shop_id, *user_ids)
+            result = await db.query_raw(query, shop_id, user_ids)
 
             return (
                 {
@@ -482,22 +760,30 @@ class GorseSyncPipeline:
     ):
         """
         Sync items combining ProductFeatures, CollectionFeatures
-        Uses batch processing to handle large datasets efficiently
+        Uses batch processing to handle large datasets efficiently with transactional integrity
 
         Args:
             shop_id: Shop ID to sync
             incremental: Whether to use incremental sync
             since_timestamp: Timestamp for incremental sync
         """
-        await self._generic_batch_processor(
-            shop_id=shop_id,
-            batch_size=self.item_batch_size,
-            fetch_batch_func=lambda shop_id, offset, limit: self._fetch_item_batch(
-                shop_id, offset, limit, since_timestamp if incremental else None
-            ),
-            process_batch_func=self._process_item_batch,
-            entity_name="items",
-        )
+
+        async def _sync_items_operation():
+            return await self._generic_batch_processor(
+                shop_id=shop_id,
+                batch_size=self.item_batch_size,
+                fetch_batch_func=lambda shop_id, offset, limit: self._fetch_item_batch(
+                    shop_id, offset, limit, since_timestamp if incremental else None
+                ),
+                process_batch_func=self._process_item_batch,
+                entity_name="items",
+            )
+
+        # Use transaction if not already in one
+        if self._is_in_transaction():
+            await _sync_items_operation()
+        else:
+            await self._execute_with_transaction("sync_items", _sync_items_operation)
 
     async def _fetch_item_batch(
         self,
@@ -729,55 +1015,100 @@ class GorseSyncPipeline:
 
     async def sync_feedback(self, shop_id: str, since_hours: int = 24):
         """
-        Sync feedback from behavioral events, orders, and interaction features
-        Uses streaming batch processing to handle large datasets efficiently
+        Sync feedback data from multiple sources to Gorse using streaming processing
+        Processes behavioral events, orders, interactions, and sessions without loading all data into memory
+        with transactional integrity
         """
-        try:
+
+        async def _sync_feedback_operation():
             logger.info(
-                f"Starting feedback sync for shop {shop_id} (last {since_hours} hours) with batch size {self.feedback_batch_size}"
+                f"Starting streaming feedback sync for shop {shop_id} (last {since_hours} hours) with batch size {self.feedback_batch_size}"
             )
             since_time = now_utc() - timedelta(hours=since_hours)
 
             total_synced = 0
 
-            # Process different feedback sources concurrently and in batches
-            feedback_sources = await asyncio.gather(
-                self._process_behavioral_events(shop_id, since_time),
-                self._process_orders(shop_id, since_time),
-                self._process_interaction_features(shop_id, since_time),
-                self._process_session_feedback(shop_id, since_time),
+            # Create streaming generators for each feedback source
+            feedback_streams = [
+                self._stream_behavioral_events(shop_id, since_time),
+                self._stream_orders(shop_id, since_time),
+                self._stream_interaction_features(shop_id, since_time),
+                self._stream_session_feedback(shop_id, since_time),
+            ]
+
+            # Process feedback streams concurrently using asyncio.gather
+            # Each stream yields batches of feedback that we process immediately
+            stream_tasks = [
+                self._process_feedback_stream(stream) for stream in feedback_streams
+            ]
+
+            # Wait for all streams to complete and sum up the results
+            stream_results = await asyncio.gather(*stream_tasks)
+            total_synced = sum(stream_results)
+
+            logger.info(
+                f"Streaming sync completed: {total_synced} feedback records synced for shop {shop_id}"
+            )
+            return total_synced
+
+        # Use transaction if not already in one
+        if self._is_in_transaction():
+            await _sync_feedback_operation()
+        else:
+            await self._execute_with_transaction(
+                "sync_feedback", _sync_feedback_operation
             )
 
-            # Combine all feedback
-            all_feedback = []
-            for source_feedback in feedback_sources:
-                all_feedback.extend(source_feedback)
+    async def _process_feedback_stream(self, feedback_stream) -> int:
+        """
+        Process a single feedback stream, yielding batches and inserting them immediately
+        Returns the total number of records processed from this stream
+        """
+        total_synced = 0
+        batch_buffer = []
 
-            # Deduplicate feedback
-            unique_feedback = self._deduplicate_feedback(all_feedback)
+        try:
+            async for feedback_batch in feedback_stream:
+                # Add to buffer
+                batch_buffer.extend(feedback_batch)
 
-            logger.info(f"Processing {len(unique_feedback)} unique feedback records...")
+                # Process buffer when it reaches batch size
+                if len(batch_buffer) >= self.feedback_batch_size:
+                    # Deduplicate the batch
+                    unique_batch = self._deduplicate_feedback(batch_buffer)
 
-            # Process feedback in batches for efficient database operations
-            for i in range(0, len(unique_feedback), self.feedback_batch_size):
-                batch = unique_feedback[i : i + self.feedback_batch_size]
-                batch_count = await self._bulk_insert_gorse_feedback(batch)
+                    # Insert the batch
+                    batch_count = await self._bulk_insert_gorse_feedback(unique_batch)
+                    total_synced += batch_count
+
+                    logger.debug(
+                        f"Processed streaming batch: {len(unique_batch)} records, total: {total_synced}"
+                    )
+
+                    # Clear buffer
+                    batch_buffer = []
+
+            # Process any remaining records in buffer
+            if batch_buffer:
+                unique_batch = self._deduplicate_feedback(batch_buffer)
+                batch_count = await self._bulk_insert_gorse_feedback(unique_batch)
                 total_synced += batch_count
 
                 logger.debug(
-                    f"Processed feedback batch: {len(batch)} records, total: {total_synced}"
+                    f"Processed final streaming batch: {len(unique_batch)} records, total: {total_synced}"
                 )
 
-            logger.info(f"Synced {total_synced} feedback records for shop {shop_id}")
-
         except Exception as e:
-            logger.error(f"Failed to sync feedback: {str(e)}")
+            logger.error(f"Error processing feedback stream: {str(e)}")
             raise
 
+        return total_synced
+
+    @retry_with_exponential_backoff(max_retries=2, base_delay=1.0)
     async def _bulk_insert_gorse_feedback(
         self, feedback_batch: List[Dict[str, Any]]
     ) -> int:
-        """Bulk insert feedback records to GorseFeedback table"""
+        """Bulk insert feedback records to GorseFeedback table using true bulk operations"""
         if not feedback_batch:
             return 0
 
@@ -797,35 +1128,64 @@ class GorseSyncPipeline:
                 }
                 gorse_feedback_data.append(gorse_feedback_record)
 
-            # Process in smaller chunks to avoid too many concurrent operations
-            chunk_size = 200  # Process 200 feedback records at a time
-            total_inserted = 0
-
-            for i in range(0, len(gorse_feedback_data), chunk_size):
-                chunk = gorse_feedback_data[i : i + chunk_size]
-
-                # Use asyncio.gather for concurrent inserts within each chunk
-                insert_tasks = []
-                for feedback_data in chunk:
-                    insert_tasks.append(self._safe_insert_feedback(feedback_data))
-
-                # Execute all inserts in this chunk concurrently
-                results = await asyncio.gather(*insert_tasks, return_exceptions=True)
-
-                # Count successful insertions
-                successful_inserts = sum(1 for result in results if result is True)
-                total_inserted += successful_inserts
-
-                logger.debug(
-                    f"Processed feedback chunk: {successful_inserts}/{len(chunk)} inserted"
+            # Use Prisma's create_many for true bulk insert with skip_duplicates
+            # This is much more efficient than individual inserts
+            try:
+                result = await db.gorsefeedback.create_many(
+                    data=gorse_feedback_data,
+                    skip_duplicates=True,  # Skip records that violate unique constraints
                 )
+                total_inserted = result.count
+                logger.debug(
+                    f"Bulk inserted {total_inserted} feedback records using create_many"
+                )
+                return total_inserted
 
-            logger.debug(f"Bulk inserted {total_inserted} feedback records")
-            return total_inserted
+            except (PrismaError, asyncio.TimeoutError, ConnectionError) as bulk_error:
+                # Fallback to chunked processing if bulk insert fails
+                logger.warning(
+                    f"Bulk insert failed, falling back to chunked processing: {str(bulk_error)}"
+                )
+                return await self._fallback_chunked_feedback_insert(gorse_feedback_data)
+            except Exception as bulk_error:
+                # For non-transient errors, don't retry
+                logger.error(f"Non-retryable error in bulk insert: {str(bulk_error)}")
+                raise
 
-        except Exception as e:
-            logger.error(f"Failed to bulk insert Gorse feedback: {str(e)}")
+        except (PrismaError, asyncio.TimeoutError, ConnectionError) as e:
+            logger.error(f"Database error in bulk insert Gorse feedback: {str(e)}")
             raise
+        except Exception as e:
+            logger.error(f"Unexpected error in bulk insert Gorse feedback: {str(e)}")
+            raise
+
+    async def _fallback_chunked_feedback_insert(
+        self, gorse_feedback_data: List[Dict[str, Any]]
+    ) -> int:
+        """Fallback method for chunked feedback insertion when bulk insert fails"""
+        chunk_size = 200  # Process 200 feedback records at a time
+        total_inserted = 0
+
+        for i in range(0, len(gorse_feedback_data), chunk_size):
+            chunk = gorse_feedback_data[i : i + chunk_size]
+
+            # Use asyncio.gather for concurrent inserts within each chunk
+            insert_tasks = []
+            for feedback_data in chunk:
+                insert_tasks.append(self._safe_insert_feedback(feedback_data))
+
+            # Execute all inserts in this chunk concurrently
+            results = await asyncio.gather(*insert_tasks, return_exceptions=True)
+
+            # Count successful insertions
+            successful_inserts = sum(1 for result in results if result is True)
+            total_inserted += successful_inserts
+
+            logger.debug(
+                f"Processed feedback chunk: {successful_inserts}/{len(chunk)} inserted"
+            )
+
+        return total_inserted
 
     async def _safe_insert_feedback(self, feedback_data: Dict[str, Any]) -> bool:
         """Safely insert a single feedback record, handling duplicates"""
@@ -1169,6 +1529,8 @@ class GorseSyncPipeline:
         result = await db.query_raw(query, shop_id, since_time)
         sessions = [dict(row) for row in result] if result else []
 
+        # Convert sessions to Gorse user format for bulk upsert
+        gorse_users_data = []
         for session in sessions:
             user_id = f"session_{session['sessionId']}"
 
@@ -1184,57 +1546,19 @@ class GorseSyncPipeline:
                 "customer_segment": "anonymous",
             }
 
-            await self._upsert_gorse_user(user_id, shop_id, labels)
+            gorse_users_data.append(
+                {
+                    "userId": user_id,
+                    "shopId": shop_id,
+                    "labels": Json(labels),
+                }
+            )
+
+        # Bulk upsert anonymous users
+        if gorse_users_data:
+            await self._bulk_upsert_gorse_users(gorse_users_data)
 
         return len(sessions)
-
-    async def _sync_valuable_anonymous_users(self, shop_id: str):
-        """Only sync anonymous sessions that have high engagement"""
-        try:
-            db = await self._get_database()
-
-            # Only get sessions with significant activity
-            query = """
-                SELECT 
-                    "sessionId",
-                    COUNT(*) as session_count,
-                    AVG("durationSeconds") as avg_duration,
-                    SUM("productViewCount") as total_views,
-                    SUM("cartAddCount") as total_cart_adds,
-                    SUM(CASE WHEN "checkoutCompleted" THEN 1 ELSE 0 END) as purchases
-                FROM "SessionFeatures"
-                WHERE "shopId" = $1 
-                    AND "customerId" IS NULL
-                    AND "endTime" > $2::timestamp
-                    AND ("cartAddCount" > 0 OR "checkoutCompleted" = true)
-                GROUP BY "sessionId"
-            """
-
-            since_time = now_utc() - timedelta(days=7)
-            result = await db.query_raw(query, shop_id, since_time)
-            sessions = [dict(row) for row in result] if result else []
-
-            for session in sessions:
-                user_id = f"session_{session['sessionId']}"
-
-                # Simple labels for anonymous users
-                labels = {
-                    "engagement_level": min(session["total_views"] / 10, 1.0),
-                    "conversion_score": 1.0 if session["purchases"] > 0 else 0.3,
-                    "is_anonymous": 1,
-                    "lifecycle_stage": 0,  # New/anonymous
-                }
-
-                await db.gorseusers.upsert(
-                    where={"userId": user_id},
-                    data={"userId": user_id, "shopId": shop_id, "labels": labels},
-                    create={"userId": user_id, "shopId": shop_id, "labels": labels},
-                )
-
-            logger.info(f"Synced {len(sessions)} high-value anonymous sessions")
-
-        except Exception as e:
-            logger.error(f"Failed to sync anonymous users: {str(e)}")
 
     async def _process_behavioral_events(
         self, shop_id: str, since_time: datetime
@@ -1261,6 +1585,39 @@ class GorseSyncPipeline:
 
         return feedback_list
 
+    async def _stream_behavioral_events(self, shop_id: str, since_time: datetime):
+        """
+        Stream behavioral events in batches to avoid loading all data into memory
+        """
+        db = await self._get_database()
+        batch_size = 1000  # Process events in smaller batches
+        offset = 0
+
+        while True:
+            query = """
+                SELECT * FROM "BehavioralEvents" 
+                WHERE "shopId" = $1 
+                    AND "occurredAt" >= $2::timestamp
+                ORDER BY "occurredAt" ASC
+                LIMIT $3 OFFSET $4
+            """
+
+            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            events = [dict(row) for row in result] if result else []
+
+            if not events:
+                break  # No more events to process
+
+            # Convert events to feedback
+            feedback_batch = []
+            for event in events:
+                feedback = self._convert_event_to_feedback(event)
+                if feedback:
+                    feedback_batch.extend(feedback)
+
+            yield feedback_batch
+            offset += batch_size
+
     async def _process_orders(
         self, shop_id: str, since_time: datetime
     ) -> List[Dict[str, Any]]:
@@ -1284,6 +1641,39 @@ class GorseSyncPipeline:
                 feedback_list.extend(feedback)
 
         return feedback_list
+
+    async def _stream_orders(self, shop_id: str, since_time: datetime):
+        """
+        Stream orders in batches to avoid loading all data into memory
+        """
+        db = await self._get_database()
+        batch_size = 500  # Process orders in smaller batches
+        offset = 0
+
+        while True:
+            query = """
+                SELECT * FROM "OrderData" 
+                WHERE "shopId" = $1 
+                    AND "orderDate" >= $2::timestamp
+                ORDER BY "orderDate" ASC
+                LIMIT $3 OFFSET $4
+            """
+
+            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            orders = [dict(row) for row in result] if result else []
+
+            if not orders:
+                break  # No more orders to process
+
+            # Convert orders to feedback
+            feedback_batch = []
+            for order in orders:
+                feedback = self._convert_order_to_feedback(order)
+                if feedback:
+                    feedback_batch.extend(feedback)
+
+            yield feedback_batch
+            offset += batch_size
 
     async def _process_interaction_features(
         self, shop_id: str, since_time: datetime
@@ -1323,6 +1713,56 @@ class GorseSyncPipeline:
                 )
 
         return feedback_list
+
+    async def _stream_interaction_features(self, shop_id: str, since_time: datetime):
+        """
+        Stream interaction features in batches to avoid loading all data into memory
+        """
+        db = await self._get_database()
+        batch_size = 1000  # Process interactions in smaller batches
+        offset = 0
+
+        while True:
+            query = """
+                SELECT * FROM "InteractionFeatures" 
+                WHERE "shopId" = $1 
+                    AND "lastComputedAt" >= $2::timestamp
+                    AND "interactionScore" > 0
+                ORDER BY "lastComputedAt" ASC
+                LIMIT $3 OFFSET $4
+            """
+
+            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            interactions = [dict(row) for row in result] if result else []
+
+            if not interactions:
+                break  # No more interactions to process
+
+            # Convert interactions to feedback
+            feedback_batch = []
+            for interaction in interactions:
+                # Create synthetic feedback based on interaction score
+                if interaction["lastViewDate"]:
+                    feedback_batch.append(
+                        {
+                            "feedback_type": "interaction",
+                            "user_id": interaction["customerId"],
+                            "item_id": interaction["productId"],
+                            "timestamp": interaction["lastViewDate"],
+                            "shop_id": shop_id,
+                            "comment": json.dumps(
+                                {
+                                    "weight": float(interaction["interactionScore"]),
+                                    "affinity": float(
+                                        interaction["affinityScore"] or 0
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+
+            yield feedback_batch
+            offset += batch_size
 
     async def _process_session_feedback(
         self, shop_id: str, since_time: datetime
@@ -1378,6 +1818,69 @@ class GorseSyncPipeline:
 
         return feedback_list
 
+    async def _stream_session_feedback(self, shop_id: str, since_time: datetime):
+        """
+        Stream session feedback in batches to avoid loading all data into memory
+        """
+        db = await self._get_database()
+        batch_size = 500  # Process sessions in smaller batches
+        offset = 0
+
+        while True:
+            query = """
+                SELECT 
+                    sf.*,
+                    be."eventData"
+                FROM "SessionFeatures" sf
+                LEFT JOIN "BehavioralEvents" be 
+                    ON sf."sessionId" = be."clientId" 
+                    AND be."eventType" = 'product_viewed'
+                WHERE sf."shopId" = $1 
+                    AND sf."endTime" >= $2::timestamp
+                    AND sf."productViewCount" > 0
+                ORDER BY sf."endTime" ASC
+                LIMIT $3 OFFSET $4
+            """
+
+            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            sessions = [dict(row) for row in result] if result else []
+
+            if not sessions:
+                break  # No more sessions to process
+
+            # Convert sessions to feedback
+            feedback_batch = []
+            processed_sessions = set()
+
+            for session in sessions:
+                if session["sessionId"] in processed_sessions:
+                    continue
+                processed_sessions.add(session["sessionId"])
+
+                user_id = session["customerId"] or f"session_{session['sessionId']}"
+
+                # Create session-level feedback if converted
+                if session["checkoutCompleted"]:
+                    feedback_batch.append(
+                        {
+                            "feedback_type": "session_conversion",
+                            "user_id": user_id,
+                            "item_id": "session_conversion",  # Special item for session conversions
+                            "timestamp": session["endTime"],
+                            "shop_id": shop_id,
+                            "comment": json.dumps(
+                                {
+                                    "weight": 10.0,
+                                    "order_value": float(session["orderValue"] or 0),
+                                    "duration": session["durationSeconds"],
+                                }
+                            ),
+                        }
+                    )
+
+            yield feedback_batch
+            offset += batch_size
+
     def _convert_event_to_feedback(self, event: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Convert behavioral event to feedback"""
         feedback_list = []
@@ -1432,109 +1935,6 @@ class GorseSyncPipeline:
                 )
 
         return feedback_list
-
-    async def _upsert_gorse_user(
-        self, user_id: str, shop_id: str, labels: Dict[str, Any]
-    ):
-        """Upsert user to Gorse users table"""
-        try:
-            db = await self._get_database()
-
-            await db.gorseusers.upsert(
-                where={"userId": user_id},
-                data={
-                    "create": {
-                        "userId": user_id,
-                        "shopId": shop_id,
-                        "labels": Json(labels),
-                    },
-                    "update": {
-                        "userId": user_id,
-                        "shopId": shop_id,
-                        "labels": Json(labels),
-                    },
-                },
-            )
-
-            logger.debug(f"Upserted Gorse user: {user_id} for shop {shop_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to upsert Gorse user {user_id}: {str(e)}")
-            raise
-
-    async def _upsert_gorse_item(
-        self,
-        item_id: str,
-        shop_id: str,
-        categories: List[str],
-        labels: Dict[str, Any],
-        is_hidden: bool = False,
-    ):
-        """Upsert item to Gorse items table"""
-        try:
-            db = await self._get_database()
-
-            await db.gorseitems.upsert(
-                where={"itemId": item_id},
-                data={
-                    "create": {
-                        "itemId": item_id,
-                        "shopId": shop_id,
-                        "categories": categories,
-                        "labels": Json(labels),
-                        "isHidden": is_hidden,
-                    },
-                    "update": {
-                        "itemId": item_id,
-                        "shopId": shop_id,
-                        "categories": categories,
-                        "labels": Json(labels),
-                        "isHidden": is_hidden,
-                    },
-                },
-            )
-
-            logger.debug(f"Upserted Gorse item: {item_id} for shop {shop_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to upsert Gorse item {item_id}: {str(e)}")
-            raise
-
-    async def _insert_gorse_feedback(self, feedback: Dict[str, Any]):
-        """Insert feedback to Gorse feedback table"""
-        try:
-            db = await self._get_database()
-
-            # Convert feedback dict to Gorse schema format
-            gorse_feedback_data = {
-                "feedbackType": feedback["feedback_type"],
-                "userId": feedback["user_id"],
-                "itemId": feedback["item_id"],
-                "timestamp": feedback["timestamp"],
-                "shopId": feedback["shop_id"],
-                "comment": feedback.get("comment"),
-            }
-
-            try:
-                await db.gorsefeedback.create(data=gorse_feedback_data)
-                logger.debug(
-                    f"Inserted Gorse feedback: {feedback['feedback_type']} for user {feedback['user_id']} on item {feedback['item_id']}"
-                )
-            except Exception as create_error:
-                # If it's a unique constraint violation, it's likely a duplicate, so we can skip it
-                error_str = str(create_error).lower()
-                if "unique constraint" in error_str or "duplicate" in error_str:
-                    logger.debug(
-                        f"Skipped duplicate Gorse feedback: {feedback['feedback_type']} for user {feedback['user_id']} on item {feedback['item_id']}"
-                    )
-                else:
-                    # Re-raise if it's not a duplicate error
-                    raise create_error
-
-        except Exception as e:
-            logger.error(f"Failed to insert Gorse feedback: {str(e)}")
-            logger.error(f"Feedback data: {feedback}")
-            raise
 
     def _should_hide_product(self, product: Dict[str, Any]) -> bool:
         """Determine if product should be hidden in Gorse"""
@@ -1841,47 +2241,6 @@ class GorseSyncPipeline:
                 categories.append(str(coll["id"]))
 
         return categories
-
-    def _should_hide_product_optimized(self, product: Dict[str, Any]) -> bool:
-        """Simple hiding logic"""
-        # Only hide if out of stock or very poor performance
-        if int(product.get("totalInventory", 0)) <= 0:
-            return True
-
-        # Hide if no views in 30 days
-        if int(product.get("viewCount30d", 0)) == 0:
-            return True
-
-        return False
-
-    def _extract_product_id_from_event_optimized(
-        self, event_type: str, event_data: Dict[str, Any]
-    ) -> Optional[str]:
-        """Extract product ID from event data with optimized parsing"""
-        if event_type == "product_viewed":
-            # Navigate through the nested structure
-            data = event_data.get("data", {})
-            product_variant = data.get("productVariant", {})
-            product = product_variant.get("product", {})
-            product_id = product.get("id", "")
-
-            # Extract numeric ID from GID
-            if "/" in product_id:
-                return product_id.split("/")[-1]
-            return product_id if product_id else None
-
-        elif event_type == "product_added_to_cart":
-            data = event_data.get("data", {})
-            cart_line = data.get("cartLine", {})
-            merchandise = cart_line.get("merchandise", {})
-            product = merchandise.get("product", {})
-            product_id = product.get("id", "")
-
-            if "/" in product_id:
-                return product_id.split("/")[-1]
-            return product_id if product_id else None
-
-        return None
 
 
 async def run_gorse_sync(
