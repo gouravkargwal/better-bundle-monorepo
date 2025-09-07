@@ -4,21 +4,13 @@ This service now uses the new architecture with specialized generators and repos
 """
 
 from typing import Dict, Any, List, Optional
-import statistics
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
 from ..models import MLFeatures
-from app.domains.shopify.models import (
-    ShopifyShop,
-    ShopifyProduct,
-    ShopifyOrder,
-    ShopifyCustomer,
-    ShopifyCollection,
-    BehavioralEvent,
-)
+
 from ..repositories.feature_repository import FeatureRepository, IFeatureRepository
 from ..generators import (
     ProductFeatureGenerator,
@@ -57,11 +49,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
     # Batch processing methods for efficiency
     async def compute_all_product_features(
         self,
-        products: List[ShopifyProduct],
-        shop: ShopifyShop,
-        orders: Optional[List[ShopifyOrder]] = None,
-        collections: Optional[List[ShopifyCollection]] = None,
-        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        products: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        orders: Optional[List[Dict[str, Any]]] = None,
+        collections: Optional[List[Dict[str, Any]]] = None,
+        behavioral_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple products"""
         try:
@@ -78,12 +70,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self.product_generator.generate_features(
                         product, context
                     )
-                    results[product.id] = features
+                    results[product["id"]] = features
                 except Exception as e:
                     logger.error(
-                        f"Failed to compute features for product {product.id}: {str(e)}"
+                        f"Failed to compute features for product {product['id']}: {str(e)}"
                     )
-                    results[product.id] = {}
+                    results[product["id"]] = {}
 
             return results
         except Exception as e:
@@ -92,10 +84,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def compute_all_user_features(
         self,
-        customers: List[ShopifyCustomer],
-        shop: ShopifyShop,
-        orders: Optional[List[ShopifyOrder]] = None,
-        events: Optional[List[BehavioralEvent]] = None,
+        customers: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        orders: Optional[List[Dict[str, Any]]] = None,
+        events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple customers/users"""
         try:
@@ -111,12 +103,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self.user_generator.generate_features(
                         customer, context
                     )
-                    results[customer.id] = features
+                    results[customer["id"]] = features
                 except Exception as e:
                     logger.error(
-                        f"Failed to compute user features for {customer.id}: {str(e)}"
+                        f"Failed to compute user features for {customer['id']}: {str(e)}"
                     )
-                    results[customer.id] = {}
+                    results[customer["id"]] = {}
 
             return results
         except Exception as e:
@@ -125,11 +117,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def compute_all_collection_features(
         self,
-        collections: List[ShopifyCollection],
-        shop: ShopifyShop,
-        products: Optional[List[ShopifyProduct]] = None,
-        behavioral_events: Optional[List[BehavioralEvent]] = None,
-        order_data: Optional[List[ShopifyOrder]] = None,
+        collections: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        products: Optional[List[Dict[str, Any]]] = None,
+        behavioral_events: Optional[List[Dict[str, Any]]] = None,
+        order_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple collections"""
         try:
@@ -146,12 +138,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self.collection_generator.generate_features(
                         collection, context
                     )
-                    results[collection.id] = features
+                    results[collection["id"]] = features
                 except Exception as e:
                     logger.error(
-                        f"Failed to compute collection features for {collection.id}: {str(e)}"
+                        f"Failed to compute collection features for {collection['id']}: {str(e)}"
                     )
-                    results[collection.id] = {}
+                    results[collection["id"]] = {}
 
             return results
         except Exception as e:
@@ -160,9 +152,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def compute_all_customer_behavior_features(
         self,
-        customers: List[ShopifyCustomer],
-        shop: ShopifyShop,
-        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        customers: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        behavioral_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute customer behavior features"""
         try:
@@ -174,7 +166,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     customer_events = [
                         event
                         for event in (behavioral_events or [])
-                        if event.customerId == customer.id
+                        if event.get("customerId") == customer["id"]
                     ]
 
                     context = {
@@ -185,12 +177,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self.customer_behavior_generator.generate_features(
                         customer, context
                     )
-                    results[customer.id] = features
+                    results[customer["id"]] = features
                 except Exception as e:
                     logger.error(
-                        f"Failed to compute customer behavior features for {customer.id}: {str(e)}"
+                        f"Failed to compute customer behavior features for {customer['id']}: {str(e)}"
                     )
-                    results[customer.id] = {}
+                    results[customer["id"]] = {}
 
             return results
         except Exception as e:
@@ -201,9 +193,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def generate_session_features_from_events(
         self,
-        behavioral_events: List[BehavioralEvent],
-        shop: ShopifyShop,
-        order_data: Optional[List[ShopifyOrder]] = None,
+        behavioral_events: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        order_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Generate session features by grouping behavioral events into sessions"""
         try:
@@ -241,7 +233,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             return {}
 
     def _group_events_into_sessions(
-        self, events: List[BehavioralEvent], session_timeout_minutes: int = 30
+        self, events: List[Dict[str, Any]], session_timeout_minutes: int = 30
     ) -> Dict[str, Dict[str, Any]]:
         """Group behavioral events into sessions"""
         from datetime import datetime, timedelta
@@ -257,8 +249,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         current_sessions = {}  # customer_id -> current_session_id
 
         for event in sorted_events:
-            customer_id = event.customerId or "anonymous"
-            event_time = event.occurredAt
+            customer_id = event.get("customerId") or "anonymous"
+            event_time = event.get("occurredAt")
 
             # Check if we need to start a new session for this customer
             should_start_new_session = True
@@ -327,21 +319,21 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     await repository.get_last_feature_computation_time(shop_id)
                 )
 
-                # Load recent data only
+                # Load recent data only (using same approach as full load for now)
                 products = await repository.get_products_batch(
-                    shop_id, limit=batch_size * 2, updated_since=last_computation_time
+                    shop_id, limit=batch_size * 2, offset=0
                 )
                 customers = await repository.get_customers_batch(
-                    shop_id, limit=batch_size, updated_since=last_computation_time
+                    shop_id, limit=batch_size, offset=0
                 )
                 orders = await repository.get_orders_batch(
-                    shop_id, limit=batch_size * 3, created_since=last_computation_time
+                    shop_id, limit=batch_size * 3, offset=0
                 )
                 collections = await repository.get_collections_batch(
-                    shop_id, updated_since=last_computation_time
+                    shop_id, limit=batch_size, offset=0
                 )
                 behavioral_events = await repository.get_behavioral_events_batch(
-                    shop_id, limit=batch_size * 5, occurred_since=last_computation_time
+                    shop_id, limit=batch_size * 5, offset=0
                 )
 
                 # If no recent data, skip processing
@@ -358,17 +350,19 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             else:
                 # Load all data
                 products = await repository.get_products_batch(
-                    shop_id, limit=batch_size * 2
+                    shop_id, limit=batch_size * 2, offset=0
                 )
                 customers = await repository.get_customers_batch(
-                    shop_id, limit=batch_size
+                    shop_id, limit=batch_size, offset=0
                 )
                 orders = await repository.get_orders_batch(
-                    shop_id, limit=batch_size * 3
+                    shop_id, limit=batch_size * 3, offset=0
                 )
-                collections = await repository.get_collections_batch(shop_id)
+                collections = await repository.get_collections_batch(
+                    shop_id, limit=batch_size, offset=0
+                )
                 behavioral_events = await repository.get_behavioral_events_batch(
-                    shop_id, limit=batch_size * 5
+                    shop_id, limit=batch_size * 5, offset=0
                 )
 
             logger.info(
@@ -423,12 +417,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def compute_all_features_for_shop(
         self,
-        shop: ShopifyShop,
-        products: Optional[List[ShopifyProduct]] = None,
-        orders: Optional[List[ShopifyOrder]] = None,
-        customers: Optional[List[ShopifyCustomer]] = None,
-        collections: Optional[List[ShopifyCollection]] = None,
-        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        shop: Dict[str, Any],
+        products: Optional[List[Dict[str, Any]]] = None,
+        orders: Optional[List[Dict[str, Any]]] = None,
+        customers: Optional[List[Dict[str, Any]]] = None,
+        collections: Optional[List[Dict[str, Any]]] = None,
+        behavioral_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Comprehensive feature computation for all entities in a shop"""
         try:
@@ -441,7 +435,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             collections = collections or []
             behavioral_events = behavioral_events or []
 
-            logger.info(f"Computing comprehensive features for shop {shop.id}")
+            logger.info(f"Computing comprehensive features for shop {shop['id']}")
 
             # 1. Product Features
             logger.info("Computing product features...")
@@ -502,7 +496,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["search_products"] = search_product_features
 
             logger.info(
-                f"Completed comprehensive feature computation for shop {shop.id}"
+                f"Completed comprehensive feature computation for shop {shop['id']}"
             )
             return all_features
 
@@ -640,11 +634,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def _compute_sample_interaction_features(
         self,
-        customers: List[ShopifyCustomer],
-        products: List[ShopifyProduct],
-        shop: ShopifyShop,
-        orders: List[ShopifyOrder],
-        behavioral_events: List[BehavioralEvent],
+        customers: List[Dict[str, Any]],
+        products: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        orders: List[Dict[str, Any]],
+        behavioral_events: List[Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
         """Compute interaction features for customer-product pairs that have actual interactions"""
         try:
@@ -655,19 +649,19 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # From orders
             for order in orders:
-                if order.customer_id:
-                    for line_item in order.line_items:
-                        if hasattr(line_item, "product_id"):
+                if order.get("customerId"):
+                    for line_item in order.get("lineItems", []):
+                        if "product_id" in line_item:
                             interaction_pairs.add(
-                                (order.customer_id, line_item.product_id)
+                                (order.get("customerId"), line_item.get("product_id"))
                             )
 
             # From behavioral events
             for event in behavioral_events:
-                if event.customerId and hasattr(event, "eventData"):
+                if event.get("customerId") and "eventData" in event:
                     product_id = self._extract_product_id_from_event(event)
                     if product_id:
-                        interaction_pairs.add((event.customerId, product_id))
+                        interaction_pairs.add((event.get("customerId"), product_id))
 
             # Compute features for these pairs (limit to prevent excessive computation)
             limited_pairs = list(interaction_pairs)[:1000]  # Limit to 1000 pairs
@@ -675,8 +669,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             for customer_id, product_id in limited_pairs:
                 try:
                     # Find customer and product objects
-                    customer = next((c for c in customers if c.id == customer_id), None)
-                    product = next((p for p in products if p.id == product_id), None)
+                    customer = next(
+                        (c for c in customers if c.get("id") == customer_id), None
+                    )
+                    product = next(
+                        (p for p in products if p.get("id") == product_id), None
+                    )
 
                     if customer and product:
                         features = await self.compute_interaction_features(
@@ -695,10 +693,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def _compute_top_product_pair_features(
         self,
-        products: List[ShopifyProduct],
-        shop: ShopifyShop,
-        orders: List[ShopifyOrder],
-        behavioral_events: List[BehavioralEvent],
+        products: List[Dict[str, Any]],
+        shop: Dict[str, Any],
+        orders: List[Dict[str, Any]],
+        behavioral_events: List[Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
         """Compute product pair features for frequently co-occurring products"""
         try:
@@ -708,10 +706,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             co_occurrence_counts = {}
 
             for order in orders:
+                line_items = order.get("lineItems", [])
                 product_ids = [
-                    item.product_id
-                    for item in order.line_items
-                    if hasattr(item, "product_id")
+                    item.get("product_id")
+                    for item in line_items
+                    if "product_id" in item
                 ]
 
                 # Create pairs
@@ -745,8 +744,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def _compute_search_product_features_from_events(
         self,
-        behavioral_events: List[BehavioralEvent],
-        shop: ShopifyShop,
+        behavioral_events: List[Dict[str, Any]],
+        shop: Dict[str, Any],
     ) -> Dict[str, Dict[str, Any]]:
         """Compute search-product features from search events"""
         try:
@@ -756,11 +755,15 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             search_product_combinations = set()
 
             for event in behavioral_events:
-                if event.eventType == "search_submitted" and hasattr(
-                    event, "eventData"
+                if (
+                    event.get("eventType") == "search_submitted"
+                    and "eventData" in event
                 ):
+
                     # Extract search query
-                    query = self._extract_search_query_from_event(event)
+                    query = self._extract_search_query_from_event(
+                        event.get("eventData")
+                    )
                     if query:
                         # Look for product interactions after this search
                         # For now, we'll use a simple approach
@@ -787,40 +790,38 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             return {}
 
-    def _extract_product_id_from_event(self, event: BehavioralEvent) -> Optional[str]:
+    def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract product ID from behavioral event"""
         try:
-            if hasattr(event, "eventData") and event.eventData:
-                if isinstance(event.eventData, dict):
-                    return event.eventData.get("productId") or event.eventData.get(
-                        "product_id"
-                    )
+            event_data = event.get("eventData")
+            if event_data and isinstance(event_data, dict):
+                return event_data.get("productId") or event_data.get("product_id")
             return None
         except Exception:
             return None
 
-    def _extract_search_query_from_event(self, event: BehavioralEvent) -> Optional[str]:
+    def _extract_search_query_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract search query from search event"""
         try:
-            if hasattr(event, "eventData") and event.eventData:
-                if isinstance(event.eventData, dict):
-                    return (
-                        event.eventData.get("query")
-                        or event.eventData.get("searchQuery")
-                        or event.eventData.get("q")
-                    )
+            event_data = event.get("eventData")
+            if event_data and isinstance(event_data, dict):
+                return (
+                    event_data.get("query")
+                    or event_data.get("searchQuery")
+                    or event_data.get("q")
+                )
             return None
         except Exception:
             return None
 
     async def compute_cross_entity_features(
         self,
-        shop: ShopifyShop,
-        products: List[ShopifyProduct],
-        orders: List[ShopifyOrder],
-        customers: List[ShopifyCustomer],
-        collections: List[ShopifyCollection],
-        events: List[BehavioralEvent],
+        shop: Dict[str, Any],
+        products: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]],
+        customers: List[Dict[str, Any]],
+        collections: List[Dict[str, Any]],
+        events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Compute cross-entity ML features (legacy method - use compute_all_features_for_shop instead)"""
         try:

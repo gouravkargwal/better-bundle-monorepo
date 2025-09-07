@@ -978,6 +978,442 @@ async def test_consumer_database_connection(consumer_name: str):
         }
 
 
+@app.get("/api/debug/raw-payload-structure/{shop_id}")
+async def debug_raw_payload_structure(
+    shop_id: str, data_type: str = "products", limit: int = 3
+):
+    """Debug the structure of raw payloads to understand field extraction failures"""
+    try:
+        from app.core.database.simple_db_client import get_database
+        import json
+
+        db = await get_database()
+
+        # Map data types to table names
+        table_map = {
+            "products": "RawProduct",
+            "orders": "RawOrder",
+            "customers": "RawCustomer",
+            "collections": "RawCollection",
+        }
+
+        table_name = table_map.get(data_type, "RawProduct")
+
+        # Get sample raw payloads
+        raw_samples = await db.query_raw(
+            f'SELECT "shopifyId", "payload", "extractedAt" FROM "{table_name}" WHERE "shopId" = $1 LIMIT $2',
+            shop_id,
+            limit,
+        )
+
+        parsed_samples = []
+        for sample in raw_samples:
+            payload = sample["payload"]
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except:
+                    pass
+
+            # Analyze payload structure
+            structure_analysis = {
+                "shopifyId": sample["shopifyId"],
+                "extractedAt": sample["extractedAt"],
+                "payload_type": type(payload).__name__,
+                "top_level_keys": (
+                    list(payload.keys()) if isinstance(payload, dict) else "Not a dict"
+                ),
+                "has_raw_data": (
+                    "raw_data" in payload if isinstance(payload, dict) else False
+                ),
+                "has_data_key": (
+                    "data" in payload if isinstance(payload, dict) else False
+                ),
+                "has_direct_type": (
+                    data_type in payload if isinstance(payload, dict) else False
+                ),
+            }
+
+            # Check nested structure
+            if isinstance(payload, dict):
+                if "raw_data" in payload and isinstance(payload["raw_data"], dict):
+                    structure_analysis["raw_data_keys"] = list(
+                        payload["raw_data"].keys()
+                    )
+                    structure_analysis["has_nested_type"] = (
+                        data_type in payload["raw_data"]
+                    )
+
+                if "data" in payload and isinstance(payload["data"], dict):
+                    structure_analysis["data_keys"] = list(payload["data"].keys())
+                    structure_analysis["has_data_type"] = data_type in payload["data"]
+
+            # Sample of actual payload (first 500 chars)
+            payload_str = (
+                str(payload)[:500] + "..." if len(str(payload)) > 500 else str(payload)
+            )
+            structure_analysis["payload_sample"] = payload_str
+
+            parsed_samples.append(structure_analysis)
+
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "table_name": table_name,
+            "sample_count": len(parsed_samples),
+            "samples": parsed_samples,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Debug raw payload structure failed: {e}")
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.get("/api/debug/field-extraction-test/{shop_id}")
+async def test_field_extraction(
+    shop_id: str, data_type: str = "products", limit: int = 2
+):
+    """Test field extraction on actual raw data to identify extraction issues"""
+    try:
+        from app.core.database.simple_db_client import get_database
+        from app.domains.shopify.services.field_extractor import FieldExtractorService
+        from app.domains.shopify.services.data_cleaning_service import (
+            DataCleaningService,
+        )
+        import json
+
+        db = await get_database()
+        field_extractor = FieldExtractorService()
+        data_cleaner = DataCleaningService()
+
+        # Map data types to table names
+        table_map = {
+            "products": "RawProduct",
+            "orders": "RawOrder",
+            "customers": "RawCustomer",
+            "collections": "RawCollection",
+        }
+
+        table_name = table_map.get(data_type, "RawProduct")
+
+        # Get sample raw payloads
+        raw_samples = await db.query_raw(
+            f'SELECT "shopifyId", "payload" FROM "{table_name}" WHERE "shopId" = $1 LIMIT $2',
+            shop_id,
+            limit,
+        )
+
+        test_results = []
+        for sample in raw_samples:
+            shopify_id = sample["shopifyId"]
+            payload = sample["payload"]
+
+            # Parse payload if string
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception as parse_error:
+                    test_results.append(
+                        {
+                            "shopifyId": shopify_id,
+                            "step": "payload_parsing",
+                            "success": False,
+                            "error": str(parse_error),
+                        }
+                    )
+                    continue
+
+            # Test field extraction
+            try:
+                extracted_data = field_extractor.extract_fields_generic(
+                    data_type, payload, shop_id
+                )
+                extraction_success = extracted_data is not None
+                extraction_keys = list(extracted_data.keys()) if extracted_data else []
+            except Exception as extract_error:
+                test_results.append(
+                    {
+                        "shopifyId": shopify_id,
+                        "step": "field_extraction",
+                        "success": False,
+                        "error": str(extract_error),
+                    }
+                )
+                continue
+
+            # Test data cleaning if extraction succeeded
+            cleaning_success = False
+            cleaning_keys = []
+            cleaning_error = None
+
+            if extraction_success:
+                try:
+                    cleaned_data = data_cleaner.clean_data_generic(
+                        extracted_data, data_type
+                    )
+                    cleaning_success = cleaned_data is not None
+                    cleaning_keys = list(cleaned_data.keys()) if cleaned_data else []
+                except Exception as clean_error:
+                    cleaning_error = str(clean_error)
+
+            # Check for required ID field
+            id_field_config = {
+                "products": "productId",
+                "orders": "orderId",
+                "customers": "customerId",
+                "collections": "collectionId",
+            }
+
+            required_id_field = id_field_config.get(data_type, "id")
+            has_required_id = False
+
+            if cleaning_success:
+                has_required_id = bool(cleaned_data.get(required_id_field))
+
+            test_results.append(
+                {
+                    "shopifyId": shopify_id,
+                    "extraction_success": extraction_success,
+                    "extraction_keys_count": len(extraction_keys),
+                    "cleaning_success": cleaning_success,
+                    "cleaning_keys_count": len(cleaning_keys),
+                    "has_required_id_field": has_required_id,
+                    "required_id_field": required_id_field,
+                    "cleaning_error": cleaning_error,
+                    "final_status": (
+                        "SUCCESS"
+                        if extraction_success and cleaning_success and has_required_id
+                        else "FAILED"
+                    ),
+                }
+            )
+
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "table_name": table_name,
+            "sample_count": len(test_results),
+            "success_count": len(
+                [r for r in test_results if r.get("final_status") == "SUCCESS"]
+            ),
+            "test_results": test_results,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Field extraction test failed: {e}")
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.post("/api/debug/test-main-table-processing/{shop_id}")
+async def test_main_table_processing(
+    shop_id: str, data_type: str = "products", limit: int = 5
+):
+    """Test main table processing with actual data to verify upsert fixes"""
+    try:
+        from app.domains.shopify.services.main_table_storage import (
+            MainTableStorageService,
+        )
+
+        storage_service = MainTableStorageService()
+
+        # Test the main table processing for the specified data type
+        result = await storage_service._store_data_generic(
+            data_type, shop_id, incremental=True
+        )
+
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "test_result": {
+                "success": result.success,
+                "processed_count": result.processed_count,
+                "error_count": result.error_count,
+                "errors": result.errors,
+                "duration_ms": result.duration_ms,
+            },
+            "message": (
+                "SUCCESS"
+                if result.success and result.processed_count > 0
+                else "FAILED - Check errors"
+            ),
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        import traceback
+
+        logger.error(f"Main table processing test failed: {e}")
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "test_result": "FAILED",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.get("/api/debug/table-counts/{shop_id}")
+async def check_table_counts(shop_id: str):
+    """Check raw vs main table counts for debugging"""
+    try:
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+
+        # Check all data types
+        results = {}
+        for data_type in ["products", "orders", "customers", "collections"]:
+            # Map to table names
+            raw_tables = {
+                "products": "RawProduct",
+                "orders": "RawOrder",
+                "customers": "RawCustomer",
+                "collections": "RawCollection",
+            }
+            main_tables = {
+                "products": "ProductData",
+                "orders": "OrderData",
+                "customers": "CustomerData",
+                "collections": "CollectionData",
+            }
+
+            raw_table = raw_tables[data_type]
+            main_table = main_tables[data_type]
+
+            # Get counts
+            raw_count = await db.query_raw(
+                f'SELECT COUNT(*) as count FROM "{raw_table}" WHERE "shopId" = $1',
+                shop_id,
+            )
+            main_count = await db.query_raw(
+                f'SELECT COUNT(*) as count FROM "{main_table}" WHERE "shopId" = $1',
+                shop_id,
+            )
+
+            results[data_type] = {
+                "raw_count": raw_count[0]["count"] if raw_count else 0,
+                "main_count": main_count[0]["count"] if main_count else 0,
+                "gap": (raw_count[0]["count"] if raw_count else 0)
+                - (main_count[0]["count"] if main_count else 0),
+            }
+
+        return {
+            "shop_id": shop_id,
+            "table_comparison": results,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Table counts check failed: {e}")
+        return {
+            "shop_id": shop_id,
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.get("/api/debug/id-comparison/{shop_id}")
+async def debug_id_comparison(shop_id: str, data_type: str = "products"):
+    """Debug the exact ID comparison logic to see why records aren't being processed"""
+    try:
+        from app.domains.shopify.services.main_table_storage import (
+            MainTableStorageService,
+        )
+        from app.core.database.simple_db_client import get_database
+
+        storage_service = MainTableStorageService()
+        db = await get_database()
+
+        # Import the module-level config
+        from app.domains.shopify.services.main_table_storage import DATA_TYPE_CONFIG
+        
+        # Get the config
+        config = DATA_TYPE_CONFIG[data_type]
+
+        # Step 1: Get raw IDs (same logic as _store_data_generic)
+        raw_result = await db.query_raw(
+            f'SELECT "{config["raw_id_field"]}" FROM "{config["raw_table"]}" WHERE "shopId" = $1 AND "{config["raw_id_field"]}" IS NOT NULL ORDER BY "extractedAt" ASC LIMIT 10',
+            shop_id,
+        )
+
+        # Extract numeric IDs from raw data
+        raw_shopify_ids = [
+            row[config["raw_id_field"]]
+            for row in raw_result
+            if row[config["raw_id_field"]]
+        ]
+        raw_ids_extracted = [
+            storage_service._extract_shopify_id(id) for id in raw_shopify_ids
+        ]
+        raw_ids = [id for id in raw_ids_extracted if id]  # Filter out None values
+
+        # Step 2: Get processed IDs (original format)
+        processed_ids_raw = await storage_service._get_processed_shopify_ids(
+            shop_id, data_type
+        )
+
+        # Step 3: Normalize processed IDs (same as the fix)
+        processed_ids_normalized = set()
+        for pid in processed_ids_raw:
+            extracted_id = storage_service._extract_shopify_id(pid) if pid else None
+            if extracted_id:
+                processed_ids_normalized.add(extracted_id)
+
+        # Step 4: Compare
+        new_ids = [id for id in raw_ids if id not in processed_ids_normalized]
+
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "analysis": {
+                "raw_shopify_ids_sample": raw_shopify_ids[:5],
+                "raw_ids_extracted_sample": raw_ids[:5],
+                "processed_ids_raw_sample": list(processed_ids_raw)[:5],
+                "processed_ids_normalized_sample": list(processed_ids_normalized)[:5],
+                "new_ids_sample": new_ids[:5],
+                "counts": {
+                    "total_raw_ids": len(raw_ids),
+                    "total_processed_ids": len(processed_ids_normalized),
+                    "new_ids_to_process": len(new_ids),
+                },
+            },
+            "conclusion": {
+                "should_process": len(new_ids) > 0,
+                "reason": (
+                    "All records already processed"
+                    if len(new_ids) == 0
+                    else f"{len(new_ids)} new records found"
+                ),
+            },
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        import traceback
+
+        logger.error(f"ID comparison debug failed: {e}")
+        return {
+            "shop_id": shop_id,
+            "data_type": data_type,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
 @app.post("/api/shopify/permissions/cache/clear")
 async def clear_permission_cache(shop_domain: Optional[str] = None):
     """Clear permission cache for a specific shop or all shops"""

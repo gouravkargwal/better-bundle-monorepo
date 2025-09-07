@@ -186,11 +186,12 @@ DATA_TYPE_CONFIG = {
 class MainTableStorageService:
     """Service for storing structured data in main tables"""
 
-    def __init__(self):
+    def __init__(self, debug_mode=False):
         self.logger = logger
         self._db_client = None
         self.field_extractor = FieldExtractorService()
         self.data_cleaner = DataCleaningService()
+        self.debug_mode = debug_mode  # Enable detailed per-item logging for debugging
 
     async def _get_database(self):
         """Get or initialize the database client"""
@@ -199,7 +200,17 @@ class MainTableStorageService:
         return self._db_client
 
     def _extract_shopify_id(self, gid: str) -> Optional[str]:
-        """Extract numeric ID from Shopify GraphQL GID"""
+        """
+        Extract numeric ID from Shopify GraphQL GID
+
+        🚀 FUTURE OPTIMIZATION: This method should eventually be eliminated by standardizing
+        on storing full GIDs in both raw and main tables. Consider migrating to:
+        1. Store full GID as primary 'shopifyId' in all tables
+        2. Add separate 'numericId' BigInt column if needed elsewhere
+        3. Remove all GID conversion logic from processing pipeline
+
+        This would eliminate performance overhead and potential bugs from ID format mismatches.
+        """
         if not gid:
             return None
         try:
@@ -210,112 +221,14 @@ class MainTableStorageService:
         except Exception:
             return None
 
-    async def _get_processed_shopify_ids(self, shop_id: str, data_type: str) -> set:
-        """Get all Shopify IDs that have already been processed in the main table using efficient raw SQL queries"""
-        try:
-            db = await self._get_database()
-
-            # Use raw SQL queries to get only the IDs we need - much more memory efficient
-            if data_type == "orders":
-                result = await db.query_raw(
-                    'SELECT "orderId" FROM "OrderData" WHERE "shopId" = $1', shop_id
-                )
-                return {row["orderId"] for row in result if row["orderId"]}
-            elif data_type == "products":
-                result = await db.query_raw(
-                    'SELECT "productId" FROM "ProductData" WHERE "shopId" = $1', shop_id
-                )
-                return {row["productId"] for row in result if row["productId"]}
-            elif data_type == "customers":
-                result = await db.query_raw(
-                    'SELECT "customerId" FROM "CustomerData" WHERE "shopId" = $1',
-                    shop_id,
-                )
-                return {row["customerId"] for row in result if row["customerId"]}
-            elif data_type == "collections":
-                result = await db.query_raw(
-                    'SELECT "collectionId" FROM "CollectionData" WHERE "shopId" = $1',
-                    shop_id,
-                )
-                return {row["collectionId"] for row in result if row["collectionId"]}
-            else:
-                return set()
-
-        except Exception as e:
-            self.logger.warning(
-                f"Failed to get processed Shopify IDs for {data_type}: {e}"
-            )
-            return set()
-
-    async def _get_updated_shopify_ids(self, shop_id: str, data_type: str) -> set:
-        """Get Shopify IDs that have been updated in raw tables since last main table processing"""
-        try:
-            db = await self._get_database()
-
-            # Compare raw table extractedAt with main table updatedAt to find updated records
-            if data_type == "orders":
-                result = await db.query_raw(
-                    """
-                    SELECT r."shopifyId" 
-                    FROM "RawOrder" r
-                    LEFT JOIN "OrderData" o ON r."shopifyId" = o."orderId" AND r."shopId" = o."shopId"
-                    WHERE r."shopId" = $1 
-                    AND r."shopifyId" IS NOT NULL
-                    AND (o."orderId" IS NULL OR r."extractedAt" > o."updatedAt")
-                    """,
-                    shop_id,
-                )
-                return {row["shopifyId"] for row in result if row["shopifyId"]}
-            elif data_type == "products":
-                result = await db.query_raw(
-                    """
-                    SELECT r."shopifyId" 
-                    FROM "RawProduct" r
-                    LEFT JOIN "ProductData" p ON r."shopifyId" = p."productId" AND r."shopId" = p."shopId"
-                    WHERE r."shopId" = $1 
-                    AND r."shopifyId" IS NOT NULL
-                    AND (p."productId" IS NULL OR r."extractedAt" > p."updatedAt")
-                    """,
-                    shop_id,
-                )
-                return {row["shopifyId"] for row in result if row["shopifyId"]}
-            elif data_type == "customers":
-                result = await db.query_raw(
-                    """
-                    SELECT r."shopifyId" 
-                    FROM "RawCustomer" r
-                    LEFT JOIN "CustomerData" c ON r."shopifyId" = c."customerId" AND r."shopId" = c."shopId"
-                    WHERE r."shopId" = $1 
-                    AND r."shopifyId" IS NOT NULL
-                    AND (c."customerId" IS NULL OR r."extractedAt" > c."updatedAt")
-                    """,
-                    shop_id,
-                )
-                return {row["shopifyId"] for row in result if row["shopifyId"]}
-            elif data_type == "collections":
-                result = await db.query_raw(
-                    """
-                    SELECT r."shopifyId" 
-                    FROM "RawCollection" r
-                    LEFT JOIN "CollectionData" c ON r."shopifyId" = c."collectionId" AND r."shopId" = c."shopId"
-                    WHERE r."shopId" = $1 
-                    AND r."shopifyId" IS NOT NULL
-                    AND (c."collectionId" IS NULL OR r."extractedAt" > c."updatedAt")
-                    """,
-                    shop_id,
-                )
-                return {row["shopifyId"] for row in result if row["shopifyId"]}
-            else:
-                return set()
-
-        except Exception as e:
-            self.logger.error(f"Error getting updated Shopify IDs for {data_type}: {e}")
-            return set()
-
     async def _store_data_generic(
         self, data_type: str, shop_id: str, incremental: bool = True
     ) -> StorageResult:
-        """Generic method to store any data type from raw to main tables"""
+        """
+        🚀 SCALABLE method to store any data type from raw to main tables.
+        Uses database-based filtering and pagination to handle millions of records efficiently.
+        Memory usage: O(batch_size) instead of O(total_records)
+        """
         start_time = now_utc()
         processed_count = 0
         error_count = 0
@@ -325,131 +238,178 @@ class MainTableStorageService:
             config = DATA_TYPE_CONFIG[data_type]
             db = await self._get_database()
 
-            # Get all raw IDs using efficient raw SQL query
-            raw_result = await db.query_raw(
-                f'SELECT "{config["raw_id_field"]}" FROM "{config["raw_table"]}" WHERE "shopId" = $1 AND "{config["raw_id_field"]}" IS NOT NULL ORDER BY "extractedAt" ASC',
-                shop_id,
-            )
-            # Extract numeric IDs from Shopify GID format for comparison
-            raw_ids = [
-                self._extract_shopify_id(row[config["raw_id_field"]])
-                for row in raw_result
-                if row[config["raw_id_field"]]
-            ]
-            raw_ids = [id for id in raw_ids if id]  # Filter out None values
+            # Configuration for pagination
+            batch_size = config.get("batch_size", 1000)
+            offset = 0
+            total_batches_processed = 0
 
-            total_raw_count = len(raw_ids)
             self.logger.info(
-                f"Found {total_raw_count} raw {data_type} for shop {shop_id}"
+                f"Starting scalable processing of {data_type} for shop {shop_id} (batch_size: {batch_size})"
             )
 
-            if total_raw_count == 0:
-                self.logger.info(f"No raw {data_type} found for shop {shop_id}")
-                return StorageResult(
-                    success=True,
-                    processed_count=0,
-                    error_count=0,
-                    errors=[],
-                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
-                )
+            while True:
+                # 🔥 CRITICAL OPTIMIZATION: Database-optimized query
+                # Fetches ONLY new/updated records directly, eliminating memory issues
+                if incremental:
+                    # Query for records that are NEW or UPDATED since last processing
+                    # 🔧 FIX: Handle GID to numeric ID conversion in JOIN
+                    if data_type == "products":
+                        id_conversion = (
+                            "REPLACE(r.\"shopifyId\", 'gid://shopify/Product/', '')"
+                        )
+                    elif data_type == "orders":
+                        id_conversion = (
+                            "REPLACE(r.\"shopifyId\", 'gid://shopify/Order/', '')"
+                        )
+                    elif data_type == "customers":
+                        id_conversion = (
+                            "REPLACE(r.\"shopifyId\", 'gid://shopify/Customer/', '')"
+                        )
+                    elif data_type == "collections":
+                        id_conversion = (
+                            "REPLACE(r.\"shopifyId\", 'gid://shopify/Collection/', '')"
+                        )
+                    else:
+                        id_conversion = f"r.\"{config['raw_id_field']}\""
 
-            # Get already processed IDs if incremental
-            processed_ids = set()
-            if incremental:
-                processed_ids = await self._get_processed_shopify_ids(
-                    shop_id, data_type
-                )
+                    query = f"""
+                    SELECT r."payload", r."{config["raw_id_field"]}"
+                    FROM "{config["raw_table"]}" r
+                    LEFT JOIN "{config["main_table"]}" m 
+                        ON {id_conversion} = m."{config["id_field"]}" 
+                        AND r."shopId" = m."shopId"
+                    WHERE r."shopId" = $1 
+                        AND r."{config["raw_id_field"]}" IS NOT NULL
+                        AND (m."{config["id_field"]}" IS NULL OR r."extractedAt" > m."updatedAt")
+                    ORDER BY r."extractedAt" ASC
+                    LIMIT $2 OFFSET $3
+                    """
+                    params = [shop_id, batch_size, offset]
+                else:
+                    # Non-incremental: process all records
+                    query = f"""
+                    SELECT r."payload", r."{config["raw_id_field"]}"
+                    FROM "{config["raw_table"]}" r
+                    WHERE r."shopId" = $1 
+                        AND r."{config["raw_id_field"]}" IS NOT NULL
+                    ORDER BY r."extractedAt" ASC
+                    LIMIT $2 OFFSET $3
+                    """
+                    params = [shop_id, batch_size, offset]
+
+                # Execute the optimized query
+                batch_result = await db.query_raw(query, *params)
+
+                # No more records to process
+                if not batch_result:
+                    if total_batches_processed == 0:
+                        self.logger.info(
+                            f"No new/updated {data_type} records found for shop {shop_id}"
+                        )
+                    break
+
+                total_batches_processed += 1
+                batch_records = len(batch_result)
+
                 self.logger.info(
-                    f"Found {len(processed_ids)} already processed {data_type}"
+                    f"Processing batch {total_batches_processed}: {batch_records} {data_type} records (offset: {offset})"
                 )
 
-            # Filter to only new/updated items
-            new_ids = [id for id in raw_ids if id not in processed_ids]
-            self.logger.info(f"Processing {len(new_ids)} new/updated {data_type}")
+                # Process this batch of records directly (no more ID conversion needed)
+                try:
+                    batch_processed, batch_errors = await self._process_batch_records(
+                        data_type, batch_result, shop_id, db, config
+                    )
 
-            if not new_ids:
-                self.logger.info(f"No new {data_type} to process")
-                return StorageResult(
-                    success=True,
-                    processed_count=0,
-                    error_count=0,
-                    errors=[],
-                    duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
-                )
+                    processed_count += batch_processed
+                    error_count += len(batch_errors)
+                    errors.extend(batch_errors)
 
-            # Process in batches
-            batch_size = config["batch_size"]
-            for i in range(0, len(new_ids), batch_size):
-                batch_ids = new_ids[i : i + batch_size]
-                batch_processed, batch_errors = await self._process_batch_generic(
-                    data_type, batch_ids, shop_id, db
-                )
-                processed_count += batch_processed
-                error_count += len(batch_errors)
-                errors.extend(batch_errors)
+                    if self.debug_mode:
+                        self.logger.info(
+                            f"Batch {total_batches_processed} details: {batch_processed} processed, {len(batch_errors)} errors"
+                        )
 
-            duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
-            self.logger.info(
-                f"Completed {data_type} storage: {processed_count} processed, {error_count} errors in {duration_ms}ms"
-            )
+                except Exception as batch_error:
+                    import traceback
 
-            return StorageResult(
-                success=error_count == 0,
-                processed_count=processed_count,
-                error_count=error_count,
-                errors=errors,
-                duration_ms=duration_ms,
-            )
+                    error_msg = (
+                        f"Batch {total_batches_processed} failed: {str(batch_error)}"
+                    )
+                    self.logger.error(
+                        f"{error_msg} - Traceback: {traceback.format_exc()}"
+                    )
+                    errors.append(error_msg)
+                    error_count += batch_records
+
+                # Move to next batch
+                offset += batch_size
+
+                # Safety check to prevent infinite loops on massive datasets
+                if offset > 10_000_000:  # 10M record safety limit
+                    self.logger.warning(
+                        f"Safety limit reached processing {data_type}. Stopping at offset {offset}"
+                    )
+                    break
 
         except Exception as e:
-            error_msg = f"Failed to store {data_type}: {str(e)}"
-            self.logger.error(error_msg)
-            return StorageResult(
-                success=False,
-                processed_count=processed_count,
-                error_count=error_count + 1,
-                errors=errors + [error_msg],
-                duration_ms=int((now_utc() - start_time).total_seconds() * 1000),
-            )
+            import traceback
 
-    async def _process_batch_generic(
-        self, data_type: str, batch_ids: List[str], shop_id: str, db
+            error_msg = f"Fatal error in _store_data_generic for {data_type}: {str(e)}"
+            self.logger.error(f"{error_msg} - Traceback: {traceback.format_exc()}")
+            errors.append(error_msg)
+            error_count += 1
+
+        duration_ms = int((now_utc() - start_time).total_seconds() * 1000)
+        success = error_count == 0
+
+        self.logger.info(
+            f"Completed scalable {data_type} storage: {processed_count} processed, {error_count} errors in {duration_ms}ms ({total_batches_processed} batches)"
+        )
+
+        return StorageResult(
+            success=success,
+            processed_count=processed_count,
+            error_count=error_count,
+            errors=errors,
+            duration_ms=duration_ms,
+        )
+
+    async def _process_batch_records(
+        self, data_type: str, batch_records: List[dict], shop_id: str, db, config: dict
     ) -> Tuple[int, List[str]]:
-        """Generic batch processing for any data type"""
+        """
+        🚀 SCALABLE batch processing that works directly with payload data.
+        Eliminates the need for GID conversion and additional database queries.
+        """
         processed_count = 0
         errors = []
 
         try:
-            config = DATA_TYPE_CONFIG[data_type]
-
-            # Get raw data for this batch
-            raw_data_result = await db.query_raw(
-                f'SELECT "payload" FROM "{config["raw_table"]}" WHERE "shopId" = $1 AND "{config["raw_id_field"]}" = ANY($2)',
-                shop_id,
-                batch_ids,
-            )
-
-            # Process each item
             items_to_upsert = []
-            for row in raw_data_result:
+
+            # Process each record directly (no more ID lookups needed!)
+            for record in batch_records:
                 try:
-                    payload = row["payload"]
+                    # Parse payload
+                    payload = record["payload"]
                     if isinstance(payload, str):
                         payload = json.loads(payload)
 
-                    # Extract fields from raw payload first
+                    # Extract fields from raw payload
                     extracted_data = self.field_extractor.extract_fields_generic(
                         data_type, payload, shop_id
                     )
                     if not extracted_data:
                         error_msg = f"Failed to extract {data_type} fields from payload"
                         errors.append(error_msg)
-                        self.logger.warning(
-                            f"{error_msg} - Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}"
-                        )
+                        if self.debug_mode:
+                            self.logger.warning(
+                                f"{error_msg} - Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}"
+                            )
                         continue
 
-                    # Clean the extracted data using the data cleaning service
+                    # Clean the extracted data
                     try:
                         cleaned_data = self.data_cleaner.clean_data_generic(
                             extracted_data, data_type
@@ -459,40 +419,66 @@ class MainTableStorageService:
                             f"Failed to clean {data_type} data: {str(clean_error)}"
                         )
                         errors.append(error_msg)
-                        self.logger.warning(
-                            f"{error_msg} - Extracted data keys: {list(extracted_data.keys()) if isinstance(extracted_data, dict) else 'Not a dict'}"
-                        )
+                        if self.debug_mode:
+                            self.logger.warning(
+                                f"{error_msg} - Extracted data keys: {list(extracted_data.keys()) if isinstance(extracted_data, dict) else 'Not a dict'}"
+                            )
                         continue
 
-                    # Extract the ID field
+                    # Validate required ID field
                     id_value = cleaned_data.get(config["id_field"])
                     if not id_value:
                         error_msg = f"Missing {config['id_field']} in {data_type} data"
                         errors.append(error_msg)
-                        self.logger.warning(
-                            f"{error_msg} - Available fields: {list(cleaned_data.keys()) if isinstance(cleaned_data, dict) else 'Not a dict'}"
-                        )
+                        if self.debug_mode:
+                            self.logger.warning(
+                                f"{error_msg} - Available fields: {list(cleaned_data.keys()) if isinstance(cleaned_data, dict) else 'Not a dict'}"
+                            )
                         continue
 
                     items_to_upsert.append(cleaned_data)
-                    processed_count += 1
 
                 except Exception as e:
                     import traceback
 
                     error_msg = f"Failed to process {data_type} item: {str(e)}"
                     errors.append(error_msg)
-                    self.logger.error(
-                        f"{error_msg} - Traceback: {traceback.format_exc()}"
-                    )
+                    if self.debug_mode:
+                        self.logger.error(
+                            f"{error_msg} - Traceback: {traceback.format_exc()}"
+                        )
                     continue
 
             # Batch upsert the processed items
             if items_to_upsert:
-                await self._batch_upsert_generic(data_type, items_to_upsert, db)
+                try:
+                    await self._batch_upsert_generic(data_type, items_to_upsert, db)
+                    # Only count as processed after successful upsert
+                    processed_count += len(items_to_upsert)
+                    if self.debug_mode:
+                        self.logger.info(
+                            f"Successfully upserted {len(items_to_upsert)} {data_type} items to main table"
+                        )
+                except Exception as upsert_error:
+                    import traceback
+
+                    error_msg = f"Failed to upsert {len(items_to_upsert)} {data_type} items: {str(upsert_error)}"
+                    errors.append(error_msg)
+                    self.logger.error(
+                        f"{error_msg} - Traceback: {traceback.format_exc()}"
+                    )
+            else:
+                if self.debug_mode:
+                    self.logger.warning(
+                        f"No items to upsert for {data_type} - all items failed processing"
+                    )
 
         except Exception as e:
-            errors.append(f"Batch processing failed for {data_type}: {str(e)}")
+            import traceback
+
+            error_msg = f"Batch processing failed for {data_type}: {str(e)}"
+            errors.append(error_msg)
+            self.logger.error(f"{error_msg} - Traceback: {traceback.format_exc()}")
 
         return processed_count, errors
 
@@ -549,13 +535,13 @@ class MainTableStorageService:
         id_field = config["id_field"]
 
         try:
-            # Use Prisma's create_many for batch insert (much faster than individual upserts)
+            # Try batch create first for new records (without skip_duplicates for proper error handling)
             create_data = [
                 self._convert_to_db_format(data_type, item) for item in items
             ]
-            await getattr(db, table_name.lower()).create_many(
-                data=create_data, skip_duplicates=True
-            )
+
+            # Don't use skip_duplicates - we want to know about conflicts and handle them with upsert
+            await getattr(db, table_name.lower()).create_many(data=create_data)
 
         except Exception as e:
             # Fallback to individual upserts if batch insert fails
@@ -571,25 +557,77 @@ class MainTableStorageService:
                 f"{data_type} batch insert traceback: {traceback.format_exc()}"
             )
 
-            for item in items:
+            # 🚀 OPTIMIZATION: Parallel individual upserts for better performance
+            import asyncio
+
+            async def upsert_single_item(item):
                 try:
                     db_data = self._convert_to_db_format(data_type, item)
-                    await getattr(db, table_name.lower()).upsert(
-                        where={
-                            f"shopId_{id_field}": {
-                                "shopId": item["shopId"],
-                                id_field: item[id_field],
-                            }
-                        },
-                        data=db_data,
-                    )
-                except Exception as item_error:
-                    import traceback
 
+                    # Manual upsert logic - try update first, then create if not exists
+                    table_accessor = getattr(db, table_name.lower())
+                    where_clause = {
+                        "shopId_"
+                        + id_field: {
+                            "shopId": item["shopId"],
+                            id_field: item[id_field],
+                        }
+                    }
+
+                    try:
+                        # Try update first (more common case for incremental processing)
+                        await table_accessor.update(where=where_clause, data=db_data)
+                        return {"success": True, "item_id": item.get(id_field)}
+                    except Exception as update_error:
+                        # Only create if update failed due to record not existing
+                        try:
+                            await table_accessor.create(data=db_data)
+                            return {"success": True, "item_id": item.get(id_field)}
+                        except Exception:
+                            # Race condition: record was created by another process
+                            # Try update one more time
+                            try:
+                                await table_accessor.update(
+                                    where=where_clause, data=db_data
+                                )
+                                return {"success": True, "item_id": item.get(id_field)}
+                            except Exception as final_error:
+                                # Log the actual error for debugging
+                                raise final_error
+                except Exception as item_error:
+                    return {
+                        "success": False,
+                        "item_id": item.get(id_field),
+                        "error": str(item_error),
+                    }
+
+            # Execute all upserts in parallel
+            upsert_tasks = [upsert_single_item(item) for item in items]
+            results = await asyncio.gather(*upsert_tasks, return_exceptions=True)
+
+            # Log any individual failures
+            failed_count = 0
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    failed_count += 1
+                    item_id = items[i].get(id_field, "unknown")
                     self.logger.error(
-                        f"Failed to upsert {data_type} item {item.get(id_field)}: {str(item_error)} - Traceback: {traceback.format_exc()}"
+                        f"Failed to upsert {data_type} item {item_id}: {str(result)}"
                     )
-                    continue
+                elif not result.get("success"):
+                    failed_count += 1
+                    self.logger.error(
+                        f"Failed to upsert {data_type} item {result.get('item_id', 'unknown')}: {result.get('error', 'Unknown error')}"
+                    )
+
+            if failed_count > 0:
+                self.logger.warning(
+                    f"Parallel fallback upsert completed with {failed_count}/{len(items)} failures"
+                )
+            else:
+                self.logger.info(
+                    f"Parallel fallback upsert successful for all {len(items)} {data_type} items"
+                )
 
     async def store_all_data(
         self, shop_id: str, incremental: bool = True
