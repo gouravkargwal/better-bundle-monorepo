@@ -246,7 +246,7 @@ class GorseUserSync:
             table_accessor=lambda db: db.gorseusers,
             id_field="userId",
             entity_name="users",
-            table_name="GorseUsers",
+            table_name="gorse_users",
         )
 
     async def _sync_anonymous_users(self, shop_id: str):

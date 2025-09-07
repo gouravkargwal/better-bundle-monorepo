@@ -282,7 +282,7 @@ class GorseItemSync:
             table_accessor=lambda db: db.gorseitems,
             id_field="itemId",
             entity_name="items",
-            table_name="GorseItems",
+            table_name="gorse_items",
         )
 
     async def _get_product_categories(

@@ -35,6 +35,9 @@ class GorseSyncCore:
                 f"Starting Gorse sync for shop: {shop_id} (incremental: {incremental})"
             )
 
+            # 🔥 STEP 1: Create shop-specific views for Gorse
+            await self.create_shop_gorse_views(shop_id)
+
             # Get last sync timestamp for incremental processing
             last_sync_timestamp = None
             if incremental:
@@ -218,6 +221,82 @@ class GorseSyncCore:
 
         except Exception as e:
             logger.error(f"Failed to sync {entity_name}: {str(e)}")
+            raise
+
+    async def create_shop_gorse_views(self, shop_id: str):
+        """
+        Create shop-specific database views for Gorse to use
+        This allows Gorse to see only the data for a specific shop
+        Views automatically reflect data changes - no updates needed!
+        """
+        try:
+            db = await self.pipeline._get_database()
+
+            # Sanitize shop_id for SQL
+            sanitized_shop_id = shop_id.replace("'", "''")
+
+            # Check if views already exist
+            check_sql = f"""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.views 
+                    WHERE table_name = 'shop_{sanitized_shop_id}_items'
+                )
+                """
+            result = await db.query_raw(check_sql)
+
+            if result and result[0]["exists"]:
+                logger.info(
+                    f"Views already exist for shop {shop_id} - no update needed"
+                )
+                return  # Views are already current!
+
+            # Create views for Gorse tables
+            views_sql = [
+                f"""
+                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_items AS 
+                    SELECT 
+                        "itemId" as item_id,
+                        "categories"::text as categories,
+                        "labels"::text as labels,
+                        "isHidden" as is_hidden,
+                        "updatedAt" as time_stamp,
+                        '' as comment
+                    FROM "gorse_items" 
+                    WHERE "shopId" = '{sanitized_shop_id}'
+                    """,
+                f"""
+                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_users AS 
+                    SELECT 
+                        "userId" as user_id,
+                        "labels"::text as labels,
+                        '[]'::text as subscribe,
+                        '' as comment
+                    FROM "gorse_users" 
+                    WHERE "shopId" = '{sanitized_shop_id}'
+                    """,
+                f"""
+                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_feedback AS 
+                    SELECT 
+                        "feedbackType" as feedback_type,
+                        "userId" as user_id,
+                        "itemId" as item_id,
+                        1.0 as value,
+                        "timestamp" as time_stamp,
+                        COALESCE("comment", '') as comment
+                    FROM "gorse_feedback" 
+                    WHERE "shopId" = '{sanitized_shop_id}'
+                    """,
+            ]
+
+            for sql in views_sql:
+                await db.query_raw(sql)
+
+            logger.info(
+                f"Created Gorse views for shop {shop_id} - they will stay current automatically"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to create Gorse views for shop {shop_id}: {str(e)}")
             raise
 
 
