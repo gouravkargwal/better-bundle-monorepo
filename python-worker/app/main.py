@@ -854,9 +854,9 @@ async def get_circuit_breaker_status(consumer_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/consumers/{consumer_name}/circuit-breaker/reset")
+@app.post("/api/consumers/{consumer_name}/reset-circuit-breaker")
 async def reset_circuit_breaker(consumer_name: str):
-    """Manually reset circuit breaker for a specific consumer"""
+    """Reset circuit breaker for a specific consumer"""
     try:
         consumer = consumer_manager.get_consumer(consumer_name)
         if not consumer:
@@ -865,10 +865,117 @@ async def reset_circuit_breaker(consumer_name: str):
             )
 
         consumer.reset_circuit_breaker()
-        return {"message": f"Circuit breaker reset for {consumer_name}"}
+        return {
+            "message": f"Circuit breaker reset for consumer {consumer_name}",
+            "timestamp": now_utc().isoformat(),
+        }
     except Exception as e:
         logger.error(f"Failed to reset circuit breaker: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/consumers/{consumer_name}/restart")
+async def restart_consumer(consumer_name: str):
+    """Restart a specific consumer"""
+    try:
+        consumer = consumer_manager.get_consumer(consumer_name)
+        if not consumer:
+            raise HTTPException(
+                status_code=404, detail=f"Consumer {consumer_name} not found"
+            )
+
+        # Stop and restart the consumer
+        await consumer.stop()
+        await asyncio.sleep(2)  # Wait a bit
+        await consumer.start()
+
+        return {
+            "message": f"Consumer {consumer_name} restarted",
+            "status": consumer.status.value,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to restart consumer {consumer_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/redis-health")
+async def check_redis_health():
+    """Check Redis connection health"""
+    try:
+        from app.core.redis_client import check_redis_health
+
+        is_healthy = await check_redis_health()
+        return {"redis_healthy": is_healthy, "timestamp": now_utc().isoformat()}
+    except Exception as e:
+        logger.error(f"Failed to check Redis health: {e}")
+        return {
+            "redis_healthy": False,
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.get("/api/debug/database-health")
+async def check_database_health():
+    """Check database connection health"""
+    try:
+        from app.core.database.simple_db_client import check_database_health
+
+        is_healthy = await check_database_health()
+        return {
+            "database_healthy": is_healthy,
+            "timestamp": now_utc().isoformat(),
+            "timeout_settings": {
+                "connect_timeout": settings.DATABASE_CONNECT_TIMEOUT,
+                "query_timeout": settings.DATABASE_QUERY_TIMEOUT,
+                "pool_timeout": settings.DATABASE_POOL_TIMEOUT,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to check database health: {e}")
+        return {
+            "database_healthy": False,
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
+
+
+@app.get("/api/debug/consumer-database-test/{consumer_name}")
+async def test_consumer_database_connection(consumer_name: str):
+    """Test database connection from a specific consumer's perspective"""
+    try:
+        consumer = consumer_manager.get_consumer(consumer_name)
+        if not consumer:
+            raise HTTPException(
+                status_code=404, detail=f"Consumer {consumer_name} not found"
+            )
+
+        # Try to get the database and run a simple query
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+
+        # Test a simple query that consumers might run
+        start_time = now_utc()
+        result = await db.query_raw('SELECT COUNT(*) as shop_count FROM "Shop"')
+        query_time = (now_utc() - start_time).total_seconds()
+
+        return {
+            "consumer_name": consumer_name,
+            "database_test": "success",
+            "query_time_seconds": query_time,
+            "shop_count": result[0]["shop_count"] if result else 0,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Consumer database test failed for {consumer_name}: {e}")
+        return {
+            "consumer_name": consumer_name,
+            "database_test": "failed",
+            "error": str(e),
+            "timestamp": now_utc().isoformat(),
+        }
 
 
 @app.post("/api/shopify/permissions/cache/clear")

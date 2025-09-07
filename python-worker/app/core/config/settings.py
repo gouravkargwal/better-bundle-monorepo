@@ -185,7 +185,8 @@ class WorkerSettings(BaseSettings):
 
     # Redis Timeout Settings
     REDIS_TIMEOUT_BUFFER_SECONDS: int = Field(
-        default=30, env="REDIS_TIMEOUT_BUFFER_SECONDS"
+        default=60,
+        env="REDIS_TIMEOUT_BUFFER_SECONDS",  # Increased from 30 to 60 for better database reliability
     )
 
 
@@ -351,9 +352,18 @@ class Settings(BaseSettings):
         return self.worker.REDIS_TIMEOUT_BUFFER_SECONDS
 
     # Retry Configuration
-    MAX_RETRIES: int = Field(default=3, env="MAX_RETRIES")
-    RETRY_DELAY: float = Field(default=1.0, env="RETRY_DELAY")
+    MAX_RETRIES: int = Field(default=5, env="MAX_RETRIES")  # Increased from 3 to 5
+    RETRY_DELAY: float = Field(
+        default=2.0, env="RETRY_DELAY"
+    )  # Increased from 1.0 to 2.0
     RETRY_BACKOFF: float = Field(default=2.0, env="RETRY_BACKOFF")
+
+    # Database Timeout Configuration
+    DATABASE_CONNECT_TIMEOUT: int = Field(default=30, env="DATABASE_CONNECT_TIMEOUT")
+    DATABASE_QUERY_TIMEOUT: int = Field(
+        default=60, env="DATABASE_QUERY_TIMEOUT"
+    )  # Long timeout for heavy queries
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, env="DATABASE_POOL_TIMEOUT")
 
     # Health Check Configuration
     HEALTH_CHECK_TIMEOUT: int = Field(

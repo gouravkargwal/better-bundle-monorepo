@@ -37,22 +37,36 @@ async def get_database() -> Prisma:
             if _db_instance is None:
                 logger.info("Creating new Prisma database connection")
 
-                # Create Prisma instance (connection pool settings are configured via environment variables)
+                # Create Prisma instance with timeout configurations
                 _db_instance = Prisma()
 
                 try:
-                    await _db_instance.connect()
+                    # Use asyncio.wait_for to add connection timeout
+                    await asyncio.wait_for(
+                        _db_instance.connect(),
+                        timeout=settings.DATABASE_CONNECT_TIMEOUT,
+                    )
                     logger.info("Database connection established successfully")
+                except asyncio.TimeoutError:
+                    logger.error(
+                        f"Database connection timeout after {settings.DATABASE_CONNECT_TIMEOUT} seconds"
+                    )
+                    _db_instance = None
+                    raise Exception(
+                        f"Database connection timeout after {settings.DATABASE_CONNECT_TIMEOUT} seconds"
+                    )
                 except PrismaError as e:
                     logger.error(f"Database connection failed: {e}")
                     _db_instance = None
                     raise Exception(f"Failed to connect to database: {str(e)}")
 
-    # Verify connection is still alive
+    # Verify connection is still alive with timeout
     try:
-        await _db_instance.query_raw("SELECT 1")
-    except Exception as e:
-        logger.warning(f"Database connection lost, reconnecting: {e}")
+        await asyncio.wait_for(
+            _db_instance.query_raw("SELECT 1"), timeout=settings.DATABASE_QUERY_TIMEOUT
+        )
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning(f"Database connection lost or timed out, reconnecting: {e}")
         try:
             await _db_instance.disconnect()
         except Exception:
@@ -82,8 +96,15 @@ async def check_database_health() -> bool:
     """Check if the database connection is healthy"""
     try:
         db = await get_database()
-        await db.query_raw("SELECT 1")
+        await asyncio.wait_for(
+            db.query_raw("SELECT 1"), timeout=settings.DATABASE_QUERY_TIMEOUT
+        )
         return True
+    except asyncio.TimeoutError:
+        logger.error(
+            f"Database health check timeout after {settings.DATABASE_QUERY_TIMEOUT} seconds"
+        )
+        return False
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         return False
@@ -102,8 +123,41 @@ async def with_database_retry(operation, operation_name: str, context: dict = No
 
     for attempt in range(max_retries + 1):
         try:
-            result = await operation()
+            # Wrap operation with query timeout
+            result = await asyncio.wait_for(
+                operation(), timeout=settings.DATABASE_QUERY_TIMEOUT
+            )
             return result
+
+        except asyncio.TimeoutError as e:
+            if attempt < max_retries:
+                logger.warning(
+                    f"Database operation timeout on attempt {attempt + 1}, retrying",
+                    timeout=settings.DATABASE_QUERY_TIMEOUT,
+                    operation=operation_name,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+
+                # Reset connection and retry
+                if _db_instance:
+                    try:
+                        await _db_instance.disconnect()
+                    except Exception:
+                        pass
+                    _db_instance = None
+
+                await asyncio.sleep(retry_delay * (settings.RETRY_BACKOFF**attempt))
+                continue
+            else:
+                logger.error(
+                    f"Database operation {operation_name} timed out after {max_retries + 1} attempts",
+                    timeout=settings.DATABASE_QUERY_TIMEOUT,
+                    context=context,
+                )
+                raise Exception(
+                    f"Database operation timeout after {settings.DATABASE_QUERY_TIMEOUT} seconds"
+                )
 
         except PrismaError as e:
             # Check if it's a connection or timeout error
