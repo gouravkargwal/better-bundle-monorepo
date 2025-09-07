@@ -284,7 +284,7 @@ class GorseSyncPipeline:
             return (
                 {
                     row["customerId"]: {
-                        "completed_sessions": int(row["completed_sessions"] or 0),
+                        "completed_sessions": int(row.get("completed_sessions") or 0),
                         "avg_session_duration": float(row["avg_session_duration"] or 0),
                     }
                     for row in result
@@ -670,94 +670,117 @@ class GorseSyncPipeline:
         """
         Build comprehensive Gorse user labels from all feature tables
         """
-        labels = {
-            # From UserFeatures
-            "total_purchases": int(user.get("totalPurchases", 0)),
-            "total_spent": float(user.get("totalSpent") or 0),
-            "avg_order_value": float(user.get("avgOrderValue") or 0),
-            "lifetime_value": float(user.get("lifetimeValue") or 0),
-            "days_since_last_order": user.get("daysSinceLastOrder"),
-            "order_frequency_per_month": float(user.get("orderFrequencyPerMonth") or 0),
-            "distinct_products_purchased": int(
-                user.get("distinctProductsPurchased", 0)
-            ),
-            "distinct_categories_purchased": int(
-                user.get("distinctCategoriesPurchased", 0)
-            ),
-            "preferred_category": user.get("preferredCategory", "unknown"),
-            "preferred_vendor": user.get("preferredVendor", "unknown"),
-            "price_preference": user.get("pricePointPreference", "mid"),
-            "discount_sensitivity": float(user.get("discountSensitivity") or 0),
-            # From CustomerBehaviorFeatures
-            "engagement_score": float(user.get("engagementScore") or 0),
-            "recency_score": float(user.get("recencyScore") or 0),
-            "diversity_score": float(user.get("diversityScore") or 0),
-            "behavioral_score": float(user.get("behavioralScore") or 0),
-            "session_count": int(user.get("sessionCount", 0)),
-            "product_view_count": int(user.get("productViewCount", 0)),
-            "cart_add_count": int(user.get("cartAddCount", 0)),
-            "search_count": int(user.get("searchCount", 0)),
-            "unique_products_viewed": int(user.get("uniqueProductsViewed", 0)),
-            "unique_collections_viewed": int(user.get("uniqueCollectionsViewed", 0)),
-            "browse_to_cart_rate": (
-                float(user.get("browseToCartRate", 0))
-                if user.get("browseToCartRate")
-                else 0
-            ),
-            "cart_to_purchase_rate": (
-                float(user.get("cartToPurchaseRate", 0))
-                if user.get("cartToPurchaseRate")
-                else 0
-            ),
-            "search_to_purchase_rate": (
-                float(user.get("searchToPurchaseRate", 0))
-                if user.get("searchToPurchaseRate")
-                else 0
-            ),
-            "most_active_hour": user.get("mostActiveHour"),
-            "most_active_day": user.get("mostActiveDay"),
-            "device_type": user.get("deviceType", "unknown"),
-            "primary_referrer": user.get("primaryReferrer", "direct"),
-            # From aggregated InteractionFeatures
-            "total_interaction_score": float(user.get("total_interaction_score") or 0),
-            "avg_affinity_score": float(user.get("avg_affinity_score") or 0),
-            # From aggregated SessionFeatures
-            "completed_sessions": int(user.get("completed_sessions", 0)),
-            "avg_session_duration": float(user.get("avg_session_duration") or 0),
-            # Computed segments
-            "customer_segment": self._calculate_customer_segment(user),
-            "is_active": bool(user.get("daysSinceLastOrder", 365) < 30),
-            "is_high_value": bool(user.get("lifetimeValue", 0) > 500),
-            "is_frequent_buyer": bool(user.get("orderFrequencyPerMonth", 0) > 1),
-            # Optimized features for better recommendations
-            "purchase_power": min(float(user.get("totalSpent") or 0) / 5000, 1.0),
-            "purchase_frequency": min(int(user.get("totalPurchases", 0)) / 50, 1.0),
-            "recency_tier": self._calculate_recency_tier(
-                user.get("daysSinceLastOrder")
-            ),
-            "is_active_30d": int(user.get("daysSinceLastOrder", 999) < 30),
-            "is_active_7d": int(user.get("daysSinceLastOrder", 999) < 7),
-            "engagement_level": min(
-                (user.get("productViewCount", 0) + user.get("cartAddCount", 0) * 3)
-                / 100,
-                1.0,
-            ),
-            "category_diversity": min(
-                user.get("distinctCategoriesPurchased", 0) / 5, 1.0
-            ),
-            "price_tier": self._encode_price_tier(user.get("pricePointPreference")),
-            "discount_affinity": min(
-                float(user.get("discountSensitivity") or 0) * 2, 1.0
-            ),
-            "conversion_score": self._calculate_conversion_score(user),
-            "lifecycle_stage": self._encode_lifecycle_stage(user),
-            "customer_value_tier": self._calculate_value_tier(
-                float(user.get("totalSpent") or 0), int(user.get("totalPurchases", 0))
-            ),
-        }
+        try:
+            labels = {
+                # From UserFeatures
+                "total_purchases": int(user.get("totalPurchases") or 0),
+                "total_spent": float(user.get("totalSpent") or 0),
+                "avg_order_value": float(user.get("avgOrderValue") or 0),
+                "lifetime_value": float(user.get("lifetimeValue") or 0),
+                "days_since_last_order": user.get("daysSinceLastOrder"),
+                "order_frequency_per_month": float(
+                    user.get("orderFrequencyPerMonth") or 0
+                ),
+                "distinct_products_purchased": int(
+                    user.get("distinctProductsPurchased") or 0
+                ),
+                "distinct_categories_purchased": int(
+                    user.get("distinctCategoriesPurchased") or 0
+                ),
+                "preferred_category": user.get("preferredCategory", "unknown"),
+                "preferred_vendor": user.get("preferredVendor", "unknown"),
+                "price_preference": user.get("pricePointPreference", "mid"),
+                "discount_sensitivity": float(user.get("discountSensitivity") or 0),
+                # From CustomerBehaviorFeatures
+                "engagement_score": float(user.get("engagementScore") or 0),
+                "recency_score": float(user.get("recencyScore") or 0),
+                "diversity_score": float(user.get("diversityScore") or 0),
+                "behavioral_score": float(user.get("behavioralScore") or 0),
+                "session_count": int(user.get("sessionCount") or 0),
+                "product_view_count": int(user.get("productViewCount") or 0),
+                "cart_add_count": int(user.get("cartAddCount") or 0),
+                "search_count": int(user.get("searchCount") or 0),
+                "unique_products_viewed": int(user.get("uniqueProductsViewed") or 0),
+                "unique_collections_viewed": int(
+                    user.get("uniqueCollectionsViewed") or 0
+                ),
+                "browse_to_cart_rate": (
+                    float(user.get("browseToCartRate", 0))
+                    if user.get("browseToCartRate")
+                    else 0
+                ),
+                "cart_to_purchase_rate": (
+                    float(user.get("cartToPurchaseRate", 0))
+                    if user.get("cartToPurchaseRate")
+                    else 0
+                ),
+                "search_to_purchase_rate": (
+                    float(user.get("searchToPurchaseRate", 0))
+                    if user.get("searchToPurchaseRate")
+                    else 0
+                ),
+                "most_active_hour": user.get("mostActiveHour"),
+                "most_active_day": user.get("mostActiveDay"),
+                "device_type": user.get("deviceType", "unknown"),
+                "primary_referrer": user.get("primaryReferrer", "direct"),
+                # From aggregated InteractionFeatures
+                "total_interaction_score": float(
+                    user.get("total_interaction_score") or 0
+                ),
+                "avg_affinity_score": float(user.get("avg_affinity_score") or 0),
+                # From aggregated SessionFeatures
+                "completed_sessions": int(user.get("completed_sessions") or 0),
+                "avg_session_duration": float(user.get("avg_session_duration") or 0),
+                # Computed segments
+                "customer_segment": self._calculate_customer_segment(user),
+                "is_active": bool((user.get("daysSinceLastOrder") or 365) < 30),
+                "is_high_value": bool((user.get("lifetimeValue") or 0) > 500),
+                "is_frequent_buyer": bool(
+                    (user.get("orderFrequencyPerMonth") or 0) > 1
+                ),
+                # Optimized features for better recommendations
+                "purchase_power": min(float(user.get("totalSpent") or 0) / 5000, 1.0),
+                "purchase_frequency": min(
+                    int(user.get("totalPurchases") or 0) / 50, 1.0
+                ),
+                "recency_tier": self._calculate_recency_tier(
+                    user.get("daysSinceLastOrder")
+                ),
+                "is_active_30d": int((user.get("daysSinceLastOrder") or 999) < 30),
+                "is_active_7d": int((user.get("daysSinceLastOrder") or 999) < 7),
+                "engagement_level": min(
+                    (
+                        (user.get("productViewCount") or 0)
+                        + (user.get("cartAddCount") or 0) * 3
+                    )
+                    / 100,
+                    1.0,
+                ),
+                "category_diversity": min(
+                    (user.get("distinctCategoriesPurchased") or 0) / 5, 1.0
+                ),
+                "price_tier": self._encode_price_tier(user.get("pricePointPreference")),
+                "discount_affinity": min(
+                    float(user.get("discountSensitivity") or 0) * 2, 1.0
+                ),
+                "conversion_score": self._calculate_conversion_score(user),
+                "lifecycle_stage": self._encode_lifecycle_stage(user),
+                "customer_value_tier": self._calculate_value_tier(
+                    float(user.get("totalSpent") or 0),
+                    int(user.get("totalPurchases") or 0),
+                ),
+            }
 
-        # Remove None values
-        return {k: v for k, v in labels.items() if v is not None}
+            # Remove None values
+            return {k: v for k, v in labels.items() if v is not None}
+        except Exception as e:
+            logger.error(
+                f"Error building user labels for user {user.get('customerId', 'unknown')}: {str(e)}"
+            )
+            logger.error(f"User data keys: {list(user.keys())}")
+            logger.error(f"User data sample: {dict(list(user.items())[:10])}")
+
+            raise
 
     def _build_comprehensive_item_labels(
         self, product: Dict[str, Any]
@@ -970,7 +993,7 @@ class GorseSyncPipeline:
             user_id = f"session_{session['sessionId']}"
 
             labels = {
-                "session_count": int(session["session_count"]),
+                "session_count": int(session.get("session_count") or 0),
                 "avg_session_duration": float(session["avg_duration"] or 0),
                 "product_view_count": int(session["total_views"] or 0),
                 "cart_add_count": int(session["total_cart_adds"] or 0),
@@ -1534,7 +1557,7 @@ class GorseSyncPipeline:
     def _encode_lifecycle_stage(self, user: Dict[str, Any]) -> int:
         """Encode customer lifecycle stage"""
         total_spent = float(user.get("totalSpent") or 0)
-        days_since_last = user.get("daysSinceLastOrder", 999)
+        days_since_last = user.get("daysSinceLastOrder") or 999
         frequency = float(user.get("orderFrequencyPerMonth") or 0)
 
         if total_spent > 1000 and days_since_last < 30:
