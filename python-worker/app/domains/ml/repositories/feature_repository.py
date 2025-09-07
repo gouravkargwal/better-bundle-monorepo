@@ -2,12 +2,11 @@
 Feature repository for handling all database operations related to ML features
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from abc import ABC, abstractmethod
 
 from app.core.logging import get_logger
 from app.core.database.simple_db_client import get_database
-from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
 

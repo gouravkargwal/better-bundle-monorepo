@@ -10,6 +10,7 @@ from .product_pair_feature_generator import ProductPairFeatureGenerator
 from .search_product_feature_generator import SearchProductFeatureGenerator
 from .session_feature_generator import SessionFeatureGenerator
 from .customer_behavior_feature_generator import CustomerBehaviorFeatureGenerator
+from .user_feature_generator import UserFeatureGenerator
 
 __all__ = [
     "BaseFeatureGenerator",
@@ -20,4 +21,5 @@ __all__ = [
     "ProductPairFeatureGenerator",
     "SearchProductFeatureGenerator",
     "SessionFeatureGenerator",
+    "UserFeatureGenerator",
 ]

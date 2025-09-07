@@ -714,7 +714,6 @@ model Shop {
   
   // Enhanced feature models
   collectionFeatures        CollectionFeatures[]
-  productCollectionFeatures ProductCollectionFeatures[]
   customerBehaviorFeatures  CustomerBehaviorFeatures[]
   advancedMLFeatures        AdvancedMLFeatures?
   collectionAnalytics       CollectionAnalytics?

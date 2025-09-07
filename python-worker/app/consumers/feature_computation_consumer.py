@@ -116,7 +116,7 @@ class FeatureComputationConsumer(BaseConsumer):
             incremental = metadata.get(
                 "incremental", False
             )  # Default to full processing
-            result = await self.feature_service.run_feature_pipeline_for_shop(
+            result = await self.feature_service.run_comprehensive_pipeline_for_shop(
                 shop_id=shop_id, batch_size=batch_size, incremental=incremental
             )
 
