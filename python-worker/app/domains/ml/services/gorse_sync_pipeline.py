@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from prisma import Json
 
 logger = get_logger(__name__)
 
@@ -67,8 +68,10 @@ class GorseSyncPipeline:
                     *[
                         table.upsert(
                             where={id_field: item_data[id_field]},
-                            data=item_data,
-                            create=item_data,
+                            data={
+                                "create": item_data,
+                                "update": item_data,
+                            },
                         )
                         for item_data in chunk
                     ]
@@ -313,7 +316,7 @@ class GorseSyncPipeline:
                 user_data = {
                     "userId": user["customerId"],
                     "shopId": shop_id,
-                    "labels": labels,
+                    "labels": Json(labels),
                 }
                 gorse_users_data.append(user_data)
 
@@ -356,19 +359,23 @@ class GorseSyncPipeline:
         try:
             db = await self._get_database()
 
-            # Simplified base query with pagination for items
+            # Enhanced query with collection features
             base_query = """
                 SELECT 
                     pf.*,
                     pd."status", pd."productType", pd."vendor", pd."tags", 
                     pd."collections", pd."totalInventory", pd."compareAtPrice",
-                    pcf."collectionCount", pcf."collectionQualityScore", pcf."crossCollectionScore",
-                    pcf."isInManualCollections", pcf."isInAutomatedCollections"
+                    cf."productCount" as collection_product_count,
+                    cf."performanceScore" as collection_performance_score,
+                    cf."conversionRate" as collection_conversion_rate
                 FROM "ProductFeatures" pf
                 JOIN "ProductData" pd 
                     ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                LEFT JOIN "ProductCollectionFeatures" pcf
-                    ON pf."productId" = pcf."productId" AND pf."shopId" = pcf."shopId"
+                LEFT JOIN "CollectionFeatures" cf
+                    ON cf."shopId" = pf."shopId"
+                    AND cf."collectionId" = ANY(
+                        SELECT jsonb_array_elements_text(pd."collections"::jsonb)
+                    )
                 WHERE pf."shopId" = $1 AND pd."isActive" = true
                 ORDER BY pf."productId"
                 LIMIT $2 OFFSET $3
@@ -518,8 +525,8 @@ class GorseSyncPipeline:
                 item_data = {
                     "itemId": item["productId"],
                     "shopId": shop_id,
-                    "categories": categories,
-                    "labels": labels,
+                    "categories": Json(categories),
+                    "labels": Json(labels),
                     "isHidden": is_hidden,
                 }
                 gorse_items_data.append(item_data)
@@ -859,24 +866,20 @@ class GorseSyncPipeline:
                 and float(product.get("compareAtPrice", 0))
                 > float(product.get("avgSellingPrice", 0))
             ),
-            # From ProductCollectionFeatures
-            "collection_count": int(product.get("collectionCount", 0)),
-            "collection_quality_score": (
-                float(product.get("collectionQualityScore", 0))
-                if product.get("collectionQualityScore")
+            # Collection features (from CollectionFeatures table)
+            "collection_count": (
+                len(product.get("collections", []))
+                if isinstance(product.get("collections"), list)
                 else 0
             ),
-            "cross_collection_score": (
-                float(product.get("crossCollectionScore", 0))
-                if product.get("crossCollectionScore")
-                else 0
+            "collection_quality_score": float(
+                product.get("collection_performance_score", 0.5)
             ),
-            "is_in_manual_collections": bool(
-                product.get("isInManualCollections", False)
+            "cross_collection_score": float(
+                product.get("collection_conversion_rate", 0.0)
             ),
-            "is_in_automated_collections": bool(
-                product.get("isInAutomatedCollections", False)
-            ),
+            "is_in_manual_collections": bool(product.get("collections")),
+            "is_in_automated_collections": False,  # Would need to check CollectionData.isAutomated
             # From aggregated ProductPairFeatures
             "avg_lift_score": float(product.get("avg_lift_score", 0)),
             "frequently_bought_with_count": int(
@@ -981,7 +984,7 @@ class GorseSyncPipeline:
             FROM "SessionFeatures"
             WHERE "shopId" = $1 
                 AND "customerId" IS NULL
-                AND "endTime" > $2
+                AND "endTime" > $2::timestamp
             GROUP BY "sessionId"
         """
 
@@ -1025,7 +1028,7 @@ class GorseSyncPipeline:
                 FROM "SessionFeatures"
                 WHERE "shopId" = $1 
                     AND "customerId" IS NULL
-                    AND "endTime" > $2
+                    AND "endTime" > $2::timestamp
                     AND ("cartAddCount" > 0 OR "checkoutCompleted" = true)
                 GROUP BY "sessionId"
             """
@@ -1066,7 +1069,7 @@ class GorseSyncPipeline:
         query = """
             SELECT * FROM "BehavioralEvents" 
             WHERE "shopId" = $1 
-                AND "occurredAt" >= $2
+                AND "occurredAt" >= $2::timestamp
             ORDER BY "occurredAt" ASC
         """
 
@@ -1091,7 +1094,7 @@ class GorseSyncPipeline:
         query = """
             SELECT * FROM "OrderData" 
             WHERE "shopId" = $1 
-                AND "orderDate" >= $2
+                AND "orderDate" >= $2::timestamp
         """
 
         result = await db.query_raw(query, shop_id, since_time)
@@ -1115,7 +1118,7 @@ class GorseSyncPipeline:
         query = """
             SELECT * FROM "InteractionFeatures" 
             WHERE "shopId" = $1 
-                AND "lastComputedAt" >= $2
+                AND "lastComputedAt" >= $2::timestamp
                 AND "interactionScore" > 0
         """
 
@@ -1157,10 +1160,10 @@ class GorseSyncPipeline:
                 be."eventData"
             FROM "SessionFeatures" sf
             LEFT JOIN "BehavioralEvents" be 
-                ON sf."sessionId" = be."sessionId" 
+                ON sf."sessionId" = be."clientId" 
                 AND be."eventType" = 'product_viewed'
             WHERE sf."shopId" = $1 
-                AND sf."endTime" >= $2
+                AND sf."endTime" >= $2::timestamp
                 AND sf."productViewCount" > 0
         """
 
@@ -1263,14 +1266,16 @@ class GorseSyncPipeline:
             await db.gorseusers.upsert(
                 where={"userId": user_id},
                 data={
-                    "userId": user_id,
-                    "shopId": shop_id,
-                    "labels": labels,
-                },
-                create={
-                    "userId": user_id,
-                    "shopId": shop_id,
-                    "labels": labels,
+                    "create": {
+                        "userId": user_id,
+                        "shopId": shop_id,
+                        "labels": Json(labels),
+                    },
+                    "update": {
+                        "userId": user_id,
+                        "shopId": shop_id,
+                        "labels": Json(labels),
+                    },
                 },
             )
 
@@ -1295,18 +1300,20 @@ class GorseSyncPipeline:
             await db.gorseitems.upsert(
                 where={"itemId": item_id},
                 data={
-                    "itemId": item_id,
-                    "shopId": shop_id,
-                    "categories": categories,
-                    "labels": labels,
-                    "isHidden": is_hidden,
-                },
-                create={
-                    "itemId": item_id,
-                    "shopId": shop_id,
-                    "categories": categories,
-                    "labels": labels,
-                    "isHidden": is_hidden,
+                    "create": {
+                        "itemId": item_id,
+                        "shopId": shop_id,
+                        "categories": categories,
+                        "labels": Json(labels),
+                        "isHidden": is_hidden,
+                    },
+                    "update": {
+                        "itemId": item_id,
+                        "shopId": shop_id,
+                        "categories": categories,
+                        "labels": Json(labels),
+                        "isHidden": is_hidden,
+                    },
                 },
             )
 
