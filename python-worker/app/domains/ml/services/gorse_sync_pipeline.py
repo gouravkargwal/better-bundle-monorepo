@@ -35,12 +35,71 @@ class GorseSyncPipeline:
         self.user_batch_size = user_batch_size  # Users processing batch
         self.item_batch_size = item_batch_size  # Items processing batch
         self.feedback_batch_size = 2000  # Feedback bulk insert batch
+        self.max_parallel_workers = (
+            10  # Maximum parallel workers for concurrent operations
+        )
 
     async def _get_database(self):
         """Get or initialize the database client"""
         if self._db_client is None:
             self._db_client = await get_database()
         return self._db_client
+
+    async def _get_last_sync_timestamp(self, shop_id: str) -> Optional[datetime]:
+        """Get the last sync timestamp by checking feature table updates"""
+        try:
+            db = await self._get_database()
+            # Check the most recent feature computation across all feature tables
+            result = await db.query_raw(
+                """
+                SELECT MAX(last_computed) as last_sync FROM (
+                    SELECT MAX("lastComputedAt") as last_computed FROM "UserFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "ProductFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "CustomerBehaviorFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "CollectionFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "InteractionFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "SessionFeatures" WHERE "shopId" = $1
+                ) as all_features
+                """,
+                shop_id,
+            )
+
+            if result and result[0]["last_sync"]:
+                return result[0]["last_sync"]
+            return None
+        except Exception as e:
+            logger.warning(
+                f"Could not get last sync timestamp for shop {shop_id}: {str(e)}"
+            )
+            return None
+
+    async def _is_first_sync(self, shop_id: str) -> bool:
+        """Check if this is the first sync by checking if any feature data exists"""
+        try:
+            db = await self._get_database()
+            result = await db.query_raw(
+                """
+                SELECT COUNT(*) as count FROM (
+                    SELECT 1 FROM "UserFeatures" WHERE "shopId" = $1 LIMIT 1
+                    UNION ALL
+                    SELECT 1 FROM "ProductFeatures" WHERE "shopId" = $1 LIMIT 1
+                    UNION ALL
+                    SELECT 1 FROM "CustomerBehaviorFeatures" WHERE "shopId" = $1 LIMIT 1
+                ) as any_features
+                """,
+                shop_id,
+            )
+            return result[0]["count"] == 0 if result else True
+        except Exception as e:
+            logger.warning(
+                f"Could not check first sync status for shop {shop_id}: {str(e)}"
+            )
+            return True
 
     async def _generic_bulk_upsert(
         self,
@@ -51,7 +110,7 @@ class GorseSyncPipeline:
         table_name: str,
         chunk_size: int = 100,
     ):
-        """Generic bulk upsert method for any Gorse table"""
+        """Generic bulk upsert method for any Gorse table with parallel processing"""
         if not data_list:
             return
 
@@ -59,26 +118,46 @@ class GorseSyncPipeline:
             db = await self._get_database()
             table = table_accessor(db)
 
-            # Process in smaller chunks for better performance
+            # Process in smaller chunks with parallel processing
+            semaphore = asyncio.Semaphore(self.max_parallel_workers)
+
+            async def upsert_chunk(chunk):
+                async with semaphore:
+                    return await asyncio.gather(
+                        *[
+                            table.upsert(
+                                where={id_field: item_data[id_field]},
+                                data={
+                                    "create": item_data,
+                                    "update": item_data,
+                                },
+                            )
+                            for item_data in chunk
+                        ],
+                        return_exceptions=True,
+                    )
+
+            # Process all chunks in parallel
+            chunk_tasks = []
             for i in range(0, len(data_list), chunk_size):
                 chunk = data_list[i : i + chunk_size]
+                chunk_tasks.append(upsert_chunk(chunk))
 
-                # Use individual upserts within concurrent operations
-                await asyncio.gather(
-                    *[
-                        table.upsert(
-                            where={id_field: item_data[id_field]},
-                            data={
-                                "create": item_data,
-                                "update": item_data,
-                            },
-                        )
-                        for item_data in chunk
-                    ]
-                )
+            # Wait for all chunks to complete
+            results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+
+            # Count successful operations
+            successful_ops = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Chunk upsert failed: {str(result)}")
+                else:
+                    successful_ops += len(
+                        [r for r in result if not isinstance(r, Exception)]
+                    )
 
             logger.debug(
-                f"Bulk upserted {len(data_list)} {entity_name} to {table_name}"
+                f"Bulk upserted {successful_ops}/{len(data_list)} {entity_name} to {table_name}"
             )
 
         except Exception as e:
@@ -135,18 +214,37 @@ class GorseSyncPipeline:
             logger.error(f"Failed to sync {entity_name}: {str(e)}")
             raise
 
-    async def sync_all(self, shop_id: str):
+    async def sync_all(self, shop_id: str, incremental: bool = True):
         """
         Main entry point - syncs all data for a shop to Gorse
+
+        Args:
+            shop_id: Shop ID to sync
+            incremental: Whether to use incremental sync (default: True)
         """
         try:
-            logger.info(f"Starting Gorse sync for shop: {shop_id}")
+            logger.info(
+                f"Starting Gorse sync for shop: {shop_id} (incremental: {incremental})"
+            )
+
+            # Get last sync timestamp for incremental processing
+            last_sync_timestamp = None
+            if incremental:
+                last_sync_timestamp = await self._get_last_sync_timestamp(shop_id)
+                if last_sync_timestamp:
+                    logger.info(f"Using incremental sync since: {last_sync_timestamp}")
+                else:
+                    logger.info("No previous sync found, performing full sync")
 
             # 1. Sync Users (combining multiple feature tables)
-            await self.sync_users(shop_id)
+            await self.sync_users(
+                shop_id, incremental=incremental, since_timestamp=last_sync_timestamp
+            )
 
             # 2. Sync Items (combining multiple feature tables)
-            await self.sync_items(shop_id)
+            await self.sync_items(
+                shop_id, incremental=incremental, since_timestamp=last_sync_timestamp
+            )
 
             # 3. Sync Feedback (from events, orders, and interaction features)
             await self.sync_feedback(shop_id)
@@ -157,45 +255,82 @@ class GorseSyncPipeline:
             logger.error(f"Failed to sync shop {shop_id}: {str(e)}")
             raise
 
-    async def sync_users(self, shop_id: str):
+    async def sync_users(
+        self,
+        shop_id: str,
+        incremental: bool = True,
+        since_timestamp: Optional[datetime] = None,
+    ):
         """
         Sync users combining UserFeatures, CustomerBehaviorFeatures, and InteractionFeatures
         Uses batch processing to handle large datasets efficiently
+
+        Args:
+            shop_id: Shop ID to sync
+            incremental: Whether to use incremental sync
+            since_timestamp: Timestamp for incremental sync
         """
         await self._generic_batch_processor(
             shop_id=shop_id,
             batch_size=self.user_batch_size,
-            fetch_batch_func=self._fetch_user_batch,
+            fetch_batch_func=lambda shop_id, offset, limit: self._fetch_user_batch(
+                shop_id, offset, limit, since_timestamp if incremental else None
+            ),
             process_batch_func=self._process_user_batch,
             entity_name="users",
             additional_processor=self._sync_anonymous_users,
         )
 
     async def _fetch_user_batch(
-        self, shop_id: str, offset: int, limit: int
+        self,
+        shop_id: str,
+        offset: int,
+        limit: int,
+        last_sync_timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of users with all their feature data"""
+        """Fetch a batch of users with all their feature data (incremental if timestamp provided)"""
         try:
             db = await self._get_database()
 
-            # Simplified base query with pagination
-            base_query = """
-                SELECT 
-                    uf.*,
-                    cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
-                    cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
-                    cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
-                    cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
-                    cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
-                FROM "UserFeatures" uf
-                LEFT JOIN "CustomerBehaviorFeatures" cbf 
-                    ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
-                WHERE uf."shopId" = $1
-                ORDER BY uf."customerId"
-                LIMIT $2 OFFSET $3
-            """
-
-            result = await db.query_raw(base_query, shop_id, limit, offset)
+            # Build incremental query if timestamp provided
+            if last_sync_timestamp:
+                base_query = """
+                    SELECT 
+                        uf.*,
+                        cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
+                        cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
+                        cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
+                        cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
+                        cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
+                    FROM "UserFeatures" uf
+                    LEFT JOIN "CustomerBehaviorFeatures" cbf 
+                        ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
+                    WHERE uf."shopId" = $1 
+                        AND (uf."lastComputedAt" > $4::timestamp OR cbf."lastComputedAt" > $4::timestamp)
+                    ORDER BY uf."customerId"
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(
+                    base_query, shop_id, limit, offset, last_sync_timestamp
+                )
+            else:
+                # Full sync query
+                base_query = """
+                    SELECT 
+                        uf.*,
+                        cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
+                        cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
+                        cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
+                        cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
+                        cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
+                    FROM "UserFeatures" uf
+                    LEFT JOIN "CustomerBehaviorFeatures" cbf 
+                        ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
+                    WHERE uf."shopId" = $1
+                    ORDER BY uf."customerId"
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(base_query, shop_id, limit, offset)
             batch_users = [dict(row) for row in result] if result else []
 
             if batch_users:
@@ -339,49 +474,91 @@ class GorseSyncPipeline:
             table_name="GorseUsers",
         )
 
-    async def sync_items(self, shop_id: str):
+    async def sync_items(
+        self,
+        shop_id: str,
+        incremental: bool = True,
+        since_timestamp: Optional[datetime] = None,
+    ):
         """
-        Sync items combining ProductFeatures, CollectionFeatures, ProductCollectionFeatures
+        Sync items combining ProductFeatures, CollectionFeatures
         Uses batch processing to handle large datasets efficiently
+
+        Args:
+            shop_id: Shop ID to sync
+            incremental: Whether to use incremental sync
+            since_timestamp: Timestamp for incremental sync
         """
         await self._generic_batch_processor(
             shop_id=shop_id,
             batch_size=self.item_batch_size,
-            fetch_batch_func=self._fetch_item_batch,
+            fetch_batch_func=lambda shop_id, offset, limit: self._fetch_item_batch(
+                shop_id, offset, limit, since_timestamp if incremental else None
+            ),
             process_batch_func=self._process_item_batch,
             entity_name="items",
         )
 
     async def _fetch_item_batch(
-        self, shop_id: str, offset: int, limit: int
+        self,
+        shop_id: str,
+        offset: int,
+        limit: int,
+        last_sync_timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of items with their core feature data"""
+        """Fetch a batch of items with their core feature data (incremental if timestamp provided)"""
         try:
             db = await self._get_database()
 
-            # Enhanced query with collection features
-            base_query = """
-                SELECT 
-                    pf.*,
-                    pd."status", pd."productType", pd."vendor", pd."tags", 
-                    pd."collections", pd."totalInventory", pd."compareAtPrice",
-                    cf."productCount" as collection_product_count,
-                    cf."performanceScore" as collection_performance_score,
-                    cf."conversionRate" as collection_conversion_rate
-                FROM "ProductFeatures" pf
-                JOIN "ProductData" pd 
-                    ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                LEFT JOIN "CollectionFeatures" cf
-                    ON cf."shopId" = pf."shopId"
-                    AND cf."collectionId" = ANY(
-                        SELECT jsonb_array_elements_text(pd."collections"::jsonb)
-                    )
-                WHERE pf."shopId" = $1 AND pd."isActive" = true
-                ORDER BY pf."productId"
-                LIMIT $2 OFFSET $3
-            """
-
-            result = await db.query_raw(base_query, shop_id, limit, offset)
+            # Build incremental query if timestamp provided
+            if last_sync_timestamp:
+                base_query = """
+                    SELECT 
+                        pf.*,
+                        pd."status", pd."productType", pd."vendor", pd."tags", 
+                        pd."collections", pd."totalInventory", pd."compareAtPrice",
+                        cf."productCount" as collection_product_count,
+                        cf."performanceScore" as collection_performance_score,
+                        cf."conversionRate" as collection_conversion_rate
+                    FROM "ProductFeatures" pf
+                    JOIN "ProductData" pd 
+                        ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
+                    LEFT JOIN "CollectionFeatures" cf
+                        ON cf."shopId" = pf."shopId"
+                        AND cf."collectionId" = ANY(
+                            SELECT jsonb_array_elements_text(pd."collections"::jsonb)
+                        )
+                    WHERE pf."shopId" = $1 AND pd."isActive" = true 
+                        AND pf."lastComputedAt" > $4::timestamp
+                    ORDER BY pf."productId"
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(
+                    base_query, shop_id, limit, offset, last_sync_timestamp
+                )
+            else:
+                # Full sync query
+                base_query = """
+                    SELECT 
+                        pf.*,
+                        pd."status", pd."productType", pd."vendor", pd."tags", 
+                        pd."collections", pd."totalInventory", pd."compareAtPrice",
+                        cf."productCount" as collection_product_count,
+                        cf."performanceScore" as collection_performance_score,
+                        cf."conversionRate" as collection_conversion_rate
+                    FROM "ProductFeatures" pf
+                    JOIN "ProductData" pd 
+                        ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
+                    LEFT JOIN "CollectionFeatures" cf
+                        ON cf."shopId" = pf."shopId"
+                        AND cf."collectionId" = ANY(
+                            SELECT jsonb_array_elements_text(pd."collections"::jsonb)
+                        )
+                    WHERE pf."shopId" = $1 AND pd."isActive" = true
+                    ORDER BY pf."productId"
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(base_query, shop_id, limit, offset)
             batch_items = [dict(row) for row in result] if result else []
 
             if batch_items:
