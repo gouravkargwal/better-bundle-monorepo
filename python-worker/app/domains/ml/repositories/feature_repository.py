@@ -473,3 +473,104 @@ class FeatureRepository(IFeatureRepository):
                 f"Failed to get behavioral events batch for shop {shop_id}: {str(e)}"
             )
             return []
+
+    # Incremental data loading methods
+    async def get_products_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get products modified since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            query = """
+                SELECT * FROM "ProductData" 
+                WHERE "shopId" = $1 AND "updatedAt" > $2 
+                ORDER BY "updatedAt" ASC 
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get products batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_customers_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get customers modified since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            query = """
+                SELECT * FROM "CustomerData" 
+                WHERE "shopId" = $1 AND "updatedAt" > $2 
+                ORDER BY "updatedAt" ASC 
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get customers batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_orders_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get orders modified since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            query = """
+                SELECT * FROM "OrderData" 
+                WHERE "shopId" = $1 AND "updatedAt" > $2 
+                ORDER BY "updatedAt" ASC 
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get orders batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_collections_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get collections modified since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            query = """
+                SELECT * FROM "CollectionData" 
+                WHERE "shopId" = $1 AND "updatedAt" > $2 
+                ORDER BY "updatedAt" ASC 
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get collections batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_behavioral_events_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get behavioral events since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            query = """
+                SELECT * FROM "BehavioralEvents" 
+                WHERE "shopId" = $1 AND "occurredAt" > $2 
+                ORDER BY "occurredAt" ASC 
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get behavioral events batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []

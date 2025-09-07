@@ -4,6 +4,7 @@ This service now uses the new architecture with specialized generators and repos
 """
 
 from typing import Dict, Any, List, Optional
+import asyncio
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -46,6 +47,188 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         self.product_pair_generator = ProductPairFeatureGenerator()
 
     # Batch processing methods for efficiency
+
+    async def compute_features_parallel(
+        self,
+        entities: List[Dict[str, Any]],
+        context: Dict[str, Any],
+        generator,
+        max_concurrent: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute features for multiple entities in parallel with concurrency control
+
+        Args:
+            entities: List of entities to compute features for
+            context: Context data for feature computation
+            generator: Feature generator instance
+            max_concurrent: Maximum number of concurrent computations
+
+        Returns:
+            List of computed features
+        """
+        if not entities:
+            return []
+
+        # Create semaphore to limit concurrent operations
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def compute_single_feature(entity):
+            async with semaphore:
+                try:
+                    if hasattr(generator, "generate_features"):
+                        # Handle different generator signatures
+                        if generator.__class__.__name__ == "ProductFeatureGenerator":
+                            return await generator.generate_features(
+                                context.get("shop", {}).get("id", ""),
+                                entity.get("productId", ""),
+                                context,
+                            )
+                        elif generator.__class__.__name__ == "UserFeatureGenerator":
+                            return await generator.generate_features(
+                                context.get("shop", {}).get("id", ""),
+                                entity.get("customerId", ""),
+                                context,
+                            )
+                        else:
+                            return await generator.generate_features(entity, context)
+                    else:
+                        logger.error(
+                            f"Generator {generator.__class__.__name__} has no generate_features method"
+                        )
+                        return {}
+                except Exception as e:
+                    logger.error(
+                        f"Failed to compute features for entity {entity.get('id', 'unknown')}: {str(e)}"
+                    )
+                    return {}
+
+        # Create tasks for all entities
+        tasks = [compute_single_feature(entity) for entity in entities]
+
+        # Execute all tasks in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Filter out exceptions and empty results
+        valid_results = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Parallel feature computation failed: {str(result)}")
+            elif result and isinstance(result, dict):
+                valid_results.append(result)
+
+        logger.info(
+            f"Computed {len(valid_results)} features in parallel from {len(entities)} entities"
+        )
+        return valid_results
+
+    async def process_entities_in_chunks(
+        self,
+        shop_id: str,
+        entity_type: str,
+        batch_size: int,
+        chunk_size: int = 100,
+        incremental: bool = False,
+        since_timestamp: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Process entities in chunks to avoid loading large datasets in memory
+
+        Args:
+            shop_id: Shop ID to process
+            entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'behavioral_events')
+            batch_size: Total batch size to process
+            chunk_size: Size of each chunk to process in memory
+            incremental: Whether to use incremental loading
+            since_timestamp: Timestamp for incremental loading
+
+        Returns:
+            List of all processed entities
+        """
+        all_entities = []
+        offset = 0
+
+        while offset < batch_size:
+            current_chunk_size = min(chunk_size, batch_size - offset)
+
+            try:
+                if incremental and since_timestamp:
+                    # Use incremental loading methods
+                    if entity_type == "products":
+                        chunk = await self.repository.get_products_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "customers":
+                        chunk = await self.repository.get_customers_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "orders":
+                        chunk = await self.repository.get_orders_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "collections":
+                        chunk = await self.repository.get_collections_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "behavioral_events":
+                        chunk = await self.repository.get_behavioral_events_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    else:
+                        logger.error(
+                            f"Unknown entity type for incremental loading: {entity_type}"
+                        )
+                        break
+                else:
+                    # Use regular batch loading methods
+                    if entity_type == "products":
+                        chunk = await self.repository.get_products_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "customers":
+                        chunk = await self.repository.get_customers_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "orders":
+                        chunk = await self.repository.get_orders_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "collections":
+                        chunk = await self.repository.get_collections_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "behavioral_events":
+                        chunk = await self.repository.get_behavioral_events_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    else:
+                        logger.error(f"Unknown entity type: {entity_type}")
+                        break
+
+                if not chunk:
+                    # No more data available
+                    break
+
+                all_entities.extend(chunk)
+                offset += len(chunk)
+
+                logger.debug(
+                    f"Loaded chunk of {len(chunk)} {entity_type} (total: {len(all_entities)})"
+                )
+
+                # If we got fewer entities than requested, we've reached the end
+                if len(chunk) < current_chunk_size:
+                    break
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to load chunk of {entity_type} at offset {offset}: {str(e)}"
+                )
+                break
+
+        logger.info(f"Loaded {len(all_entities)} {entity_type} in chunks")
+        return all_entities
+
     async def compute_all_product_features(
         self,
         products: List[Dict[str, Any]],
@@ -54,9 +237,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         collections: Optional[List[Dict[str, Any]]] = None,
         behavioral_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
-        """Batch compute features for multiple products"""
+        """Batch compute features for multiple products in parallel"""
         try:
-            results = {}
+            if not products:
+                return {}
+
             context = {
                 "shop": shop,
                 "orders": orders or [],
@@ -64,17 +249,17 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "behavioral_events": behavioral_events or [],
             }
 
-            for product in products:
-                try:
-                    features = await self.product_generator.generate_features(
-                        shop["id"], product["id"], context
-                    )
-                    results[product["id"]] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute features for product {product['id']}: {str(e)}"
-                    )
-                    results[product["id"]] = {}
+            # Compute features for all products in parallel
+            product_features_list = await self.compute_features_parallel(
+                products, context, self.product_generator, max_concurrent=10
+            )
+
+            # Convert list to dictionary keyed by productId
+            results = {}
+            for features in product_features_list:
+                product_id = features.get("productId")
+                if product_id:
+                    results[product_id] = features
 
             return results
         except Exception as e:
@@ -88,26 +273,28 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         orders: Optional[List[Dict[str, Any]]] = None,
         events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
-        """Batch compute features for multiple customers/users"""
+        """Batch compute features for multiple customers/users in parallel"""
         try:
-            results = {}
+            if not customers:
+                return {}
+
             context = {
                 "shop": shop,
                 "orders": orders or [],
                 "events": events or [],
             }
 
-            for customer in customers:
-                try:
-                    features = await self.user_generator.generate_features(
-                        shop["id"], customer["id"], context
-                    )
-                    results[customer["id"]] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute user features for {customer['id']}: {str(e)}"
-                    )
-                    results[customer["id"]] = {}
+            # Compute features for all customers in parallel
+            customer_features_list = await self.compute_features_parallel(
+                customers, context, self.user_generator, max_concurrent=10
+            )
+
+            # Convert list to dictionary keyed by customerId
+            results = {}
+            for features in customer_features_list:
+                customer_id = features.get("customerId")
+                if customer_id:
+                    results[customer_id] = features
 
             return results
         except Exception as e:
@@ -312,27 +499,52 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     "timestamp": now_utc().isoformat(),
                 }
 
-            # Handle incremental vs full data loading internally
+            # Handle incremental vs full data loading with chunked processing
             if incremental:
                 last_computation_time = (
                     await repository.get_last_feature_computation_time(shop_id)
                 )
 
-                # Load recent data only (using same approach as full load for now)
-                products = await repository.get_products_batch(
-                    shop_id, limit=batch_size * 2, offset=0
+                # Load only data modified since last computation using chunked processing
+                products = await self.process_entities_in_chunks(
+                    shop_id,
+                    "products",
+                    batch_size * 2,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
                 )
-                customers = await repository.get_customers_batch(
-                    shop_id, limit=batch_size, offset=0
+                customers = await self.process_entities_in_chunks(
+                    shop_id,
+                    "customers",
+                    batch_size,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
                 )
-                orders = await repository.get_orders_batch(
-                    shop_id, limit=batch_size * 3, offset=0
+                orders = await self.process_entities_in_chunks(
+                    shop_id,
+                    "orders",
+                    batch_size * 3,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
                 )
-                collections = await repository.get_collections_batch(
-                    shop_id, limit=batch_size, offset=0
+                collections = await self.process_entities_in_chunks(
+                    shop_id,
+                    "collections",
+                    batch_size,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
                 )
-                behavioral_events = await repository.get_behavioral_events_batch(
-                    shop_id, limit=batch_size * 5, offset=0
+                behavioral_events = await self.process_entities_in_chunks(
+                    shop_id,
+                    "behavioral_events",
+                    batch_size * 5,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
                 )
 
                 # If no recent data, skip processing
@@ -347,21 +559,21 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         "timestamp": now_utc().isoformat(),
                     }
             else:
-                # Load all data
-                products = await repository.get_products_batch(
-                    shop_id, limit=batch_size * 2, offset=0
+                # Load all data using chunked processing
+                products = await self.process_entities_in_chunks(
+                    shop_id, "products", batch_size * 2, chunk_size=100
                 )
-                customers = await repository.get_customers_batch(
-                    shop_id, limit=batch_size, offset=0
+                customers = await self.process_entities_in_chunks(
+                    shop_id, "customers", batch_size, chunk_size=100
                 )
-                orders = await repository.get_orders_batch(
-                    shop_id, limit=batch_size * 3, offset=0
+                orders = await self.process_entities_in_chunks(
+                    shop_id, "orders", batch_size * 3, chunk_size=100
                 )
-                collections = await repository.get_collections_batch(
-                    shop_id, limit=batch_size, offset=0
+                collections = await self.process_entities_in_chunks(
+                    shop_id, "collections", batch_size, chunk_size=100
                 )
-                behavioral_events = await repository.get_behavioral_events_batch(
-                    shop_id, limit=batch_size * 5, offset=0
+                behavioral_events = await self.process_entities_in_chunks(
+                    shop_id, "behavioral_events", batch_size * 5, chunk_size=100
                 )
 
             logger.info(
