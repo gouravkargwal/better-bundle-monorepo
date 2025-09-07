@@ -33,6 +33,7 @@ from app.shared.constants.redis import (
     COMPLETION_RESULTS_STREAM,
     COMPLETION_EVENTS_STREAM,
     BEHAVIORAL_EVENTS_STREAM,
+    GORSE_SYNC_STREAM,
     DATA_PROCESSOR_GROUP,
     FEATURES_CONSUMER_GROUP,
     ML_TRAINING_GROUP,
@@ -86,6 +87,7 @@ class RedisSettings(BaseSettings):
     BEHAVIORAL_EVENTS_STREAM: str = Field(
         default=BEHAVIORAL_EVENTS_STREAM, env="BEHAVIORAL_EVENTS_STREAM"
     )
+    GORSE_SYNC_STREAM: str = Field(default=GORSE_SYNC_STREAM, env="GORSE_SYNC_STREAM")
 
     # Consumer Group Names
     DATA_PROCESSOR_GROUP: str = Field(
@@ -334,6 +336,10 @@ class Settings(BaseSettings):
     @property
     def BEHAVIORAL_EVENTS_STREAM(self) -> str:
         return self.redis.BEHAVIORAL_EVENTS_STREAM
+
+    @property
+    def GORSE_SYNC_STREAM(self) -> str:
+        return self.redis.GORSE_SYNC_STREAM
 
     # Worker Configuration (Direct access for backward compatibility)
     @property

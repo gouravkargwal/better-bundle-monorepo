@@ -15,6 +15,9 @@ class BehavioralEvent(BaseModel):
     customer_id: Optional[str] = Field(
         None, alias="customerId", description="Customer identifier"
     )
+    client_id: Optional[str] = Field(
+        None, alias="clientId", description="Session identifier from Shopify Web Pixels"
+    )
     event_type: str = Field(
         ..., alias="eventType", description="Type of behavioral event"
     )

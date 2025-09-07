@@ -50,6 +50,9 @@ class WebhookRepository:
                 Json(event_data_dict) if event_data_dict is not None else None
             )
 
+            # Extract clientId from raw payload for session tracking
+            client_id = raw_payload.get("clientId")
+
             await db.behavioralevents.upsert(
                 where={"eventId": validated_event.id},
                 data={
@@ -57,12 +60,14 @@ class WebhookRepository:
                         "eventId": validated_event.id,
                         "shopId": shop_id,
                         "customerId": validated_event.customer_id,
+                        "clientId": client_id,
                         "eventType": validated_event.name,
                         "occurredAt": validated_event.timestamp,
                         "eventData": event_data_json,
                     },
                     "update": {
                         "customerId": validated_event.customer_id,
+                        "clientId": client_id,
                         "occurredAt": validated_event.timestamp,
                         "eventData": event_data_json,
                     },

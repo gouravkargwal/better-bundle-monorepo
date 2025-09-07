@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import json
 from app.core.logging import get_logger
+from app.shared.helpers import now_utc
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -63,6 +64,9 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
             # Validate and clean features
             features = self.validate_features(features)
+
+            # Add lastComputedAt timestamp
+            features["lastComputedAt"] = now_utc()
 
             logger.debug(
                 f"Computed {len(features)} session features for session: {session_id}"

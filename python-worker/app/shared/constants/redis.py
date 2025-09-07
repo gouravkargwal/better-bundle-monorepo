@@ -16,6 +16,7 @@ NEXT_ANALYSIS_SCHEDULED_STREAM = "betterbundle:next-analysis-scheduled"
 COMPLETION_RESULTS_STREAM = "betterbundle:completion-results"
 COMPLETION_EVENTS_STREAM = "betterbundle:ml-training-complete"
 BEHAVIORAL_EVENTS_STREAM = "betterbundle:behavioral-events"
+GORSE_SYNC_STREAM = "betterbundle:gorse-sync"
 
 # Consumer Group Names
 DATA_PROCESSOR_GROUP = "data-processors"
@@ -23,6 +24,7 @@ FEATURES_CONSUMER_GROUP = "data-processors"
 ML_TRAINING_GROUP = "ml-training-consumers"
 HEURISTIC_DECISION_GROUP = "heuristic-decision-processors"
 COMPLETION_HANDLER_GROUP = "completion-handlers"
+GORSE_SYNC_GROUP = "gorse-sync-processors"
 
 # Redis Configuration
 DEFAULT_REDIS_PORT = 6379
@@ -50,11 +52,13 @@ __all__ = [
     "COMPLETION_RESULTS_STREAM",
     "COMPLETION_EVENTS_STREAM",
     "BEHAVIORAL_EVENTS_STREAM",
+    "GORSE_SYNC_STREAM",
     "DATA_PROCESSOR_GROUP",
     "FEATURES_CONSUMER_GROUP",
     "ML_TRAINING_GROUP",
     "HEURISTIC_DECISION_GROUP",
     "COMPLETION_HANDLER_GROUP",
+    "GORSE_SYNC_GROUP",
     "DEFAULT_REDIS_PORT",
     "DEFAULT_REDIS_DB",
     "DEFAULT_REDIS_TLS",

@@ -59,7 +59,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             # Performance metrics from orders
             if order_data:
                 features.update(
-                    self._compute_performance_metrics(collection, order_data)
+                    self._compute_performance_metrics(collection, order_data, products)
                 )
 
             # SEO and image scores
@@ -210,9 +210,48 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         self,
         collection: Dict[str, Any],
         order_data: List[Dict[str, Any]],
+        products: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compute performance metrics from order data"""
         collection_id = collection.get("collectionId", "")
+        products = products or []
+
+        # Build product-to-collection mapping and product info lookup
+        collection_product_ids = set()
+        product_info = {}
+
+        for product in products:
+            product_id = product.get("productId")
+            if not product_id:
+                continue
+
+            product_info[product_id] = {
+                "vendor": product.get("vendor", ""),
+                "title": product.get("title", ""),
+            }
+
+            # Check if product belongs to this collection
+            collections = product.get("collections", [])
+            if isinstance(collections, str):
+                import json
+
+                try:
+                    collections = json.loads(collections)
+                except:
+                    collections = []
+
+            # Check if this collection ID is in the product's collections
+            for coll in collections:
+                if isinstance(coll, dict):
+                    coll_id = coll.get("id") or coll.get("collectionId")
+                elif isinstance(coll, str):
+                    coll_id = coll
+                else:
+                    continue
+
+                if coll_id == collection_id:
+                    collection_product_ids.add(product_id)
+                    break
 
         # Find orders with products from this collection
         collection_orders = []
@@ -233,19 +272,28 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             order_has_collection_product = False
             for line_item in line_items:
                 product_id = line_item.get("productId") or line_item.get("product_id")
-                # We'd need to check if this product belongs to collection
-                # For now, we'll use a simplified approach
-                if product_id:
-                    # Track product sales
+
+                # Only include if product belongs to this collection
+                if product_id and product_id in collection_product_ids:
                     quantity = line_item.get("quantity", 1)
                     price = float(line_item.get("price", 0))
+                    revenue = price * quantity
 
+                    # Track product sales
                     if product_id not in product_sales:
                         product_sales[product_id] = {"quantity": 0, "revenue": 0}
                     product_sales[product_id]["quantity"] += quantity
-                    product_sales[product_id]["revenue"] += price * quantity
+                    product_sales[product_id]["revenue"] += revenue
 
-                    collection_revenue += price * quantity
+                    # Track vendor sales
+                    vendor = product_info.get(product_id, {}).get("vendor", "Unknown")
+                    if vendor and vendor != "Unknown":
+                        if vendor not in vendor_sales:
+                            vendor_sales[vendor] = {"quantity": 0, "revenue": 0}
+                        vendor_sales[vendor]["quantity"] += quantity
+                        vendor_sales[vendor]["revenue"] += revenue
+
+                    collection_revenue += revenue
                     order_has_collection_product = True
 
             if order_has_collection_product:
@@ -269,15 +317,17 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         )[:5]
         top_product_ids = [p[0] for p in top_products]
 
-        # For vendors, we'd need to join with product data
-        # For now, return empty list
-        top_vendors = []
+        # Get top vendors by revenue
+        top_vendors = sorted(
+            vendor_sales.items(), key=lambda x: x[1]["revenue"], reverse=True
+        )[:5]
+        top_vendor_names = [v[0] for v in top_vendors]
 
         return {
             "conversionRate": conversion_rate,
             "revenueContribution": revenue_contribution,
             "topProducts": top_product_ids if top_product_ids else None,
-            "topVendors": top_vendors if top_vendors else None,
+            "topVendors": top_vendor_names if top_vendor_names else None,
         }
 
     def _compute_seo_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:

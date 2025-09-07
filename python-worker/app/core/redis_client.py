@@ -354,6 +354,26 @@ class RedisStreamsManager:
 
         return await self.publish_event(settings.BEHAVIORAL_EVENTS_STREAM, event_data)
 
+    async def publish_gorse_sync_event(
+        self,
+        job_id: str,
+        shop_id: str,
+        sync_type: str = "all",
+        since_hours: int = 24,
+        metadata: Dict[str, Any] = None,
+    ) -> str:
+        """Publish a Gorse sync event"""
+        event_data = {
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "sync_type": sync_type,  # all, users, items, feedback
+            "since_hours": since_hours,
+            "metadata": metadata or {},
+            "status": "queued",
+        }
+
+        return await self.publish_event(settings.GORSE_SYNC_STREAM, event_data)
+
 
 # Global streams manager instance
 streams_manager = RedisStreamsManager()

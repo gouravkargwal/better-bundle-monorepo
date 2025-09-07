@@ -4,6 +4,7 @@ Aligned with the ProductPairFeatures table schema
 """
 
 import datetime
+import json
 from typing import Dict, Any, List, Optional, Set, Tuple
 from collections import defaultdict
 
@@ -141,7 +142,8 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         )
 
         for event in behavioral_events:
-            session_id = event.get("sessionId")
+            # Extract session ID from event record
+            session_id = event.get("clientId")  # clientId is now stored directly
             if not session_id:
                 continue
 

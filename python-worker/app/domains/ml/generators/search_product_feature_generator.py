@@ -8,6 +8,7 @@ import json
 import statistics
 
 from app.core.logging import get_logger
+from app.shared.helpers import now_utc
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -73,6 +74,9 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
+            # Add lastComputedAt timestamp
+            features["lastComputedAt"] = now_utc()
+
             logger.debug(
                 f"Computed {len(features)} search-product features for '{search_query}' + {product_id}"
             )
@@ -100,6 +104,11 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             "conversionRate": None,
             "lastOccurrence": None,
         }
+
+    def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
+        """Extract session ID from event record"""
+        # clientId is now stored directly in the event record
+        return event.get("clientId")
 
     def _compute_basic_features(
         self, search_product_data: Dict[str, Any], shop: Dict[str, Any]

@@ -46,6 +46,7 @@ from app.consumers.feature_computation_consumer import FeatureComputationConsume
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
+from app.consumers.gorse_sync_consumer import GorseSyncConsumer
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -120,6 +121,9 @@ async def initialize_services():
         # Initialize behavioral events consumer
         services["behavioral_events_consumer"] = BehavioralEventsConsumer()
 
+        # Initialize gorse sync consumer
+        services["gorse_sync_consumer"] = GorseSyncConsumer()
+
         # Initialize webhook services
         services["webhook_repository"] = WebhookRepository()
         services["webhook_handler"] = WebhookHandler(services["webhook_repository"])
@@ -130,6 +134,7 @@ async def initialize_services():
             main_table_processing_consumer=services["main_table_processing_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
+            gorse_sync_consumer=services["gorse_sync_consumer"],
         )
 
         # Start consumer manager
@@ -503,7 +508,7 @@ async def get_feature_architecture_status():
                     "ShopFeatureGenerator",
                 ],
                 "repository": "FeatureRepository",
-                "pipeline": "FeaturePipeline",
+                "pipeline": "FeatureEngineeringService",
             },
             "benefits": [
                 "Single Responsibility Principle",
@@ -1032,6 +1037,133 @@ async def get_behavioral_event_status(event_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get behavioral event status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Gorse sync endpoints
+@app.post("/api/gorse/sync")
+async def trigger_gorse_sync(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger Gorse data synchronization via Redis stream"""
+    try:
+        from app.core.redis_client import streams_manager
+        from app.shared.helpers import now_utc
+
+        # Extract parameters from request body (JSON) or form data
+        try:
+            body = await request.json()
+        except:
+            # Fallback to form data
+            form_data = await request.form()
+            body = dict(form_data)
+
+        shop_id = body.get("shop_id")
+        sync_type = body.get("sync_type", "all")  # all, users, items, feedback
+        since_hours = int(body.get("since_hours", 24))
+
+        # Validate required parameters
+        if not shop_id:
+            raise HTTPException(status_code=400, detail="shop_id is required")
+
+        # Validate sync_type
+        valid_sync_types = ["all", "users", "items", "feedback"]
+        if sync_type not in valid_sync_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"sync_type must be one of: {', '.join(valid_sync_types)}",
+            )
+
+        # Generate a unique job ID
+        job_id = f"gorse_sync_{shop_id}_{sync_type}_{int(now_utc().timestamp())}"
+
+        # Prepare event metadata
+        metadata = {
+            "trigger_source": "api_endpoint",
+            "timestamp": now_utc().isoformat(),
+        }
+
+        # Publish the Gorse sync event to Redis stream
+        event_id = await streams_manager.publish_gorse_sync_event(
+            job_id=job_id,
+            shop_id=shop_id,
+            sync_type=sync_type,
+            since_hours=since_hours,
+            metadata=metadata,
+        )
+
+        logger.info(
+            f"Triggered Gorse sync",
+            job_id=job_id,
+            shop_id=shop_id,
+            sync_type=sync_type,
+            since_hours=since_hours,
+            event_id=event_id,
+        )
+
+        return {
+            "message": "Gorse sync triggered",
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "sync_type": sync_type,
+            "since_hours": since_hours,
+            "event_id": event_id,
+            "status": "queued",
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to trigger Gorse sync: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gorse/sync/status/{shop_id}")
+async def get_gorse_sync_status(shop_id: str):
+    """Get Gorse sync status for a shop"""
+    try:
+        # Get the Gorse sync consumer from services
+        if "gorse_sync_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Gorse sync consumer not available"
+            )
+
+        consumer = services["gorse_sync_consumer"]
+
+        # Get active jobs for this shop
+        active_jobs = {
+            job_id: job_info
+            for job_id, job_info in consumer.active_sync_jobs.items()
+            if job_info.get("shop_id") == shop_id
+        }
+
+        return {
+            "shop_id": shop_id,
+            "consumer_status": consumer.status.value,
+            "active_jobs": len(active_jobs),
+            "jobs": active_jobs,
+            "timestamp": now_utc().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get Gorse sync status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gorse/sync/health")
+async def get_gorse_sync_health():
+    """Get Gorse sync consumer health status"""
+    try:
+        if "gorse_sync_consumer" not in services:
+            raise HTTPException(
+                status_code=500, detail="Gorse sync consumer not available"
+            )
+
+        health_status = await services["gorse_sync_consumer"].get_health_status()
+        return health_status
+
+    except Exception as e:
+        logger.error(f"Failed to get Gorse sync health status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
