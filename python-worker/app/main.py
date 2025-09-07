@@ -22,7 +22,6 @@ from app.domains.shopify.services import (
 )
 from app.domains.ml.services import (
     FeatureEngineeringService,
-    GorseMLService,
 )
 from app.domains.analytics.services import (
     BusinessMetricsService,
@@ -32,13 +31,11 @@ from app.domains.analytics.services import (
     RevenueAnalyticsService,
     HeuristicService,
 )
-from app.domains.ml.services.gorse_training_monitor import GorseTrainingMonitor
 
 # Consumer imports
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
-from app.consumers.ml_training_consumer import MLTrainingConsumer
 from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 
@@ -155,8 +152,6 @@ async def get_service(service_name: str):
         if service_name == "feature_engineering":
             logger.info("Using FeatureEngineeringService (refactored architecture)")
             services["feature_engineering"] = FeatureEngineeringService()
-        elif service_name == "gorse_ml":
-            services["gorse_ml"] = GorseMLService()
         elif service_name == "ml_pipeline":
             if "feature_engineering" not in services:
                 await get_service("feature_engineering")
@@ -174,18 +169,6 @@ async def get_service(service_name: str):
             services["revenue_analytics"] = RevenueAnalyticsService()
         elif service_name == "heuristic":
             services["heuristic"] = HeuristicService()
-        elif service_name == "gorse_training_monitor":
-            if "heuristic" not in services:
-                await get_service("heuristic")
-            services["gorse_training_monitor"] = GorseTrainingMonitor(
-                heuristic_service=services["heuristic"]
-            )
-        elif service_name == "ml_training_consumer":
-            if "ml_pipeline" not in services:
-                await get_service("ml_pipeline")
-            services["ml_training_consumer"] = MLTrainingConsumer(
-                ml_pipeline_service=services["ml_pipeline"]
-            )
         elif service_name == "analytics_consumer":
             # Load all analytics services
             for analytics_service in [

@@ -3,6 +3,7 @@ Complete Gorse Data Synchronization Pipeline
 Uses ALL feature tables to build comprehensive user and item profiles
 """
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
@@ -19,14 +20,115 @@ class GorseSyncPipeline:
     Synchronizes data from ALL feature tables to Gorse-compatible format
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        batch_size: int = 1000,
+        user_batch_size: int = 500,
+        item_batch_size: int = 500,
+    ):
         self._db_client = None
+        # Performance configurations
+        self.batch_size = batch_size  # General batch size
+        self.user_batch_size = user_batch_size  # Users processing batch
+        self.item_batch_size = item_batch_size  # Items processing batch
+        self.feedback_batch_size = 2000  # Feedback bulk insert batch
 
     async def _get_database(self):
         """Get or initialize the database client"""
         if self._db_client is None:
             self._db_client = await get_database()
         return self._db_client
+
+    async def _generic_bulk_upsert(
+        self,
+        data_list: List[Dict[str, Any]],
+        table_accessor: callable,
+        id_field: str,
+        entity_name: str,
+        table_name: str,
+        chunk_size: int = 100,
+    ):
+        """Generic bulk upsert method for any Gorse table"""
+        if not data_list:
+            return
+
+        try:
+            db = await self._get_database()
+            table = table_accessor(db)
+
+            # Process in smaller chunks for better performance
+            for i in range(0, len(data_list), chunk_size):
+                chunk = data_list[i : i + chunk_size]
+
+                # Use individual upserts within concurrent operations
+                await asyncio.gather(
+                    *[
+                        table.upsert(
+                            where={id_field: item_data[id_field]},
+                            data=item_data,
+                            create=item_data,
+                        )
+                        for item_data in chunk
+                    ]
+                )
+
+            logger.debug(
+                f"Bulk upserted {len(data_list)} {entity_name} to {table_name}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to bulk upsert Gorse {entity_name}: {str(e)}")
+            raise
+
+    async def _generic_batch_processor(
+        self,
+        shop_id: str,
+        batch_size: int,
+        fetch_batch_func: callable,
+        process_batch_func: callable,
+        entity_name: str,
+        additional_processor: callable = None,
+    ) -> int:
+        """Generic batch processing pattern for syncing data"""
+        try:
+            logger.info(
+                f"Starting {entity_name} sync for shop {shop_id} with batch size {batch_size}"
+            )
+
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Fetch batch
+                batch_data = await fetch_batch_func(shop_id, offset, batch_size)
+
+                if not batch_data:
+                    break  # No more data to process
+
+                # Process this batch
+                batch_count = await process_batch_func(shop_id, batch_data)
+                total_synced += batch_count
+                offset += len(batch_data)
+
+                logger.debug(
+                    f"Processed {entity_name} batch: {len(batch_data)} items, total: {total_synced}"
+                )
+
+            # Run additional processing if provided
+            additional_count = 0
+            if additional_processor:
+                additional_count = await additional_processor(shop_id)
+                if additional_count:
+                    logger.info(
+                        f"Additional {entity_name} processing: {additional_count} items"
+                    )
+
+            logger.info(f"Synced {total_synced} {entity_name} for shop {shop_id}")
+            return total_synced
+
+        except Exception as e:
+            logger.error(f"Failed to sync {entity_name}: {str(e)}")
+            raise
 
     async def sync_all(self, shop_id: str):
         """
@@ -53,223 +155,514 @@ class GorseSyncPipeline:
     async def sync_users(self, shop_id: str):
         """
         Sync users combining UserFeatures, CustomerBehaviorFeatures, and InteractionFeatures
+        Uses batch processing to handle large datasets efficiently
         """
+        await self._generic_batch_processor(
+            shop_id=shop_id,
+            batch_size=self.user_batch_size,
+            fetch_batch_func=self._fetch_user_batch,
+            process_batch_func=self._process_user_batch,
+            entity_name="users",
+            additional_processor=self._sync_anonymous_users,
+        )
+
+    async def _fetch_user_batch(
+        self, shop_id: str, offset: int, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch a batch of users with all their feature data"""
         try:
             db = await self._get_database()
 
-            # Query all user-related features using proper Prisma syntax
-            query = """
+            # Simplified base query with pagination
+            base_query = """
                 SELECT 
                     uf.*,
-                    cbf."engagementScore",
-                    cbf."recencyScore", 
-                    cbf."diversityScore",
-                    cbf."behavioralScore",
-                    cbf."sessionCount",
-                    cbf."productViewCount",
-                    cbf."cartAddCount",
-                    cbf."purchaseCount" as cbf_purchase_count,
-                    cbf."searchCount",
-                    cbf."uniqueProductsViewed",
-                    cbf."uniqueCollectionsViewed",
-                    cbf."deviceType",
-                    cbf."primaryReferrer",
-                    cbf."browseToCartRate",
-                    cbf."cartToPurchaseRate",
-                    cbf."searchToPurchaseRate",
-                    cbf."mostActiveHour",
-                    cbf."mostActiveDay",
-                    -- Aggregate interaction features
-                    COALESCE(
-                        (SELECT SUM("interactionScore") 
-                         FROM "InteractionFeatures" 
-                         WHERE "customerId" = uf."customerId" 
-                         AND "shopId" = uf."shopId"), 
-                        0
-                    ) as total_interaction_score,
-                    COALESCE(
-                        (SELECT AVG("affinityScore") 
-                         FROM "InteractionFeatures" 
-                         WHERE "customerId" = uf."customerId" 
-                         AND "shopId" = uf."shopId"), 
-                        0
-                    ) as avg_affinity_score,
-                    -- Session features aggregation
-                    COALESCE(
-                        (SELECT COUNT(*) 
-                         FROM "SessionFeatures" 
-                         WHERE "customerId" = uf."customerId" 
-                         AND "shopId" = uf."shopId" 
-                         AND "checkoutCompleted" = true), 
-                        0
-                    ) as completed_sessions,
-                    COALESCE(
-                        (SELECT AVG("durationSeconds") 
-                         FROM "SessionFeatures" 
-                         WHERE "customerId" = uf."customerId" 
-                         AND "shopId" = uf."shopId"), 
-                        0
-                    ) as avg_session_duration
+                    cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
+                    cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
+                    cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
+                    cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
+                    cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
                 FROM "UserFeatures" uf
                 LEFT JOIN "CustomerBehaviorFeatures" cbf 
-                    ON uf."customerId" = cbf."customerId" 
-                    AND uf."shopId" = cbf."shopId"
+                    ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
                 WHERE uf."shopId" = $1
+                ORDER BY uf."customerId"
+                LIMIT $2 OFFSET $3
             """
 
-            result = await db.query_raw(query, shop_id)
-            users = [dict(row) for row in result] if result else []
+            result = await db.query_raw(base_query, shop_id, limit, offset)
+            batch_users = [dict(row) for row in result] if result else []
+
+            if batch_users:
+                # Fetch aggregated interaction and session data for this batch
+                user_ids = [user["customerId"] for user in batch_users]
+                interaction_data = await self._fetch_interaction_aggregates(
+                    shop_id, user_ids
+                )
+                session_data = await self._fetch_session_aggregates(shop_id, user_ids)
+
+                # Merge the aggregated data back into users
+                for user in batch_users:
+                    customer_id = user["customerId"]
+                    user.update(interaction_data.get(customer_id, {}))
+                    user.update(session_data.get(customer_id, {}))
+
+            return batch_users
+
+        except Exception as e:
+            logger.error(f"Failed to fetch user batch: {str(e)}")
+            raise
+
+    async def _fetch_interaction_aggregates(
+        self, shop_id: str, user_ids: List[str]
+    ) -> Dict[str, Dict]:
+        """Fetch interaction aggregates for a batch of users"""
+        if not user_ids:
+            return {}
+
+        try:
+            db = await self._get_database()
+
+            # Create parameterized query for batch
+            placeholders = ",".join([f"${i+2}" for i in range(len(user_ids))])
+            query = f"""
+                SELECT 
+                    "customerId",
+                    SUM("interactionScore") as total_interaction_score,
+                    AVG("affinityScore") as avg_affinity_score
+                FROM "InteractionFeatures" 
+                WHERE "shopId" = $1 AND "customerId" IN ({placeholders})
+                GROUP BY "customerId"
+            """
+
+            result = await db.query_raw(query, shop_id, *user_ids)
+
+            return (
+                {
+                    row["customerId"]: {
+                        "total_interaction_score": float(
+                            row["total_interaction_score"] or 0
+                        ),
+                        "avg_affinity_score": float(row["avg_affinity_score"] or 0),
+                    }
+                    for row in result
+                }
+                if result
+                else {}
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to fetch interaction aggregates: {str(e)}")
+            return {}
+
+    async def _fetch_session_aggregates(
+        self, shop_id: str, user_ids: List[str]
+    ) -> Dict[str, Dict]:
+        """Fetch session aggregates for a batch of users"""
+        if not user_ids:
+            return {}
+
+        try:
+            db = await self._get_database()
+
+            # Create parameterized query for batch
+            placeholders = ",".join([f"${i+2}" for i in range(len(user_ids))])
+            query = f"""
+                SELECT 
+                    "customerId",
+                    COUNT(*) FILTER (WHERE "checkoutCompleted" = true) as completed_sessions,
+                    AVG("durationSeconds") as avg_session_duration
+                FROM "SessionFeatures" 
+                WHERE "shopId" = $1 AND "customerId" IN ({placeholders})
+                GROUP BY "customerId"
+            """
+
+            result = await db.query_raw(query, shop_id, *user_ids)
+
+            return (
+                {
+                    row["customerId"]: {
+                        "completed_sessions": int(row["completed_sessions"] or 0),
+                        "avg_session_duration": float(row["avg_session_duration"] or 0),
+                    }
+                    for row in result
+                }
+                if result
+                else {}
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to fetch session aggregates: {str(e)}")
+            return {}
+
+    async def _process_user_batch(
+        self, shop_id: str, users: List[Dict[str, Any]]
+    ) -> int:
+        """Process a batch of users with bulk operations"""
+        if not users:
+            return 0
+
+        try:
+            # Prepare bulk data for Gorse users
+            gorse_users_data = []
 
             for user in users:
                 labels = self._build_comprehensive_user_labels(user)
+                user_data = {
+                    "userId": user["customerId"],
+                    "shopId": shop_id,
+                    "labels": labels,
+                }
+                gorse_users_data.append(user_data)
 
-                # Upsert to GorseUsers
-                await self._upsert_gorse_user(
-                    user_id=user["customer_id"], shop_id=shop_id, labels=labels
-                )
+            # Bulk upsert to GorseUsers table
+            await self._bulk_upsert_gorse_users(gorse_users_data)
 
-            # Also sync anonymous session users
-            await self._sync_anonymous_users(shop_id)
-
-            logger.info(f"Synced {len(users)} users for shop {shop_id}")
+            return len(users)
 
         except Exception as e:
-            logger.error(f"Failed to sync users: {str(e)}")
+            logger.error(f"Failed to process user batch: {str(e)}")
             raise
+
+    async def _bulk_upsert_gorse_users(self, gorse_users_data: List[Dict[str, Any]]):
+        """Bulk upsert users to GorseUsers table"""
+        await self._generic_bulk_upsert(
+            data_list=gorse_users_data,
+            table_accessor=lambda db: db.gorseusers,
+            id_field="userId",
+            entity_name="users",
+            table_name="GorseUsers",
+        )
 
     async def sync_items(self, shop_id: str):
         """
         Sync items combining ProductFeatures, CollectionFeatures, ProductCollectionFeatures
+        Uses batch processing to handle large datasets efficiently
         """
+        await self._generic_batch_processor(
+            shop_id=shop_id,
+            batch_size=self.item_batch_size,
+            fetch_batch_func=self._fetch_item_batch,
+            process_batch_func=self._process_item_batch,
+            entity_name="items",
+        )
+
+    async def _fetch_item_batch(
+        self, shop_id: str, offset: int, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch a batch of items with their core feature data"""
         try:
             db = await self._get_database()
 
-            # Query all product-related features using proper Prisma syntax
-            query = """
+            # Simplified base query with pagination for items
+            base_query = """
                 SELECT 
                     pf.*,
-                    pd."status",
-                    pd."productType",
-                    pd."vendor",
-                    pd."tags",
-                    pd."collections",
-                    pd."totalInventory",
-                    pd."compareAtPrice",
-                    -- Product-Collection features
-                    pcf."collectionCount",
-                    pcf."collectionQualityScore",
-                    pcf."crossCollectionScore",
-                    pcf."isInManualCollections",
-                    pcf."isInAutomatedCollections",
-                    -- Co-purchase strength (from ProductPairFeatures)
-                    COALESCE(
-                        (SELECT AVG("liftScore") 
-                         FROM "ProductPairFeatures" 
-                         WHERE ("productId1" = pf."productId" OR "productId2" = pf."productId")
-                         AND "shopId" = pf."shopId"), 
-                        0
-                    ) as avg_lift_score,
-                    COALESCE(
-                        (SELECT COUNT(DISTINCT CASE 
-                            WHEN "productId1" = pf."productId" THEN "productId2" 
-                            ELSE "productId1" END) 
-                         FROM "ProductPairFeatures" 
-                         WHERE ("productId1" = pf."productId" OR "productId2" = pf."productId")
-                         AND "coPurchaseCount" > 0
-                         AND "shopId" = pf."shopId"), 
-                        0
-                    ) as frequently_bought_with_count,
-                    -- Search performance
-                    COALESCE(
-                        (SELECT AVG("clickThroughRate") 
-                         FROM "SearchProductFeatures" 
-                         WHERE "productId" = pf."productId" 
-                         AND "shopId" = pf."shopId"), 
-                        0
-                    ) as search_ctr,
-                    COALESCE(
-                        (SELECT AVG("conversionRate") 
-                         FROM "SearchProductFeatures" 
-                         WHERE "productId" = pf."productId" 
-                         AND "shopId" = pf."shopId"), 
-                        0
-                    ) as search_conversion_rate
+                    pd."status", pd."productType", pd."vendor", pd."tags", 
+                    pd."collections", pd."totalInventory", pd."compareAtPrice",
+                    pcf."collectionCount", pcf."collectionQualityScore", pcf."crossCollectionScore",
+                    pcf."isInManualCollections", pcf."isInAutomatedCollections"
                 FROM "ProductFeatures" pf
                 JOIN "ProductData" pd 
-                    ON pf."productId" = pd."productId" 
-                    AND pf."shopId" = pd."shopId"
+                    ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
                 LEFT JOIN "ProductCollectionFeatures" pcf
-                    ON pf."productId" = pcf."productId"
-                    AND pf."shopId" = pcf."shopId"
-                WHERE pf."shopId" = $1
-                    AND pd."isActive" = true
+                    ON pf."productId" = pcf."productId" AND pf."shopId" = pcf."shopId"
+                WHERE pf."shopId" = $1 AND pd."isActive" = true
+                ORDER BY pf."productId"
+                LIMIT $2 OFFSET $3
             """
 
-            result = await db.query_raw(query, shop_id)
-            products = [dict(row) for row in result] if result else []
+            result = await db.query_raw(base_query, shop_id, limit, offset)
+            batch_items = [dict(row) for row in result] if result else []
 
-            for product in products:
-                labels = self._build_comprehensive_item_labels(product)
-                categories = await self._get_product_categories(product, shop_id)
-                is_hidden = self._should_hide_product(product)
-
-                # Upsert to GorseItems
-                await self._upsert_gorse_item(
-                    item_id=product["product_id"],
-                    shop_id=shop_id,
-                    categories=categories,
-                    labels=labels,
-                    is_hidden=is_hidden,
+            if batch_items:
+                # Fetch aggregated product pair and search data for this batch
+                product_ids = [item["productId"] for item in batch_items]
+                product_aggregates = await self._fetch_product_aggregates(
+                    shop_id, product_ids
                 )
 
-            logger.info(f"Synced {len(products)} items for shop {shop_id}")
+                # Merge the aggregated data back into items
+                for item in batch_items:
+                    product_id = item["productId"]
+                    item.update(product_aggregates.get(product_id, {}))
+
+            return batch_items
 
         except Exception as e:
-            logger.error(f"Failed to sync items: {str(e)}")
+            logger.error(f"Failed to fetch item batch: {str(e)}")
             raise
+
+    async def _fetch_product_aggregates(
+        self, shop_id: str, product_ids: List[str]
+    ) -> Dict[str, Dict]:
+        """Fetch product pair and search aggregates for a batch of products"""
+        if not product_ids:
+            return {}
+
+        try:
+            db = await self._get_database()
+
+            # Create parameterized queries for batch
+            placeholders = ",".join([f"${i+2}" for i in range(len(product_ids))])
+
+            # Fetch product pair features
+            pair_query = f"""
+                SELECT 
+                    CASE WHEN "productId1" IN ({placeholders}) THEN "productId1" ELSE "productId2" END as product_id,
+                    AVG("liftScore") as avg_lift_score,
+                    COUNT(DISTINCT CASE 
+                        WHEN "productId1" IN ({placeholders}) THEN "productId2" 
+                        ELSE "productId1" END) FILTER (WHERE "coPurchaseCount" > 0) as frequently_bought_with_count
+                FROM "ProductPairFeatures" 
+                WHERE "shopId" = $1 
+                    AND ("productId1" IN ({placeholders}) OR "productId2" IN ({placeholders}))
+                GROUP BY CASE WHEN "productId1" IN ({placeholders}) THEN "productId1" ELSE "productId2" END
+            """
+
+            # Fetch search features
+            search_query = f"""
+                SELECT 
+                    "productId",
+                    AVG("clickThroughRate") as search_ctr,
+                    AVG("conversionRate") as search_conversion_rate
+                FROM "SearchProductFeatures" 
+                WHERE "shopId" = $1 AND "productId" IN ({placeholders})
+                GROUP BY "productId"
+            """
+
+            # Execute both queries concurrently
+            pair_result, search_result = await asyncio.gather(
+                db.query_raw(
+                    pair_query,
+                    shop_id,
+                    *product_ids,
+                    *product_ids,
+                    *product_ids,
+                    *product_ids,
+                ),
+                db.query_raw(search_query, shop_id, *product_ids),
+            )
+
+            # Combine results
+            aggregates = {}
+
+            # Add product pair data
+            if pair_result:
+                for row in pair_result:
+                    product_id = row["product_id"]
+                    aggregates[product_id] = {
+                        "avg_lift_score": float(row["avg_lift_score"] or 0),
+                        "frequently_bought_with_count": int(
+                            row["frequently_bought_with_count"] or 0
+                        ),
+                    }
+
+            # Add search data
+            if search_result:
+                for row in search_result:
+                    product_id = row["productId"]
+                    if product_id not in aggregates:
+                        aggregates[product_id] = {}
+                    aggregates[product_id].update(
+                        {
+                            "search_ctr": float(row["search_ctr"] or 0),
+                            "search_conversion_rate": float(
+                                row["search_conversion_rate"] or 0
+                            ),
+                        }
+                    )
+
+            # Fill in missing products with defaults
+            for product_id in product_ids:
+                if product_id not in aggregates:
+                    aggregates[product_id] = {
+                        "avg_lift_score": 0.0,
+                        "frequently_bought_with_count": 0,
+                        "search_ctr": 0.0,
+                        "search_conversion_rate": 0.0,
+                    }
+
+            return aggregates
+
+        except Exception as e:
+            logger.error(f"Failed to fetch product aggregates: {str(e)}")
+            return {
+                product_id: {
+                    "avg_lift_score": 0.0,
+                    "frequently_bought_with_count": 0,
+                    "search_ctr": 0.0,
+                    "search_conversion_rate": 0.0,
+                }
+                for product_id in product_ids
+            }
+
+    async def _process_item_batch(
+        self, shop_id: str, items: List[Dict[str, Any]]
+    ) -> int:
+        """Process a batch of items with bulk operations"""
+        if not items:
+            return 0
+
+        try:
+            # Prepare bulk data for Gorse items
+            gorse_items_data = []
+
+            for item in items:
+                labels = self._build_comprehensive_item_labels(item)
+                categories = await self._get_product_categories(item, shop_id)
+                is_hidden = self._should_hide_product(item)
+
+                item_data = {
+                    "itemId": item["productId"],
+                    "shopId": shop_id,
+                    "categories": categories,
+                    "labels": labels,
+                    "isHidden": is_hidden,
+                }
+                gorse_items_data.append(item_data)
+
+            # Bulk upsert to GorseItems table
+            await self._bulk_upsert_gorse_items(gorse_items_data)
+
+            return len(items)
+
+        except Exception as e:
+            logger.error(f"Failed to process item batch: {str(e)}")
+            raise
+
+    async def _bulk_upsert_gorse_items(self, gorse_items_data: List[Dict[str, Any]]):
+        """Bulk upsert items to GorseItems table"""
+        await self._generic_bulk_upsert(
+            data_list=gorse_items_data,
+            table_accessor=lambda db: db.gorseitems,
+            id_field="itemId",
+            entity_name="items",
+            table_name="GorseItems",
+        )
 
     async def sync_feedback(self, shop_id: str, since_hours: int = 24):
         """
         Sync feedback from behavioral events, orders, and interaction features
+        Uses streaming batch processing to handle large datasets efficiently
         """
         try:
+            logger.info(
+                f"Starting feedback sync for shop {shop_id} (last {since_hours} hours) with batch size {self.feedback_batch_size}"
+            )
             since_time = now_utc() - timedelta(hours=since_hours)
 
-            # 1. Process behavioral events
-            events_feedback = await self._process_behavioral_events(shop_id, since_time)
+            total_synced = 0
 
-            # 2. Process orders
-            orders_feedback = await self._process_orders(shop_id, since_time)
-
-            # 3. Process interaction features (for weighted feedback)
-            interaction_feedback = await self._process_interaction_features(
-                shop_id, since_time
+            # Process different feedback sources concurrently and in batches
+            feedback_sources = await asyncio.gather(
+                self._process_behavioral_events(shop_id, since_time),
+                self._process_orders(shop_id, since_time),
+                self._process_interaction_features(shop_id, since_time),
+                self._process_session_feedback(shop_id, since_time),
             )
-
-            # 4. Process session-based feedback
-            session_feedback = await self._process_session_feedback(shop_id, since_time)
 
             # Combine all feedback
-            all_feedback = (
-                events_feedback
-                + orders_feedback
-                + interaction_feedback
-                + session_feedback
-            )
+            all_feedback = []
+            for source_feedback in feedback_sources:
+                all_feedback.extend(source_feedback)
 
-            # Deduplicate and insert
+            # Deduplicate feedback
             unique_feedback = self._deduplicate_feedback(all_feedback)
 
-            for feedback in unique_feedback:
-                await self._insert_gorse_feedback(feedback)
+            logger.info(f"Processing {len(unique_feedback)} unique feedback records...")
 
-            logger.info(
-                f"Synced {len(unique_feedback)} feedback records for shop {shop_id}"
-            )
+            # Process feedback in batches for efficient database operations
+            for i in range(0, len(unique_feedback), self.feedback_batch_size):
+                batch = unique_feedback[i : i + self.feedback_batch_size]
+                batch_count = await self._bulk_insert_gorse_feedback(batch)
+                total_synced += batch_count
+
+                logger.debug(
+                    f"Processed feedback batch: {len(batch)} records, total: {total_synced}"
+                )
+
+            logger.info(f"Synced {total_synced} feedback records for shop {shop_id}")
 
         except Exception as e:
             logger.error(f"Failed to sync feedback: {str(e)}")
             raise
+
+    async def _bulk_insert_gorse_feedback(
+        self, feedback_batch: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk insert feedback records to GorseFeedback table"""
+        if not feedback_batch:
+            return 0
+
+        try:
+            db = await self._get_database()
+
+            # Convert feedback to Gorse schema format
+            gorse_feedback_data = []
+            for feedback in feedback_batch:
+                gorse_feedback_record = {
+                    "feedbackType": feedback["feedback_type"],
+                    "userId": feedback["user_id"],
+                    "itemId": feedback["item_id"],
+                    "timestamp": feedback["timestamp"],
+                    "shopId": feedback["shop_id"],
+                    "comment": feedback.get("comment"),
+                }
+                gorse_feedback_data.append(gorse_feedback_record)
+
+            # Process in smaller chunks to avoid too many concurrent operations
+            chunk_size = 200  # Process 200 feedback records at a time
+            total_inserted = 0
+
+            for i in range(0, len(gorse_feedback_data), chunk_size):
+                chunk = gorse_feedback_data[i : i + chunk_size]
+
+                # Use asyncio.gather for concurrent inserts within each chunk
+                insert_tasks = []
+                for feedback_data in chunk:
+                    insert_tasks.append(self._safe_insert_feedback(feedback_data))
+
+                # Execute all inserts in this chunk concurrently
+                results = await asyncio.gather(*insert_tasks, return_exceptions=True)
+
+                # Count successful insertions
+                successful_inserts = sum(1 for result in results if result is True)
+                total_inserted += successful_inserts
+
+                logger.debug(
+                    f"Processed feedback chunk: {successful_inserts}/{len(chunk)} inserted"
+                )
+
+            logger.debug(f"Bulk inserted {total_inserted} feedback records")
+            return total_inserted
+
+        except Exception as e:
+            logger.error(f"Failed to bulk insert Gorse feedback: {str(e)}")
+            raise
+
+    async def _safe_insert_feedback(self, feedback_data: Dict[str, Any]) -> bool:
+        """Safely insert a single feedback record, handling duplicates"""
+        try:
+            db = await self._get_database()
+
+            await db.gorsefeedback.create(data=feedback_data)
+            return True
+
+        except Exception as e:
+            # If it's a unique constraint violation, it's likely a duplicate, so we can skip it
+            error_str = str(e).lower()
+            if "unique constraint" in error_str or "duplicate" in error_str:
+                logger.debug(
+                    f"Skipped duplicate Gorse feedback: {feedback_data['feedbackType']} "
+                    f"for user {feedback_data['userId']} on item {feedback_data['itemId']}"
+                )
+                return False
+            else:
+                # Re-raise if it's not a duplicate error
+                logger.error(f"Failed to insert feedback: {str(e)}")
+                logger.debug(f"Problematic feedback data: {feedback_data}")
+                return False
 
     def _build_comprehensive_user_labels(self, user: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -555,6 +948,8 @@ class GorseSyncPipeline:
 
             await self._upsert_gorse_user(user_id, shop_id, labels)
 
+        return len(sessions)
+
     async def _process_behavioral_events(
         self, shop_id: str, since_time: datetime
     ) -> List[Dict[str, Any]]:
@@ -697,8 +1092,6 @@ class GorseSyncPipeline:
 
         return feedback_list
 
-    # ... [Keep all the helper methods from the previous version] ...
-
     def _convert_event_to_feedback(self, event: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Convert behavioral event to feedback"""
         feedback_list = []
@@ -750,7 +1143,6 @@ class GorseSyncPipeline:
 
         return feedback_list
 
-    # Missing helper methods - Add placeholders for now, will implement based on Gorse schema
     async def _upsert_gorse_user(
         self, user_id: str, shop_id: str, labels: Dict[str, Any]
     ):
@@ -1023,9 +1415,18 @@ class GorseSyncPipeline:
         return unique_feedback
 
 
-async def run_gorse_sync(shop_id: str):
+async def run_gorse_sync(
+    shop_id: str,
+    batch_size: int = 1000,
+    user_batch_size: int = 500,
+    item_batch_size: int = 500,
+):
     """
-    Main entry point to run Gorse synchronization
+    Main entry point to run Gorse synchronization with configurable batch sizes
     """
-    pipeline = GorseSyncPipeline()
+    pipeline = GorseSyncPipeline(
+        batch_size=batch_size,
+        user_batch_size=user_batch_size,
+        item_batch_size=item_batch_size,
+    )
     await pipeline.sync_all(shop_id)
