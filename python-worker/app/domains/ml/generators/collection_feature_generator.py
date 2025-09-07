@@ -29,7 +29,6 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 - products: List of ProductData for this collection
                 - behavioral_events: List of BehavioralEvents
                 - order_data: List of OrderData
-                - shop_analytics: ShopAnalytics data
 
         Returns:
             Dictionary of generated features matching CollectionFeatures schema
@@ -44,7 +43,6 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             products = context.get("products", [])
             behavioral_events = context.get("behavioral_events", [])
             order_data = context.get("order_data", [])
-            shop_analytics = context.get("shop_analytics", {})
 
             # Basic collection features
             features.update(self._compute_basic_collection_features(collection, shop))
@@ -61,9 +59,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             # Performance metrics from orders
             if order_data:
                 features.update(
-                    self._compute_performance_metrics(
-                        collection, order_data, shop_analytics
-                    )
+                    self._compute_performance_metrics(collection, order_data)
                 )
 
             # SEO and image scores
@@ -214,7 +210,6 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         self,
         collection: Dict[str, Any],
         order_data: List[Dict[str, Any]],
-        shop_analytics: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Compute performance metrics from order data"""
         collection_id = collection.get("collectionId", "")
@@ -260,8 +255,10 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         # This is a placeholder - actual calculation would need view data
         conversion_rate = None
 
-        # Calculate revenue contribution
-        total_shop_revenue = shop_analytics.get("totalRevenue", 0)
+        # Calculate revenue contribution by computing total shop revenue from all orders
+        total_shop_revenue = sum(
+            float(order.get("totalPrice", 0)) for order in order_data
+        )
         revenue_contribution = None
         if total_shop_revenue > 0:
             revenue_contribution = (collection_revenue / total_shop_revenue) * 100

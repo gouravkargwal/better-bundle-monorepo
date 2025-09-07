@@ -20,10 +20,8 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def bulk_upsert_customer_features(
-        self, user_features_batch: List[tuple], behavior_features_batch: List[tuple]
-    ) -> int:
-        """Bulk upsert customer features"""
+    async def bulk_upsert_user_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert user features"""
         pass
 
     @abstractmethod
@@ -37,18 +35,25 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def bulk_upsert_shop_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert shop features"""
-        pass
-
-    @abstractmethod
-    async def bulk_upsert_order_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert order features"""
-        pass
-
-    @abstractmethod
     async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
         """Bulk upsert session features"""
+        pass
+
+    @abstractmethod
+    async def bulk_upsert_customer_behavior_features(
+        self, batch_data: List[tuple]
+    ) -> int:
+        """Bulk upsert customer behavior features"""
+        pass
+
+    @abstractmethod
+    async def bulk_upsert_product_pair_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert product pair features"""
+        pass
+
+    @abstractmethod
+    async def bulk_upsert_search_product_features(self, batch_data: List[tuple]) -> int:
+        """Bulk upsert search product features"""
         pass
 
     @abstractmethod
@@ -87,88 +92,27 @@ class IFeatureRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_entity_count(self, shop_id: str, entity_table: str) -> int:
-        """Get the total count of an entity for a shop"""
-        pass
-
-    @abstractmethod
-    async def get_orders_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of orders created since timestamp"""
-        pass
-
-    @abstractmethod
-    async def get_products_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of products updated since timestamp"""
-        pass
-
-    @abstractmethod
-    async def get_customers_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of customers updated since timestamp"""
-        pass
-
-    @abstractmethod
-    async def get_collections_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of collections updated since timestamp"""
-        pass
-
-    @abstractmethod
-    async def get_orders_since(
-        self, shop_id: str, since_timestamp: str
-    ) -> List[Dict[str, Any]]:
-        """Get orders created since timestamp"""
-        pass
-
-    @abstractmethod
-    async def get_shop_last_computation_time(self, shop_id: str) -> str:
+    async def get_last_feature_computation_time(self, shop_id: str) -> str:
         """Get the last feature computation timestamp for a shop"""
         pass
 
     @abstractmethod
-    async def update_shop_last_computation_time(self, shop_id: str, timestamp) -> None:
+    async def update_last_feature_computation_time(
+        self, shop_id: str, timestamp
+    ) -> None:
         """Update the last feature computation timestamp for a shop"""
         pass
 
     @abstractmethod
-    async def get_affected_entity_ids_from_orders(
-        self, shop_id: str, since_timestamp: str
-    ) -> Dict[str, List[str]]:
-        """Extract affected product and customer IDs from new orders since timestamp"""
+    async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
+        """Get shop data for processing"""
         pass
 
     @abstractmethod
-    async def get_products_by_ids(
-        self, shop_id: str, product_ids: List[str]
+    async def get_behavioral_events_batch(
+        self, shop_id: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get products by their IDs for processing"""
-        pass
-
-    @abstractmethod
-    async def get_customers_by_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get customers by their IDs for processing"""
-        pass
-
-    @abstractmethod
-    async def get_orders_for_customer_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get all orders for a batch of customer IDs"""
-        pass
-
-    @abstractmethod
-    async def get_events_for_customer_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get all events for a batch of customer IDs"""
+        """Get a batch of behavioral events for a shop"""
         pass
 
 
@@ -184,544 +128,255 @@ class FeatureRepository(IFeatureRepository):
             self._db_client = await get_database()
         return self._db_client
 
-    async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert product features using Prisma native methods"""
+    async def _bulk_upsert_generic(
+        self,
+        table_name: str,
+        batch_data: List[tuple],
+        expected_length: int,
+        field_names: List[str],
+        unique_key_fields: List[str],
+    ) -> int:
+        """Generic bulk upsert method to eliminate duplication across feature types"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Convert tuple data to Prisma format
+            # Prepare data for Prisma
             create_data = []
             for data in batch_data:
-                if len(data) != 11:
+                if len(data) != expected_length:
                     logger.error(
-                        f"Invalid batch data length: {len(data)}, expected 11. Data: {data}"
+                        f"Invalid batch data length for {table_name}: {len(data)}, expected {expected_length}. Data: {data}"
                     )
                     continue
 
-                # Convert tuple to dict format expected by Prisma
+                # Map tuple to dict using field_names
                 feature_data = {
-                    "shopId": data[0],
-                    "productId": data[1],
-                    "popularity": data[2],
-                    "priceTier": data[3],
-                    "category": data[4],
-                    "variantComplexity": data[5],
-                    "imageRichness": data[6],
-                    "tagDiversity": data[7],
-                    "categoryEncoded": data[8],
-                    "vendorScore": data[9],
-                    # lastComputedAt will be set automatically by the database
+                    field_names[i]: data[i] for i in range(len(field_names))
                 }
+
                 create_data.append(feature_data)
 
             if not create_data:
                 return 0
 
+            # Get the Prisma model for the table
+            model = getattr(db, table_name.lower() + "features", None)
+            if not model:
+                raise ValueError(f"No model found for table: {table_name}")
+
             # Use Prisma's create_many with skip_duplicates for bulk insert
             try:
-                await db.productfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
+                await model.create_many(data=create_data, skip_duplicates=True)
                 return len(create_data)
             except Exception as create_error:
                 # Fallback to individual upserts if batch insert fails
                 logger.warning(
-                    f"Batch insert failed, falling back to individual upserts: {str(create_error)}"
+                    f"{table_name} batch insert failed, falling back to individual upserts: {str(create_error)}"
                 )
 
                 success_count = 0
                 for feature_data in create_data:
                     try:
-                        await db.productfeatures.upsert(
-                            where={
-                                "shopId_productId": {
-                                    "shopId": feature_data["shopId"],
-                                    "productId": feature_data["productId"],
-                                }
-                            },
+                        # Build unique key dynamically
+                        unique_key = {
+                            "_".join(unique_key_fields): {
+                                field: feature_data[field]
+                                for field in unique_key_fields
+                            }
+                        }
+                        await model.upsert(
+                            where=unique_key,
                             data=feature_data,
                             update=feature_data,
                         )
                         success_count += 1
                     except Exception as upsert_error:
                         logger.error(
-                            f"Failed to upsert product feature {feature_data.get('productId')}: {str(upsert_error)}"
+                            f"Failed to upsert {table_name} feature: {str(upsert_error)}"
                         )
                         continue
 
                 return success_count
 
         except Exception as e:
-            logger.error(f"Failed to bulk upsert product features: {str(e)}")
+            logger.error(f"Failed to bulk upsert {table_name} features: {str(e)}")
             return 0
 
-    async def bulk_upsert_customer_features(
-        self, user_features_batch: List[tuple], behavior_features_batch: List[tuple]
-    ) -> int:
-        """Bulk upsert customer features using Prisma native methods"""
-        try:
-            total_saved = 0
-            db = await self._get_database()
+    async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
+        field_names = [
+            "shopId",
+            "productId",
+            "popularity",
+            "priceTier",
+            "category",
+            "variantComplexity",
+            "imageRichness",
+            "tagDiversity",
+            "categoryEncoded",
+            "vendorScore",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="Product",
+            batch_data=batch_data,
+            expected_length=11,  # 10 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "productId"],
+        )
 
-            # Bulk upsert user features
-            if user_features_batch:
-                user_create_data = []
-                for data in user_features_batch:
-                    if len(data) != 8:  # 7 fields + timestamp
-                        logger.error(
-                            f"Invalid user features batch data length: {len(data)}, expected 8"
-                        )
-                        continue
-
-                    user_data = {
-                        "shopId": data[0],
-                        "customerId": data[1],
-                        "totalPurchases": data[2],
-                        "totalSpent": data[3],
-                        "recencyDays": data[4],
-                        "avgPurchaseIntervalDays": data[5],
-                        "preferredCategory": data[6],
-                    }
-                    user_create_data.append(user_data)
-
-                if user_create_data:
-                    try:
-                        await db.userfeatures.create_many(
-                            data=user_create_data, skip_duplicates=True
-                        )
-                        total_saved += len(user_create_data)
-                    except Exception as create_error:
-                        logger.warning(
-                            f"User features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                        )
-
-                        for user_data in user_create_data:
-                            try:
-                                await db.userfeatures.upsert(
-                                    where={
-                                        "shopId_customerId": {
-                                            "shopId": user_data["shopId"],
-                                            "customerId": user_data["customerId"],
-                                        }
-                                    },
-                                    data=user_data,
-                                    update=user_data,
-                                )
-                                total_saved += 1
-                            except Exception as upsert_error:
-                                logger.error(
-                                    f"Failed to upsert user feature {user_data.get('customerId')}: {str(upsert_error)}"
-                                )
-                                continue
-
-            # Bulk upsert behavior features
-            if behavior_features_batch:
-                behavior_create_data = []
-                for data in behavior_features_batch:
-                    if len(data) != 12:  # 11 fields + timestamp
-                        logger.error(
-                            f"Invalid behavior features batch data length: {len(data)}, expected 12"
-                        )
-                        continue
-
-                    behavior_data = {
-                        "shopId": data[0],
-                        "customerId": data[1],
-                        "eventDiversity": data[2],
-                        "eventFrequency": data[3],
-                        "daysSinceFirstEvent": data[4],
-                        "daysSinceLastEvent": data[5],
-                        "purchaseFrequency": data[6],
-                        "engagementScore": data[7],
-                        "recencyScore": data[8],
-                        "diversityScore": data[9],
-                        "behavioralScore": data[10],
-                    }
-                    behavior_create_data.append(behavior_data)
-
-                if behavior_create_data:
-                    try:
-                        await db.customerbehaviorfeatures.create_many(
-                            data=behavior_create_data, skip_duplicates=True
-                        )
-                        total_saved += len(behavior_create_data)
-                    except Exception as create_error:
-                        logger.warning(
-                            f"Behavior features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                        )
-
-                        for behavior_data in behavior_create_data:
-                            try:
-                                await db.customerbehaviorfeatures.upsert(
-                                    where={
-                                        "shopId_customerId": {
-                                            "shopId": behavior_data["shopId"],
-                                            "customerId": behavior_data["customerId"],
-                                        }
-                                    },
-                                    data=behavior_data,
-                                    update=behavior_data,
-                                )
-                                total_saved += 1
-                            except Exception as upsert_error:
-                                logger.error(
-                                    f"Failed to upsert behavior feature {behavior_data.get('customerId')}: {str(upsert_error)}"
-                                )
-                                continue
-
-            return total_saved
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert customer features: {str(e)}")
-            return 0
+    async def bulk_upsert_user_features(self, batch_data: List[tuple]) -> int:
+        field_names = [
+            "shopId",
+            "customerId",
+            "totalPurchases",
+            "totalSpent",
+            "recencyDays",
+            "avgPurchaseIntervalDays",
+            "preferredCategory",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="UserFeatures",
+            batch_data=batch_data,
+            expected_length=8,  # 7 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "customerId"],
+        )
 
     async def bulk_upsert_collection_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert collection features using Prisma native methods"""
-        try:
-            if not batch_data:
-                return 0
-
-            db = await self._get_database()
-
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != 8:  # 7 fields + timestamp
-                    logger.error(
-                        f"Invalid collection batch data length: {len(data)}, expected 8. Data: {data}"
-                    )
-                    continue
-
-                create_data.append(
-                    {
-                        "shopId": data[0],
-                        "collectionId": data[1],
-                        "productCount": data[2],
-                        "isAutomated": data[3],
-                        "performanceScore": data[4],
-                        "seoScore": data[5],
-                        "imageScore": data[6],
-                    }
-                )
-
-            if not create_data:
-                return 0
-
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await db.collectionfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"Collection features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        await db.collectionfeatures.upsert(
-                            where={
-                                "shopId_collectionId": {
-                                    "shopId": feature_data["shopId"],
-                                    "collectionId": feature_data["collectionId"],
-                                }
-                            },
-                            update=feature_data,
-                            create=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert collection feature {feature_data.get('collectionId')}: {str(upsert_error)}"
-                        )
-                        continue
-
-                return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert collection features: {str(e)}")
-            return 0
+        field_names = [
+            "shopId",
+            "collectionId",
+            "productCount",
+            "isAutomated",
+            "performanceScore",
+            "seoScore",
+            "imageScore",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="CollectionFeatures",
+            batch_data=batch_data,
+            expected_length=8,  # 7 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "collectionId"],
+        )
 
     async def bulk_upsert_interaction_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert interaction features using Prisma native methods"""
-        try:
-            if not batch_data:
-                return 0
-
-            db = await self._get_database()
-
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != 6:  # 5 fields + timestamp
-                    logger.error(
-                        f"Invalid interaction batch data length: {len(data)}, expected 6. Data: {data}"
-                    )
-                    continue
-
-                create_data.append(
-                    {
-                        "shopId": data[0],
-                        "customerId": data[1],
-                        "productId": data[2],
-                        "purchaseCount": data[3],
-                        "lastPurchaseDate": data[4],
-                        "timeDecayedWeight": data[5],
-                    }
-                )
-
-            if not create_data:
-                return 0
-
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await db.interactionfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"Interaction features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        await db.interactionfeatures.upsert(
-                            where={
-                                "shopId_customerId_productId": {
-                                    "shopId": feature_data["shopId"],
-                                    "customerId": feature_data["customerId"],
-                                    "productId": feature_data["productId"],
-                                }
-                            },
-                            update=feature_data,
-                            create=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert interaction feature {feature_data.get('customerId')}-{feature_data.get('productId')}: {str(upsert_error)}"
-                        )
-                        continue
-
-                return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert interaction features: {str(e)}")
-            return 0
-
-    async def bulk_upsert_shop_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert shop features using Prisma native methods"""
-        try:
-            if not batch_data:
-                return 0
-
-            db = await self._get_database()
-
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != 8:  # 7 fields + timestamp
-                    logger.error(
-                        f"Invalid shop batch data length: {len(data)}, expected 8. Data: {data}"
-                    )
-                    continue
-
-                create_data.append(
-                    {
-                        "shopId": data[0],
-                        "totalProducts": data[1],
-                        "totalCustomers": data[2],
-                        "totalOrders": data[3],
-                        "avgOrderValue": data[4],
-                        "totalRevenue": data[5],
-                        "conversionRate": data[6],
-                    }
-                )
-
-            if not create_data:
-                return 0
-
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await db.shopfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"Shop features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        await db.shopfeatures.upsert(
-                            where={"shopId": feature_data["shopId"]},
-                            update=feature_data,
-                            create=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert shop feature {feature_data.get('shopId')}: {str(upsert_error)}"
-                        )
-                        continue
-
-                return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert shop features: {str(e)}")
-            return 0
-
-    async def bulk_upsert_order_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert order features using Prisma native methods"""
-        try:
-            if not batch_data:
-                return 0
-
-            db = await self._get_database()
-
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != 9:  # 8 fields + timestamp
-                    logger.error(
-                        f"Invalid order batch data length: {len(data)}, expected 9. Data: {data}"
-                    )
-                    continue
-
-                create_data.append(
-                    {
-                        "shopId": data[0],
-                        "orderId": data[1],
-                        "customerId": data[2],
-                        "totalAmount": data[3],
-                        "itemCount": data[4],
-                        "discountAmount": data[5],
-                        "shippingCost": data[6],
-                        "taxAmount": data[7],
-                    }
-                )
-
-            if not create_data:
-                return 0
-
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await db.orderfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"Order features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        await db.orderfeatures.upsert(
-                            where={
-                                "shopId_orderId": {
-                                    "shopId": feature_data["shopId"],
-                                    "orderId": feature_data["orderId"],
-                                }
-                            },
-                            update=feature_data,
-                            create=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert order feature {feature_data.get('orderId')}: {str(upsert_error)}"
-                        )
-                        continue
-
-                return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert order features: {str(e)}")
-            return 0
+        field_names = [
+            "shopId",
+            "customerId",
+            "productId",
+            "purchaseCount",
+            "lastPurchaseDate",
+            "timeDecayedWeight",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="InteractionFeatures",
+            batch_data=batch_data,
+            expected_length=7,  # 6 fields + implied timestamp (updated based on tuple length)
+            field_names=field_names,
+            unique_key_fields=["shopId", "customerId", "productId"],
+        )
 
     async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
-        """Bulk upsert session features using Prisma native methods"""
-        try:
-            if not batch_data:
-                return 0
+        field_names = [
+            "shopId",
+            "sessionId",
+            "customerId",
+            "duration",
+            "pageViews",
+            "uniqueProducts",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="SessionFeatures",
+            batch_data=batch_data,
+            expected_length=7,  # 6 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "sessionId"],
+        )
 
-            db = await self._get_database()
+    async def bulk_upsert_customer_behavior_features(
+        self, batch_data: List[tuple]
+    ) -> int:
+        field_names = [
+            "shopId",
+            "customerId",
+            "sessionCount",
+            "avgSessionDuration",
+            "avgEventsPerSession",
+            "totalEventCount",
+            "productViewCount",
+            "collectionViewCount",
+            "cartAddCount",
+            "searchCount",
+            "checkoutStartCount",
+            "purchaseCount",
+            "daysSinceFirstEvent",
+            "daysSinceLastEvent",
+            "mostActiveHour",
+            "mostActiveDay",
+            "uniqueProductsViewed",
+            "uniqueCollectionsViewed",
+            "searchTerms",
+            "topCategories",
+            "deviceType",
+            "primaryReferrer",
+            "browseToCartRate",
+            "cartToPurchaseRate",
+            "searchToPurchaseRate",
+            "engagementScore",
+            "recencyScore",
+            "diversityScore",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="CustomerBehaviorFeatures",
+            batch_data=batch_data,
+            expected_length=29,  # 28 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "customerId"],
+        )
 
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != 7:  # 6 fields + timestamp
-                    logger.error(
-                        f"Invalid session batch data length: {len(data)}, expected 7. Data: {data}"
-                    )
-                    continue
+    async def bulk_upsert_product_pair_features(self, batch_data: List[tuple]) -> int:
+        field_names = [
+            "shopId",
+            "productId1",
+            "productId2",
+            "coPurchaseCount",
+            "coViewCount",
+            "coCartCount",
+            "supportScore",
+            "liftScore",
+            "lastCoOccurrence",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="ProductPairFeatures",
+            batch_data=batch_data,
+            expected_length=10,  # 9 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "productId1", "productId2"],
+        )
 
-                create_data.append(
-                    {
-                        "shopId": data[0],
-                        "sessionId": data[1],
-                        "customerId": data[2],
-                        "duration": data[3],
-                        "pageViews": data[4],
-                        "uniqueProducts": data[5],
-                    }
-                )
-
-            if not create_data:
-                return 0
-
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await db.sessionfeatures.create_many(
-                    data=create_data, skip_duplicates=True
-                )
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"Session features batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        await db.sessionfeatures.upsert(
-                            where={
-                                "shopId_sessionId": {
-                                    "shopId": feature_data["shopId"],
-                                    "sessionId": feature_data["sessionId"],
-                                }
-                            },
-                            update=feature_data,
-                            create=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert session feature {feature_data.get('sessionId')}: {str(upsert_error)}"
-                        )
-                        continue
-
-                return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert session features: {str(e)}")
-            return 0
+    async def bulk_upsert_search_product_features(self, batch_data: List[tuple]) -> int:
+        field_names = [
+            "shopId",
+            "searchQuery",
+            "productId",
+            "impressionCount",
+            "clickCount",
+            "purchaseCount",
+            "avgPosition",
+            "clickThroughRate",
+            "conversionRate",
+            "lastOccurrence",
+        ]
+        return await self._bulk_upsert_generic(
+            table_name="SearchProductFeatures",
+            batch_data=batch_data,
+            expected_length=11,  # 10 fields + implied timestamp
+            field_names=field_names,
+            unique_key_fields=["shopId", "searchQuery", "productId"],
+        )
 
     async def get_products_batch(
         self, shop_id: str, limit: int, offset: int
@@ -790,97 +445,7 @@ class FeatureRepository(IFeatureRepository):
             logger.error(f"Failed to get events batch for shop {shop_id}: {str(e)}")
             return []
 
-    async def get_entity_count(self, shop_id: str, entity_table: str) -> int:
-        """Get the total count of an entity for a shop"""
-        try:
-            db = await self._get_database()
-            query = (
-                f'SELECT COUNT(*) as count FROM "{entity_table}" WHERE "shopId" = $1'
-            )
-            result = await db.query_raw(query, shop_id)
-            return result[0]["count"] if result else 0
-        except Exception as e:
-            logger.error(
-                f"Failed to get entity count for {entity_table} in shop {shop_id}: {str(e)}"
-            )
-            return 0
-
-    async def get_orders_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of orders created since timestamp"""
-        try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "createdAt" > $2::timestamp ORDER BY "createdAt" LIMIT $3 OFFSET $4'
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
-            return [dict(row) for row in result] if result else []
-        except Exception as e:
-            logger.error(
-                f"Failed to get orders batch since {since_timestamp} for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_products_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of products updated since timestamp from main table"""
-        try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
-            return [dict(row) for row in result] if result else []
-        except Exception as e:
-            logger.error(
-                f"Failed to get products batch since {since_timestamp} for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_customers_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of customers updated since timestamp from main table"""
-        try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
-            return [dict(row) for row in result] if result else []
-        except Exception as e:
-            logger.error(
-                f"Failed to get customers batch since {since_timestamp} for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_collections_batch_since(
-        self, shop_id: str, since_timestamp: str, limit: int, offset: int
-    ) -> List[Dict[str, Any]]:
-        """Get a batch of collections updated since timestamp from main table"""
-        try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 AND "updatedAt" > $2::timestamp ORDER BY "updatedAt" LIMIT $3 OFFSET $4'
-            result = await db.query_raw(query, shop_id, since_timestamp, limit, offset)
-            return [dict(row) for row in result] if result else []
-        except Exception as e:
-            logger.error(
-                f"Failed to get collections batch since {since_timestamp} for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_orders_since(
-        self, shop_id: str, since_timestamp: str
-    ) -> List[Dict[str, Any]]:
-        """Get orders created since timestamp from main table"""
-        try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "createdAt" > $2::timestamp ORDER BY "createdAt"'
-            result = await db.query_raw(query, shop_id, since_timestamp)
-            return [dict(row) for row in result] if result else []
-        except Exception as e:
-            logger.error(
-                f"Failed to get orders since {since_timestamp} for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_shop_last_computation_time(self, shop_id: str) -> str:
+    async def get_last_feature_computation_time(self, shop_id: str) -> str:
         """Get the last feature computation timestamp for a shop"""
         try:
             db = await self._get_database()
@@ -896,7 +461,9 @@ class FeatureRepository(IFeatureRepository):
             )
             return "1970-01-01T00:00:00Z"
 
-    async def update_shop_last_computation_time(self, shop_id: str, timestamp) -> None:
+    async def update_last_feature_computation_time(
+        self, shop_id: str, timestamp
+    ) -> None:
         """Update the last feature computation timestamp for a shop"""
         try:
             db = await self._get_database()
@@ -913,134 +480,28 @@ class FeatureRepository(IFeatureRepository):
                 f"Failed to update last computation time for shop {shop_id}: {str(e)}"
             )
 
-    async def get_affected_entity_ids_from_orders(
-        self, shop_id: str, since_timestamp: str
-    ) -> Dict[str, List[str]]:
-        """Extract affected product and customer IDs from new orders since timestamp"""
+    async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
+        """Get shop data for processing"""
         try:
             db = await self._get_database()
+            query = 'SELECT * FROM "Shop" WHERE "id" = $1'
+            result = await db.query_raw(query, shop_id)
+            return dict(result[0]) if result else None
+        except Exception as e:
+            logger.error(f"Failed to get shop data for shop {shop_id}: {str(e)}")
+            return None
 
-            # Query to get all unique product and customer IDs from new orders
-            # Note: lineItems are stored as JSON in OrderData table
-            query = """
-            SELECT DISTINCT 
-                o."customerId",
-                jsonb_array_elements(o."lineItems")->>'productId' as "productId"
-            FROM "OrderData" o
-            WHERE o."shopId" = $1 
-            AND o."createdAt" > $2::timestamp
-            AND o."customerId" IS NOT NULL
-            AND o."lineItems" IS NOT NULL
-            AND jsonb_array_length(o."lineItems") > 0
-            """
-
-            result = await db.query_raw(query, shop_id, since_timestamp)
-
-            # Extract unique IDs
-            customer_ids = set()
-            product_ids = set()
-
-            for row in result:
-                if row.get("customerId"):
-                    customer_ids.add(row["customerId"])
-                if row.get("productId"):
-                    product_ids.add(row["productId"])
-
-            return {
-                "customer_ids": list(customer_ids),
-                "product_ids": list(product_ids),
-            }
-
+    async def get_behavioral_events_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of behavioral events for a shop"""
+        try:
+            db = await self._get_database()
+            query = 'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 ORDER BY "occurredAt" DESC LIMIT $2 OFFSET $3'
+            result = await db.query_raw(query, shop_id, limit, offset)
+            return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
-                f"Failed to get affected entity IDs from orders for shop {shop_id}: {str(e)}"
-            )
-            return {"customer_ids": [], "product_ids": []}
-
-    async def get_products_by_ids(
-        self, shop_id: str, product_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get products by their IDs for processing"""
-        try:
-            if not product_ids:
-                return []
-
-            db = await self._get_database()
-
-            # Create placeholders for the IN clause
-            placeholders = ",".join([f"${i+2}" for i in range(len(product_ids))])
-            query = f'SELECT * FROM "ProductData" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
-
-            result = await db.query_raw(query, shop_id, *product_ids)
-            return [dict(row) for row in result] if result else []
-
-        except Exception as e:
-            logger.error(f"Failed to get products by IDs for shop {shop_id}: {str(e)}")
-            return []
-
-    async def get_customers_by_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get customers by their IDs for processing"""
-        try:
-            if not customer_ids:
-                return []
-
-            db = await self._get_database()
-
-            # Create placeholders for the IN clause
-            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "CustomerData" WHERE "shopId" = $1 AND "id" IN ({placeholders})'
-
-            result = await db.query_raw(query, shop_id, *customer_ids)
-            return [dict(row) for row in result] if result else []
-
-        except Exception as e:
-            logger.error(f"Failed to get customers by IDs for shop {shop_id}: {str(e)}")
-            return []
-
-    async def get_orders_for_customer_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get all orders for a batch of customer IDs"""
-        try:
-            if not customer_ids:
-                return []
-
-            db = await self._get_database()
-
-            # Create placeholders for the IN clause
-            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "OrderData" WHERE "shopId" = $1 AND "customerId" IN ({placeholders})'
-
-            result = await db.query_raw(query, shop_id, *customer_ids)
-            return [dict(row) for row in result] if result else []
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get orders for customer IDs for shop {shop_id}: {str(e)}"
-            )
-            return []
-
-    async def get_events_for_customer_ids(
-        self, shop_id: str, customer_ids: List[str]
-    ) -> List[Dict[str, Any]]:
-        """Get all behavioral events for a batch of customer IDs"""
-        try:
-            if not customer_ids:
-                return []
-
-            db = await self._get_database()
-
-            # Create placeholders for the IN clause
-            placeholders = ",".join([f"${i+2}" for i in range(len(customer_ids))])
-            query = f'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 AND "customerId" IN ({placeholders}) ORDER BY "occurredAt" DESC'
-
-            result = await db.query_raw(query, shop_id, *customer_ids)
-            return [dict(row) for row in result] if result else []
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get behavioral events for customer IDs for shop {shop_id}: {str(e)}"
+                f"Failed to get behavioral events batch for shop {shop_id}: {str(e)}"
             )
             return []

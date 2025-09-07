@@ -559,21 +559,6 @@ model TrackingEvent {
   @@index([userId])
 }
 
-model ShopAnalytics {
-  id              String   @id @default(cuid())
-  shopId          String   @unique
-  totalOrders     Int      @default(0)
-  totalRevenue    Float    @default(0)
-  avgOrderValue   Float    @default(0)
-  topProducts     Json?    // Top 10 products by quantity
-  topCategories   Json?    // Top categories by revenue
-  lastComputedAt  DateTime @default(now())
-  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, totalRevenue])
-  @@index([shopId, totalOrders])
-  @@map("ShopAnalytics")
-}
 
 // Billing models
 model BillingSubscription {
@@ -701,7 +686,6 @@ model Shop {
   widgetConfig       WidgetConfiguration?
   widgetEvents       WidgetEvent[]
   trackingEvents     TrackingEvent[]
-  shopAnalytics      ShopAnalytics?
   featureComputations FeatureComputation[]
   mlTrainingLogs      MLTrainingLog[]
   billingSubscriptions BillingSubscription[]

@@ -130,7 +130,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         products: Optional[List[ShopifyProduct]] = None,
         behavioral_events: Optional[List[BehavioralEvent]] = None,
         order_data: Optional[List[ShopifyOrder]] = None,
-        shop_analytics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple collections"""
         try:
@@ -140,7 +139,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "products": products or [],
                 "behavioral_events": behavioral_events or [],
                 "order_data": order_data or [],
-                "shop_analytics": shop_analytics or {},
             }
 
             for collection in collections:
@@ -373,9 +371,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     shop_id, limit=batch_size * 5
                 )
 
-            # Load analytics data
-            shop_analytics = await repository.get_shop_analytics(shop_id)
-
             logger.info(
                 f"Loaded {len(products)} products, {len(customers)} customers, "
                 f"{len(orders)} orders, {len(collections)} collections, {len(behavioral_events)} events"
@@ -389,7 +384,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 orders=orders,
                 collections=collections,
                 behavioral_events=behavioral_events,
-                shop_analytics=shop_analytics,
             )
 
             # Save all features to database with parallel processing
@@ -435,7 +429,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         customers: Optional[List[ShopifyCustomer]] = None,
         collections: Optional[List[ShopifyCollection]] = None,
         behavioral_events: Optional[List[BehavioralEvent]] = None,
-        shop_analytics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Comprehensive feature computation for all entities in a shop"""
         try:
@@ -447,7 +440,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             customers = customers or []
             collections = collections or []
             behavioral_events = behavioral_events or []
-            shop_analytics = shop_analytics or {}
 
             logger.info(f"Computing comprehensive features for shop {shop.id}")
 
@@ -468,7 +460,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # 3. Collection Features
             logger.info("Computing collection features...")
             collection_features = await self.compute_all_collection_features(
-                collections, shop, products, behavioral_events, orders, shop_analytics
+                collections, shop, products, behavioral_events, orders
             )
             all_features["collections"] = collection_features
 
