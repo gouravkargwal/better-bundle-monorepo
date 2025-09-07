@@ -326,8 +326,8 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         return {
             "conversionRate": conversion_rate,
             "revenueContribution": revenue_contribution,
-            "topProducts": top_product_ids if top_product_ids else None,
-            "topVendors": top_vendor_names if top_vendor_names else None,
+            "topProducts": top_product_ids if top_product_ids else [],
+            "topVendors": top_vendor_names if top_vendor_names else [],
         }
 
     def _compute_seo_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:

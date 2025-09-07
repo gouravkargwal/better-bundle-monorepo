@@ -310,7 +310,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         )
 
         # Get unique search terms (limit to prevent huge JSON)
-        unique_search_terms = list(set(search_terms))[:20] if search_terms else None
+        unique_search_terms = list(set(search_terms))[:20] if search_terms else []
 
         return {
             "uniqueProductsViewed": len(unique_products),

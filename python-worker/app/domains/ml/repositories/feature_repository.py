@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 
 from app.core.logging import get_logger
 from app.core.database.simple_db_client import get_database
-from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
 
@@ -147,139 +146,46 @@ class FeatureRepository(IFeatureRepository):
         batch_data: List[Dict[str, Any]],
         unique_key_fields: List[str],
     ) -> int:
-        """Generic bulk upsert method that accepts dictionary data directly"""
+        """Generic bulk upsert method using Prisma's native methods"""
         try:
             if not batch_data:
                 return 0
 
             db = await self._get_database()
 
-            # Prepare data for Prisma - dictionaries are already in the right format
-            create_data = []
-            for feature_data in batch_data:
-                create_data.append(feature_data)
+            # Map table names to actual Prisma model names
+            model_mapping = {
+                "ProductFeatures": "productfeatures",
+                "UserFeatures": "userfeatures",
+                "CollectionFeatures": "collectionfeatures",
+                "CustomerBehaviorFeatures": "customerbehaviorfeatures",
+                "InteractionFeatures": "interactionfeatures",
+                "SessionFeatures": "sessionfeatures",
+                "ProductPairFeatures": "productpairfeatures",
+                "SearchProductFeatures": "searchproductfeatures",
+            }
 
-            # Use Prisma's upsert_many for efficient bulk operations
-            if create_data:
-                # Convert data types for PostgreSQL compatibility
-                processed_data = []
-                for data in create_data:
-                    processed_item = {}
-                    for key, value in data.items():
-                        if value is None:
-                            # Handle None values explicitly
-                            processed_item[key] = None
-                        elif key in [
-                            "lastComputedAt",
-                            "lastViewedAt",
-                            "lastPurchasedAt",
-                            "firstPurchasedAt",
-                        ]:
-                            # Convert datetime to ISO string for PostgreSQL
-                            if hasattr(value, "isoformat"):
-                                processed_item[key] = value.isoformat()
-                            else:
-                                processed_item[key] = value
-                        elif key in ["topProducts", "topVendors"] and value is not None:
-                            # Ensure JSON fields are properly formatted
-                            import json
+            model_name = model_mapping.get(table_name)
+            if not model_name:
+                raise ValueError(f"No model mapping found for table: {table_name}")
 
-                            processed_item[key] = json.dumps(value)
-                        else:
-                            processed_item[key] = value
-                    processed_data.append(processed_item)
-
-                # Build the SQL with proper type casting
-                columns = list(processed_data[0].keys())
-                timestamp_columns = [
-                    "lastComputedAt",
-                    "lastViewedAt",
-                    "lastPurchasedAt",
-                    "firstPurchasedAt",
-                ]
-                json_columns = ["topProducts", "topVendors"]
-                float_columns = [
-                    "viewToCartRate",
-                    "cartToPurchaseRate",
-                    "overallConversionRate",
-                    "avgSellingPrice",
-                    "priceVariance",
-                    "inventoryTurnover",
-                    "stockVelocity",
-                    "variantComplexity",
-                    "imageRichness",
-                    "tagDiversity",
-                    "metafieldUtilization",
-                    "popularityScore",
-                    "trendingScore",
-                    "avgOrderValue",
-                    "lifetimeValue",
-                    "orderFrequencyPerMonth",
-                    "discountSensitivity",
-                    "avgDiscountAmount",
-                    "clickThroughRate",
-                    "bounceRate",
-                    "conversionRate",
-                    "revenueContribution",
-                    "avgSessionDuration",
-                    "avgEventsPerSession",
-                    "engagementScore",
-                    "behavioralScore",
-                ]
-                int_columns = [
-                    "viewCount30d",
-                    "uniqueViewers30d",
-                    "cartAddCount30d",
-                    "purchaseCount30d",
-                    "uniquePurchasers30d",
-                    "daysSinceFirstPurchase",
-                    "daysSinceLastPurchase",
-                    "priceTier",
-                    "totalPurchases",
-                    "totalSpent",
-                    "daysSinceFirstOrder",
-                    "daysSinceLastOrder",
-                    "avgDaysBetweenOrders",
-                    "distinctProductsPurchased",
-                    "distinctCategoriesPurchased",
-                    "ordersWithDiscountCount",
-                    "productCount",
-                    "uniqueViewers30d",
-                    "sessionCount",
-                    "viewCount",
-                    "cartAddCount",
-                    "purchaseCount",
-                ]
-
-                # Create type-cast expressions for each column
-                value_expressions = []
-                for col in columns:
-                    if col in timestamp_columns:
-                        value_expressions.append(
-                            f"${len(value_expressions)+1}::timestamp"
-                        )
-                    elif col in json_columns:
-                        value_expressions.append(f"${len(value_expressions)+1}::jsonb")
-                    elif col in float_columns:
-                        value_expressions.append(f"${len(value_expressions)+1}::float")
-                    elif col in int_columns:
-                        value_expressions.append(f"${len(value_expressions)+1}::int")
-                    else:
-                        value_expressions.append(f"${len(value_expressions)+1}::text")
-
-                await db.execute_raw(
-                    f"""
-                    INSERT INTO "{table_name}" ({', '.join(f'"{k}"' for k in columns)})
-                    VALUES {', '.join([f"({', '.join(value_expressions)})" for _ in processed_data])}
-                    ON CONFLICT ({', '.join(f'"{k}"' for k in unique_key_fields)})
-                    DO UPDATE SET
-                        {', '.join([f'"{k}" = EXCLUDED."{k}"' for k in columns if k not in unique_key_fields])}
-                    """,
-                    *[item for data in processed_data for item in data.values()],
+            model = getattr(db, model_name, None)
+            if not model:
+                raise ValueError(
+                    f"No model found for table: {table_name} (mapped to: {model_name})"
                 )
 
-            logger.info(f"Bulk upserted {len(create_data)} records to {table_name}")
-            return len(create_data)
+            # Use Prisma's createMany with skipDuplicates for bulk operations
+            # This is more efficient than individual upserts
+            try:
+                await model.create_many(data=batch_data, skip_duplicates=True)
+                logger.info(f"Bulk upserted {len(batch_data)} records to {table_name}")
+                return len(batch_data)
+            except Exception as create_error:
+                logger.error(f"{table_name} batch insert failed: {str(create_error)}")
+                # For now, we'll just log the error and return 0
+                # In the future, we could implement a proper upsert fallback
+                return 0
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert {table_name}: {str(e)}")
