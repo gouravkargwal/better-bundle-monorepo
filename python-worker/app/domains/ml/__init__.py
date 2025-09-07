@@ -8,7 +8,6 @@ This domain handles all ML-related operations including:
 - ML pipeline management
 """
 
-from .models import *
 from .services import *
 from .repositories import *
 from .interfaces import *

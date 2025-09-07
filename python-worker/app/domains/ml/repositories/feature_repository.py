@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 
 from app.core.logging import get_logger
 from app.core.database.simple_db_client import get_database
+from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
 
@@ -15,44 +16,56 @@ class IFeatureRepository(ABC):
     """Interface for feature repository operations"""
 
     @abstractmethod
-    async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_product_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert product features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_user_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_user_features(self, batch_data: List[Dict[str, Any]]) -> int:
         """Bulk upsert user features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_collection_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_collection_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert collection features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_interaction_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_interaction_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert interaction features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_session_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert session features"""
         pass
 
     @abstractmethod
     async def bulk_upsert_customer_behavior_features(
-        self, batch_data: List[tuple]
+        self, batch_data: List[Dict[str, Any]]
     ) -> int:
         """Bulk upsert customer behavior features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_product_pair_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_product_pair_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert product pair features"""
         pass
 
     @abstractmethod
-    async def bulk_upsert_search_product_features(self, batch_data: List[tuple]) -> int:
+    async def bulk_upsert_search_product_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
         """Bulk upsert search product features"""
         pass
 
@@ -127,6 +140,150 @@ class FeatureRepository(IFeatureRepository):
         if self._db_client is None:
             self._db_client = await get_database()
         return self._db_client
+
+    async def _bulk_upsert_dict_generic(
+        self,
+        table_name: str,
+        batch_data: List[Dict[str, Any]],
+        unique_key_fields: List[str],
+    ) -> int:
+        """Generic bulk upsert method that accepts dictionary data directly"""
+        try:
+            if not batch_data:
+                return 0
+
+            db = await self._get_database()
+
+            # Prepare data for Prisma - dictionaries are already in the right format
+            create_data = []
+            for feature_data in batch_data:
+                create_data.append(feature_data)
+
+            # Use Prisma's upsert_many for efficient bulk operations
+            if create_data:
+                # Convert data types for PostgreSQL compatibility
+                processed_data = []
+                for data in create_data:
+                    processed_item = {}
+                    for key, value in data.items():
+                        if value is None:
+                            # Handle None values explicitly
+                            processed_item[key] = None
+                        elif key in [
+                            "lastComputedAt",
+                            "lastViewedAt",
+                            "lastPurchasedAt",
+                            "firstPurchasedAt",
+                        ]:
+                            # Convert datetime to ISO string for PostgreSQL
+                            if hasattr(value, "isoformat"):
+                                processed_item[key] = value.isoformat()
+                            else:
+                                processed_item[key] = value
+                        elif key in ["topProducts", "topVendors"] and value is not None:
+                            # Ensure JSON fields are properly formatted
+                            import json
+
+                            processed_item[key] = json.dumps(value)
+                        else:
+                            processed_item[key] = value
+                    processed_data.append(processed_item)
+
+                # Build the SQL with proper type casting
+                columns = list(processed_data[0].keys())
+                timestamp_columns = [
+                    "lastComputedAt",
+                    "lastViewedAt",
+                    "lastPurchasedAt",
+                    "firstPurchasedAt",
+                ]
+                json_columns = ["topProducts", "topVendors"]
+                float_columns = [
+                    "viewToCartRate",
+                    "cartToPurchaseRate",
+                    "overallConversionRate",
+                    "avgSellingPrice",
+                    "priceVariance",
+                    "inventoryTurnover",
+                    "stockVelocity",
+                    "variantComplexity",
+                    "imageRichness",
+                    "tagDiversity",
+                    "metafieldUtilization",
+                    "popularityScore",
+                    "trendingScore",
+                    "avgOrderValue",
+                    "lifetimeValue",
+                    "orderFrequencyPerMonth",
+                    "discountSensitivity",
+                    "avgDiscountAmount",
+                    "clickThroughRate",
+                    "bounceRate",
+                    "conversionRate",
+                    "revenueContribution",
+                    "avgSessionDuration",
+                    "avgEventsPerSession",
+                    "engagementScore",
+                    "behavioralScore",
+                ]
+                int_columns = [
+                    "viewCount30d",
+                    "uniqueViewers30d",
+                    "cartAddCount30d",
+                    "purchaseCount30d",
+                    "uniquePurchasers30d",
+                    "daysSinceFirstPurchase",
+                    "daysSinceLastPurchase",
+                    "priceTier",
+                    "totalPurchases",
+                    "totalSpent",
+                    "daysSinceFirstOrder",
+                    "daysSinceLastOrder",
+                    "avgDaysBetweenOrders",
+                    "distinctProductsPurchased",
+                    "distinctCategoriesPurchased",
+                    "ordersWithDiscountCount",
+                    "productCount",
+                    "uniqueViewers30d",
+                    "sessionCount",
+                    "viewCount",
+                    "cartAddCount",
+                    "purchaseCount",
+                ]
+
+                # Create type-cast expressions for each column
+                value_expressions = []
+                for col in columns:
+                    if col in timestamp_columns:
+                        value_expressions.append(
+                            f"${len(value_expressions)+1}::timestamp"
+                        )
+                    elif col in json_columns:
+                        value_expressions.append(f"${len(value_expressions)+1}::jsonb")
+                    elif col in float_columns:
+                        value_expressions.append(f"${len(value_expressions)+1}::float")
+                    elif col in int_columns:
+                        value_expressions.append(f"${len(value_expressions)+1}::int")
+                    else:
+                        value_expressions.append(f"${len(value_expressions)+1}::text")
+
+                await db.execute_raw(
+                    f"""
+                    INSERT INTO "{table_name}" ({', '.join(f'"{k}"' for k in columns)})
+                    VALUES {', '.join([f"({', '.join(value_expressions)})" for _ in processed_data])}
+                    ON CONFLICT ({', '.join(f'"{k}"' for k in unique_key_fields)})
+                    DO UPDATE SET
+                        {', '.join([f'"{k}" = EXCLUDED."{k}"' for k in columns if k not in unique_key_fields])}
+                    """,
+                    *[item for data in processed_data for item in data.values()],
+                )
+
+            logger.info(f"Bulk upserted {len(create_data)} records to {table_name}")
+            return len(create_data)
+
+        except Exception as e:
+            logger.error(f"Failed to bulk upsert {table_name}: {str(e)}")
+            raise
 
     async def _bulk_upsert_generic(
         self,
@@ -205,176 +362,81 @@ class FeatureRepository(IFeatureRepository):
             logger.error(f"Failed to bulk upsert {table_name} features: {str(e)}")
             return 0
 
-    async def bulk_upsert_product_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "productId",
-            "popularity",
-            "priceTier",
-            "category",
-            "variantComplexity",
-            "imageRichness",
-            "tagDiversity",
-            "categoryEncoded",
-            "vendorScore",
-        ]
-        return await self._bulk_upsert_generic(
-            table_name="Product",
+    async def bulk_upsert_product_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert product features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
+            table_name="ProductFeatures",
             batch_data=batch_data,
-            expected_length=11,  # 10 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "productId"],
         )
 
-    async def bulk_upsert_user_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "customerId",
-            "totalPurchases",
-            "totalSpent",
-            "recencyDays",
-            "avgPurchaseIntervalDays",
-            "preferredCategory",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_user_features(self, batch_data: List[Dict[str, Any]]) -> int:
+        """Bulk upsert user features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="UserFeatures",
             batch_data=batch_data,
-            expected_length=8,  # 7 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "customerId"],
         )
 
-    async def bulk_upsert_collection_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "collectionId",
-            "productCount",
-            "isAutomated",
-            "performanceScore",
-            "seoScore",
-            "imageScore",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_collection_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert collection features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="CollectionFeatures",
             batch_data=batch_data,
-            expected_length=8,  # 7 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "collectionId"],
         )
 
-    async def bulk_upsert_interaction_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "customerId",
-            "productId",
-            "purchaseCount",
-            "lastPurchaseDate",
-            "timeDecayedWeight",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_interaction_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert interaction features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="InteractionFeatures",
             batch_data=batch_data,
-            expected_length=7,  # 6 fields + implied timestamp (updated based on tuple length)
-            field_names=field_names,
             unique_key_fields=["shopId", "customerId", "productId"],
         )
 
-    async def bulk_upsert_session_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "sessionId",
-            "customerId",
-            "duration",
-            "pageViews",
-            "uniqueProducts",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_session_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert session features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="SessionFeatures",
             batch_data=batch_data,
-            expected_length=7,  # 6 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "sessionId"],
         )
 
     async def bulk_upsert_customer_behavior_features(
-        self, batch_data: List[tuple]
+        self, batch_data: List[Dict[str, Any]]
     ) -> int:
-        field_names = [
-            "shopId",
-            "customerId",
-            "sessionCount",
-            "avgSessionDuration",
-            "avgEventsPerSession",
-            "totalEventCount",
-            "productViewCount",
-            "collectionViewCount",
-            "cartAddCount",
-            "searchCount",
-            "checkoutStartCount",
-            "purchaseCount",
-            "daysSinceFirstEvent",
-            "daysSinceLastEvent",
-            "mostActiveHour",
-            "mostActiveDay",
-            "uniqueProductsViewed",
-            "uniqueCollectionsViewed",
-            "searchTerms",
-            "topCategories",
-            "deviceType",
-            "primaryReferrer",
-            "browseToCartRate",
-            "cartToPurchaseRate",
-            "searchToPurchaseRate",
-            "engagementScore",
-            "recencyScore",
-            "diversityScore",
-        ]
-        return await self._bulk_upsert_generic(
+        """Bulk upsert customer behavior features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="CustomerBehaviorFeatures",
             batch_data=batch_data,
-            expected_length=29,  # 28 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "customerId"],
         )
 
-    async def bulk_upsert_product_pair_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "productId1",
-            "productId2",
-            "coPurchaseCount",
-            "coViewCount",
-            "coCartCount",
-            "supportScore",
-            "liftScore",
-            "lastCoOccurrence",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_product_pair_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert product pair features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="ProductPairFeatures",
             batch_data=batch_data,
-            expected_length=10,  # 9 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "productId1", "productId2"],
         )
 
-    async def bulk_upsert_search_product_features(self, batch_data: List[tuple]) -> int:
-        field_names = [
-            "shopId",
-            "searchQuery",
-            "productId",
-            "impressionCount",
-            "clickCount",
-            "purchaseCount",
-            "avgPosition",
-            "clickThroughRate",
-            "conversionRate",
-            "lastOccurrence",
-        ]
-        return await self._bulk_upsert_generic(
+    async def bulk_upsert_search_product_features(
+        self, batch_data: List[Dict[str, Any]]
+    ) -> int:
+        """Bulk upsert search product features using dictionary data structure"""
+        return await self._bulk_upsert_dict_generic(
             table_name="SearchProductFeatures",
             batch_data=batch_data,
-            expected_length=11,  # 10 fields + implied timestamp
-            field_names=field_names,
             unique_key_fields=["shopId", "searchQuery", "productId"],
         )
 

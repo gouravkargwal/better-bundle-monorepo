@@ -9,7 +9,6 @@ from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
-from ..models import MLFeatures
 
 from ..repositories.feature_repository import FeatureRepository, IFeatureRepository
 from ..generators import (
@@ -68,7 +67,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             for product in products:
                 try:
                     features = await self.product_generator.generate_features(
-                        product, context
+                        shop["id"], product["id"], context
                     )
                     results[product["id"]] = features
                 except Exception as e:
@@ -101,7 +100,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             for customer in customers:
                 try:
                     features = await self.user_generator.generate_features(
-                        customer, context
+                        shop["id"], customer["id"], context
                     )
                     results[customer["id"]] = features
                 except Exception as e:
@@ -594,10 +593,28 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                     (shop_id, search_query, product_id, feature_data)
                                 )
                     else:
-                        # Simple entity types (product, user, collection, etc.)
-                        batch_data.append((shop_id, entity_id, feature_data))
+                        # Simple entity types - use consistent dictionary-based approach
+                        prepared_data = feature_data.copy()
+                        prepared_data["shopId"] = shop_id
 
-            # Use repository bulk operations for efficiency
+                        # Add entity ID based on feature type
+                        if feature_type == "collection":
+                            prepared_data["collectionId"] = entity_id
+                        elif feature_type == "customer_behavior":
+                            prepared_data["customerId"] = entity_id
+                        elif feature_type == "product":
+                            prepared_data["productId"] = entity_id
+                        elif feature_type == "user":
+                            prepared_data["customerId"] = entity_id
+                        elif feature_type == "session":
+                            prepared_data["sessionId"] = entity_id
+                        else:
+                            # Generic fallback
+                            prepared_data["entityId"] = entity_id
+
+                        batch_data.append(prepared_data)
+
+            # Use repository bulk operations for efficiency - all methods now use dictionaries
             if batch_data:
                 bulk_method_name = f"bulk_upsert_{feature_type}_features"
                 if hasattr(self.repository, bulk_method_name):
@@ -609,7 +626,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         save_method_name = f"save_{feature_type}_features"
                         if hasattr(self.repository, save_method_name):
                             save_method = getattr(self.repository, save_method_name)
-                            await save_method(*data)
+                            await save_method(data)
                             saved_count += 1
 
             logger.info(
@@ -813,70 +830,3 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             return None
         except Exception:
             return None
-
-    async def compute_cross_entity_features(
-        self,
-        shop: Dict[str, Any],
-        products: List[Dict[str, Any]],
-        orders: List[Dict[str, Any]],
-        customers: List[Dict[str, Any]],
-        collections: List[Dict[str, Any]],
-        events: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Compute cross-entity ML features (legacy method - use compute_all_features_for_shop instead)"""
-        try:
-            features = {}
-
-            # Product-customer interactions
-            features.update(
-                self._compute_product_customer_interactions(products, customers, orders)
-            )
-
-            # Collection performance features
-            features.update(
-                self._compute_collection_performance_features_batch(
-                    collections, products, orders
-                )
-            )
-
-            # Customer segment features
-            features.update(
-                self._compute_customer_segment_features(customers, orders, events)
-            )
-
-            # Product category features
-            features.update(
-                self._compute_product_category_features(products, collections)
-            )
-
-            # Time series features
-            features.update(self._compute_time_series_features(orders, events))
-
-            return features
-
-        except Exception as e:
-            logger.error(f"Failed to compute cross-entity features: {str(e)}")
-            return {}
-
-    async def create_ml_features(
-        self,
-        shop_id: str,
-        feature_type: str,
-        entity_id: str,
-        features: Dict[str, Any],
-        data_sources: List[str],
-    ) -> MLFeatures:
-        """Create MLFeatures model instance"""
-        try:
-            return MLFeatures(
-                shop_id=shop_id,
-                feature_type=feature_type,
-                entity_id=entity_id,
-                features=features,
-                data_sources=data_sources,
-                created_at=now_utc(),
-                updated_at=now_utc(),
-            )
-        except Exception as e:
-            logger.error(f"Failed to create MLFeatures: {str(e)}")
-            raise

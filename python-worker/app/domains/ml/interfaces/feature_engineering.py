@@ -6,14 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from app.domains.shopify.models import (
-    ShopifyShop,
-    ShopifyProduct,
-    ShopifyOrder,
-    ShopifyCustomer,
-    ShopifyCollection,
-    BehavioralEvent,
-)
+# Removed Pydantic model imports - using dictionary data directly
 
 
 class IFeatureEngineeringService(ABC):
@@ -42,23 +35,23 @@ class IFeatureEngineeringService(ABC):
     @abstractmethod
     async def compute_all_features_for_shop(
         self,
-        shop: ShopifyShop,
-        products: Optional[List[ShopifyProduct]] = None,
-        orders: Optional[List[ShopifyOrder]] = None,
-        customers: Optional[List[ShopifyCustomer]] = None,
-        collections: Optional[List[ShopifyCollection]] = None,
-        behavioral_events: Optional[List[BehavioralEvent]] = None,
+        shop: Dict[str, Any],
+        products: Optional[List[Dict[str, Any]]] = None,
+        orders: Optional[List[Dict[str, Any]]] = None,
+        customers: Optional[List[Dict[str, Any]]] = None,
+        collections: Optional[List[Dict[str, Any]]] = None,
+        behavioral_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Comprehensive feature computation for all entities in a shop
 
         Args:
-            shop: Shop to compute features for
-            products: Optional products
-            orders: Optional orders
-            customers: Optional customers
-            collections: Optional collections
-            behavioral_events: Optional events
+            shop: Shop data as dictionary
+            products: Optional list of product dictionaries
+            orders: Optional list of order dictionaries
+            customers: Optional list of customer dictionaries
+            collections: Optional list of collection dictionaries
+            behavioral_events: Optional list of event dictionaries
 
         Returns:
             Dictionary of all computed features by entity type
