@@ -1,12 +1,14 @@
 """
-Complete Gorse Data Synchronization Pipeline
+Optimized Gorse Data Synchronization Pipeline
+Designed to achieve 70% of big recommendation engine performance
 Uses ALL feature tables to build comprehensive user and item profiles
 """
 
 import asyncio
 import json
+import math
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
@@ -671,11 +673,11 @@ class GorseSyncPipeline:
         labels = {
             # From UserFeatures
             "total_purchases": int(user.get("totalPurchases", 0)),
-            "total_spent": float(user.get("totalSpent", 0)),
-            "avg_order_value": float(user.get("avgOrderValue", 0)),
-            "lifetime_value": float(user.get("lifetimeValue", 0)),
+            "total_spent": float(user.get("totalSpent") or 0),
+            "avg_order_value": float(user.get("avgOrderValue") or 0),
+            "lifetime_value": float(user.get("lifetimeValue") or 0),
             "days_since_last_order": user.get("daysSinceLastOrder"),
-            "order_frequency_per_month": float(user.get("orderFrequencyPerMonth", 0)),
+            "order_frequency_per_month": float(user.get("orderFrequencyPerMonth") or 0),
             "distinct_products_purchased": int(
                 user.get("distinctProductsPurchased", 0)
             ),
@@ -685,12 +687,12 @@ class GorseSyncPipeline:
             "preferred_category": user.get("preferredCategory", "unknown"),
             "preferred_vendor": user.get("preferredVendor", "unknown"),
             "price_preference": user.get("pricePointPreference", "mid"),
-            "discount_sensitivity": float(user.get("discountSensitivity", 0)),
+            "discount_sensitivity": float(user.get("discountSensitivity") or 0),
             # From CustomerBehaviorFeatures
-            "engagement_score": float(user.get("engagementScore", 0)),
-            "recency_score": float(user.get("recencyScore", 0)),
-            "diversity_score": float(user.get("diversityScore", 0)),
-            "behavioral_score": float(user.get("behavioralScore", 0)),
+            "engagement_score": float(user.get("engagementScore") or 0),
+            "recency_score": float(user.get("recencyScore") or 0),
+            "diversity_score": float(user.get("diversityScore") or 0),
+            "behavioral_score": float(user.get("behavioralScore") or 0),
             "session_count": int(user.get("sessionCount", 0)),
             "product_view_count": int(user.get("productViewCount", 0)),
             "cart_add_count": int(user.get("cartAddCount", 0)),
@@ -717,16 +719,41 @@ class GorseSyncPipeline:
             "device_type": user.get("deviceType", "unknown"),
             "primary_referrer": user.get("primaryReferrer", "direct"),
             # From aggregated InteractionFeatures
-            "total_interaction_score": float(user.get("total_interaction_score", 0)),
-            "avg_affinity_score": float(user.get("avg_affinity_score", 0)),
+            "total_interaction_score": float(user.get("total_interaction_score") or 0),
+            "avg_affinity_score": float(user.get("avg_affinity_score") or 0),
             # From aggregated SessionFeatures
             "completed_sessions": int(user.get("completed_sessions", 0)),
-            "avg_session_duration": float(user.get("avg_session_duration", 0)),
+            "avg_session_duration": float(user.get("avg_session_duration") or 0),
             # Computed segments
             "customer_segment": self._calculate_customer_segment(user),
             "is_active": bool(user.get("daysSinceLastOrder", 365) < 30),
             "is_high_value": bool(user.get("lifetimeValue", 0) > 500),
             "is_frequent_buyer": bool(user.get("orderFrequencyPerMonth", 0) > 1),
+            # Optimized features for better recommendations
+            "purchase_power": min(float(user.get("totalSpent") or 0) / 5000, 1.0),
+            "purchase_frequency": min(int(user.get("totalPurchases", 0)) / 50, 1.0),
+            "recency_tier": self._calculate_recency_tier(
+                user.get("daysSinceLastOrder")
+            ),
+            "is_active_30d": int(user.get("daysSinceLastOrder", 999) < 30),
+            "is_active_7d": int(user.get("daysSinceLastOrder", 999) < 7),
+            "engagement_level": min(
+                (user.get("productViewCount", 0) + user.get("cartAddCount", 0) * 3)
+                / 100,
+                1.0,
+            ),
+            "category_diversity": min(
+                user.get("distinctCategoriesPurchased", 0) / 5, 1.0
+            ),
+            "price_tier": self._encode_price_tier(user.get("pricePointPreference")),
+            "discount_affinity": min(
+                float(user.get("discountSensitivity") or 0) * 2, 1.0
+            ),
+            "conversion_score": self._calculate_conversion_score(user),
+            "lifecycle_stage": self._encode_lifecycle_stage(user),
+            "customer_value_tier": self._calculate_value_tier(
+                float(user.get("totalSpent") or 0), int(user.get("totalPurchases", 0))
+            ),
         }
 
         # Remove None values
@@ -847,6 +874,14 @@ class GorseSyncPipeline:
                 product.get("total_inventory", 1) < 10
                 and product.get("stock_velocity", 0) > 0.5
             ),
+            # Optimized features for better recommendations
+            "performance_score": self._calculate_performance_score(product),
+            "freshness_score": self._calculate_freshness_score(product),
+            "price_bucket": self._bucket_price(
+                float(product.get("avgSellingPrice") or product.get("price") or 0)
+            ),
+            "has_discount": int(bool(product.get("compareAtPrice"))),
+            "stock_level": min(int(product.get("totalInventory", 0)) / 100, 1.0),
         }
 
         # Add tags if available
@@ -949,6 +984,54 @@ class GorseSyncPipeline:
             await self._upsert_gorse_user(user_id, shop_id, labels)
 
         return len(sessions)
+
+    async def _sync_valuable_anonymous_users(self, shop_id: str):
+        """Only sync anonymous sessions that have high engagement"""
+        try:
+            db = await self._get_database()
+
+            # Only get sessions with significant activity
+            query = """
+                SELECT 
+                    "sessionId",
+                    COUNT(*) as session_count,
+                    AVG("durationSeconds") as avg_duration,
+                    SUM("productViewCount") as total_views,
+                    SUM("cartAddCount") as total_cart_adds,
+                    SUM(CASE WHEN "checkoutCompleted" THEN 1 ELSE 0 END) as purchases
+                FROM "SessionFeatures"
+                WHERE "shopId" = $1 
+                    AND "customerId" IS NULL
+                    AND "endTime" > $2
+                    AND ("cartAddCount" > 0 OR "checkoutCompleted" = true)
+                GROUP BY "sessionId"
+            """
+
+            since_time = now_utc() - timedelta(days=7)
+            result = await db.query_raw(query, shop_id, since_time)
+            sessions = [dict(row) for row in result] if result else []
+
+            for session in sessions:
+                user_id = f"session_{session['sessionId']}"
+
+                # Simple labels for anonymous users
+                labels = {
+                    "engagement_level": min(session["total_views"] / 10, 1.0),
+                    "conversion_score": 1.0 if session["purchases"] > 0 else 0.3,
+                    "is_anonymous": 1,
+                    "lifecycle_stage": 0,  # New/anonymous
+                }
+
+                await db.gorseusers.upsert(
+                    where={"userId": user_id},
+                    data={"userId": user_id, "shopId": shop_id, "labels": labels},
+                    create={"userId": user_id, "shopId": shop_id, "labels": labels},
+                )
+
+            logger.info(f"Synced {len(sessions)} high-value anonymous sessions")
+
+        except Exception as e:
+            logger.error(f"Failed to sync anonymous users: {str(e)}")
 
     async def _process_behavioral_events(
         self, shop_id: str, since_time: datetime
@@ -1114,30 +1197,34 @@ class GorseSyncPipeline:
             else:
                 return []
 
-        # Map event types to feedback with weights
+        # Map event types to feedback with optimized weights
         feedback_mapping = {
             "product_viewed": ("view", 1.0),
-            "product_added_to_cart": ("cart_add", 3.0),
+            "product_added_to_cart": ("cart_add", 5.0),  # Increased
             "collection_viewed": ("collection_view", 0.5),
             "search_submitted": ("search", 0.3),
-            "checkout_started": ("checkout_start", 2.0),
-            "checkout_completed": ("purchase", 7.0),
+            "checkout_started": ("checkout_start", 7.0),  # Increased
+            "checkout_completed": ("purchase", 10.0),  # Maximum weight
         }
 
         if event_type in feedback_mapping:
-            feedback_type, weight = feedback_mapping[event_type]
+            feedback_type, base_weight = feedback_mapping[event_type]
 
             product_id = self._extract_product_id_from_event(event_type, event_data)
 
             if product_id:
+                # Apply time decay to weight
+                timestamp = event.get("occurredAt")
+                decayed_weight = base_weight * self._apply_time_decay(timestamp)
+
                 feedback_list.append(
                     {
                         "feedback_type": feedback_type,
                         "user_id": user_id,
                         "item_id": product_id,
-                        "timestamp": event.get("occurredAt"),
+                        "timestamp": timestamp,
                         "shop_id": event.get("shopId"),
-                        "comment": json.dumps({"weight": weight}),
+                        "comment": json.dumps({"weight": decayed_weight}),
                     }
                 )
 
@@ -1254,8 +1341,8 @@ class GorseSyncPipeline:
 
     def _calculate_customer_segment(self, user: Dict[str, Any]) -> str:
         """Calculate customer segment based on user data"""
-        lifetime_value = float(user.get("lifetimeValue", 0))
-        order_frequency = float(user.get("orderFrequencyPerMonth", 0))
+        lifetime_value = float(user.get("lifetimeValue") or 0)
+        order_frequency = float(user.get("orderFrequencyPerMonth") or 0)
 
         if lifetime_value > 1000 and order_frequency > 2:
             return "vip"
@@ -1348,14 +1435,14 @@ class GorseSyncPipeline:
                             line_total = price * quantity
 
                     # Calculate weight based on purchase value and quantity
-                    base_weight = 7.0  # Base weight for purchase
-                    quantity_bonus = min(
-                        quantity * 0.5, 3.0
-                    )  # Up to 3 extra points for quantity
-                    value_bonus = min(
-                        (line_total / 100) * 0.5, 2.0
-                    )  # Up to 2 extra points for value
-                    final_weight = base_weight + quantity_bonus + value_bonus
+                    base_weight = 10.0  # Strong weight for purchases
+
+                    # Bonus for high-value orders
+                    if total_amount > 100:
+                        base_weight *= 1.2
+
+                    # Apply time decay
+                    decayed_weight = base_weight * self._apply_time_decay(order_date)
 
                     # Create feedback record
                     feedback = {
@@ -1366,7 +1453,7 @@ class GorseSyncPipeline:
                         "shop_id": shop_id,
                         "comment": json.dumps(
                             {
-                                "weight": final_weight,
+                                "weight": decayed_weight,
                                 "order_id": order_id,
                                 "quantity": quantity,
                                 "line_total": line_total,
@@ -1413,6 +1500,181 @@ class GorseSyncPipeline:
                 unique_feedback.append(feedback)
 
         return unique_feedback
+
+    # === Optimization Methods ===
+
+    def _calculate_recency_tier(self, days_since_last: Optional[int]) -> int:
+        """Calculate recency tier (0-4)"""
+        if days_since_last is None:
+            return 0
+        if days_since_last < 7:
+            return 4
+        elif days_since_last < 30:
+            return 3
+        elif days_since_last < 90:
+            return 2
+        elif days_since_last < 180:
+            return 1
+        else:
+            return 0
+
+    def _encode_price_tier(self, price_pref: Optional[str]) -> int:
+        """Encode price tier as number"""
+        tiers = {"budget": 0, "mid": 1, "premium": 2, "luxury": 3}
+        return tiers.get(price_pref, 1)
+
+    def _calculate_conversion_score(self, user: Dict[str, Any]) -> float:
+        """Calculate user's conversion propensity"""
+        browse_to_cart = float(user.get("browseToCartRate") or 0)
+        cart_to_purchase = float(user.get("cartToPurchaseRate") or 0)
+
+        # Weight purchase conversion higher
+        return min(browse_to_cart * 0.3 + cart_to_purchase * 0.7, 1.0)
+
+    def _encode_lifecycle_stage(self, user: Dict[str, Any]) -> int:
+        """Encode customer lifecycle stage"""
+        total_spent = float(user.get("totalSpent") or 0)
+        days_since_last = user.get("daysSinceLastOrder", 999)
+        frequency = float(user.get("orderFrequencyPerMonth") or 0)
+
+        if total_spent > 1000 and days_since_last < 30:
+            return 5  # Champions
+        elif frequency > 1 and days_since_last < 60:
+            return 4  # Loyal
+        elif total_spent > 100 and days_since_last < 90:
+            return 3  # Potential
+        elif days_since_last < 180:
+            return 2  # At risk
+        elif total_spent > 0:
+            return 1  # Lost
+        else:
+            return 0  # New
+
+    def _calculate_value_tier(self, total_spent: float, total_purchases: int) -> int:
+        """Calculate customer value tier"""
+        if total_spent > 2000 or total_purchases > 20:
+            return 3  # High value
+        elif total_spent > 500 or total_purchases > 5:
+            return 2  # Medium value
+        elif total_spent > 0:
+            return 1  # Low value
+        else:
+            return 0  # No value yet
+
+    def _calculate_performance_score(self, product: Dict[str, Any]) -> float:
+        """Calculate unified product performance score"""
+        views = int(product.get("viewCount30d", 0))
+        purchases = int(product.get("purchaseCount30d", 0))
+        conversion = float(product.get("overallConversionRate") or 0)
+
+        # Log scale for views, linear for purchases
+        view_score = min(math.log10(views + 1) / 3, 1.0) if views > 0 else 0
+        purchase_score = min(purchases / 20, 1.0)
+
+        # Weighted combination
+        return view_score * 0.2 + purchase_score * 0.5 + conversion * 30
+
+    def _calculate_freshness_score(self, product: Dict[str, Any]) -> float:
+        """Calculate product freshness with decay"""
+        days_since = product.get("daysSinceFirstPurchase")
+        if not days_since:
+            return 1.0
+
+        # Exponential decay over 90 days
+        return max(0, 1.0 - (days_since / 90) ** 2)
+
+    def _bucket_price(self, price: float) -> int:
+        """Bucket price into categories"""
+        if price < 25:
+            return 0
+        elif price < 75:
+            return 1
+        elif price < 150:
+            return 2
+        elif price < 300:
+            return 3
+        else:
+            return 4
+
+    def _apply_time_decay(self, timestamp: Any) -> float:
+        """Apply time decay to feedback weight"""
+        if not timestamp:
+            return 1.0
+
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except:
+                return 1.0
+
+        days_old = (now_utc() - timestamp).days
+
+        # Exponential decay with 30-day half-life
+        return 0.5 ** (days_old / 30)
+
+    def _extract_simple_categories(self, product: Dict[str, Any]) -> List[str]:
+        """Extract simplified categories"""
+        categories = []
+
+        # Just use product type as main category
+        if product.get("productType"):
+            categories.append(str(product["productType"]))
+
+        # Add collections if available
+        collections = product.get("collections", [])
+        if isinstance(collections, str):
+            try:
+                collections = json.loads(collections)
+            except:
+                collections = []
+
+        # Limit to 3 categories
+        for coll in collections[:2]:
+            if isinstance(coll, dict) and coll.get("id"):
+                categories.append(str(coll["id"]))
+
+        return categories
+
+    def _should_hide_product_optimized(self, product: Dict[str, Any]) -> bool:
+        """Simple hiding logic"""
+        # Only hide if out of stock or very poor performance
+        if int(product.get("totalInventory", 0)) <= 0:
+            return True
+
+        # Hide if no views in 30 days
+        if int(product.get("viewCount30d", 0)) == 0:
+            return True
+
+        return False
+
+    def _extract_product_id_from_event_optimized(
+        self, event_type: str, event_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extract product ID from event data with optimized parsing"""
+        if event_type == "product_viewed":
+            # Navigate through the nested structure
+            data = event_data.get("data", {})
+            product_variant = data.get("productVariant", {})
+            product = product_variant.get("product", {})
+            product_id = product.get("id", "")
+
+            # Extract numeric ID from GID
+            if "/" in product_id:
+                return product_id.split("/")[-1]
+            return product_id if product_id else None
+
+        elif event_type == "product_added_to_cart":
+            data = event_data.get("data", {})
+            cart_line = data.get("cartLine", {})
+            merchandise = cart_line.get("merchandise", {})
+            product = merchandise.get("product", {})
+            product_id = product.get("id", "")
+
+            if "/" in product_id:
+                return product_id.split("/")[-1]
+            return product_id if product_id else None
+
+        return None
 
 
 async def run_gorse_sync(
