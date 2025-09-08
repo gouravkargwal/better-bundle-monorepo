@@ -1,5 +1,5 @@
 services:
-  # Redis service removed - using external Redis at 10.80.138.89:6379
+  # Redis service removed - using external Redis
 
   gorse-worker:
     image: zhenghaoz/gorse-worker:latest
@@ -16,8 +16,8 @@ services:
       - worker_data:/var/lib/gorse
     depends_on:
       - gorse-master
-    environment:
-      - GORSE_LOG_LEVEL=info
+    env_file:
+      - production.env
 
   gorse-server:
     image: zhenghaoz/gorse-server:latest
@@ -34,8 +34,8 @@ services:
       - server_data:/var/lib/gorse
     depends_on:
       - gorse-master
-    environment:
-      - GORSE_LOG_LEVEL=info
+    env_file:
+      - production.env
 
   gorse-master:
     image: zhenghaoz/gorse-master:latest
@@ -43,10 +43,8 @@ services:
     ports:
       - "8086:8086"
       - "8088:8088"
-    environment:
-      GORSE_CACHE_STORE: redis://10.80.138.89:6379/0
-      GORSE_DATA_STORE: postgresql://better_bundle_user:6eV4BA1YcoeFedPRJEJ0oDYlMOgFwTnF@dpg-d2qpjbemcj7s73cegbv0-a.singapore-postgres.render.com/better_bundle
-      GORSE_LOG_LEVEL: info
+    env_file:
+      - production.env
     command: >
       -c /etc/gorse/config.toml 
       --log-path /var/log/gorse/master.log 

@@ -1,38 +1,8 @@
 [database]
-
-# The database for caching, support Redis, MySQL, Postgres and MongoDB:
-#   redis://<user>:<password>@<host>:<port>/<db_number>
-#   rediss://<user>:<password>@<host>:<port>/<db_number>
-#   redis+cluster://<user>:<password>@<host>:<port>[?addr=<host2>:<port2>&addr=<host3>:<port3>]
-#   rediss+cluster://<user>:<password>@<host>:<port>[?addr=<host2>:<port2>&addr=<host3>:<port3>]
-#   mysql://[username[:password]@][protocol[(address)]]/dbname[?param1=value1&...&paramN=valueN]
-#   postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full
-#   postgresql://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full
-#   mongodb://[username:password@]host1[:port1][,...hostN[:portN]][/[defaultauthdb][?options]]
-#   mongodb+srv://[username:password@]host1[:port1][,...hostN[:portN]][/[defaultauthdb][?options]]
-#   sqlite://<path>
 cache_store = "redis://localhost:6379/0"
-
-# The database for persist data, support MySQL, Postgres, ClickHouse and MongoDB:
-#   mysql://[username[:password]@][protocol[(address)]]/dbname[?param1=value1&...&paramN=valueN]
-#   postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full
-#   postgresql://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full
-#   clickhouse://user:password@host[:port]/database?param1=value1&...&paramN=valueN
-#   chhttp://user:password@host[:port]/database?param1=value1&...&paramN=valueN
-#   chhttps://user:password@host[:port]/database?param1=value1&...&paramN=valueN
-#   mongodb://[username:password@]host1[:port1][,...hostN[:portN]][/[defaultauthdb][?options]]
-#   mongodb+srv://[username:password@]host1[:port1][,...hostN[:portN]][/[defaultauthdb][?options]]
-#   sqlite://<path>
-data_store = "mysql://gorse:gorse_pass@tcp(localhost:3306)/gorse"
-
-# The naming prefix for tables (collections, keys) in databases. The default value is empty.
-table_prefix = ""
-
-# The naming prefix for tables (collections, keys) in cache storage databases. The default value is `table_prefix`.
-cache_table_prefix = ""
-
-# The naming prefix for tables (collections, keys) in data storage databases. The default value is `table_prefix`.
-data_table_prefix = ""
+data_store = "postgresql://gorse:password@localhost:5432/gorse"
+table_prefix = "gorse_"
+cache_table_prefix = "gorse_cache_"
 
 [database.mysql]
 
@@ -40,248 +10,115 @@ data_table_prefix = ""
 isolation_level = "READ-UNCOMMITTED"
 
 [master]
-
-# GRPC port of the master node. The default value is 8086.
 port = 8086
-
-# gRPC host of the master node. The default values is "0.0.0.0".
 host = "0.0.0.0"
-
-# Enable SSL for the gRPC communication. The default value is false.
-ssl_mode = false
-
-# SSL certification authority for the gRPC communication.
-ssl_ca = ""
-
-# SSL certification for the gRPC communication.
-ssl_cert = ""
-
-# SSL certification key for the gRPC communication.
-ssl_key = ""
-
-# HTTP port of the master node. The default values is 8088.
 http_port = 8088
-
-# HTTP host of the master node. The default values is "0.0.0.0".
 http_host = "0.0.0.0"
-
-# AllowedDomains is a list of allowed values for Http Origin.
-# The list may contain the special wildcard string ".*" ; all is allowed
-# If empty all are allowed.
-http_cors_domains = []
-
-# AllowedMethods is either empty or has a list of http methods names. Checking is case-insensitive.
-http_cors_methods = []
-
-# Number of working jobs in the master node. The default value is 1.
-n_jobs = 1
-
-# Meta information timeout. The default value is 10s.
-meta_timeout = "10s"
-
-# Username for the master node dashboard.
-dashboard_user_name = ""
-
-# Password for the master node dashboard.
-dashboard_password = ""
-
-# Secret key for admin APIs (SSL required).
-admin_api_key = ""
+n_jobs = 8  # Adjust to CPU cores - 1
+meta_timeout = "60s"  # Increased for large datasets
 
 [server]
-
-# Default number of returned items. The default value is 10.
-default_n = 10
-
-# Secret key for RESTful APIs (SSL required).
-api_key = ""
-
-# Clock error in the cluster. The default value is 5s.
-clock_error = "5s"
-
-# Insert new users while inserting feedback. The default value is true.
-auto_insert_user = true
-
-# Insert new items while inserting feedback. The default value is true.
-auto_insert_item = true
-
-# Server-side cache expire time. The default value is 10s.
-cache_expire = "10s"
+default_n = 20
+api_key = "secure_random_key_123"  # Set a secure API key
+cache_expire = "1h"  # Extended for stable product catalog
+auto_insert_user = false
+auto_insert_item = false
 
 [recommend]
-
-# The cache size for recommended/popular/latest items. The default value is 10.
-cache_size = 100
-
-# Recommended cache expire time. The default value is 72h.
-cache_expire = "72h"
-
-# The time-to-live (days) of active users, 0 means disabled. Recommendation won't be cached for inactive users. The default value is 0.
-active_user_ttl = 0
+cache_size = 20000  # Increased for larger catalogs
+cache_expire = "1h"
+active_user_ttl = 60  # Extended based on user retention
 
 [recommend.data_source]
-
-# The feedback types for positive events.
-positive_feedback_types = ["star","like","read>=3"]
-
-# The feedback types for read events.
-read_feedback_types = ["read"]
-
-# The time-to-live (days) of positive feedback, 0 means disabled. The default value is 0.
-positive_feedback_ttl = 0
-
-# The time-to-live (days) of items, 0 means disabled. The default value is 0.
-item_ttl = 0
+# Match your actual feedback types from sync pipeline
+positive_feedback_types = ["purchase", "cart_add", "checkout_start"]
+read_feedback_types = ["view", "search", "collection_view"]
+positive_feedback_ttl = 90  # 90 days
+item_ttl = 180  # 6 months for products
 
 [recommend.popular]
+popular_window = "168h"  # 7 days for trending
 
-# The time window of popular items. The default values is 4320h.
-popular_window = "720h"
-
-[[recommend.non-personalized]]
-
-# The name of the leaderboard.
-name = "most_starred_weekly"
-
-# The score function for items in the leaderboard.
-score = "count(feedback, .FeedbackType == 'star')"
-
-# The filter for items in the leaderboard.
-filter = "(now() - item.Timestamp).Hours() < 168"
+# Remove the non-personalized sections - they have syntax errors
+# Use the API to get these instead
 
 [[recommend.item-to-item]]
+name = "similar_products"
+type = "users"
+column = ""
 
-# The name of the item-to-item recommender.
-name = "neighbors"
+[[recommend.item-to-item]]
+name = "category_similar"
+type = "tags"
+column = "item.Labels.category"
 
-# The type of the item-to-item recommender. There are three types:
-#   embedding: recommend by Euclidean distance of embeddings.
-#   tags: recommend by number of common tags.
-#   users: recommend by number of common users.
-#   chat: recommend by chat completion model.
-type = "embedding"
-
-# The column of the item embeddings. Leave blank if type is "users".
-column = "item.Labels.embedding"
+# [[recommend.item-to-item]]
+# name = "embedding_similar"
+# type = "embedding"
+# column = "item.Labels.embedding"  # Not using embeddings currently
 
 [[recommend.user-to-user]]
-
-# The name of the user-to-user recommender.
-name = "neighbors"
-
-# The type of the item-to-item recommender. There are three types:
-#   embedding: recommend by Euclidean distance of embeddings.
-#   tags: recommend by number of common tags.
-#   items: recommend by number of common items.
-#   auto: recommend by number of common tags and items.
+name = "similar_customers"
 type = "items"
 
+[[recommend.user-to-user]]
+name = "category_similar_users"
+type = "tags"
+column = "user.Labels.preferred_category"  # From CustomerBehaviorFeatures
+
 [recommend.collaborative]
-
-# Enable approximate collaborative filtering recommend using vector index. The default value is true.
 enable_index = true
-
-# Minimal recall for approximate collaborative filtering recommend. The default value is 0.9.
-index_recall = 0.9
-
-# Maximal number of fit epochs for approximate collaborative filtering recommend vector index. The default value is 3.
-index_fit_epoch = 3
-
-# The time period for model fitting. The default value is "60m".
+index_recall = 0.8
+index_fit_epoch = 10
 model_fit_period = "60m"
-
-# The time period for model searching. The default value is "360m".
 model_search_period = "360m"
+model_search_epoch = 50
+model_search_trials = 20
+enable_model_size_search = true
 
-# The number of epochs for model searching. The default value is 100.
-model_search_epoch = 100
-
-# The number of trials for model searching. The default value is 10.
-model_search_trials = 10
-
-# Enable searching models of different sizes, which consume more memory. The default value is false.
-enable_model_size_search = false
+[recommend.ranking]
+model = "svd++"  # SVD++ for ranking without deep learning
+factors = 32  # Number of latent factors
+epochs = 20  # Training epochs
+learning_rate = 0.005  # Learning rate
+reg = 0.02  # Regularization to prevent overfitting
+enable_user_features = true  # Use GorseUsers.labels (e.g., engagementScore, topCategories)
+enable_item_features = true  # Use GorseItems.labels (e.g., popularityScore, trendingScore)
+fit_period = "60m"  # Update ranking model hourly
+search_period = "360m"  # Hyperparameter search every 6 hours
+search_trials = 20  # Number of hyperparameter trials
+search_epoch = 20  # Epochs for hyperparameter search
 
 [recommend.replacement]
-
-# Replace historical items back to recommendations. The default value is false.
-enable_replacement = false
-
-# Decay the weights of replaced items from positive feedbacks. The default value is 0.8.
-positive_replacement_decay = 0.8
-
-# Decay the weights of replaced items from read feedbacks. The default value is 0.6.
-read_replacement_decay = 0.6
+enable_replacement = true
+positive_replacement_decay = 0.85  # Slightly faster decay
+read_replacement_decay = 0.7
 
 [recommend.offline]
-
-# The time period to check recommendation for users. The default values is 1m.
-check_recommend_period = "1m"
-
-# The time period to refresh recommendation for inactive users. The default values is 120h.
-refresh_recommend_period = "24h"
-
-# Enable latest recommendation during offline recommendation. The default value is false.
+check_recommend_period = "5m"  # Faster checks for real-time updates
+refresh_recommend_period = "6h"
 enable_latest_recommend = true
-
-# Enable popular recommendation during offline recommendation. The default value is false.
-enable_popular_recommend = false
-
-# Enable user-based similarity recommendation during offline recommendation. The default value is false.
+enable_popular_recommend = true
 enable_user_based_recommend = true
-
-# Enable item-based similarity recommendation during offline recommendation. The default value is false.
-enable_item_based_recommend = false
-
-# Enable collaborative filtering recommendation during offline recommendation. The default value is true.
+enable_item_based_recommend = true
 enable_collaborative_recommend = true
-
-# Enable click-though rate prediction during offline recommendation. Otherwise, results from multi-way recommendation
-# would be merged randomly. The default value is false.
 enable_click_through_prediction = true
-
-# The explore recommendation method is used to inject popular items or latest items into recommended result:
-#   popular: Recommend popular items to cold-start users.
-#   latest: Recommend latest items to cold-start users.
-# The default values is { popular = 0.0, latest = 0.0 }.
-explore_recommend = { popular = 0.1, latest = 0.2 }
+explore_recommend = { popular = 0.1, latest = 0.3 }  # Increased latest for new products
 
 [recommend.online]
-
-# The fallback recommendation method is used when cached recommendation drained out:
-#   item_based: Recommend similar items to cold-start users.
-#   popular: Recommend popular items to cold-start users.
-#   latest: Recommend latest items to cold-start users.
-# Recommenders are used in order. The default values is ["latest"].
-fallback_recommend = ["item_based", "latest"]
-
-# The number of feedback used in fallback item-based similar recommendation. The default values is 10.
+fallback_recommend = ["item_based", "collaborative", "popular", "latest"]
 num_feedback_fallback_item_based = 10
 
 [tracing]
-
-# Enable tracing for REST APIs. The default value is false.
-enable_tracing = false
-
-# The type of tracing exporters should be one of "jaeger", "zipkin", "otlp" and "otlphttp". The default value is "jaeger".
-exporter = "jaeger"
-
-# The endpoint of tracing collector.
-collector_endpoint = "http://localhost:14268/api/traces"
-
-# The type of tracing sampler should be one of "always", "never" and "ratio". The default value is "always".
-sampler = "always"
-
-# The ratio of ratio based sampler. The default value is 1.
-ratio = 1
+enable_tracing = true
+exporter = "otlp"
+collector_endpoint = "http://localhost:4317"  # Update to actual OTLP endpoint
+sampler = "ratio"
+ratio = 0.1  # Sample 10% of traces for performance
 
 [experimental]
-
-# Enable deep learning recommenders. The default value is false.
 enable_deep_learning = false
-
-# Batch size for deep learning recommenders. The default value is 128.
-deep_learning_batch_size = 128
+deep_learning_batch_size = 256
 
 [oidc]
 
@@ -303,34 +140,14 @@ client_secret = ""
 # http://localhost:8088, the redirect URL should be: http://localhost:8088/callback/oauth2
 redirect_url = ""
 
-[openai]
-
-# Base URL of OpenAI API.
-base_url = "http://localhost:11434/v1"
-
-# API key of OpenAI API.
-auth_token = "ollama"
-
-# Name of chat completion model.
-chat_completion_model = "qwen2.5"
-
-# Maximum requests per minute for chat completion.
-chat_completion_rpm = 15000
-
-# Maximum tokens per minute for chat completion.
-chat_completion_tpm = 1200000
-
-# Name of embedding model.
-embedding_model = "mxbai-embed-large"
-
-# Dimensions of embedding vectors.
-embedding_dimensions = 1024
-
-# Maximum requests per minute for embedding.
-embedding_rpm = 1800
-
-# Maximum tokens per minute for embedding.
-embedding_tpm = 1200000
-
-# Log file for OpenAI API.
-log_file = "openai.log"
+# [openai]
+# base_url = "https://api.production-endpoint.com/v1"  # Not using OpenAI currently
+# auth_token = "secure_ollama_token"
+# chat_completion_model = "qwen2.5"
+# chat_completion_rpm = 15000
+# chat_completion_tpm = 1200000
+# embedding_model = "mxbai-embed-large"
+# embedding_dimensions = 1024
+# embedding_rpm = 1800
+# embedding_tpm = 1200000
+# log_file = "openai.log"

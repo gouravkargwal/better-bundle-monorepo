@@ -1,9 +1,9 @@
 [database]
-# Cache store for local Redis
-cache_store = "redis://10.80.138.89:6379/0"
+# Cache store for Redis (will be overridden by GORSE_CACHE_STORE env var)
+cache_store = ""
 
-# Data store for Render PostgreSQL  
-data_store = "postgresql://better_bundle_user:6eV4BA1YcoeFedPRJEJ0oDYlMOgFwTnF@dpg-d2qpjbemcj7s73cegbv0-a.singapore-postgres.render.com/better_bundle"
+# Data store for PostgreSQL (will be overridden by GORSE_DATA_STORE env var)
+data_store = ""
 
 [master]
 host = "0.0.0.0"
