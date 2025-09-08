@@ -27,8 +27,9 @@ class GorseItemSync:
         since_timestamp: Optional[datetime] = None,
     ):
         """
-        Sync items combining ProductFeatures, CollectionFeatures
+        Sync items from ProductFeatures table only (with CollectionFeatures for context)
         Uses batch processing to handle large datasets efficiently with transactional integrity
+        Only processes items that have been computed by the feature engineering pipeline
 
         Args:
             shop_id: Shop ID to sync
@@ -62,7 +63,7 @@ class GorseItemSync:
         limit: int,
         last_sync_timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of items with their core feature data (incremental if timestamp provided)"""
+        """Fetch a batch of items from ProductFeatures table only (incremental if timestamp provided)"""
         try:
             db = await self.pipeline._get_database()
 
@@ -71,20 +72,23 @@ class GorseItemSync:
                 base_query = """
                         SELECT 
                             pf.*,
-                            pd."status", pd."productType", pd."vendor", pd."tags", 
-                            pd."collections", pd."totalInventory", pd."compareAtPrice",
-                            cf."productCount" as collection_product_count,
-                            cf."performanceScore" as collection_performance_score,
-                            cf."conversionRate" as collection_conversion_rate
+                            -- Default values for missing ProductData fields
+                            pd.status,
+                            pd."productType",
+                            pd.vendor,
+                            pd.tags,
+                            pd.collections,
+                            pd."totalInventory",
+                            pd."compareAtPrice",
+                            pd.price,
+                            pd."productCreatedAt",
+                            -- Default collection feature values (will be NULL if no collections exist)
+                            NULL as collection_product_count,
+                            NULL as collection_performance_score,
+                            NULL as collection_conversion_rate
                         FROM "ProductFeatures" pf
-                        JOIN "ProductData" pd 
-                            ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                        LEFT JOIN "CollectionFeatures" cf
-                            ON cf."shopId" = pf."shopId"
-                            AND cf."collectionId" = ANY(
-                                SELECT jsonb_array_elements_text(pd."collections"::jsonb)
-                            )
-                        WHERE pf."shopId" = $1 AND pd."isActive" = true 
+                        LEFT JOIN "ProductData" pd ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
+                        WHERE pf."shopId" = $1 
                             AND pf."lastComputedAt" > $4::timestamp
                         ORDER BY pf."productId"
                         LIMIT $2 OFFSET $3
@@ -97,20 +101,23 @@ class GorseItemSync:
                 base_query = """
                         SELECT 
                             pf.*,
-                            pd."status", pd."productType", pd."vendor", pd."tags", 
-                            pd."collections", pd."totalInventory", pd."compareAtPrice",
-                            cf."productCount" as collection_product_count,
-                            cf."performanceScore" as collection_performance_score,
-                            cf."conversionRate" as collection_conversion_rate
+                            -- Default values for missing ProductData fields
+                            pd.status,
+                            pd."productType",
+                            pd.vendor,
+                            pd.tags,
+                            pd.collections,
+                            pd."totalInventory",
+                            pd."compareAtPrice",
+                            pd.price,
+                            pd."productCreatedAt",
+                            -- Default collection feature values (will be NULL if no collections exist)
+                            NULL as collection_product_count,
+                            NULL as collection_performance_score,
+                            NULL as collection_conversion_rate
                         FROM "ProductFeatures" pf
-                        JOIN "ProductData" pd 
-                            ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                        LEFT JOIN "CollectionFeatures" cf
-                            ON cf."shopId" = pf."shopId"
-                            AND cf."collectionId" = ANY(
-                                SELECT jsonb_array_elements_text(pd."collections"::jsonb)
-                            )
-                        WHERE pf."shopId" = $1 AND pd."isActive" = true
+                        LEFT JOIN "ProductData" pd ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
+                        WHERE pf."shopId" = $1
                         ORDER BY pf."productId"
                         LIMIT $2 OFFSET $3
                     """
@@ -329,10 +336,20 @@ class GorseItemSync:
 
     def _should_hide_product(self, product: Dict[str, Any]) -> bool:
         """Determine if product should be hidden in Gorse"""
-        # Hide products with low performance or out of stock
-        total_inventory = product.get("totalInventory", 1)
-        conversion_rate = product.get("overallConversionRate", 0)
+        total_inventory = product.get("totalInventory")
+        conversion_rate = product.get("overallConversionRate")
+        view_count = product.get("viewCount30d", 0)
 
-        return not bool(total_inventory > 0) or (  # Out of stock
-            conversion_rate is not None and float(conversion_rate) < 0.01
-        )  # Very low conversion
+        # Hide if out of stock
+        if total_inventory is None or total_inventory <= 0:
+            return True
+
+        # Hide for very low conversion if there are sufficient views to make a decision
+        if (
+            view_count > 50
+            and conversion_rate is not None
+            and float(conversion_rate) < 0.01
+        ):
+            return True
+
+        return False

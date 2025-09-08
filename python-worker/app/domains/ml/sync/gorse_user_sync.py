@@ -71,18 +71,19 @@ class GorseUserSync:
             if last_sync_timestamp:
                 base_query = """
                         SELECT 
+                            COALESCE(uf."customerId", cbf."customerId") as "customerId",
                             uf.*,
                             cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
-                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
+                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount",
                             cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
                             cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
                             cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
                         FROM "UserFeatures" uf
-                        LEFT JOIN "CustomerBehaviorFeatures" cbf 
+                        FULL OUTER JOIN "CustomerBehaviorFeatures" cbf 
                             ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
-                        WHERE uf."shopId" = $1 
+                        WHERE COALESCE(uf."shopId", cbf."shopId") = $1
                             AND (uf."lastComputedAt" > $4::timestamp OR cbf."lastComputedAt" > $4::timestamp)
-                        ORDER BY uf."customerId"
+                        ORDER BY "customerId"
                         LIMIT $2 OFFSET $3
                     """
                 result = await db.query_raw(
@@ -92,17 +93,18 @@ class GorseUserSync:
                 # Full sync query
                 base_query = """
                         SELECT 
+                            COALESCE(uf."customerId", cbf."customerId") as "customerId",
                             uf.*,
                             cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
-                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount", cbf."purchaseCount" as cbf_purchase_count,
+                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount",
                             cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
                             cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
                             cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
                         FROM "UserFeatures" uf
-                        LEFT JOIN "CustomerBehaviorFeatures" cbf 
+                        FULL OUTER JOIN "CustomerBehaviorFeatures" cbf 
                             ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
-                        WHERE uf."shopId" = $1
-                        ORDER BY uf."customerId"
+                        WHERE COALESCE(uf."shopId", cbf."shopId") = $1
+                        ORDER BY "customerId"
                         LIMIT $2 OFFSET $3
                     """
                 result = await db.query_raw(base_query, shop_id, limit, offset)

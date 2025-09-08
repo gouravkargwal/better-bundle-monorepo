@@ -208,11 +208,7 @@ class GorseDataTransformers:
             "product_type": product.get("productType", "unknown"),
             "vendor": product.get("vendor", "unknown"),
             "in_stock": bool(product.get("totalInventory", 0) > 0),
-            "has_discount": bool(
-                product.get("compareAtPrice")
-                and float(product.get("compareAtPrice", 0))
-                > float(product.get("avgSellingPrice", 0))
-            ),
+            "has_discount": self._calculate_has_discount(product),
             # Collection features (from CollectionFeatures table)
             "collection_count": (
                 len(product.get("collections", []))
@@ -236,11 +232,7 @@ class GorseDataTransformers:
             "search_ctr": float(product.get("search_ctr", 0)),
             "search_conversion_rate": float(product.get("search_conversion_rate", 0)),
             # Computed flags
-            "is_new": bool(
-                product.get("days_since_first_purchase", 365) < 30
-                if product.get("days_since_first_purchase")
-                else False
-            ),
+            "is_new": self._calculate_is_new(product),
             "is_bestseller": bool(product.get("purchase_count_30d", 0) > 10),
             "is_trending": bool(product.get("trending_score", 0) > 0.7),
             "needs_restock": bool(
@@ -270,6 +262,46 @@ class GorseDataTransformers:
 
         # Remove None values
         return {k: v for k, v in labels.items() if v is not None}
+
+    def _calculate_is_new(self, product: Dict[str, Any]) -> bool:
+        """Calculate is_new flag based on creation date or first purchase"""
+        # Prioritize purchase data if available
+        days_since_first_purchase = product.get("daysSinceFirstPurchase")
+        if days_since_first_purchase is not None:
+            return days_since_first_purchase < 30
+
+        # Fallback to product creation date
+        created_at = product.get("productCreatedAt")
+        if created_at:
+            if isinstance(created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+                except:
+                    return False
+            if isinstance(created_at, datetime):
+                return (now_utc() - created_at).days < 30
+
+        return False
+
+    def _calculate_has_discount(self, product: Dict[str, Any]) -> bool:
+        """Calculate has_discount flag with fallbacks"""
+        compare_at_price = product.get("compareAtPrice")
+        if compare_at_price is None or compare_at_price <= 0:
+            return False
+
+        # Use avgSellingPrice if available (more accurate)
+        avg_selling_price = product.get("avgSellingPrice")
+        if avg_selling_price is not None:
+            return float(compare_at_price) > float(avg_selling_price)
+
+        # Fallback to list price
+        price = product.get("price")
+        if price is not None:
+            return float(compare_at_price) > float(price)
+
+        return False
 
     def _calculate_recency_tier(self, days_since_last: Optional[int]) -> int:
         """Calculate recency tier (0-4)"""
@@ -344,12 +376,27 @@ class GorseDataTransformers:
 
     def _calculate_freshness_score(self, product: Dict[str, Any]) -> float:
         """Calculate product freshness with decay"""
-        days_since = product.get("daysSinceFirstPurchase")
-        if not days_since:
-            return 1.0
+        # Prioritize purchase data for freshness
+        days_since_purchase = product.get("daysSinceFirstPurchase")
+        if days_since_purchase is not None:
+            # Exponential decay over 90 days
+            return max(0, 1.0 - (days_since_purchase / 90) ** 2)
 
-        # Exponential decay over 90 days
-        return max(0, 1.0 - (days_since / 90) ** 2)
+        # Fallback to creation date if no purchase data
+        created_at = product.get("productCreatedAt")
+        if created_at:
+            if isinstance(created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+                except:
+                    return 1.0  # Default to fresh if parse fails
+            if isinstance(created_at, datetime):
+                days_since_creation = (now_utc() - created_at).days
+                return max(0, 1.0 - (days_since_creation / 90) ** 2)
+
+        return 1.0
 
     def _bucket_price(self, price: float) -> int:
         """Bucket price into categories"""
