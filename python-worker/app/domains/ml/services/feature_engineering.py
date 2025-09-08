@@ -758,12 +758,13 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         # Create parallel save tasks using generic method
         for feature_key, feature_type, features in feature_configs:
-            if features:
-                save_tasks.append(
-                    self._save_features_generic(
-                        shop_id, feature_key, feature_type, features
-                    )
+            # Always create save tasks, even for empty feature dictionaries
+            # This ensures all expected feature types are included in save_results
+            save_tasks.append(
+                self._save_features_generic(
+                    shop_id, feature_key, feature_type, features
                 )
+            )
 
         # Execute all save operations in parallel
         if save_tasks:
@@ -788,6 +789,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         """Generic method to save any feature type - eliminates duplicate methods"""
         try:
             saved_count = 0
+
+            # Handle empty feature dictionaries
+            if not features:
+                logger.info(f"No {feature_type} features to save for shop {shop_id}")
+                return {
+                    feature_key: {
+                        "saved_count": 0,
+                        "total_processed": 0,
+                    }
+                }
 
             # Prepare batch data for bulk operation
             batch_data = []
@@ -953,9 +964,25 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             for customer_id, product_id in limited_pairs:
                 # Find customer and product objects
                 customer = next(
-                    (c for c in customers if c.get("id") == customer_id), None
+                    (c for c in customers if c.get("customerId") == customer_id), None
                 )
-                product = next((p for p in products if p.get("id") == product_id), None)
+                # Handle both GID format and plain product ID format
+                product = None
+                if product_id.startswith("gid://shopify/Product/"):
+                    # Extract numeric product ID from GID
+                    numeric_product_id = product_id.split("/")[-1]
+                    product = next(
+                        (
+                            p
+                            for p in products
+                            if p.get("productId") == numeric_product_id
+                        ),
+                        None,
+                    )
+                else:
+                    product = next(
+                        (p for p in products if p.get("productId") == product_id), None
+                    )
 
                 if customer and product:
                     context = {
