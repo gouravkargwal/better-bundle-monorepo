@@ -22,6 +22,24 @@ class GorseFeedbackSync:
     def __init__(self, pipeline):
         self.pipeline = pipeline
 
+    def _get_prefixed_user_id(self, user_id: str, shop_id: str) -> str:
+        """
+        Generate shop-prefixed user ID for multi-tenancy
+        Format: shop_{shop_id}_{user_id}
+        """
+        if not shop_id:
+            return user_id
+        return f"shop_{shop_id}_{user_id}"
+
+    def _get_prefixed_item_id(self, item_id: str, shop_id: str) -> str:
+        """
+        Generate shop-prefixed item ID for multi-tenancy
+        Format: shop_{shop_id}_{item_id}
+        """
+        if not shop_id:
+            return item_id
+        return f"shop_{shop_id}_{item_id}"
+
     async def sync_feedback(self, shop_id: str, since_hours: int = 24):
         """
         Sync feedback data from multiple sources to Gorse using streaming processing
@@ -83,8 +101,11 @@ class GorseFeedbackSync:
 
                 # Process buffer when it reaches batch size
                 if len(batch_buffer) >= self.pipeline.feedback_batch_size:
+                    # Resolve user identities before further processing
+                    resolved_batch = await self._resolve_user_identities(batch_buffer)
+
                     # Deduplicate the batch
-                    unique_batch = self._deduplicate_feedback(batch_buffer)
+                    unique_batch = self._deduplicate_feedback(resolved_batch)
 
                     # Insert the batch
                     batch_count = await self._bulk_insert_gorse_feedback(unique_batch)
@@ -99,7 +120,8 @@ class GorseFeedbackSync:
 
             # Process any remaining records in buffer
             if batch_buffer:
-                unique_batch = self._deduplicate_feedback(batch_buffer)
+                resolved_batch = await self._resolve_user_identities(batch_buffer)
+                unique_batch = self._deduplicate_feedback(resolved_batch)
                 batch_count = await self._bulk_insert_gorse_feedback(unique_batch)
                 total_synced += batch_count
 
@@ -113,6 +135,54 @@ class GorseFeedbackSync:
 
         return total_synced
 
+    async def _resolve_user_identities(
+        self, feedback_batch: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Check for and stitch user identities from anonymous to known"""
+        # Find all anonymous session IDs in the batch
+        session_ids = {
+            f["user_id"].replace("session_", "")
+            for f in feedback_batch
+            if f.get("user_id", "").startswith("session_")
+        }
+
+        if not session_ids:
+            return feedback_batch
+
+        try:
+            db = await self.pipeline._get_database()
+            links = await db.useridentitylink.find_many(
+                where={"clientId": {"in": list(session_ids)}}
+            )
+
+            if not links:
+                return feedback_batch
+
+            # Create a mapping from clientId to customerId
+            id_map = {link.clientId: link.customerId for link in links}
+            logger.debug(f"Found {len(id_map)} identity links for this batch.")
+
+            # Create a new batch with resolved IDs
+            resolved_batch = []
+            for feedback in feedback_batch:
+                user_id = feedback.get("user_id")
+                if user_id and user_id.startswith("session_"):
+                    client_id = user_id.replace("session_", "")
+                    if client_id in id_map:
+                        # Swap anonymous ID for the permanent customer ID
+                        feedback["user_id"] = id_map[client_id]
+                        logger.debug(
+                            f"Stitched identity: {user_id} -> {id_map[client_id]}"
+                        )
+                resolved_batch.append(feedback)
+
+            return resolved_batch
+
+        except Exception as e:
+            logger.error(f"Failed during user identity resolution: {str(e)}")
+            # Return original batch on error to avoid data loss
+            return feedback_batch
+
     @retry_with_exponential_backoff(max_retries=2, base_delay=1.0)
     async def _bulk_insert_gorse_feedback(
         self, feedback_batch: List[Dict[str, Any]]
@@ -124,13 +194,21 @@ class GorseFeedbackSync:
         try:
             db = await self.pipeline._get_database()
 
-            # Convert feedback to Gorse schema format
+            # Convert feedback to Gorse schema format with prefixed IDs for multi-tenancy
             gorse_feedback_data = []
             for feedback in feedback_batch:
+                # Use prefixed IDs for multi-tenancy
+                prefixed_user_id = self._get_prefixed_user_id(
+                    feedback["user_id"], feedback["shop_id"]
+                )
+                prefixed_item_id = self._get_prefixed_item_id(
+                    feedback["item_id"], feedback["shop_id"]
+                )
+
                 gorse_feedback_record = {
                     "feedbackType": feedback["feedback_type"],
-                    "userId": feedback["user_id"],
-                    "itemId": feedback["item_id"],
+                    "userId": prefixed_user_id,
+                    "itemId": prefixed_item_id,
                     "timestamp": feedback["timestamp"],
                     "shopId": feedback["shop_id"],
                     "comment": feedback.get("comment"),

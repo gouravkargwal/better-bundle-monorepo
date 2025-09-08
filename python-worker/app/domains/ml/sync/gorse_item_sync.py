@@ -20,6 +20,15 @@ class GorseItemSync:
     def __init__(self, pipeline):
         self.pipeline = pipeline
 
+    def _get_prefixed_item_id(self, item_id: str, shop_id: str) -> str:
+        """
+        Generate shop-prefixed item ID for multi-tenancy
+        Format: shop_{shop_id}_{item_id}
+        """
+        if not shop_id:
+            return item_id
+        return f"shop_{shop_id}_{item_id}"
+
     async def sync_items(
         self,
         shop_id: str,
@@ -264,8 +273,12 @@ class GorseItemSync:
                 categories = await self._get_product_categories(item, shop_id)
                 is_hidden = self._should_hide_product(item)
 
+                # Use prefixed item ID for multi-tenancy
+                prefixed_item_id = self._get_prefixed_item_id(
+                    item["productId"], shop_id
+                )
                 item_data = {
-                    "itemId": item["productId"],
+                    "itemId": prefixed_item_id,
                     "shopId": shop_id,
                     "categories": Json(categories),
                     "labels": Json(labels),
@@ -296,11 +309,16 @@ class GorseItemSync:
         self, product: Dict[str, Any], shop_id: str
     ) -> List[str]:
         """
-        Get categories from collections and CollectionFeatures
+        Get categories with shopId as primary category for multi-tenancy
+        Format: ["shop_{shop_id}", "collection_abc", "collection_def", ...]
         """
         categories = []
 
-        # Get from product collections
+        # 1. Add shopId as primary category for multi-tenancy
+        if shop_id:
+            categories.append(f"shop_{shop_id}")
+
+        # 2. Get from product collections
         collections = product.get("collections", "[]")
         if isinstance(collections, str):
             try:
@@ -316,7 +334,7 @@ class GorseItemSync:
             elif isinstance(collection, str):
                 categories.append(collection)
 
-        # Also get high-performance collections from CollectionFeatures
+        # 3. Also get high-performance collections from CollectionFeatures
         db = await self.pipeline._get_database()
         query = """
                 SELECT "collectionId" 

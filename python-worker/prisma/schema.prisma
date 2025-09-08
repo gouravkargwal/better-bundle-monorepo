@@ -1036,6 +1036,19 @@ model SearchProductFeatures {
   @@map("SearchProductFeatures")
 }
 
+model UserIdentityLink {
+  id         String   @id @default(cuid())
+  shopId     String
+  clientId   String // Anonymous session/client ID
+  customerId String // Permanent customer ID
+  linkedAt   DateTime @default(now())
+
+  @@unique([shopId, clientId, customerId])
+  @@index([shopId, clientId])
+  @@index([shopId, customerId])
+  @@map("UserIdentityLink")
+}
+
 // ============= GORSE BRIDGE TABLES =============
 
 model GorseUsers {

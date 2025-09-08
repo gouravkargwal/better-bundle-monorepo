@@ -20,6 +20,15 @@ class GorseUserSync:
     def __init__(self, pipeline):
         self.pipeline = pipeline
 
+    def _get_prefixed_user_id(self, user_id: str, shop_id: str) -> str:
+        """
+        Generate shop-prefixed user ID for multi-tenancy
+        Format: shop_{shop_id}_{user_id}
+        """
+        if not shop_id:
+            return user_id
+        return f"shop_{shop_id}_{user_id}"
+
     async def sync_users(
         self,
         shop_id: str,
@@ -225,8 +234,12 @@ class GorseUserSync:
                 labels = self.pipeline.transformers._build_comprehensive_user_labels(
                     user
                 )
+                # Use prefixed user ID for multi-tenancy
+                prefixed_user_id = self._get_prefixed_user_id(
+                    user["customerId"], shop_id
+                )
                 user_data = {
-                    "userId": user["customerId"],
+                    "userId": prefixed_user_id,
                     "shopId": shop_id,
                     "labels": Json(labels),
                 }
@@ -280,7 +293,9 @@ class GorseUserSync:
         # Convert sessions to Gorse user format for bulk upsert
         gorse_users_data = []
         for session in sessions:
-            user_id = f"session_{session['sessionId']}"
+            # Use prefixed user ID for multi-tenancy
+            base_user_id = f"session_{session['sessionId']}"
+            prefixed_user_id = self._get_prefixed_user_id(base_user_id, shop_id)
 
             labels = {
                 "session_count": int(session.get("session_count") or 0),
@@ -296,7 +311,7 @@ class GorseUserSync:
 
             gorse_users_data.append(
                 {
-                    "userId": user_id,
+                    "userId": prefixed_user_id,
                     "shopId": shop_id,
                     "labels": Json(labels),
                 }

@@ -7,6 +7,7 @@
 {%- liquid
   assign current_product_id = product.id
   assign shop_domain = shop.domain
+  assign customer_id = customer.id | default: ''
   assign app_bridge_url = 'https://cdn.shopify.com/shopifycloud/shopify/assets/shopify/app-bridge-3.7.9.js'
   
   comment
@@ -43,6 +44,7 @@
 <div class="bundle-recommendations bundle-recommendations--{{ layout_style }}" 
      data-product-id="{{ current_product_id }}"
      data-shop-domain="{{ shop_domain }}"
+     data-customer-id="{{ customer_id }}"
      data-api-url="{{ widget_api_url }}"
      data-show-individual="{{ show_individual_add }}"
      data-show-bundle="{{ show_bundle_total }}"
@@ -302,7 +304,74 @@
     
     const productId = bundleWidget.dataset.productId;
     const shopDomain = bundleWidget.dataset.shopDomain;
+    const customerId = bundleWidget.dataset.customerId;
+
+    // --- Client ID & Identity Stitching ---
+    function manageClientIdAndStitching() {
+      const cookieName = 'better_bundle_client_id';
+      const stitchCookieName = 'better_bundle_stitch_done';
+
+      function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+      }
+
+      function setCookie(name, value, days) {
+        let expires = "";
+        if (days) {
+          const date = new Date();
+          date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+          expires = "; expires=" + date.toUTCString();
+        }
+        document.cookie = name + "=" + (value || "") + expires + "; path=/";
+      }
+
+      function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+
+      let clientId = getCookie(cookieName);
+      if (!clientId) {
+        clientId = generateUUID();
+        setCookie(cookieName, clientId, 365);
+      }
+
+      // If customer is logged in, has a clientId, and we haven't stitched this session yet
+      if (customerId && clientId && !getCookie(stitchCookieName)) {
+        const stitchApiUrl = `/api/v1/identity/stitch`;
+        console.log(`[BetterBundle] Stitching identity: ${clientId} -> ${customerId}`);
+        
+        fetch(stitchApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shopDomain: shopDomain,
+            clientId: clientId,
+            customerId: customerId
+          })
+        })
+        .then(response => {
+          if (response.ok) {
+            console.log('[BetterBundle] Identity stitched successfully.');
+            // Set a session cookie to prevent re-stitching
+            setCookie(stitchCookieName, 'true', 0); 
+          } else {
+            console.error('[BetterBundle] Failed to stitch identity.');
+          }
+        })
+        .catch(error => {
+          console.error('[BetterBundle] Error during identity stitching:', error);
+        });
+      }
+    }
     
+    manageClientIdAndStitching();
+    // --- End Client ID & Identity Stitching ---
+
     // Dynamic API URL resolution (production-ready)
     async function getApiUrl() {
       const currentHost = window.location.host;

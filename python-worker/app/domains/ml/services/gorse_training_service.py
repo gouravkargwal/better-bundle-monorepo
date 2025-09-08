@@ -1,6 +1,6 @@
 """
 Gorse Training Service
-Manages ML model training jobs with proper logging and monitoring
+Manages data pushing to Gorse API which automatically triggers training
 """
 
 import asyncio
@@ -12,6 +12,7 @@ from enum import Enum
 from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.shared.gorse_api_client import GorseApiClient
 
 logger = get_logger(__name__)
 
@@ -37,12 +38,27 @@ class TrainingJobType(Enum):
 
 class GorseTrainingService:
     """
-    Simplified service for managing Gorse model training
-    Uses MLTrainingLog for persistence and actual Gorse Redis keys for progress tracking
+    Service for pushing data to Gorse API which automatically triggers training
+    Reads from bridge tables (gorse_users, gorse_items, gorse_feedback) and pushes to Gorse
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        gorse_base_url: str = "http://localhost:8088",
+        gorse_api_key: Optional[str] = None,
+    ):
+        """
+        Initialize Gorse training service
+
+        Args:
+            gorse_base_url: Gorse master server URL
+            gorse_api_key: Optional API key for Gorse authentication
+        """
         self._db_client = None
+        self.gorse_client = GorseApiClient(
+            base_url=gorse_base_url, api_key=gorse_api_key
+        )
+        self.batch_size = 100  # Batch size for API calls
 
     async def _get_database(self):
         """Get database connection with caching"""
@@ -50,7 +66,7 @@ class GorseTrainingService:
             self._db_client = await get_database()
         return self._db_client
 
-    async def start_training_job(
+    async def push_data_to_gorse(
         self,
         shop_id: str,
         job_type: TrainingJobType = TrainingJobType.FULL_TRAINING,
@@ -58,19 +74,19 @@ class GorseTrainingService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Start a new training job for a shop
+        Push all data for a shop to Gorse API, which automatically triggers training
 
         Args:
-            shop_id: Shop ID to train models for
-            job_type: Type of training job to run
-            trigger_source: Source that triggered the training (api, gorse, scheduled, etc.)
-            metadata: Additional metadata for the training job
+            shop_id: Shop ID to push data for
+            job_type: Type of data push job
+            trigger_source: Source that triggered the data push
+            metadata: Additional metadata for the job
 
         Returns:
-            job_id: Unique identifier for the training job
+            job_id: Unique identifier for the data push job
         """
         try:
-            job_id = f"training_{shop_id}_{job_type.value}_{int(time.time())}"
+            job_id = f"data_push_{shop_id}_{job_type.value}_{int(time.time())}"
 
             # Create training log record
             db = await self._get_database()
@@ -83,21 +99,21 @@ class GorseTrainingService:
             )
 
             logger.info(
-                f"Created training job {job_id} for shop {shop_id} (type: {job_type.value})"
+                f"Created data push job {job_id} for shop {shop_id} (type: {job_type.value})"
             )
 
-            # Start the training process asynchronously
+            # Start the data push process asynchronously
             asyncio.create_task(
-                self._execute_training_job(job_id, shop_id, job_type, training_log.id)
+                self._execute_data_push_job(job_id, shop_id, job_type, training_log.id)
             )
 
             return job_id
 
         except Exception as e:
-            logger.error(f"Failed to start training job for shop {shop_id}: {str(e)}")
+            logger.error(f"Failed to start data push job for shop {shop_id}: {str(e)}")
             raise
 
-    async def _execute_training_job(
+    async def _execute_data_push_job(
         self,
         job_id: str,
         shop_id: str,
@@ -105,314 +121,370 @@ class GorseTrainingService:
         training_log_id: str,
     ):
         """
-        Execute the actual training job
-        This runs asynchronously and updates the training log
+        Execute the data push job to Gorse API
         """
-        db = await self._get_database()
-
         try:
-            logger.info(f"Starting training execution for job {job_id}")
+            logger.info(f"Starting data push job {job_id} for shop {shop_id}")
 
-            # Execute training based on job type
-            incremental = job_type in [
-                TrainingJobType.INCREMENTAL_TRAINING,
-                TrainingJobType.MODEL_REFRESH,
-            ]
-            await self._execute_training(job_id, shop_id, training_log_id, incremental)
-
-            # Mark as completed
-            await self._update_training_log(
-                training_log_id, "completed", completed_at=now_utc()
+            # Update training log status
+            db = await self._get_database()
+            await db.mltraininglog.update(
+                where={"id": training_log_id},
+                data={"status": "running", "updatedAt": now_utc()},
             )
 
-            logger.info(f"Training job {job_id} completed successfully")
+            # Step 1: Check Gorse API health
+            health_check = await self.gorse_client.health_check()
+            if not health_check["success"]:
+                raise Exception(
+                    f"Gorse API is not healthy: {health_check.get('error', 'Unknown error')}"
+                )
+
+            # Step 2: Get last push timestamps for incremental logic
+            last_push_info = await self._get_last_push_timestamps(shop_id)
+
+            # Step 3: Push all data types incrementally using unified method
+            data_types = ["users", "items", "feedback"]
+            results = {}
+
+            for data_type in data_types:
+                result = await self._push_data_incremental(
+                    data_type, shop_id, training_log_id, last_push_info
+                )
+                results[data_type] = result
+                logger.info(f"Pushed {result['pushed']} {data_type} for shop {shop_id}")
+
+            # Step 4: Update training log with success
+            total_pushed = sum(result["pushed"] for result in results.values())
+
+            await db.mltraininglog.update(
+                where={"id": training_log_id},
+                data={
+                    "status": "completed",
+                    "completedAt": now_utc(),
+                    "updatedAt": now_utc(),
+                    "metadata": {
+                        "users_pushed": results["users"]["pushed"],
+                        "items_pushed": results["items"]["pushed"],
+                        "feedback_pushed": results["feedback"]["pushed"],
+                        "total_pushed": total_pushed,
+                        "job_type": job_type.value,
+                        "push_strategy": "incremental",
+                    },
+                },
+            )
+
+            logger.info(
+                f"Data push job {job_id} completed successfully. Total records pushed: {total_pushed}"
+            )
 
         except Exception as e:
-            logger.error(f"Training job {job_id} failed: {str(e)}")
+            logger.error(f"Data push job {job_id} failed: {str(e)}")
+            try:
+                db = await self._get_database()
+                await db.mltraininglog.update(
+                    where={"id": training_log_id},
+                    data={
+                        "status": "failed",
+                        "completedAt": now_utc(),
+                        "errorMessage": str(e),
+                        "updatedAt": now_utc(),
+                    },
+                )
+            except Exception as log_error:
+                logger.error(f"Failed to update training log: {str(log_error)}")
 
-            # Mark as failed
-            await self._update_training_log(
-                training_log_id, "failed", error=str(e), completed_at=now_utc()
-            )
-
-    async def _execute_training(
-        self, job_id: str, shop_id: str, training_log_id: str, incremental: bool = False
-    ):
-        """Execute model training for a shop"""
-        try:
-            training_type = "incremental" if incremental else "full"
-            logger.info(f"Starting {training_type} training for shop {shop_id}")
-
-            # Step 1: Ensure views exist for the shop
-            await self._ensure_shop_views_exist(shop_id)
-
-            # Step 2: Trigger Gorse training by calling the training API
-            training_result = await self._trigger_gorse_training(shop_id, training_type)
-
-            # Step 3: Monitor for training completion using Redis keys
-            await self._monitor_gorse_training_completion(
-                shop_id, training_log_id, training_result
-            )
-
-            # Step 4: Store training results
-            await self._store_training_results(
-                shop_id, training_log_id, training_result
-            )
-
-        except Exception as e:
-            logger.error(f"Training failed for job {job_id}: {str(e)}")
-            raise
-
-    async def _ensure_shop_views_exist(self, shop_id: str):
-        """Ensure shop-specific views exist for Gorse training"""
+    async def _get_last_push_timestamps(self, shop_id: str) -> Optional[Dict[str, Any]]:
+        """Get the last push timestamps for a shop from training logs"""
         try:
             db = await self._get_database()
 
-            # Sanitize shop_id for SQL
-            sanitized_shop_id = shop_id.replace("'", "''")
+            # Get the most recent training log (regardless of status)
+            last_log = await db.mltraininglog.find_first(
+                where={"shopId": shop_id}, order={"startedAt": "desc"}
+            )
 
-            # Check if views already exist
-            check_sql = f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.views 
-                    WHERE table_name = 'shop_{sanitized_shop_id}_items'
+            if last_log and last_log.metadata:
+                metadata = (
+                    last_log.metadata if isinstance(last_log.metadata, dict) else {}
                 )
-            """
-            result = await db.query_raw(check_sql)
-
-            if result and result[0]["exists"]:
-                logger.info(
-                    f"Views already exist for shop {shop_id} - no update needed"
-                )
-                return  # Views are already current!
-
-            # Create views for Gorse tables
-            views_sql = [
-                f"""
-                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_items AS 
-                    SELECT 
-                        "itemId" as item_id,
-                        "categories"::text as categories,
-                        "labels"::text as labels,
-                        "isHidden" as is_hidden,
-                        "updatedAt" as time_stamp,
-                        '' as comment
-                    FROM "gorse_items" 
-                    WHERE "shopId" = '{sanitized_shop_id}'
-                """,
-                f"""
-                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_users AS 
-                    SELECT 
-                        "userId" as user_id,
-                        "labels"::text as labels,
-                        '[]'::text as subscribe,
-                        '' as comment
-                    FROM "gorse_users" 
-                    WHERE "shopId" = '{sanitized_shop_id}'
-                """,
-                f"""
-                    CREATE OR REPLACE VIEW shop_{sanitized_shop_id}_feedback AS 
-                    SELECT 
-                        "feedbackType" as feedback_type,
-                        "userId" as user_id,
-                        "itemId" as item_id,
-                        1.0 as value,
-                        "timestamp" as time_stamp,
-                        COALESCE("comment", '') as comment
-                    FROM "gorse_feedback" 
-                    WHERE "shopId" = '{sanitized_shop_id}'
-                """,
-            ]
-
-            for sql in views_sql:
-                await db.query_raw(sql)
-
-            logger.info(
-                f"Created Gorse views for shop {shop_id} - they will stay current automatically"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to ensure views for shop {shop_id}: {str(e)}")
-            raise
-
-    async def _trigger_gorse_training(
-        self, shop_id: str, training_type: str
-    ) -> Dict[str, Any]:
-        """Trigger Gorse training via API call"""
-        try:
-            import httpx
-
-            # Gorse training is typically triggered by data insertion
-            # Since we have views, we can trigger training by calling the Gorse API
-            gorse_master_url = "http://localhost:8088"  # Default Gorse master URL
-
-            # For now, we'll simulate the training trigger
-            # In production, this would call the actual Gorse API
-            training_result = {
-                "success": True,
-                "training_type": training_type,
-                "shop_id": shop_id,
-                "triggered_at": now_utc(),
-                "api_response": "Training triggered successfully",
-            }
-
-            logger.info(
-                f"Triggered Gorse training for shop {shop_id} (type: {training_type})"
-            )
-            return training_result
-
-        except Exception as e:
-            logger.error(
-                f"Failed to trigger Gorse training for shop {shop_id}: {str(e)}"
-            )
-            return {"success": False, "error": str(e), "shop_id": shop_id}
-
-    async def _monitor_gorse_training_completion(
-        self, shop_id: str, training_log_id: str, training_result: Dict[str, Any]
-    ):
-        """
-        Monitor Gorse training completion using Redis keys
-        """
-        try:
-            from app.core.redis_client import get_redis_client
-
-            logger.info(f"Monitoring Gorse training completion for shop {shop_id}")
-
-            redis_client = await get_redis_client()
-
-            # Gorse Redis keys that indicate training completion
-            training_keys = [
-                "GlobalMeta:LastFitMatchingModelTime",
-                "GlobalMeta:LastFitRankingModelTime",
-                "GlobalMeta:LastUpdateLatestItemsTime",
-                "GlobalMeta:LastUpdatePopularItemsTime",
-            ]
-
-            # Get initial timestamps
-            initial_timestamps = {}
-            for key in training_keys:
-                try:
-                    value = await redis_client.get(key)
-                    if value:
-                        initial_timestamps[key] = value
-                except Exception as e:
-                    logger.warning(
-                        f"Error getting initial timestamp for {key}: {str(e)}"
-                    )
-
-            # Monitor for changes (simplified - wait 30 seconds)
-            await asyncio.sleep(30)
-
-            # Check if any keys have been updated
-            training_completed = False
-            for key in training_keys:
-                try:
-                    current_value = await redis_client.get(key)
-                    if current_value and current_value != initial_timestamps.get(key):
-                        logger.info(f"Training completion detected via {key} update")
-                        training_completed = True
-                        break
-                except Exception as e:
-                    logger.warning(f"Error checking {key}: {str(e)}")
-
-            if training_completed:
-                logger.info(f"Training completed for shop {shop_id}")
-            else:
-                logger.info(
-                    f"Training monitoring completed for shop {shop_id} (timeout)"
-                )
-
-        except Exception as e:
-            logger.error(
-                f"Error monitoring training completion for shop {shop_id}: {str(e)}"
-            )
-
-    async def _store_training_results(
-        self, shop_id: str, training_log_id: str, training_result: Dict[str, Any]
-    ):
-        """Store training results in the database"""
-        try:
-            db = await self._get_database()
-
-            # Update the training log with results
-            update_data = {
-                "status": "completed",
-                "completedAt": now_utc(),
-                "durationMs": None,  # Will be calculated in _update_training_log
-            }
-
-            # Add training metadata if available
-            if training_result.get("success"):
-                update_data["metadata"] = {
-                    "training_type": training_result.get("training_type"),
-                    "api_response": training_result.get("api_response"),
-                    "triggered_at": (
-                        training_result.get("triggered_at").isoformat()
-                        if training_result.get("triggered_at")
-                        else None
-                    ),
+                return {
+                    "usersLastPushAt": metadata.get("usersLastPushAt"),
+                    "itemsLastPushAt": metadata.get("itemsLastPushAt"),
+                    "feedbackLastPushAt": metadata.get("feedbackLastPushAt"),
                 }
-            else:
-                update_data["status"] = "failed"
-                update_data["error"] = training_result.get("error", "Unknown error")
 
-            await db.mltraininglog.update(
-                where={"id": training_log_id}, data=update_data
-            )
-
-            logger.info(f"Stored training results for shop {shop_id}")
+            return None
 
         except Exception as e:
             logger.error(
-                f"Failed to store training results for shop {shop_id}: {str(e)}"
+                f"Failed to get last push timestamps for shop {shop_id}: {str(e)}"
             )
-            raise
+            return None
 
-    async def _update_training_log(
+    async def _push_data_incremental(
         self,
+        data_type: str,
+        shop_id: str,
         training_log_id: str,
-        status: str,
-        completed_at: Optional[datetime] = None,
-        error: Optional[str] = None,
-    ):
-        """Update training log status"""
-        db = await self._get_database()
+        last_push_info: Optional[Dict],
+    ) -> Dict[str, Any]:
+        """Unified incremental data push method - DRY implementation"""
+
+        # Configuration for each data type
+        configs = {
+            "users": {
+                "table": "gorseusers",
+                "timestamp_field": "updatedAt",
+                "last_push_key": "usersLastPushAt",
+                "converter": self._convert_user_to_gorse_format,
+                "api_method": "users",
+            },
+            "items": {
+                "table": "gorseitems",
+                "timestamp_field": "updatedAt",
+                "last_push_key": "itemsLastPushAt",
+                "converter": self._convert_item_to_gorse_format,
+                "api_method": "items",
+            },
+            "feedback": {
+                "table": "gorsefeedback",
+                "timestamp_field": "timestamp",
+                "last_push_key": "feedbackLastPushAt",
+                "converter": self._convert_feedback_to_gorse_format,
+                "api_method": "feedback",
+            },
+        }
+
+        if data_type not in configs:
+            return {
+                "pushed": 0,
+                "success": False,
+                "error": f"Unknown data type: {data_type}",
+            }
+
+        config = configs[data_type]
 
         try:
-            update_data = {"status": status}
+            db = await self._get_database()
+            total_pushed = 0
+            offset = 0
 
-            if completed_at:
-                update_data["completedAt"] = completed_at
-                # Calculate duration
-                training_log = await db.mltraininglog.find_unique(
-                    where={"id": training_log_id}
+            # Determine the cutoff timestamp
+            if last_push_info and last_push_info.get(config["last_push_key"]):
+                cutoff_timestamp = last_push_info[config["last_push_key"]]
+                logger.info(
+                    f"Incremental {data_type} push for shop {shop_id} since {cutoff_timestamp}"
                 )
-                if training_log and training_log.startedAt:
-                    duration_ms = int(
-                        (completed_at - training_log.startedAt).total_seconds() * 1000
+            else:
+                # First time - push all data
+                cutoff_timestamp = datetime.min
+                logger.info(
+                    f"First {data_type} push for shop {shop_id} - pushing all {data_type}"
+                )
+
+            while True:
+                # Get data updated since last push
+                where_clause = {
+                    "shopId": shop_id,
+                    config["timestamp_field"]: {"gt": cutoff_timestamp},
+                }
+
+                data_records = await getattr(db, config["table"]).find_many(
+                    where=where_clause,
+                    skip=offset,
+                    take=self.batch_size,
+                    order={config["timestamp_field"]: "asc"},
+                )
+
+                if not data_records:
+                    break
+
+                # Convert and push with retry logic
+                gorse_data = [config["converter"](record) for record in data_records]
+                result = await self._push_batch_with_retry(
+                    gorse_data, config["api_method"]
+                )
+
+                if result["success"]:
+                    total_pushed += result["count"]
+                    # Update timestamp to the latest record in this batch
+                    latest_timestamp = max(
+                        getattr(record, config["timestamp_field"])
+                        for record in data_records
                     )
-                    update_data["durationMs"] = duration_ms
+                    await self._update_training_log_metadata(
+                        training_log_id, {config["last_push_key"]: latest_timestamp}
+                    )
+                else:
+                    logger.error(
+                        f"Failed to push {data_type} batch: {result.get('error')}"
+                    )
+                    # Continue with next batch instead of breaking
 
-            if error:
-                update_data["error"] = error
+                offset += self.batch_size
 
+            logger.info(f"Pushed {total_pushed} {data_type} for shop {shop_id}")
+            return {"pushed": total_pushed, "success": True}
+
+        except Exception as e:
+            logger.error(
+                f"Failed to push {data_type} data for shop {shop_id}: {str(e)}"
+            )
+            return {"pushed": 0, "success": False, "error": str(e)}
+
+    async def _push_batch_with_retry(
+        self, batch_data: List[Dict], data_type: str, max_retries: int = 3
+    ) -> Dict[str, Any]:
+        """Simple retry logic for API calls - only on network/transient errors"""
+
+        for attempt in range(max_retries):
+            try:
+                if data_type == "users":
+                    result = await self.gorse_client.insert_users_batch(batch_data)
+                elif data_type == "items":
+                    result = await self.gorse_client.insert_items_batch(batch_data)
+                elif data_type == "feedback":
+                    result = await self.gorse_client.insert_feedback_batch(batch_data)
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Unknown data type: {data_type}",
+                        "count": 0,
+                    }
+
+                # If API call succeeded, we're done
+                if result["success"]:
+                    return result
+
+                # Only retry on network/transient errors
+                if (
+                    self._is_retryable_error(result["error"])
+                    and attempt < max_retries - 1
+                ):
+                    wait_time = 2**attempt
+                    logger.warning(
+                        f"Retryable error on attempt {attempt + 1}: {result['error']}. Retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                # Don't retry on API errors (400, 401, etc.) - return immediately
+                return result
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2**attempt
+                    logger.warning(
+                        f"Exception on attempt {attempt + 1}: {str(e)}. Retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    return {"success": False, "error": str(e), "count": 0}
+
+        return {"success": False, "error": "Max retries exceeded", "count": 0}
+
+    def _is_retryable_error(self, error: str) -> bool:
+        """Only retry on network/transient errors"""
+        retryable_errors = [
+            "timeout",
+            "connection",
+            "503",
+            "502",
+            "504",  # Network/server issues
+        ]
+
+        error_lower = error.lower()
+        return any(retryable in error_lower for retryable in retryable_errors)
+
+    async def _update_training_log_metadata(
+        self, training_log_id: str, metadata_updates: Dict[str, Any]
+    ):
+        """Update training log metadata with new timestamp information"""
+        try:
+            db = await self._get_database()
+
+            # Get current metadata
+            current_log = await db.mltraininglog.find_unique(
+                where={"id": training_log_id}
+            )
+            if not current_log:
+                logger.error(f"Training log {training_log_id} not found")
+                return
+
+            current_metadata = (
+                current_log.metadata if isinstance(current_log.metadata, dict) else {}
+            )
+
+            # Merge with new updates
+            updated_metadata = {**current_metadata, **metadata_updates}
+
+            # Update the log
             await db.mltraininglog.update(
-                where={"id": training_log_id}, data=update_data
+                where={"id": training_log_id},
+                data={"metadata": updated_metadata, "updatedAt": now_utc()},
             )
 
         except Exception as e:
-            logger.error(f"Failed to update training log {training_log_id}: {str(e)}")
-            raise
+            logger.error(f"Failed to update training log metadata: {str(e)}")
 
-    async def get_training_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get the status of a training job"""
+    def _convert_user_to_gorse_format(self, user) -> Dict[str, Any]:
+        """Convert database user to Gorse API format"""
+        return {
+            "userId": user.userId,
+            "labels": user.labels if isinstance(user.labels, dict) else {},
+            "subscribe": user.subscribe if user.subscribe else [],
+            "comment": user.comment or "",
+        }
+
+    def _convert_item_to_gorse_format(self, item) -> Dict[str, Any]:
+        """Convert database item to Gorse API format"""
+        return {
+            "itemId": item.itemId,
+            "categories": item.categories if isinstance(item.categories, list) else [],
+            "labels": item.labels if isinstance(item.labels, dict) else {},
+            "isHidden": item.isHidden,
+            "comment": item.comment or "",
+            "timestamp": (
+                item.timestamp.isoformat() if item.timestamp else now_utc().isoformat()
+            ),
+        }
+
+    def _convert_feedback_to_gorse_format(self, feedback) -> Dict[str, Any]:
+        """Convert database feedback to Gorse API format"""
+        return {
+            "userId": feedback.userId,
+            "itemId": feedback.itemId,
+            "feedbackType": feedback.feedbackType,
+            "timestamp": (
+                feedback.timestamp.isoformat()
+                if feedback.timestamp
+                else now_utc().isoformat()
+            ),
+            "comment": feedback.comment or "",
+        }
+
+    async def trigger_training_after_sync(self, shop_id: str) -> str:
+        """
+        Convenience method to trigger data push after sync operations
+        This is the main method that should be called after data sync
+        """
+        return await self.push_data_to_gorse(
+            shop_id=shop_id,
+            job_type=TrainingJobType.INCREMENTAL_TRAINING,
+            trigger_source="sync_completion",
+        )
+
+    async def get_data_push_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get the status of a data push job"""
         try:
-            # Extract shop_id from job_id (format: training_{shop_id}_{type}_{timestamp})
+            # Extract shop_id from job_id (format: data_push_{shop_id}_{type}_{timestamp})
             parts = job_id.split("_")
-            if len(parts) < 2:
+            if len(parts) < 3:
                 return None
 
-            shop_id = parts[1]
+            shop_id = parts[2]  # data_push_{shop_id}_{type}_{timestamp}
             db = await self._get_database()
 
             # Find the most recent training log for this shop
@@ -431,17 +503,18 @@ class GorseTrainingService:
                     "duration_ms": training_log.durationMs,
                     "error": training_log.error,
                     "created_at": training_log.createdAt,
+                    "metadata": training_log.metadata,
                 }
             return None
 
         except Exception as e:
-            logger.error(f"Failed to get training job status for {job_id}: {str(e)}")
+            logger.error(f"Failed to get data push job status for {job_id}: {str(e)}")
             return None
 
-    async def get_shop_training_history(
+    async def get_shop_data_push_history(
         self, shop_id: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """Get training history for a shop"""
+        """Get data push history for a shop"""
         db = await self._get_database()
 
         try:
@@ -460,117 +533,29 @@ class GorseTrainingService:
                     "duration_ms": log.durationMs,
                     "error": log.error,
                     "created_at": log.createdAt,
+                    "metadata": log.metadata,
                 }
                 for log in logs
             ]
 
         except Exception as e:
-            logger.error(f"Failed to get training history for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get data push history for shop {shop_id}: {str(e)}"
+            )
             return []
 
-    async def cancel_training_job(self, job_id: str) -> bool:
-        """Cancel a running training job"""
-        try:
-            # Extract shop_id from job_id
-            parts = job_id.split("_")
-            if len(parts) < 2:
-                return False
-
-            shop_id = parts[1]
-            db = await self._get_database()
-
-            # Find the most recent training log for this shop
-            training_log = await db.mltraininglog.find_first(
-                where={"shopId": shop_id, "status": "started"},
-                order={"createdAt": "desc"},
-            )
-
-            if training_log:
-                await self._update_training_log(
-                    training_log.id, "cancelled", completed_at=now_utc()
-                )
-                logger.info(f"Cancelled training job {job_id}")
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Failed to cancel training job {job_id}: {str(e)}")
-            return False
-
-    async def trigger_training_after_sync(
-        self,
-        shop_id: str,
-        sync_type: str = "incremental",
-        batch_size: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Trigger training after Gorse sync completion
-        This is the main entry point for event-driven training
-
-        Args:
-            shop_id: Shop ID to train models for
-            sync_type: Type of sync that completed ("full", "incremental", "streaming")
-            batch_size: Number of items processed in batch (for monitoring)
-            metadata: Additional metadata from sync process
-
-        Returns:
-            job_id: Unique identifier for the training job
-        """
-        try:
-            # Determine training type based on sync type
-            if sync_type == "full":
-                job_type = TrainingJobType.FULL_TRAINING
-            elif sync_type == "incremental":
-                job_type = TrainingJobType.INCREMENTAL_TRAINING
-            elif sync_type == "streaming":
-                job_type = (
-                    TrainingJobType.INCREMENTAL_TRAINING
-                )  # Streaming is incremental
-            else:
-                job_type = TrainingJobType.FULL_TRAINING  # Default to full
-
-            # Add sync metadata to training metadata
-            training_metadata = metadata or {}
-            training_metadata.update(
-                {
-                    "sync_type": sync_type,
-                    "batch_size": batch_size,
-                    "trigger_source": "gorse_sync_completion",
-                }
-            )
-
-            logger.info(
-                f"Triggering {job_type.value} training for shop {shop_id} after {sync_type} sync"
-            )
-
-            return await self.start_training_job(
-                shop_id=shop_id,
-                job_type=job_type,
-                trigger_source="gorse_sync_completion",
-                metadata=training_metadata,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"Failed to trigger training after sync for shop {shop_id}: {str(e)}"
-            )
-            raise
-
-    async def batch_training_for_multiple_shops(
+    async def batch_data_push_for_multiple_shops(
         self,
         shop_ids: List[str],
-        job_type: TrainingJobType = TrainingJobType.FULL_TRAINING,
         max_concurrent: int = 3,
     ) -> Dict[str, str]:
         """
-        Trigger training for multiple shops in batch with concurrency control
+        Push data for multiple shops in batch with concurrency control
+        Always uses incremental push strategy
 
         Args:
-            shop_ids: List of shop IDs to train
-            job_type: Type of training to run for all shops
-            max_concurrent: Maximum number of concurrent training jobs
+            shop_ids: List of shop IDs to push data for
+            max_concurrent: Maximum number of concurrent data push jobs
 
         Returns:
             Dict mapping shop_id to job_id
@@ -578,24 +563,24 @@ class GorseTrainingService:
         results = {}
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def train_shop(shop_id: str):
+        async def push_shop_data(shop_id: str):
             async with semaphore:
                 try:
-                    job_id = await self.start_training_job(
+                    job_id = await self.push_data_to_gorse(
                         shop_id=shop_id,
-                        job_type=job_type,
-                        trigger_source="batch_training",
+                        job_type=TrainingJobType.INCREMENTAL_TRAINING,
+                        trigger_source="batch_data_push",
                     )
                     results[shop_id] = job_id
-                    logger.info(f"Started batch training for shop {shop_id}: {job_id}")
+                    logger.info(f"Started batch data push for shop {shop_id}: {job_id}")
                 except Exception as e:
                     logger.error(
-                        f"Failed to start batch training for shop {shop_id}: {str(e)}"
+                        f"Failed to start batch data push for shop {shop_id}: {str(e)}"
                     )
                     results[shop_id] = f"error: {str(e)}"
 
-        # Execute all training jobs concurrently with semaphore
-        tasks = [train_shop(shop_id) for shop_id in shop_ids]
+        # Execute all data push jobs concurrently with semaphore
+        tasks = [push_shop_data(shop_id) for shop_id in shop_ids]
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return results
