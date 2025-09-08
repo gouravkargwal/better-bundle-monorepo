@@ -1,15 +1,15 @@
-version: "3"
 services:
   redis:
-    image: redis/redis-stack
+    image: redis/redis-stack:7.2.0-v18
     restart: unless-stopped
     ports:
-      - 6379:6379
+      - "6379:6379"
 
   postgres:
-    image: postgres:10.0
+    image: postgres:16
+    restart: unless-stopped
     ports:
-      - 5432:5432
+      - "5432:5432"
     environment:
       POSTGRES_DB: gorse
       POSTGRES_USER: gorse
@@ -18,64 +18,36 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   worker:
-    image: zhenghaoz/gorse-worker
+    image: zhenghaoz/gorse-worker:nightly
     restart: unless-stopped
-    ports:
-      - 8089:8089
-    command: >
-      --master-host master --master-port 8086 
-      --http-host 0.0.0.0 --http-port 8089
-      --log-path /var/log/gorse/worker.log 
-      --cache-path /var/lib/gorse/worker_cache.data
-    volumes:
-      - gorse_log:/var/log/gorse
-      - worker_data:/var/lib/gorse
     depends_on:
       - master
     env_file:
       - local.env
 
   server:
-    image: zhenghaoz/gorse-server
+    image: zhenghaoz/gorse-server:nightly
     restart: unless-stopped
     ports:
-      - 8087:8087
-    command: >
-      --master-host master --master-port 8086 
-      --http-host 0.0.0.0 --http-port 8087
-      --log-path /var/log/gorse/server.log 
-      --cache-path /var/lib/gorse/server_cache.data
-    volumes:
-      - gorse_log:/var/log/gorse
-      - server_data:/var/lib/gorse
+      - "8087:8087"
     depends_on:
       - master
     env_file:
       - local.env
 
   master:
-    image: zhenghaoz/gorse-master
+    image: zhenghaoz/gorse-master:nightly
     restart: unless-stopped
     ports:
-      - 8086:8086
-      - 8088:8088
+      - "8086:8086"
+      - "8088:8088"
     env_file:
       - local.env
-    command: >
-      -c /etc/gorse/config.toml 
-      --log-path /var/log/gorse/master.log 
-      --cache-path /var/lib/gorse
     volumes:
       - ./config/config.toml:/etc/gorse/config.toml
-      - gorse_log:/var/log/gorse
-      - master_data:/var/lib/gorse
     depends_on:
       - redis
       - postgres
 
 volumes:
-  worker_data:
-  server_data:
-  master_data:
-  gorse_log:
   postgres_data:
