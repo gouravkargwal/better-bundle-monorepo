@@ -151,11 +151,40 @@ class BaseFeatureGenerator(ABC):
             "sessionData",
         }
 
+        # DateTime fields that should preserve None values (not convert to 0)
+        datetime_fields = {
+            "lastOccurrence",
+            "lastViewedAt",
+            "lastPurchasedAt",
+            "firstPurchasedAt",
+            "lastCoOccurrence",
+            "lastActivityAt",
+            "startedAt",
+            "completedAt",
+            "paidAt",
+            "expires",
+            "lastAnalysisAt",
+            "firstViewDate",
+            "lastViewDate",
+            "firstPurchaseDate",
+            "lastPurchaseDate",
+            "shopifyCreatedAt",
+            "shopifyUpdatedAt",
+            "productCreatedAt",
+            "productUpdatedAt",
+            "lastOrderDate",
+            "createdAtShopify",
+            "processedAt",
+            "cancelledAt",
+        }
+
         for key, value in features.items():
             if value is None:
                 # Convert None to appropriate defaults
                 if key in json_fields:
                     validated_features[key] = []  # Empty array for JSON list fields
+                elif key in datetime_fields:
+                    validated_features[key] = None  # Preserve None for DateTime fields
                 else:
                     validated_features[key] = 0
             elif isinstance(value, (int, float)):
