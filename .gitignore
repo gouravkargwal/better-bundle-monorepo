@@ -134,3 +134,4 @@ Thumbs.db
 # Local development
 .local/
 local/
+generated_data/

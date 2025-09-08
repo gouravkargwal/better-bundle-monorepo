@@ -47,6 +47,10 @@ from app.webhooks.repository import WebhookRepository
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
 from app.consumers.gorse_sync_consumer import GorseSyncConsumer
 from app.consumers.gorse_training_consumer import GorseTrainingConsumer
+from app.core.database.simple_db_client import get_database, close_database
+from app.core.redis_client import streams_manager
+from datetime import datetime
+from typing import Optional
 
 # API imports
 from app.api.v1.training import router as training_router
@@ -1513,15 +1517,17 @@ async def handle_behavioral_event(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload.")
 
-    shop_id = x_shopify_shop_domain or payload.get("context", {}).get("shop", {}).get(
-        "domain"
-    )
+    shop_domain = x_shopify_shop_domain or payload.get("context", {}).get(
+        "shop", {}
+    ).get("domain")
 
-    if not shop_id:
+    if not shop_domain:
         raise HTTPException(status_code=400, detail="Shop domain not found in request.")
 
     # Queue the event for background processing instead of processing directly
-    result = await services["webhook_handler"].queue_behavioral_event(shop_id, payload)
+    result = await services["webhook_handler"].queue_behavioral_event(
+        shop_domain, payload
+    )
 
     if "error" in result.get("status"):
         raise HTTPException(status_code=500, detail=result)
@@ -1578,6 +1584,71 @@ async def get_behavioral_event_status(event_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get behavioral event status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Replay raw behavioral events → queue for processing
+@app.post("/api/behavioral-events/replay")
+async def replay_behavioral_events(
+    shop_id: str, since: Optional[str] = None, batch_size: int = 1000
+):
+    """Publish all raw behavioral events for a shop to the processing stream.
+
+    - shop_id: required shop identifier
+    - since: optional ISO datetime string; if provided, only events with receivedAt > since are replayed
+    - batch_size: pagination size when scanning raw table
+    """
+    try:
+        db = await get_database()
+
+        offset = 0
+        total_published = 0
+
+        where_clause = {"shopId": shop_id}
+        if since:
+            try:
+                # Accept ISO format with or without Z
+                since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                where_clause["receivedAt"] = {"gt": since_dt}
+            except Exception:
+                await close_database()
+                raise HTTPException(
+                    status_code=400, detail="Invalid 'since' datetime format"
+                )
+
+        while True:
+            rows = await db.rawbehavioralevents.find_many(
+                where=where_clause,
+                skip=offset,
+                take=batch_size,
+                order={"receivedAt": "asc"},
+            )
+
+            if not rows:
+                break
+
+            for row in rows:
+                payload = row.payload
+                event_id = f"replay_{row.id}"
+                await streams_manager.publish_behavioral_event(
+                    event_id=event_id, shop_id=shop_id, payload=payload
+                )
+                total_published += 1
+
+            offset += batch_size
+
+        await close_database()
+
+        return {"status": "queued", "shop_id": shop_id, "published": total_published}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await close_database()
+        except Exception:
+            pass
+        logger.error(f"Failed to replay behavioral events: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

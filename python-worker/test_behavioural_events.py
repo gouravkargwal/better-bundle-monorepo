@@ -423,15 +423,6 @@ test_payloads = [
             }
         },
     },
-    # 8. GenericEvent (Fallback)
-    {
-        "id": "generic-event-505",
-        "timestamp": "2025-09-05T10:05:00Z",
-        "name": "unknown_event_type",
-        "customer_id": "cust-101",
-        "data": {"custom_field_1": "value1", "custom_field_2": 123},
-        "context": {"shop": {"domain": "test-shop.myshopify.com"}},
-    },
 ]
 
 

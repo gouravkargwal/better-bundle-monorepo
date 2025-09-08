@@ -1,39 +1,93 @@
-# app/webhooks/models.py
-
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Literal, Union, Dict, Any
 
-# --- Common Nested Models ---
+
+class Money(BaseModel):
+    amount: float
+    currencyCode: str
+
+
+class ImageRef(BaseModel):
+    src: Optional[str] = None
+
+
+class ProductRef(BaseModel):
+    id: str
+    title: Optional[str] = None
+    untranslatedTitle: Optional[str] = None
+    type: Optional[str] = None
+    vendor: Optional[str] = None
+    url: Optional[str] = None
 
 
 class ProductVariant(BaseModel):
     id: str
     title: str
+    untranslatedTitle: Optional[str] = None
     sku: Optional[str] = None
-    price: float
-    product_id: str = Field(..., alias="productId")
+    price: Optional[Money] = None
+    image: Optional[ImageRef] = None
+    product: Optional[ProductRef] = None
 
 
-class Cart(BaseModel):
+class TotalAmount(BaseModel):
+    totalAmount: Money
+
+
+class CartLine(BaseModel):
+    quantity: int
+    merchandise: ProductVariant
+    cost: Optional[TotalAmount] = None
+
+
+class CheckoutLineItem(BaseModel):
     id: str
-    lines: List[ProductVariant]
-    total_quantity: int = Field(..., alias="totalQuantity")
+    title: Optional[str] = None
+    quantity: int
+    finalLinePrice: Optional[Money] = None
+    discountAllocations: Optional[List[dict]] = None
+    variant: Optional[ProductVariant] = None
+
+
+class Transaction(BaseModel):
+    amount: Money
+    gateway: Optional[str] = None
+    paymentMethod: Optional[dict] = None
+
+
+class OrderRef(BaseModel):
+    id: str
+    isFirstOrder: Optional[bool] = None
 
 
 class Checkout(BaseModel):
     id: str
-    total_price: float = Field(..., alias="totalPrice")
-    currency: str
-    products: List[ProductVariant]
-
-
-# --- Define Data Models for Each Specific Event ---
+    token: Optional[str] = None
+    email: Optional[str] = None
+    currencyCode: Optional[str] = None
+    buyerAcceptsEmailMarketing: Optional[bool] = None
+    buyerAcceptsSmsMarketing: Optional[bool] = None
+    subtotalPrice: Optional[Money] = None
+    totalPrice: Optional[Money] = None
+    totalTax: Optional[Money] = None
+    discountsAmount: Optional[Money] = None
+    shippingLine: Optional[dict] = None
+    billingAddress: Optional[dict] = None
+    shippingAddress: Optional[dict] = None
+    discountApplications: Optional[List[dict]] = None
+    lineItems: List[CheckoutLineItem]
+    transactions: Optional[List[Transaction]] = None
+    order: Optional[OrderRef] = None
 
 
 class PageViewedData(BaseModel):
-    url: str
+    # Web Pixel sends minimal data for page_viewed; we keep this flexible
+    url: Optional[str] = None
     referrer: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 class ProductViewedData(BaseModel):
@@ -41,19 +95,26 @@ class ProductViewedData(BaseModel):
 
 
 class ProductAddedToCartData(BaseModel):
-    cart: Cart
-    product_variant: ProductVariant = Field(..., alias="productVariant")
-    quantity: int
+    cartLine: CartLine
+
+
+class CollectionObject(BaseModel):
+    id: str
+    title: Optional[str] = None
+    productVariants: Optional[List[ProductVariant]] = None
 
 
 class CollectionViewedData(BaseModel):
-    collection_id: str = Field(..., alias="collectionId")
-    collection_title: str = Field(..., alias="collectionTitle")
+    collection: CollectionObject
+
+
+class SearchResult(BaseModel):
+    query: str
+    productVariants: Optional[List[ProductVariant]] = None
 
 
 class SearchSubmittedData(BaseModel):
-    query: str
-    results: List[ProductVariant]
+    searchResult: SearchResult
 
 
 class CheckoutStartedData(BaseModel):
@@ -70,14 +131,14 @@ class GenericEventData(BaseModel):
         extra = "allow"
 
 
-# --- Create the Main Event Models with the Discriminated Union ---
-
-
 class BaseEvent(BaseModel):
     id: str
     timestamp: datetime
     customer_id: Optional[str] = Field(None, alias="customerId")
     context: Optional[Dict[str, Any]] = None
+    clientId: Optional[str] = None
+    seq: Optional[int] = None
+    type: Optional[str] = None
 
 
 class PageViewedEvent(BaseEvent):

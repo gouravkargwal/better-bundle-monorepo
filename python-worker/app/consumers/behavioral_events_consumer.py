@@ -44,13 +44,12 @@ class BehavioralEventsConsumer(BaseConsumer):
             # Extract message data - Redis streams return data directly
             message_data = message  # No need to get "data" field
             event_id = message_data.get("event_id")
-            shop_id = message_data.get("shop_id")
+            shop_domain = message_data.get("shop_id")
             payload = message_data.get("payload")
-            received_at = message_data.get("received_at")
 
-            if not all([event_id, shop_id, payload]):
+            if not all([event_id, shop_domain, payload]):
                 self.logger.error(
-                    "Invalid message: missing event_id, shop_id, or payload"
+                    "Invalid message: missing event_id, shop_domain, or payload"
                 )
                 return
 
@@ -59,7 +58,7 @@ class BehavioralEventsConsumer(BaseConsumer):
                 payload = json.loads(payload)
 
             # Process the behavioral event
-            result = await self.handler.process_behavioral_event(shop_id, payload)
+            result = await self.handler.process_behavioral_event(shop_domain, payload)
 
             # Mark event as completed
             if event_id in self.active_events:

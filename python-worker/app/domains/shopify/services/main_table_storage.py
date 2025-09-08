@@ -234,6 +234,9 @@ class MainTableStorageService:
         error_count = 0
         errors = []
 
+        # Ensure counters are defined even if an early exception occurs
+        total_batches_processed = 0
+
         try:
             config = DATA_TYPE_CONFIG[data_type]
             db = await self._get_database()
@@ -241,7 +244,6 @@ class MainTableStorageService:
             # Configuration for pagination
             batch_size = config.get("batch_size", 1000)
             offset = 0
-            total_batches_processed = 0
 
             self.logger.info(
                 f"Starting scalable processing of {data_type} for shop {shop_id} (batch_size: {batch_size})"
