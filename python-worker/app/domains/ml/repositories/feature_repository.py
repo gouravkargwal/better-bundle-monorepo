@@ -469,7 +469,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of behavioral events for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 ORDER BY "occurredAt" DESC LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 ORDER BY "timestamp" DESC LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -573,8 +573,8 @@ class FeatureRepository(IFeatureRepository):
             db = await self._get_database()
             # Use Prisma's native find_many with where conditions
             result = await db.behavioralevents.find_many(
-                where={"shopId": shop_id, "occurredAt": {"gt": since_timestamp}},
-                order={"occurredAt": "asc"},
+                where={"shopId": shop_id, "timestamp": {"gt": since_timestamp}},
+                order={"timestamp": "asc"},
                 take=limit,
                 skip=offset,
             )

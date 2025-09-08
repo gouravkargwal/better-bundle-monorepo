@@ -9,11 +9,6 @@ datasource db {
 }
 
 // Enums for better data validation
-enum ProductStatus {
-  ACTIVE
-  ARCHIVED
-  DRAFT
-}
 
 model RawOrder {
   id               String    @id @default(cuid())
@@ -145,7 +140,7 @@ model ProductData {
   productType      String?        @default("") @db.VarChar(100)
   vendor           String?        @default("") @db.VarChar(255)
   tags             Json?          @default("[]")
-  status           ProductStatus? @default(ACTIVE)
+  status           String?        @default("ACTIVE")
   totalInventory   Int?           @default(0)
   price            Float          @default(0.0)
   compareAtPrice   Float?         @default(0.0)
@@ -241,13 +236,13 @@ model BehavioralEvents {
   customerId String?  @db.VarChar(100)
   clientId   String?  @db.VarChar(100) // Session identifier from Shopify Web Pixels
   eventType  String   @db.VarChar(100)
-  occurredAt DateTime
+  timestamp DateTime
   eventData  Json?
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, eventType])
-  @@index([shopId, occurredAt])
+  @@index([shopId, timestamp])
   @@index([shopId, customerId])
   @@index([shopId, clientId])
   @@map("BehavioralEvents")

@@ -126,10 +126,10 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
 
-        start_time_str = sorted_events[0].get("occurredAt")
-        end_time_str = sorted_events[-1].get("occurredAt")
+        start_time_str = sorted_events[0].get("timestamp")
+        end_time_str = sorted_events[-1].get("timestamp")
 
         # Parse datetime strings
         start_time = None
@@ -211,9 +211,9 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             session_end = None
 
             if events:
-                sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
-                start_time_str = sorted_events[0].get("occurredAt")
-                end_time_str = sorted_events[-1].get("occurredAt")
+                sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
+                start_time_str = sorted_events[0].get("timestamp")
+                end_time_str = sorted_events[-1].get("timestamp")
 
                 if isinstance(start_time_str, str):
                     session_start = datetime.fromisoformat(
@@ -261,7 +261,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
         first_event = sorted_events[0]
         last_event = sorted_events[-1]
 

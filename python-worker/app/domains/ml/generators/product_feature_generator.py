@@ -134,7 +134,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Filter events in 30-day window
         recent_events = []
         for event in behavioral_events:
-            event_time = self._parse_date(event.get("occurredAt"))
+            event_time = self._parse_date(event.get("timestamp"))
             if event_time and event_time >= thirty_days_ago:
                 event_product_id = self._extract_product_id_from_event(event)
                 if event_product_id == product_id:
@@ -226,7 +226,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             if event.get("eventType") == "product_viewed":
                 event_product_id = self._extract_product_id_from_event(event)
                 if event_product_id == product_id:
-                    event_time = self._parse_date(event.get("occurredAt"))
+                    event_time = self._parse_date(event.get("timestamp"))
                     if event_time:
                         if not last_viewed_at or event_time > last_viewed_at:
                             last_viewed_at = event_time

@@ -145,8 +145,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         for session in sessions:
             if len(session) > 1:
                 # Calculate session duration in seconds
-                start_time = self._parse_datetime(session[0].get("occurredAt"))
-                end_time = self._parse_datetime(session[-1].get("occurredAt"))
+                start_time = self._parse_datetime(session[0].get("timestamp"))
+                end_time = self._parse_datetime(session[-1].get("timestamp"))
 
                 if start_time and end_time:
                     duration = int((end_time - start_time).total_seconds())
@@ -214,10 +214,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             }
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
 
-        first_event_time = self._parse_datetime(sorted_events[0].get("occurredAt"))
-        last_event_time = self._parse_datetime(sorted_events[-1].get("occurredAt"))
+        first_event_time = self._parse_datetime(sorted_events[0].get("timestamp"))
+        last_event_time = self._parse_datetime(sorted_events[-1].get("timestamp"))
         current_time = datetime.now()
 
         # Calculate days since first and last events
@@ -234,7 +234,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         days = []
 
         for event in events:
-            event_time = self._parse_datetime(event.get("occurredAt"))
+            event_time = self._parse_datetime(event.get("timestamp"))
             if event_time:
                 hours.append(event_time.hour)
                 days.append(event_time.weekday())  # 0=Monday, 6=Sunday
@@ -420,7 +420,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             return []
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
 
         sessions = []
         current_session = [sorted_events[0]]
@@ -429,8 +429,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             current_event = sorted_events[i]
             previous_event = sorted_events[i - 1]
 
-            current_time = self._parse_datetime(current_event.get("occurredAt"))
-            previous_time = self._parse_datetime(previous_event.get("occurredAt"))
+            current_time = self._parse_datetime(current_event.get("timestamp"))
+            previous_time = self._parse_datetime(previous_event.get("timestamp"))
 
             if current_time and previous_time:
                 time_gap_minutes = (current_time - previous_time).total_seconds() / 60

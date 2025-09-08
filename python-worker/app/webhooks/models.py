@@ -125,6 +125,14 @@ class CheckoutCompletedData(BaseModel):
     checkout: Checkout
 
 
+class CustomerLinkedData(BaseModel):
+    """Data for customer linking events"""
+
+    customerId: str
+    clientId: str
+    linkedAt: Optional[datetime] = None
+
+
 # A generic model for any events we don't have a specific structure for
 class GenericEventData(BaseModel):
     class Config:
@@ -176,6 +184,11 @@ class CheckoutCompletedEvent(BaseEvent):
     data: CheckoutCompletedData
 
 
+class CustomerLinkedEvent(BaseEvent):
+    name: Literal["customer_linked"]
+    data: CustomerLinkedData
+
+
 # A fallback for any other standard event type we don't need detailed data for
 class GenericEvent(BaseEvent):
     name: str
@@ -191,5 +204,6 @@ ShopifyBehavioralEvent = Union[
     SearchSubmittedEvent,
     CheckoutStartedEvent,
     CheckoutCompletedEvent,
+    CustomerLinkedEvent,
     GenericEvent,  # Fallback must be last
 ]

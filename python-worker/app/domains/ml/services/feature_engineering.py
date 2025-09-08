@@ -429,14 +429,15 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         # Sort events by time
         sorted_events = sorted(
-            events, key=lambda e: e.occurredAt if e.occurredAt else datetime.min
+            events,
+            key=lambda e: e.get("timestamp") if e.get("timestamp") else datetime.min,
         )
 
         current_sessions = {}  # customer_id -> current_session_id
 
         for event in sorted_events:
             customer_id = event.get("customerId") or "anonymous"
-            event_time = event.get("occurredAt")
+            event_time = event.get("timestamp")
 
             # Check if we need to start a new session for this customer
             should_start_new_session = True
@@ -444,7 +445,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             if customer_id in current_sessions:
                 current_session_id = current_sessions[customer_id]
                 last_event_time = (
-                    sessions[current_session_id]["events"][-1].occurredAt
+                    sessions[current_session_id]["events"][-1].get("timestamp")
                     if sessions[current_session_id]["events"]
                     else None
                 )

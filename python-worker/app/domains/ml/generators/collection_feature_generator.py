@@ -4,7 +4,7 @@ Collection feature generator for ML feature engineering
 
 from typing import Dict, Any, List, Optional
 import statistics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from prisma import Json
 
 from app.core.logging import get_logger
@@ -110,12 +110,12 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute engagement metrics from behavioral events (30-day window)"""
         collection_id = collection.get("collectionId", "")
-        thirty_days_ago = datetime.now() - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
         # Filter events for this collection in last 30 days
         collection_events = []
         for event in behavioral_events:
-            event_time = event.get("occurredAt")
+            event_time = event.get("timestamp")
             if isinstance(event_time, str):
                 event_time = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
             elif not isinstance(event_time, datetime):

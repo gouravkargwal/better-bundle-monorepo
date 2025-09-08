@@ -253,10 +253,21 @@ class BaseConsumer(ABC):
                 messages = await self._consume_messages()
 
                 if messages:
+                    # Process messages with circuit breaker protection
                     await self._process_messages(messages)
                 else:
-                    # No messages, wait a bit to avoid high CPU usage
-                    await asyncio.sleep(1.0)  # Increased from 0.1 to 1.0 seconds
+                    # No messages, but still check if circuit breaker should attempt recovery
+                    if self.circuit_breaker.state == "OPEN":
+                        # Log and wait when circuit breaker is open
+                        self.logger.info(
+                            f"Circuit breaker is OPEN for {self.consumer_name}, "
+                            f"waiting {self.circuit_breaker.recovery_timeout} seconds before retry. "
+                            f"Failure count: {self.circuit_breaker.failure_count}"
+                        )
+                        await asyncio.sleep(5)
+                    else:
+                        # No messages, wait a bit to avoid high CPU usage
+                        await asyncio.sleep(1.0)  # Increased from 0.1 to 1.0 seconds
 
                 # Reset consecutive failures on success
                 self.consecutive_failures = 0
@@ -283,18 +294,6 @@ class BaseConsumer(ABC):
 
     async def _consume_messages(self) -> List[Dict[str, Any]]:
         """Consume messages from Redis stream"""
-        # Check circuit breaker state before consuming
-        if self.circuit_breaker.state == "OPEN":
-            # Don't consume messages when circuit breaker is open
-            # Wait a bit before checking again to avoid tight loops
-            self.logger.info(
-                f"Circuit breaker is OPEN for {self.consumer_name}, "
-                f"waiting {self.circuit_breaker.recovery_timeout} seconds before retry. "
-                f"Failure count: {self.circuit_breaker.failure_count}"
-            )
-            await asyncio.sleep(5)
-            return []
-
         try:
             messages = await streams_manager.consume_events(
                 stream_name=self.stream_name,
@@ -353,6 +352,31 @@ class BaseConsumer(ABC):
         except Exception as e:
             self.logger.error(f"Failed to acknowledge message: {e}")
 
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """Check if an error should be retried (only connection/network issues)"""
+        error_message = str(error).lower()
+
+        # Only retry connection/network errors that might be transient
+        retryable_patterns = [
+            "connection",
+            "timeout",
+            "network",
+            "database connection",
+            "redis connection",
+            "postgresql connection",
+            "connection pool",
+            "connection refused",
+            "connection reset",
+            "connection lost",
+            "connection closed",
+            "temporary failure",
+            "service unavailable",
+            "rate limit",
+            "too many requests",
+        ]
+
+        return any(pattern in error_message for pattern in retryable_patterns)
+
     async def _handle_message_failure(
         self, message: Dict[str, Any], error: Exception, message_processed: bool = False
     ):
@@ -367,6 +391,16 @@ class BaseConsumer(ABC):
             message_data=message,
             message_processed=message_processed,
         )
+
+        # Check if this is a retryable error (only connection/network issues)
+        if not self._is_retryable_error(error):
+            self.logger.warning(
+                f"Non-retryable error detected - acknowledging message to prevent infinite retry",
+                message_id=message_id,
+                error=str(error),
+            )
+            await self._acknowledge_message(message)
+            return
 
         # If message was processed but failed, we need to handle it differently
         if message_processed:

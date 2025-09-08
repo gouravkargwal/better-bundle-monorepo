@@ -75,6 +75,79 @@ class WebhookHandler:
             logger.error("Failed to queue behavioral event.", error=str(e))
             return {"status": "error", "message": "Failed to queue event"}
 
+    async def _handle_customer_linking(
+        self, shop_id: str, client_id: str, customer_id: str
+    ):
+        """Handle customer linking when user logs in"""
+        try:
+            db = await get_database()
+
+            # Check if link already exists
+            existing_link = await db.useridentitylink.find_first(
+                where={
+                    "shopId": shop_id,
+                    "clientId": client_id,
+                    "customerId": customer_id,
+                }
+            )
+
+            if not existing_link:
+                # Create new link
+                await db.useridentitylink.create(
+                    data={
+                        "shopId": shop_id,
+                        "clientId": client_id,
+                        "customerId": customer_id,
+                    }
+                )
+
+                # Backfill customer_id for existing events
+                await self._backfill_customer_id(shop_id, client_id, customer_id)
+
+                logger.info(f"Created customer link: {client_id} → {customer_id}")
+            else:
+                logger.info(
+                    f"Customer link already exists: {client_id} → {customer_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to handle customer linking: {e}")
+
+    async def _backfill_customer_id(
+        self, shop_id: str, client_id: str, customer_id: str
+    ):
+        """Backfill customer_id for existing events"""
+        try:
+            db = await get_database()
+
+            # Update all events with this clientId that don't have a customerId
+            result = await db.behavioralevents.update_many(
+                where={"shopId": shop_id, "clientId": client_id, "customerId": None},
+                data={"customerId": customer_id},
+            )
+
+            logger.info(
+                f"Backfilled {result.count} events for {client_id} → {customer_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to backfill customer_id: {e}")
+
+    async def _check_existing_customer_link(self, shop_id: str, client_id: str) -> str:
+        """Check if a clientId already has a linked customerId"""
+        try:
+            if not client_id:
+                return None
+
+            db = await get_database()
+            link = await db.useridentitylink.find_first(
+                where={"shopId": shop_id, "clientId": client_id}
+            )
+            return link.customerId if link else None
+        except Exception as e:
+            logger.error(f"Failed to check existing customer link: {e}")
+            return None
+
     async def process_behavioral_event(self, shop_domain: str, payload: Dict[str, Any]):
         """
         Validates and processes an incoming behavioral event from a Web Pixel.
@@ -92,6 +165,27 @@ class WebhookHandler:
 
             # Use the pre-initialized TypeAdapter to correctly validate the Union type.
             validated_event = self.event_adapter.validate_python(payload)
+
+            # Handle customer linking events specially
+            if validated_event.name == "customer_linked":
+                await self._handle_customer_linking(
+                    shop_db_id,
+                    validated_event.data.clientId,
+                    validated_event.data.customerId,
+                )
+            else:
+                # For regular events, check if clientId already has a linked customerId
+                client_id = payload.get("clientId")
+                if client_id and not validated_event.customer_id:
+                    existing_customer_id = await self._check_existing_customer_link(
+                        shop_db_id, client_id
+                    )
+                    if existing_customer_id:
+                        # Update the validated event with the linked customer ID
+                        validated_event.customer_id = existing_customer_id
+                        logger.info(
+                            f"Auto-linked event {validated_event.id} to customer {existing_customer_id}"
+                        )
 
             await self.repository.save_behavioral_event(
                 shop_db_id, payload, validated_event

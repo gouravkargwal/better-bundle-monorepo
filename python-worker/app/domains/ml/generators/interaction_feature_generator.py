@@ -248,7 +248,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         ]
 
         if view_events:
-            view_dates = [self._parse_date(e.get("occurredAt")) for e in view_events]
+            view_dates = [self._parse_date(e.get("timestamp")) for e in view_events]
             view_dates = [d for d in view_dates if d]  # Filter None values
 
             if view_dates:

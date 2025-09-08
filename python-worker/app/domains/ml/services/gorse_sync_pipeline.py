@@ -306,8 +306,8 @@ class GorseSyncPipeline:
         query = """
             SELECT * FROM "BehavioralEvents" 
             WHERE "shopId" = $1 
-                AND "occurredAt" >= $2::timestamp
-            ORDER BY "occurredAt" ASC
+                AND "timestamp" >= $2::timestamp
+            ORDER BY "timestamp" ASC
         """
 
         result = await db.query_raw(query, shop_id, since_time)
@@ -333,8 +333,8 @@ class GorseSyncPipeline:
             query = """
                 SELECT * FROM "BehavioralEvents" 
                 WHERE "shopId" = $1 
-                    AND "occurredAt" >= $2::timestamp
-                ORDER BY "occurredAt" ASC
+                    AND "timestamp" >= $2::timestamp
+                ORDER BY "timestamp" ASC
                 LIMIT $3 OFFSET $4
             """
 

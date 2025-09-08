@@ -338,7 +338,7 @@ class GorseFeedbackSync:
 
             if product_id:
                 # Apply time decay to weight
-                timestamp = event.get("occurredAt")
+                timestamp = event.get("timestamp")
                 decayed_weight = (
                     base_weight
                     * self.pipeline.transformers._apply_time_decay(timestamp)

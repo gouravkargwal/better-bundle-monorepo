@@ -54,6 +54,7 @@ from typing import Optional
 
 # API imports
 from app.api.v1.training import router as training_router
+from app.api.v1.customer_linking import router as customer_linking_router
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -88,6 +89,7 @@ app = FastAPI(
 
 # Include API routers
 app.include_router(training_router)
+app.include_router(customer_linking_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -322,6 +324,35 @@ async def trigger_main_table_processing(
         if not shop_id:
             raise HTTPException(status_code=400, detail="shop_id is required")
 
+        # Validate that the shop exists and is active
+        try:
+            from app.core.database.simple_db_client import get_database
+
+            db = await get_database()
+            shop = await db.shop.find_unique(where={"id": shop_id})
+
+            if not shop:
+                raise HTTPException(
+                    status_code=404, detail=f"Shop not found for ID: {shop_id}"
+                )
+
+            if not shop.isActive:
+                raise HTTPException(
+                    status_code=400, detail=f"Shop is inactive for ID: {shop_id}"
+                )
+
+            logger.info(
+                f"Shop validation successful for main table processing: {shop_id} (domain: {shop.shopDomain})"
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to validate shop for main table processing: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to validate shop: {str(e)}"
+            )
+
         # Generate a unique job ID for main table processing
         job_id = f"main_table_processing_{shop_id}_{int(now_utc().timestamp())}"
 
@@ -353,8 +384,12 @@ async def trigger_main_table_processing(
         }
 
     except Exception as e:
-        logger.error(f"Failed to trigger main table processing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+
+        error_detail = str(e) if str(e) else f"Unknown error: {type(e).__name__}"
+        logger.error(f"Failed to trigger main table processing: {error_detail}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @app.get("/api/main-table/status/{shop_id}")
@@ -1616,6 +1651,16 @@ async def replay_behavioral_events(
                     status_code=400, detail="Invalid 'since' datetime format"
                 )
 
+        # Get shop domain from shop ID
+        shop = await db.shop.find_unique(where={"id": shop_id})
+        if not shop:
+            await close_database()
+            raise HTTPException(
+                status_code=404, detail=f"Shop not found for ID: {shop_id}"
+            )
+
+        shop_domain = shop.shopDomain
+
         while True:
             rows = await db.rawbehavioralevents.find_many(
                 where=where_clause,
@@ -1631,7 +1676,7 @@ async def replay_behavioral_events(
                 payload = row.payload
                 event_id = f"replay_{row.id}"
                 await streams_manager.publish_behavioral_event(
-                    event_id=event_id, shop_id=shop_id, payload=payload
+                    event_id=event_id, shop_id=shop_domain, payload=payload
                 )
                 total_published += 1
 

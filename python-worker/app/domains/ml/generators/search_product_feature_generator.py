@@ -152,13 +152,13 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
                 if event_product_id == product_id:
                     # Check if this event happened after a search in the same session
-                    event_time = self._parse_datetime(event.get("occurredAt"))
+                    event_time = self._parse_datetime(event.get("timestamp"))
 
                     # Find if there was a search before this event in the session
                     search_before = False
                     for search_event in search_events:
                         search_time = self._parse_datetime(
-                            search_event.get("occurredAt")
+                            search_event.get("timestamp")
                         )
                         if search_time and event_time and search_time <= event_time:
                             search_before = True
@@ -228,7 +228,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         last_occurrence = None
 
         # Find the most recent event related to this search query + product combination
-        for event in reversed(sorted(events, key=lambda e: e.get("occurredAt", ""))):
+        for event in reversed(sorted(events, key=lambda e: e.get("timestamp", ""))):
             event_type = event.get("eventType", "")
 
             # Check if this event is related to our search query + product
@@ -247,7 +247,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             ]
 
             if is_search_event or is_product_event:
-                last_occurrence = self._parse_datetime(event.get("occurredAt"))
+                last_occurrence = self._parse_datetime(event.get("timestamp"))
                 break
 
         return {
@@ -262,7 +262,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             return []
 
         # Sort events by time
-        sorted_events = sorted(events, key=lambda e: e.get("occurredAt", ""))
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", ""))
 
         sessions = []
         current_session = [sorted_events[0]]
@@ -276,8 +276,8 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             same_customer = current_event.get("customerId") == current_customer_id
 
             # Check time gap
-            current_time = self._parse_datetime(current_event.get("occurredAt"))
-            previous_time = self._parse_datetime(previous_event.get("occurredAt"))
+            current_time = self._parse_datetime(current_event.get("timestamp"))
+            previous_time = self._parse_datetime(previous_event.get("timestamp"))
 
             time_gap_minutes = 0
             if current_time and previous_time:

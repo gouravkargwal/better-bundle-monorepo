@@ -199,6 +199,29 @@ class MainTableStorageService:
             self._db_client = await get_database()
         return self._db_client
 
+    async def _validate_shop_exists(self, shop_id: str) -> bool:
+        """Validate that the shop exists and is active before processing data"""
+        try:
+            db = await self._get_database()
+            shop = await db.shop.find_unique(where={"id": shop_id})
+
+            if not shop:
+                self.logger.error(f"Shop not found for ID: {shop_id}")
+                return False
+
+            if not shop.isActive:
+                self.logger.error(f"Shop is inactive for ID: {shop_id}")
+                return False
+
+            self.logger.info(
+                f"Shop validation successful for ID: {shop_id} (domain: {shop.shopDomain})"
+            )
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to validate shop ID {shop_id}: {e}")
+            return False
+
     def _extract_shopify_id(self, gid: str) -> Optional[str]:
         """
         Extract numeric ID from Shopify GraphQL GID
@@ -233,6 +256,16 @@ class MainTableStorageService:
         processed_count = 0
         error_count = 0
         errors = []
+
+        # Validate shop exists and is active before processing
+        if not await self._validate_shop_exists(shop_id):
+            return StorageResult(
+                success=False,
+                processed_count=0,
+                error_count=1,
+                errors=[f"Shop validation failed for ID: {shop_id}"],
+                duration_ms=0,
+            )
 
         # Ensure counters are defined even if an early exception occurs
         total_batches_processed = 0
@@ -640,6 +673,16 @@ class MainTableStorageService:
         total_errors = 0
         all_errors = []
 
+        # Validate shop exists and is active before processing
+        if not await self._validate_shop_exists(shop_id):
+            return StorageResult(
+                success=False,
+                processed_count=0,
+                error_count=1,
+                errors=[f"Shop validation failed for ID: {shop_id}"],
+                duration_ms=0,
+            )
+
         try:
             # Store all data types concurrently using asyncio.gather
             self.logger.info(
@@ -723,6 +766,17 @@ class MainTableStorageService:
                 errors=[f"Unknown data type: {data_type}"],
                 duration_ms=0,
             )
+
+        # Validate shop exists and is active before processing
+        if not await self._validate_shop_exists(shop_id):
+            return StorageResult(
+                success=False,
+                processed_count=0,
+                error_count=1,
+                errors=[f"Shop validation failed for ID: {shop_id}"],
+                duration_ms=0,
+            )
+
         return await self._store_data_generic(data_type, shop_id, incremental)
 
     async def _publish_feature_computation_event(

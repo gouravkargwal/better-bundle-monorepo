@@ -158,7 +158,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             elif event_type == "product_added_to_cart":
                 sessions[session_id]["carts"].add(product_id)
 
-            timestamp = self._parse_date(event.get("occurredAt"))
+            timestamp = self._parse_date(event.get("timestamp"))
             if timestamp:
                 sessions[session_id]["timestamps"].append(timestamp)
 

@@ -1,7 +1,7 @@
 import { json } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { cors } from "remix-utils/cors";
-import { prisma } from "~/core/database/prisma.server";
+import { prisma } from "../core/database/prisma.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") {

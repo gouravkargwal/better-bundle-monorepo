@@ -199,7 +199,7 @@ class FieldExtractorService:
                 "productType": product_data.get("productType"),
                 "vendor": product_data.get("vendor"),
                 "tags": tags,
-                "status": product_data.get("status", "active"),
+                "status": product_data.get("status", "ACTIVE"),
                 "totalInventory": product_data.get("totalInventory"),
                 "price": price,
                 "compareAtPrice": self._get_product_compare_price(variants),
