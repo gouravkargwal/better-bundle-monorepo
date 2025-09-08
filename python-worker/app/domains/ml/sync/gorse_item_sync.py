@@ -57,13 +57,19 @@ class GorseItemSync:
                 entity_name="items",
             )
 
-        # Use transaction if not already in one
-        if self.pipeline.core._is_in_transaction():
-            await _sync_items_operation()
+        # For full sync, don't use transactions to avoid timeout issues
+        # For incremental sync, use transactions for consistency
+        if incremental:
+            # Use transaction if not already in one
+            if self.pipeline.core._is_in_transaction():
+                await _sync_items_operation()
+            else:
+                await self.pipeline.core._execute_with_transaction(
+                    "sync_items", _sync_items_operation
+                )
         else:
-            await self.pipeline.core._execute_with_transaction(
-                "sync_items", _sync_items_operation
-            )
+            # Full sync without transaction to avoid timeout
+            await _sync_items_operation()
 
     async def _fetch_item_batch(
         self,
@@ -72,188 +78,331 @@ class GorseItemSync:
         limit: int,
         last_sync_timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of items from ProductFeatures table only (incremental if timestamp provided)"""
+        """Fetch a batch of items with their features - robust approach handling missing data"""
         try:
-            db = await self.pipeline._get_database()
+            # Step 1: Get core product data from ProductFeatures (what definitely exists)
+            core_products = await self._fetch_core_products(
+                shop_id, limit, offset, last_sync_timestamp
+            )
 
-            # Build incremental query if timestamp provided
-            if last_sync_timestamp:
-                base_query = """
-                        SELECT 
-                            pf.*,
-                            -- Default values for missing ProductData fields
-                            pd.status,
-                            pd."productType",
-                            pd.vendor,
-                            pd.tags,
-                            pd.collections,
-                            pd."totalInventory",
-                            pd."compareAtPrice",
-                            pd.price,
-                            pd."productCreatedAt",
-                            -- Default collection feature values (will be NULL if no collections exist)
-                            NULL as collection_product_count,
-                            NULL as collection_performance_score,
-                            NULL as collection_conversion_rate
-                        FROM "ProductFeatures" pf
-                        LEFT JOIN "ProductData" pd ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                        WHERE pf."shopId" = $1 
-                            AND pf."lastComputedAt" > $4::timestamp
-                        ORDER BY pf."productId"
-                        LIMIT $2 OFFSET $3
-                    """
-                result = await db.query_raw(
-                    base_query, shop_id, limit, offset, last_sync_timestamp
-                )
-            else:
-                # Full sync query
-                base_query = """
-                        SELECT 
-                            pf.*,
-                            -- Default values for missing ProductData fields
-                            pd.status,
-                            pd."productType",
-                            pd.vendor,
-                            pd.tags,
-                            pd.collections,
-                            pd."totalInventory",
-                            pd."compareAtPrice",
-                            pd.price,
-                            pd."productCreatedAt",
-                            -- Default collection feature values (will be NULL if no collections exist)
-                            NULL as collection_product_count,
-                            NULL as collection_performance_score,
-                            NULL as collection_conversion_rate
-                        FROM "ProductFeatures" pf
-                        LEFT JOIN "ProductData" pd ON pf."productId" = pd."productId" AND pf."shopId" = pd."shopId"
-                        WHERE pf."shopId" = $1
-                        ORDER BY pf."productId"
-                        LIMIT $2 OFFSET $3
-                    """
-                result = await db.query_raw(base_query, shop_id, limit, offset)
-            batch_items = [dict(row) for row in result] if result else []
+            if not core_products:
+                logger.info(f"No core products found for shop {shop_id}")
+                return []
 
-            if batch_items:
-                # Fetch aggregated product pair and search data for this batch
-                product_ids = [item["productId"] for item in batch_items]
-                product_aggregates = await self._fetch_product_aggregates(
-                    shop_id, product_ids
-                )
+            # Step 2: Get product data (if exists)
+            product_data = await self._fetch_product_data(
+                shop_id, core_products, last_sync_timestamp
+            )
 
-                # Merge the aggregated data back into items
-                for item in batch_items:
-                    product_id = item["productId"]
-                    item.update(product_aggregates.get(product_id, {}))
+            # Step 3: Get collection data (if exists)
+            collection_data = await self._fetch_collection_data(
+                shop_id, core_products, last_sync_timestamp
+            )
 
-            return batch_items
+            # Step 4: Get product pair data (if exists)
+            product_pair_data = await self._fetch_product_pair_data(
+                shop_id, core_products, last_sync_timestamp
+            )
+
+            # Step 5: Get search product data (if exists)
+            search_data = await self._fetch_search_product_data(
+                shop_id, core_products, last_sync_timestamp
+            )
+
+            # Step 6: Merge all data safely
+            enriched_products = []
+            for product in core_products:
+                product_id = product.get("productId")
+                if not product_id:
+                    continue
+
+                # Start with core product data
+                enriched_product = dict(product)
+
+                # Add product data if available
+                if product_id in product_data:
+                    enriched_product.update(product_data[product_id])
+
+                # Add collection data if available
+                if product_id in collection_data:
+                    enriched_product.update(collection_data[product_id])
+
+                # Add product pair data if available
+                if product_id in product_pair_data:
+                    enriched_product.update(product_pair_data[product_id])
+
+                # Add search data if available
+                if product_id in search_data:
+                    enriched_product.update(search_data[product_id])
+
+                enriched_products.append(enriched_product)
+
+            logger.info(
+                f"Enriched {len(enriched_products)} products with available feature data"
+            )
+            return enriched_products
 
         except Exception as e:
             logger.error(f"Failed to fetch item batch: {str(e)}")
             raise
 
-    async def _fetch_product_aggregates(
-        self, shop_id: str, product_ids: List[str]
-    ) -> Dict[str, Dict]:
-        """Fetch product pair and search aggregates for a batch of products"""
-        if not product_ids:
-            return {}
-
+    async def _fetch_core_products(
+        self,
+        shop_id: str,
+        limit: int,
+        offset: int,
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch core product data from ProductFeatures - this is what definitely exists"""
         try:
             db = await self.pipeline._get_database()
 
-            # Create parameterized queries for batch
-            placeholders = ",".join([f"${i+2}" for i in range(len(product_ids))])
+            if last_sync_timestamp:
+                products = await db.productfeatures.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "lastComputedAt": {"gte": last_sync_timestamp},
+                    },
+                    order={"productId": "asc"},
+                    skip=offset,
+                    take=limit,
+                )
+            else:
+                products = await db.productfeatures.find_many(
+                    where={"shopId": shop_id},
+                    order={"productId": "asc"},
+                    skip=offset,
+                    take=limit,
+                )
 
-            # Fetch product pair features
-            pair_query = f"""
-                    SELECT 
-                        CASE WHEN "productId1" IN ({placeholders}) THEN "productId1" ELSE "productId2" END as product_id,
-                        AVG("liftScore") as avg_lift_score,
-                        COUNT(DISTINCT CASE 
-                            WHEN "productId1" IN ({placeholders}) THEN "productId2" 
-                            ELSE "productId1" END) FILTER (WHERE "coPurchaseCount" > 0) as frequently_bought_with_count
-                    FROM "ProductPairFeatures" 
-                    WHERE "shopId" = $1 
-                        AND ("productId1" IN ({placeholders}) OR "productId2" IN ({placeholders}))
-                    GROUP BY CASE WHEN "productId1" IN ({placeholders}) THEN "productId1" ELSE "productId2" END
-                """
-
-            # Fetch search features
-            search_query = f"""
-                    SELECT 
-                        "productId",
-                        AVG("clickThroughRate") as search_ctr,
-                        AVG("conversionRate") as search_conversion_rate
-                    FROM "SearchProductFeatures" 
-                    WHERE "shopId" = $1 AND "productId" IN ({placeholders})
-                    GROUP BY "productId"
-                """
-
-            # Execute both queries concurrently
-            pair_result, search_result = await asyncio.gather(
-                db.query_raw(
-                    pair_query,
-                    shop_id,
-                    *product_ids,
-                    *product_ids,
-                    *product_ids,
-                    *product_ids,
-                ),
-                db.query_raw(search_query, shop_id, *product_ids),
-            )
-
-            # Combine results
-            aggregates = {}
-
-            # Add product pair data
-            if pair_result:
-                for row in pair_result:
-                    product_id = row["product_id"]
-                    aggregates[product_id] = {
-                        "avg_lift_score": float(row["avg_lift_score"] or 0),
-                        "frequently_bought_with_count": int(
-                            row["frequently_bought_with_count"] or 0
-                        ),
-                    }
-
-            # Add search data
-            if search_result:
-                for row in search_result:
-                    product_id = row["productId"]
-                    if product_id not in aggregates:
-                        aggregates[product_id] = {}
-                    aggregates[product_id].update(
-                        {
-                            "search_ctr": float(row["search_ctr"] or 0),
-                            "search_conversion_rate": float(
-                                row["search_conversion_rate"] or 0
-                            ),
-                        }
-                    )
-
-            # Fill in missing products with defaults
-            for product_id in product_ids:
-                if product_id not in aggregates:
-                    aggregates[product_id] = {
-                        "avg_lift_score": 0.0,
-                        "frequently_bought_with_count": 0,
-                        "search_ctr": 0.0,
-                        "search_conversion_rate": 0.0,
-                    }
-
-            return aggregates
+            return [product.model_dump() for product in products]
 
         except Exception as e:
-            logger.error(f"Failed to fetch product aggregates: {str(e)}")
-            return {
-                product_id: {
-                    "avg_lift_score": 0.0,
-                    "frequently_bought_with_count": 0,
-                    "search_ctr": 0.0,
-                    "search_conversion_rate": 0.0,
-                }
-                for product_id in product_ids
-            }
+            logger.error(f"Failed to fetch core products: {str(e)}")
+            return []
+
+    async def _fetch_product_data(
+        self,
+        shop_id: str,
+        core_products: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch product data if it exists"""
+        try:
+            if not core_products:
+                return {}
+
+            db = await self.pipeline._get_database()
+            product_ids = [
+                product["productId"]
+                for product in core_products
+                if product.get("productId")
+            ]
+
+            if not product_ids:
+                return {}
+
+            if last_sync_timestamp:
+                product_data = await db.productdata.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "productId": {"in": product_ids},
+                        "updatedAt": {"gte": last_sync_timestamp},
+                    }
+                )
+            else:
+                product_data = await db.productdata.find_many(
+                    where={"shopId": shop_id, "productId": {"in": product_ids}}
+                )
+
+            return {pd.productId: pd.model_dump() for pd in product_data}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch product data: {str(e)}")
+            return {}
+
+    async def _fetch_collection_data(
+        self,
+        shop_id: str,
+        core_products: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch collection data if it exists"""
+        try:
+            if not core_products:
+                return {}
+
+            db = await self.pipeline._get_database()
+
+            if last_sync_timestamp:
+                collection_features = await db.collectionfeatures.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "lastComputedAt": {"gte": last_sync_timestamp},
+                    }
+                )
+            else:
+                collection_features = await db.collectionfeatures.find_many(
+                    where={"shopId": shop_id}
+                )
+
+            # Since collection features are shop-level, we'll add them to all products
+            collection_data = {}
+            if collection_features:
+                # Use the first collection feature for all products (or you could aggregate them)
+                cf = collection_features[0].model_dump()
+                for product in core_products:
+                    product_id = product.get("productId")
+                    if product_id:
+                        collection_data[product_id] = cf
+
+            return collection_data
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch collection data: {str(e)}")
+            return {}
+
+    async def _fetch_product_pair_data(
+        self,
+        shop_id: str,
+        core_products: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch product pair data if it exists"""
+        try:
+            if not core_products:
+                return {}
+
+            db = await self.pipeline._get_database()
+            product_ids = [
+                product["productId"]
+                for product in core_products
+                if product.get("productId")
+            ]
+
+            if not product_ids:
+                return {}
+
+            # For aggregation, we need to use raw SQL as Prisma doesn't support complex aggregations
+            if last_sync_timestamp:
+                query = """
+                    SELECT 
+                        "productId1" as "productId",
+                        COUNT(DISTINCT "productId2") as "coPurchasePartners",
+                        SUM("coPurchaseCount") as "totalCoPurchases",
+                        AVG("supportScore") as "avgSupportScore",
+                        AVG("liftScore") as "avgLiftScore"
+                    FROM "ProductPairFeatures" 
+                    WHERE "shopId" = $1 AND "productId1" = ANY($2) AND "lastComputedAt" >= $3::timestamp
+                    GROUP BY "productId1"
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        "productId2" as "productId",
+                        COUNT(DISTINCT "productId1") as "coPurchasePartners",
+                        SUM("coPurchaseCount") as "totalCoPurchases",
+                        AVG("supportScore") as "avgSupportScore",
+                        AVG("liftScore") as "avgLiftScore"
+                    FROM "ProductPairFeatures" 
+                    WHERE "shopId" = $1 AND "productId2" = ANY($2) AND "lastComputedAt" >= $3::timestamp
+                    GROUP BY "productId2"
+                """
+                result = await db.query_raw(
+                    query, shop_id, product_ids, last_sync_timestamp
+                )
+            else:
+                query = """
+                    SELECT 
+                        "productId1" as "productId",
+                        COUNT(DISTINCT "productId2") as "coPurchasePartners",
+                        SUM("coPurchaseCount") as "totalCoPurchases",
+                        AVG("supportScore") as "avgSupportScore",
+                        AVG("liftScore") as "avgLiftScore"
+                    FROM "ProductPairFeatures" 
+                    WHERE "shopId" = $1 AND "productId1" = ANY($2)
+                    GROUP BY "productId1"
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        "productId2" as "productId",
+                        COUNT(DISTINCT "productId1") as "coPurchasePartners",
+                        SUM("coPurchaseCount") as "totalCoPurchases",
+                        AVG("supportScore") as "avgSupportScore",
+                        AVG("liftScore") as "avgLiftScore"
+                    FROM "ProductPairFeatures" 
+                    WHERE "shopId" = $1 AND "productId2" = ANY($2)
+                    GROUP BY "productId2"
+                """
+                result = await db.query_raw(query, shop_id, product_ids)
+
+            return {row["productId"]: dict(row) for row in result} if result else {}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch product pair data: {str(e)}")
+            return {}
+
+    async def _fetch_search_product_data(
+        self,
+        shop_id: str,
+        core_products: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch search product data if it exists"""
+        try:
+            if not core_products:
+                return {}
+
+            db = await self.pipeline._get_database()
+            product_ids = [
+                product["productId"]
+                for product in core_products
+                if product.get("productId")
+            ]
+
+            if not product_ids:
+                return {}
+
+            # For aggregation, we need to use raw SQL as Prisma doesn't support complex aggregations
+            if last_sync_timestamp:
+                query = """
+                    SELECT 
+                        "productId",
+                        COUNT(DISTINCT "searchQuery") as "searchQueriesCount",
+                        SUM("impressionCount") as "totalSearchImpressions",
+                        SUM("clickCount") as "totalSearchClicks",
+                        SUM("purchaseCount") as "totalSearchPurchases",
+                        AVG("clickThroughRate") as "avgSearchCTR",
+                        AVG("conversionRate") as "avgSearchConversionRate"
+                    FROM "SearchProductFeatures" 
+                    WHERE "shopId" = $1 AND "productId" = ANY($2) AND "lastComputedAt" >= $3::timestamp
+                    GROUP BY "productId"
+                """
+                result = await db.query_raw(
+                    query, shop_id, product_ids, last_sync_timestamp
+                )
+            else:
+                query = """
+                    SELECT 
+                        "productId",
+                        COUNT(DISTINCT "searchQuery") as "searchQueriesCount",
+                        SUM("impressionCount") as "totalSearchImpressions",
+                        SUM("clickCount") as "totalSearchClicks",
+                        SUM("purchaseCount") as "totalSearchPurchases",
+                        AVG("clickThroughRate") as "avgSearchCTR",
+                        AVG("conversionRate") as "avgSearchConversionRate"
+                    FROM "SearchProductFeatures" 
+                    WHERE "shopId" = $1 AND "productId" = ANY($2)
+                    GROUP BY "productId"
+                """
+                result = await db.query_raw(query, shop_id, product_ids)
+
+            return {row["productId"]: dict(row) for row in result} if result else {}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch search product data: {str(e)}")
+            return {}
 
     async def _process_item_batch(
         self, shop_id: str, items: List[Dict[str, Any]]
@@ -280,8 +429,12 @@ class GorseItemSync:
                 item_data = {
                     "itemId": prefixed_item_id,
                     "shopId": shop_id,
-                    "categories": Json(categories),
-                    "labels": Json(labels),
+                    "categories": json.dumps(
+                        categories
+                    ),  # Serialize to JSON string for raw SQL
+                    "labels": json.dumps(
+                        labels
+                    ),  # Serialize to JSON string for raw SQL
                     "isHidden": is_hidden,
                 }
                 gorse_items_data.append(item_data)

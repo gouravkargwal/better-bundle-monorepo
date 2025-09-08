@@ -67,15 +67,22 @@ class GorseSyncConsumer(BaseConsumer):
                 "metadata": metadata,
             }
 
+            # Determine if this should be a full sync based on since_hours
+            incremental = since_hours > 0  # Full sync if since_hours=0
+            
+            self.logger.info(
+                f"Sync configuration | incremental={incremental} | since_hours={since_hours}"
+            )
+            
             # Execute the appropriate sync operation
             if sync_type == "users":
-                await self.gorse_pipeline.sync_users(shop_id)
+                await self.gorse_pipeline.sync_users(shop_id, incremental=incremental)
             elif sync_type == "items":
-                await self.gorse_pipeline.sync_items(shop_id)
+                await self.gorse_pipeline.sync_items(shop_id, incremental=incremental)
             elif sync_type == "feedback":
                 await self.gorse_pipeline.sync_feedback(shop_id, since_hours)
             else:  # sync_type == "all" or any other value
-                await self.gorse_pipeline.sync_all(shop_id)
+                await self.gorse_pipeline.sync_all(shop_id, incremental=incremental)
 
             # Mark job as completed
             if job_id in self.active_sync_jobs:

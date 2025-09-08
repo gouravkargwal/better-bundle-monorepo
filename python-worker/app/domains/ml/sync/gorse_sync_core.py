@@ -45,6 +45,7 @@ class GorseSyncCore:
                     logger.info(f"Using incremental sync since: {last_sync_timestamp}")
                 else:
                     logger.info("No previous sync found, performing full sync")
+                    incremental = False  # Force full sync when no previous sync
 
             if incremental:
                 # For incremental syncs, use individual transactions for better performance
@@ -87,45 +88,29 @@ class GorseSyncCore:
 
     async def _sync_all_full_transaction(self, shop_id: str):
         """
-        Perform full sync within a single database transaction to ensure consistency.
-        If any operation fails, the entire sync is rolled back.
+        Perform full sync with individual transactions for each operation.
+        Each sync operation handles its own transaction to avoid timeout issues.
         """
-        db = await self.pipeline._get_database()
+        logger.info(f"Starting full sync for shop: {shop_id}")
 
         try:
-            # Start a database transaction
-            async with db.tx() as transaction:
-                logger.info(f"Starting full sync transaction for shop: {shop_id}")
+            # 1. Sync Users (combining multiple feature tables)
+            await self.pipeline.user_sync.sync_users(
+                shop_id, incremental=False, since_timestamp=None
+            )
 
-                # Store the original database client and replace with transaction
-                original_db = self.pipeline._db_client
-                self.pipeline._db_client = transaction
+            # 2. Sync Items (combining multiple feature tables)
+            await self.pipeline.item_sync.sync_items(
+                shop_id, incremental=False, since_timestamp=None
+            )
 
-                try:
-                    # 1. Sync Users (combining multiple feature tables)
-                    await self.pipeline.user_sync.sync_users(
-                        shop_id, incremental=False, since_timestamp=None
-                    )
+            # 3. Sync Feedback (from events, orders, and interaction features)
+            await self.pipeline.feedback_sync.sync_feedback(shop_id)
 
-                    # 2. Sync Items (combining multiple feature tables)
-                    await self.pipeline.item_sync.sync_items(
-                        shop_id, incremental=False, since_timestamp=None
-                    )
-
-                    # 3. Sync Feedback (from events, orders, and interaction features)
-                    await self.pipeline.feedback_sync.sync_feedback(shop_id)
-
-                    logger.info(
-                        f"Full sync transaction completed successfully for shop: {shop_id}"
-                    )
-
-                finally:
-                    # Restore the original database client
-                    self.pipeline._db_client = original_db
+            logger.info(f"Full sync completed successfully for shop: {shop_id}")
 
         except Exception as e:
-            logger.error(f"Full sync transaction failed for shop {shop_id}: {str(e)}")
-            logger.error("All changes have been rolled back")
+            logger.error(f"Full sync failed for shop {shop_id}: {str(e)}")
             raise
 
     async def _execute_with_transaction(

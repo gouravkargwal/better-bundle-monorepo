@@ -78,13 +78,10 @@ class GorseFeedbackSync:
             )
             return total_synced
 
-        # Use transaction if not already in one
-        if self.pipeline.core._is_in_transaction():
-            await _sync_feedback_operation()
-        else:
-            await self.pipeline.core._execute_with_transaction(
-                "sync_feedback", _sync_feedback_operation
-            )
+        # Feedback sync doesn't use transactions due to streaming processing
+        # Each batch insert is atomic, but the overall sync is not wrapped in a transaction
+        # to avoid timeout issues with long-running streaming operations
+        await _sync_feedback_operation()
 
     async def _process_feedback_stream(self, feedback_stream) -> int:
         """
@@ -222,7 +219,8 @@ class GorseFeedbackSync:
                     data=gorse_feedback_data,
                     skip_duplicates=True,  # Skip records that violate unique constraints
                 )
-                total_inserted = result.count
+                # create_many returns the count directly, not as result.count
+                total_inserted = result
                 logger.debug(
                     f"Bulk inserted {total_inserted} feedback records using create_many"
                 )

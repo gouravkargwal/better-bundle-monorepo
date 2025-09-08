@@ -57,13 +57,19 @@ class GorseUserSync:
                 additional_processor=self._sync_anonymous_users,
             )
 
-        # Use transaction if not already in one
-        if self.pipeline.core._is_in_transaction():
-            await _sync_users_operation()
+        # For full sync, don't use transactions to avoid timeout issues
+        # For incremental sync, use transactions for consistency
+        if incremental:
+            # Use transaction if not already in one
+            if self.pipeline.core._is_in_transaction():
+                await _sync_users_operation()
+            else:
+                await self.pipeline.core._execute_with_transaction(
+                    "sync_users", _sync_users_operation
+                )
         else:
-            await self.pipeline.core._execute_with_transaction(
-                "sync_users", _sync_users_operation
-            )
+            # Full sync without transaction to avoid timeout
+            await _sync_users_operation()
 
     async def _fetch_user_batch(
         self,
@@ -72,72 +78,236 @@ class GorseUserSync:
         limit: int,
         last_sync_timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of users with all their feature data (incremental if timestamp provided)"""
+        """Fetch a batch of users with their features - robust approach handling missing data"""
         try:
             db = await self.pipeline._get_database()
 
-            # Build incremental query if timestamp provided
-            if last_sync_timestamp:
-                base_query = """
-                        SELECT 
-                            COALESCE(uf."customerId", cbf."customerId") as "customerId",
-                            uf.*,
-                            cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
-                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount",
-                            cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
-                            cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
-                            cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
-                        FROM "UserFeatures" uf
-                        FULL OUTER JOIN "CustomerBehaviorFeatures" cbf 
-                            ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
-                        WHERE COALESCE(uf."shopId", cbf."shopId") = $1
-                            AND (uf."lastComputedAt" > $4::timestamp OR cbf."lastComputedAt" > $4::timestamp)
-                        ORDER BY "customerId"
-                        LIMIT $2 OFFSET $3
-                    """
-                result = await db.query_raw(
-                    base_query, shop_id, limit, offset, last_sync_timestamp
-                )
-            else:
-                # Full sync query
-                base_query = """
-                        SELECT 
-                            COALESCE(uf."customerId", cbf."customerId") as "customerId",
-                            uf.*,
-                            cbf."engagementScore", cbf."recencyScore", cbf."diversityScore", cbf."behavioralScore",
-                            cbf."sessionCount", cbf."productViewCount", cbf."cartAddCount",
-                            cbf."searchCount", cbf."uniqueProductsViewed", cbf."uniqueCollectionsViewed",
-                            cbf."deviceType", cbf."primaryReferrer", cbf."browseToCartRate", 
-                            cbf."cartToPurchaseRate", cbf."searchToPurchaseRate", cbf."mostActiveHour", cbf."mostActiveDay"
-                        FROM "UserFeatures" uf
-                        FULL OUTER JOIN "CustomerBehaviorFeatures" cbf 
-                            ON uf."customerId" = cbf."customerId" AND uf."shopId" = cbf."shopId"
-                        WHERE COALESCE(uf."shopId", cbf."shopId") = $1
-                        ORDER BY "customerId"
-                        LIMIT $2 OFFSET $3
-                    """
-                result = await db.query_raw(base_query, shop_id, limit, offset)
-            batch_users = [dict(row) for row in result] if result else []
+            # Step 1: Get core user data from UserFeatures (what definitely exists)
+            core_users = await self._fetch_core_users(
+                shop_id, limit, offset, last_sync_timestamp
+            )
 
-            if batch_users:
-                # Fetch aggregated interaction and session data for this batch
-                user_ids = [user["customerId"] for user in batch_users]
-                interaction_data = await self._fetch_interaction_aggregates(
-                    shop_id, user_ids
-                )
-                session_data = await self._fetch_session_aggregates(shop_id, user_ids)
+            if not core_users:
+                logger.info(f"No core users found for shop {shop_id}")
+                return []
 
-                # Merge the aggregated data back into users
-                for user in batch_users:
-                    customer_id = user["customerId"]
-                    user.update(interaction_data.get(customer_id, {}))
-                    user.update(session_data.get(customer_id, {}))
+            # Step 2: Get customer behavior data (if exists)
+            behavior_data = await self._fetch_behavior_data(
+                shop_id, core_users, last_sync_timestamp
+            )
 
-            return batch_users
+            # Step 3: Get session data (if exists)
+            session_data = await self._fetch_session_data(
+                shop_id, core_users, last_sync_timestamp
+            )
+
+            # Step 4: Get interaction data (if exists)
+            interaction_data = await self._fetch_interaction_data(
+                shop_id, core_users, last_sync_timestamp
+            )
+
+            # Step 5: Merge all data safely
+            enriched_users = []
+            for user in core_users:
+                customer_id = user.get("customerId")
+                if not customer_id:
+                    continue
+
+                # Start with core user data
+                enriched_user = dict(user)
+
+                # Add behavior data if available
+                if customer_id in behavior_data:
+                    enriched_user.update(behavior_data[customer_id])
+
+                # Add session data if available
+                if customer_id in session_data:
+                    enriched_user.update(session_data[customer_id])
+
+                # Add interaction data if available
+                if customer_id in interaction_data:
+                    enriched_user.update(interaction_data[customer_id])
+
+                enriched_users.append(enriched_user)
+
+            logger.info(
+                f"Enriched {len(enriched_users)} users with available feature data"
+            )
+            return enriched_users
 
         except Exception as e:
             logger.error(f"Failed to fetch user batch: {str(e)}")
             raise
+
+    async def _fetch_core_users(
+        self,
+        shop_id: str,
+        limit: int,
+        offset: int,
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch core user data from UserFeatures - this is what definitely exists"""
+        try:
+            db = await self.pipeline._get_database()
+
+            if last_sync_timestamp:
+                users = await db.userfeatures.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "lastComputedAt": {"gte": last_sync_timestamp},
+                    },
+                    order={"customerId": "asc"},
+                    skip=offset,
+                    take=limit,
+                )
+            else:
+                users = await db.userfeatures.find_many(
+                    where={"shopId": shop_id},
+                    order={"customerId": "asc"},
+                    skip=offset,
+                    take=limit,
+                )
+
+            return [user.model_dump() for user in users]
+
+        except Exception as e:
+            logger.error(f"Failed to fetch core users: {str(e)}")
+            return []
+
+    async def _fetch_behavior_data(
+        self,
+        shop_id: str,
+        core_users: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch customer behavior data if it exists"""
+        try:
+            if not core_users:
+                return {}
+
+            db = await self.pipeline._get_database()
+            customer_ids = [
+                user["customerId"] for user in core_users if user.get("customerId")
+            ]
+
+            if not customer_ids:
+                return {}
+
+            if last_sync_timestamp:
+                behavior_features = await db.customerbehaviorfeatures.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "customerId": {"in": customer_ids},
+                        "lastComputedAt": {"gte": last_sync_timestamp},
+                    }
+                )
+            else:
+                behavior_features = await db.customerbehaviorfeatures.find_many(
+                    where={"shopId": shop_id, "customerId": {"in": customer_ids}}
+                )
+
+            return {bf.customerId: bf.model_dump() for bf in behavior_features}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch behavior data: {str(e)}")
+            return {}
+
+    async def _fetch_session_data(
+        self,
+        shop_id: str,
+        core_users: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch session data if it exists"""
+        try:
+            if not core_users:
+                return {}
+
+            db = await self.pipeline._get_database()
+            customer_ids = [
+                user["customerId"] for user in core_users if user.get("customerId")
+            ]
+
+            if not customer_ids:
+                return {}
+
+            if last_sync_timestamp:
+                session_features = await db.sessionfeatures.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "customerId": {"in": customer_ids},
+                        "lastComputedAt": {"gte": last_sync_timestamp},
+                    }
+                )
+            else:
+                session_features = await db.sessionfeatures.find_many(
+                    where={"shopId": shop_id, "customerId": {"in": customer_ids}}
+                )
+
+            return {sf.customerId: sf.model_dump() for sf in session_features}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch session data: {str(e)}")
+            return {}
+
+    async def _fetch_interaction_data(
+        self,
+        shop_id: str,
+        core_users: List[Dict],
+        last_sync_timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Dict]:
+        """Fetch interaction data if it exists"""
+        try:
+            if not core_users:
+                return {}
+
+            db = await self.pipeline._get_database()
+            customer_ids = [
+                user["customerId"] for user in core_users if user.get("customerId")
+            ]
+
+            if not customer_ids:
+                return {}
+
+            # For aggregation, we need to use raw SQL as Prisma doesn't support complex aggregations
+            if last_sync_timestamp:
+                query = """
+                    SELECT 
+                        "customerId",
+                        COUNT("productId") as "totalInteractions",
+                        SUM("viewCount") as "totalProductViews",
+                        SUM("cartAddCount") as "totalCartAdds",
+                        SUM("purchaseCount") as "totalPurchases",
+                        AVG("interactionScore") as "avgInteractionScore",
+                        AVG("affinityScore") as "avgAffinityScore"
+                    FROM "InteractionFeatures" 
+                    WHERE "shopId" = $1 AND "customerId" = ANY($2) AND "lastComputedAt" >= $3::timestamp
+                    GROUP BY "customerId"
+                """
+                result = await db.query_raw(
+                    query, shop_id, customer_ids, last_sync_timestamp
+                )
+            else:
+                query = """
+                    SELECT 
+                        "customerId",
+                        COUNT("productId") as "totalInteractions",
+                        SUM("viewCount") as "totalProductViews",
+                        SUM("cartAddCount") as "totalCartAdds",
+                        SUM("purchaseCount") as "totalPurchases",
+                        AVG("interactionScore") as "avgInteractionScore",
+                        AVG("affinityScore") as "avgAffinityScore"
+                    FROM "InteractionFeatures" 
+                    WHERE "shopId" = $1 AND "customerId" = ANY($2)
+                    GROUP BY "customerId"
+                """
+                result = await db.query_raw(query, shop_id, customer_ids)
+
+            return {row["customerId"]: dict(row) for row in result} if result else {}
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch interaction data: {str(e)}")
+            return {}
 
     async def _fetch_interaction_aggregates(
         self, shop_id: str, user_ids: List[str]
@@ -148,6 +318,12 @@ class GorseUserSync:
 
         try:
             db = await self.pipeline._get_database()
+
+            # Filter out None values and ensure all are strings
+            valid_user_ids = [str(uid) for uid in user_ids if uid is not None]
+
+            if not valid_user_ids:
+                return {}
 
             # Use ANY for safer array parameterization
             query = """
@@ -160,7 +336,7 @@ class GorseUserSync:
                     GROUP BY "customerId"
                 """
 
-            result = await db.query_raw(query, shop_id, user_ids)
+            result = await db.query_raw(query, shop_id, valid_user_ids)
 
             return (
                 {

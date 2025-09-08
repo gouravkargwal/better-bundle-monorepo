@@ -136,6 +136,32 @@ class GorseDataTransformers:
 
             raise
 
+    def _calculate_customer_segment(self, user: Dict[str, Any]) -> str:
+        """Calculate customer segment based on user data"""
+        lifetime_value = float(user.get("lifetimeValue") or 0)
+        order_frequency = float(user.get("orderFrequencyPerMonth") or 0)
+        days_since_last_order = user.get("daysSinceLastOrder", 999)
+
+        # High-value, frequent customers
+        if lifetime_value > 1000 and order_frequency > 2:
+            return "vip"
+
+        # High-value but less frequent
+        elif lifetime_value > 500 and order_frequency > 1:
+            return "premium"
+
+        # Active customers with some value
+        elif days_since_last_order < 30 and lifetime_value > 100:
+            return "active"
+
+        # Recent customers
+        elif days_since_last_order < 90:
+            return "recent"
+
+        # Inactive customers
+        else:
+            return "inactive"
+
     def _build_comprehensive_item_labels(
         self, product: Dict[str, Any]
     ) -> Dict[str, Any]:

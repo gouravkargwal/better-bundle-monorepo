@@ -174,17 +174,16 @@ class GorseSyncPipeline:
 
             for user_data in chunk:
                 values_list.append(
-                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}, ${param_count + 3})"
+                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}::jsonb, NOW())"
                 )
                 params.extend(
                     [
                         user_data["userId"],
                         user_data["shopId"],
                         user_data["labels"],
-                        user_data.get("updatedAt", datetime.utcnow()),
                     ]
                 )
-                param_count += 4
+                param_count += 3
 
             values_clause = ", ".join(values_list)
 
@@ -193,8 +192,8 @@ class GorseSyncPipeline:
                 VALUES {values_clause}
                 ON CONFLICT ("userId") DO UPDATE SET
                     "shopId" = EXCLUDED."shopId",
-                    labels = EXCLUDED.labels,
-                    "updatedAt" = EXCLUDED."updatedAt"
+                    labels = EXCLUDED.labels::jsonb,
+                    "updatedAt" = NOW()
             """
 
             await db.query_raw(query, *params)
@@ -214,7 +213,7 @@ class GorseSyncPipeline:
 
             for item_data in chunk:
                 values_list.append(
-                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}, ${param_count + 3}, ${param_count + 4})"
+                    f"(${param_count}, ${param_count + 1}, ${param_count + 2}::jsonb, ${param_count + 3}::jsonb, ${param_count + 4}, NOW())"
                 )
                 params.extend(
                     [
@@ -230,12 +229,12 @@ class GorseSyncPipeline:
             values_clause = ", ".join(values_list)
 
             query = f"""
-                INSERT INTO gorse_items ("itemId", "shopId", categories, labels, "isHidden")
+                INSERT INTO gorse_items ("itemId", "shopId", categories, labels, "isHidden", "updatedAt")
                 VALUES {values_clause}
                 ON CONFLICT ("itemId") DO UPDATE SET
                     "shopId" = EXCLUDED."shopId",
-                    categories = EXCLUDED.categories,
-                    labels = EXCLUDED.labels,
+                    categories = EXCLUDED.categories::jsonb,
+                    labels = EXCLUDED.labels::jsonb,
                     "isHidden" = EXCLUDED."isHidden",
                     "updatedAt" = NOW()
             """
@@ -315,7 +314,7 @@ class GorseSyncPipeline:
 
         feedback_list = []
         for event in events:
-            feedback = self._convert_event_to_feedback(event)
+            feedback = self.feedback_sync._convert_event_to_feedback(event)
             if feedback:
                 feedback_list.extend(feedback)
 
@@ -347,7 +346,7 @@ class GorseSyncPipeline:
             # Convert events to feedback
             feedback_batch = []
             for event in events:
-                feedback = self._convert_event_to_feedback(event)
+                feedback = self.feedback_sync._convert_event_to_feedback(event)
                 if feedback:
                     feedback_batch.extend(feedback)
 
@@ -504,49 +503,58 @@ class GorseSyncPipeline:
         self, shop_id: str, since_time: datetime
     ) -> List[Dict[str, Any]]:
         """
-        Process SessionFeatures for session-based feedback
+        Process SessionFeatures for session-based feedback using defensive data merging
         """
         db = await self._get_database()
-        query = """
-            SELECT 
-                sf.*,
-                be."eventData"
-            FROM "SessionFeatures" sf
-            LEFT JOIN "BehavioralEvents" be 
-                ON sf."sessionId" = be."clientId" 
-                AND be."eventType" = 'product_viewed'
-            WHERE sf."shopId" = $1 
-                AND sf."endTime" >= $2::timestamp
-                AND sf."productViewCount" > 0
-        """
 
-        result = await db.query_raw(query, shop_id, since_time)
-        sessions = [dict(row) for row in result] if result else []
+        # Step 1: Get core session data (what definitely exists)
+        sessions = await self._fetch_core_sessions(
+            db, shop_id, since_time, 10000, 0
+        )  # Large batch for non-streaming
 
+        if not sessions:
+            return []
+
+        # Step 2: Get behavioral events data (if exists) - defensive approach
+        behavioral_data = await self._fetch_session_behavioral_data(
+            db, shop_id, sessions, since_time
+        )
+
+        # Step 3: Merge data safely and convert to feedback
         feedback_list = []
         processed_sessions = set()
 
         for session in sessions:
-            if session["sessionId"] in processed_sessions:
+            session_id = session["sessionId"]
+            if session_id in processed_sessions:
                 continue
-            processed_sessions.add(session["sessionId"])
+            processed_sessions.add(session_id)
 
-            user_id = session["customerId"] or f"session_{session['sessionId']}"
+            # Start with core session data
+            enriched_session = dict(session)
+
+            # Add behavioral data if available
+            if session_id in behavioral_data:
+                enriched_session.update(behavioral_data[session_id])
+
+            user_id = enriched_session["customerId"] or f"session_{session_id}"
 
             # Create session-level feedback if converted
-            if session["checkoutCompleted"]:
+            if enriched_session["checkoutCompleted"]:
                 feedback_list.append(
                     {
                         "feedback_type": "session_conversion",
                         "user_id": user_id,
                         "item_id": "session_conversion",  # Special item for session conversions
-                        "timestamp": session["endTime"],
+                        "timestamp": enriched_session["endTime"],
                         "shop_id": shop_id,
                         "comment": json.dumps(
                             {
                                 "weight": 10.0,
-                                "order_value": float(session["orderValue"] or 0),
-                                "duration": session["durationSeconds"],
+                                "order_value": float(
+                                    enriched_session["orderValue"] or 0
+                                ),
+                                "duration": enriched_session["durationSeconds"],
                             }
                         ),
                     }
@@ -556,59 +564,61 @@ class GorseSyncPipeline:
 
     async def _stream_session_feedback(self, shop_id: str, since_time: datetime):
         """
-        Stream session feedback in batches to avoid loading all data into memory
+        Stream session feedback in batches using defensive data merging approach
         """
         db = await self._get_database()
         batch_size = 500  # Process sessions in smaller batches
         offset = 0
 
         while True:
-            query = """
-                SELECT 
-                    sf.*,
-                    be."eventData"
-                FROM "SessionFeatures" sf
-                LEFT JOIN "BehavioralEvents" be 
-                    ON sf."sessionId" = be."clientId" 
-                    AND be."eventType" = 'product_viewed'
-                WHERE sf."shopId" = $1 
-                    AND sf."endTime" >= $2::timestamp
-                    AND sf."productViewCount" > 0
-                ORDER BY sf."endTime" ASC
-                LIMIT $3 OFFSET $4
-            """
-
-            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
-            sessions = [dict(row) for row in result] if result else []
+            # Step 1: Get core session data (what definitely exists)
+            sessions = await self._fetch_core_sessions(
+                db, shop_id, since_time, batch_size, offset
+            )
 
             if not sessions:
                 break  # No more sessions to process
 
-            # Convert sessions to feedback
+            # Step 2: Get behavioral events data (if exists) - defensive approach
+            behavioral_data = await self._fetch_session_behavioral_data(
+                db, shop_id, sessions, since_time
+            )
+
+            # Step 3: Merge data safely and convert to feedback
             feedback_batch = []
             processed_sessions = set()
 
             for session in sessions:
-                if session["sessionId"] in processed_sessions:
+                session_id = session["sessionId"]
+                if session_id in processed_sessions:
                     continue
-                processed_sessions.add(session["sessionId"])
+                processed_sessions.add(session_id)
 
-                user_id = session["customerId"] or f"session_{session['sessionId']}"
+                # Start with core session data
+                enriched_session = dict(session)
+
+                # Add behavioral data if available
+                if session_id in behavioral_data:
+                    enriched_session.update(behavioral_data[session_id])
+
+                user_id = enriched_session["customerId"] or f"session_{session_id}"
 
                 # Create session-level feedback if converted
-                if session["checkoutCompleted"]:
+                if enriched_session["checkoutCompleted"]:
                     feedback_batch.append(
                         {
                             "feedback_type": "session_conversion",
                             "user_id": user_id,
                             "item_id": "session_conversion",  # Special item for session conversions
-                            "timestamp": session["endTime"],
+                            "timestamp": enriched_session["endTime"],
                             "shop_id": shop_id,
                             "comment": json.dumps(
                                 {
                                     "weight": 10.0,
-                                    "order_value": float(session["orderValue"] or 0),
-                                    "duration": session["durationSeconds"],
+                                    "order_value": float(
+                                        enriched_session["orderValue"] or 0
+                                    ),
+                                    "duration": enriched_session["durationSeconds"],
                                 }
                             ),
                         }
@@ -616,6 +626,66 @@ class GorseSyncPipeline:
 
             yield feedback_batch
             offset += batch_size
+
+    async def _fetch_core_sessions(
+        self, db, shop_id: str, since_time: datetime, batch_size: int, offset: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch core session data from SessionFeatures - this is what definitely exists"""
+        try:
+            query = """
+                SELECT * FROM "SessionFeatures" 
+                WHERE "shopId" = $1 
+                    AND "endTime" >= $2::timestamp
+                    AND "productViewCount" > 0
+                ORDER BY "endTime" ASC
+                LIMIT $3 OFFSET $4
+            """
+            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            return [dict(row) for row in result] if result else []
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch core sessions: {str(e)}")
+            return []
+
+    async def _fetch_session_behavioral_data(
+        self, db, shop_id: str, sessions: List[Dict], since_time: datetime
+    ) -> Dict[str, Dict]:
+        """Fetch behavioral events data for sessions if it exists"""
+        try:
+            if not sessions:
+                return {}
+
+            session_ids = [
+                session["sessionId"] for session in sessions if session.get("sessionId")
+            ]
+
+            if not session_ids:
+                return {}
+
+            # Create placeholders for the IN clause
+            placeholders = ",".join([f"${i+2}" for i in range(len(session_ids))])
+
+            query = f"""
+                SELECT 
+                    "clientId" as "sessionId",
+                    "eventData"
+                FROM "BehavioralEvents" 
+                WHERE "shopId" = $1 
+                    AND "clientId" IN ({placeholders})
+                    AND "eventType" = 'product_viewed'
+                    AND "timestamp" >= ${len(session_ids) + 2}::timestamp
+            """
+
+            result = await db.query_raw(query, shop_id, *session_ids, since_time)
+            return (
+                {row["sessionId"]: {"eventData": row["eventData"]} for row in result}
+                if result
+                else {}
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch session behavioral data: {str(e)}")
+            return {}
 
     def _calculate_customer_segment(self, user: Dict[str, Any]) -> str:
         """Calculate customer segment based on user data"""
