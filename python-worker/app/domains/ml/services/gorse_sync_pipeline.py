@@ -320,7 +320,9 @@ class GorseSyncPipeline:
 
         return feedback_list
 
-    async def _stream_behavioral_events(self, shop_id: str, since_time: datetime):
+    async def _stream_behavioral_events(
+        self, shop_id: str, since_time: Optional[datetime]
+    ):
         """
         Stream behavioral events in batches to avoid loading all data into memory
         """
@@ -329,15 +331,27 @@ class GorseSyncPipeline:
         offset = 0
 
         while True:
-            query = """
-                SELECT * FROM "BehavioralEvents" 
-                WHERE "shopId" = $1 
-                    AND "timestamp" >= $2::timestamp
-                ORDER BY "timestamp" ASC
-                LIMIT $3 OFFSET $4
-            """
-
-            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            if since_time is None:
+                # No time filter - get all data
+                query = """
+                    SELECT * FROM "BehavioralEvents" 
+                    WHERE "shopId" = $1 
+                    ORDER BY "timestamp" ASC
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(query, shop_id, batch_size, offset)
+            else:
+                # Time filter applied
+                query = """
+                    SELECT * FROM "BehavioralEvents" 
+                    WHERE "shopId" = $1 
+                        AND "timestamp" >= $2::timestamp
+                    ORDER BY "timestamp" ASC
+                    LIMIT $3 OFFSET $4
+                """
+                result = await db.query_raw(
+                    query, shop_id, since_time, batch_size, offset
+                )
             events = [dict(row) for row in result] if result else []
 
             if not events:
@@ -371,13 +385,13 @@ class GorseSyncPipeline:
 
         feedback_list = []
         for order in orders:
-            feedback = self._convert_order_to_feedback(order)
+            feedback = self.feedback_sync._convert_order_to_feedback(order)
             if feedback:
                 feedback_list.extend(feedback)
 
         return feedback_list
 
-    async def _stream_orders(self, shop_id: str, since_time: datetime):
+    async def _stream_orders(self, shop_id: str, since_time: Optional[datetime]):
         """
         Stream orders in batches to avoid loading all data into memory
         """
@@ -386,15 +400,27 @@ class GorseSyncPipeline:
         offset = 0
 
         while True:
-            query = """
-                SELECT * FROM "OrderData" 
-                WHERE "shopId" = $1 
-                    AND "orderDate" >= $2::timestamp
-                ORDER BY "orderDate" ASC
-                LIMIT $3 OFFSET $4
-            """
-
-            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            if since_time is None:
+                # No time filter - get all data
+                query = """
+                    SELECT * FROM "OrderData" 
+                    WHERE "shopId" = $1 
+                    ORDER BY "orderDate" ASC
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(query, shop_id, batch_size, offset)
+            else:
+                # Time filter applied
+                query = """
+                    SELECT * FROM "OrderData" 
+                    WHERE "shopId" = $1 
+                        AND "orderDate" >= $2::timestamp
+                    ORDER BY "orderDate" ASC
+                    LIMIT $3 OFFSET $4
+                """
+                result = await db.query_raw(
+                    query, shop_id, since_time, batch_size, offset
+                )
             orders = [dict(row) for row in result] if result else []
 
             if not orders:
@@ -403,7 +429,7 @@ class GorseSyncPipeline:
             # Convert orders to feedback
             feedback_batch = []
             for order in orders:
-                feedback = self._convert_order_to_feedback(order)
+                feedback = self.feedback_sync._convert_order_to_feedback(order)
                 if feedback:
                     feedback_batch.extend(feedback)
 
@@ -449,7 +475,9 @@ class GorseSyncPipeline:
 
         return feedback_list
 
-    async def _stream_interaction_features(self, shop_id: str, since_time: datetime):
+    async def _stream_interaction_features(
+        self, shop_id: str, since_time: Optional[datetime]
+    ):
         """
         Stream interaction features in batches to avoid loading all data into memory
         """
@@ -458,16 +486,29 @@ class GorseSyncPipeline:
         offset = 0
 
         while True:
-            query = """
-                SELECT * FROM "InteractionFeatures" 
-                WHERE "shopId" = $1 
-                    AND "lastComputedAt" >= $2::timestamp
-                    AND "interactionScore" > 0
-                ORDER BY "lastComputedAt" ASC
-                LIMIT $3 OFFSET $4
-            """
-
-            result = await db.query_raw(query, shop_id, since_time, batch_size, offset)
+            if since_time is None:
+                # No time filter - get all data
+                query = """
+                    SELECT * FROM "InteractionFeatures" 
+                    WHERE "shopId" = $1 
+                        AND "interactionScore" > 0
+                    ORDER BY "lastComputedAt" ASC
+                    LIMIT $2 OFFSET $3
+                """
+                result = await db.query_raw(query, shop_id, batch_size, offset)
+            else:
+                # Time filter applied
+                query = """
+                    SELECT * FROM "InteractionFeatures" 
+                    WHERE "shopId" = $1 
+                        AND "lastComputedAt" >= $2::timestamp
+                        AND "interactionScore" > 0
+                    ORDER BY "lastComputedAt" ASC
+                    LIMIT $3 OFFSET $4
+                """
+                result = await db.query_raw(
+                    query, shop_id, since_time, batch_size, offset
+                )
             interactions = [dict(row) for row in result] if result else []
 
             if not interactions:
@@ -562,7 +603,9 @@ class GorseSyncPipeline:
 
         return feedback_list
 
-    async def _stream_session_feedback(self, shop_id: str, since_time: datetime):
+    async def _stream_session_feedback(
+        self, shop_id: str, since_time: Optional[datetime]
+    ):
         """
         Stream session feedback in batches using defensive data merging approach
         """

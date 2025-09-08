@@ -50,26 +50,19 @@ class GorseUserSync:
                 shop_id=shop_id,
                 batch_size=self.pipeline.user_batch_size,
                 fetch_batch_func=lambda shop_id, offset, limit: self._fetch_user_batch(
-                    shop_id, offset, limit, since_timestamp if incremental else None
+                    shop_id,
+                    offset,
+                    limit,
+                    None,  # No time filtering - based on missing data detection
                 ),
                 process_batch_func=self._process_user_batch,
                 entity_name="users",
                 additional_processor=self._sync_anonymous_users,
             )
 
-        # For full sync, don't use transactions to avoid timeout issues
-        # For incremental sync, use transactions for consistency
-        if incremental:
-            # Use transaction if not already in one
-            if self.pipeline.core._is_in_transaction():
-                await _sync_users_operation()
-            else:
-                await self.pipeline.core._execute_with_transaction(
-                    "sync_users", _sync_users_operation
-                )
-        else:
-            # Full sync without transaction to avoid timeout
-            await _sync_users_operation()
+        # Both incremental and full sync now use missing data detection
+        # No transactions needed since we're using bulk upserts with ON CONFLICT
+        await _sync_users_operation()
 
     async def _fetch_user_batch(
         self,

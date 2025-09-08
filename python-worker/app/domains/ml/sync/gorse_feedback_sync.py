@@ -48,10 +48,16 @@ class GorseFeedbackSync:
         """
 
         async def _sync_feedback_operation():
-            logger.info(
-                f"Starting streaming feedback sync for shop {shop_id} (last {since_hours} hours) with batch size {self.pipeline.feedback_batch_size}"
-            )
-            since_time = now_utc() - timedelta(hours=since_hours)
+            if since_hours == 0:
+                logger.info(
+                    f"Starting streaming feedback sync for shop {shop_id} (ALL historical data) with batch size {self.pipeline.feedback_batch_size}"
+                )
+                since_time = None  # None means no time filter - get all data
+            else:
+                logger.info(
+                    f"Starting streaming feedback sync for shop {shop_id} (last {since_hours} hours) with batch size {self.pipeline.feedback_batch_size}"
+                )
+                since_time = now_utc() - timedelta(hours=since_hours)
 
             total_synced = 0
 

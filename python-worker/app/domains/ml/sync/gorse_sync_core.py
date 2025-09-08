@@ -35,24 +35,18 @@ class GorseSyncCore:
                 f"Starting Gorse sync for shop: {shop_id} (incremental: {incremental})"
             )
 
-            # Get last sync timestamp for incremental processing
-            last_sync_timestamp = None
+            # Both incremental and full sync now use missing data detection (no time filtering)
             if incremental:
-                last_sync_timestamp = await self.pipeline._get_last_sync_timestamp(
-                    shop_id
+                logger.info(
+                    f"Starting incremental sync for shop: {shop_id} (missing data detection)"
                 )
-                if last_sync_timestamp:
-                    logger.info(f"Using incremental sync since: {last_sync_timestamp}")
-                else:
-                    logger.info("No previous sync found, performing full sync")
-                    incremental = False  # Force full sync when no previous sync
-
-            if incremental:
                 # For incremental syncs, use individual transactions for better performance
-                # Each operation is atomic but independent
-                await self._sync_all_incremental(shop_id, last_sync_timestamp)
+                await self._sync_all_incremental(shop_id)
             else:
-                # For full syncs, use a single transaction to ensure consistency
+                logger.info(
+                    f"Starting full sync for shop: {shop_id} (missing data detection)"
+                )
+                # For full syncs, use individual transactions to avoid timeout issues
                 await self._sync_all_full_transaction(shop_id)
 
             logger.info(f"Completed Gorse sync for shop: {shop_id}")
@@ -61,26 +55,27 @@ class GorseSyncCore:
             logger.error(f"Failed to sync shop {shop_id}: {str(e)}")
             raise
 
-    async def _sync_all_incremental(
-        self, shop_id: str, last_sync_timestamp: Optional[datetime]
-    ):
+    async def _sync_all_incremental(self, shop_id: str):
         """
-        Perform incremental sync with individual transactions for each operation.
-        This provides better performance for incremental updates while maintaining atomicity per operation.
+        Perform incremental sync based on missing data detection (not time-based).
+        This syncs only data that exists in source tables but is missing from Gorse bridge tables.
         """
         try:
             # 1. Sync Users (combining multiple feature tables)
+            # No time filtering - based on missing data detection
             await self.pipeline.user_sync.sync_users(
-                shop_id, incremental=True, since_timestamp=last_sync_timestamp
+                shop_id, incremental=True, since_timestamp=None
             )
 
             # 2. Sync Items (combining multiple feature tables)
+            # No time filtering - based on missing data detection
             await self.pipeline.item_sync.sync_items(
-                shop_id, incremental=True, since_timestamp=last_sync_timestamp
+                shop_id, incremental=True, since_timestamp=None
             )
 
             # 3. Sync Feedback (from events, orders, and interaction features)
-            await self.pipeline.feedback_sync.sync_feedback(shop_id)
+            # For incremental sync, sync all data (no time limits - based on missing data)
+            await self.pipeline.feedback_sync.sync_feedback(shop_id, since_hours=0)
 
         except Exception as e:
             logger.error(f"Failed incremental sync for shop {shop_id}: {str(e)}")
@@ -105,7 +100,8 @@ class GorseSyncCore:
             )
 
             # 3. Sync Feedback (from events, orders, and interaction features)
-            await self.pipeline.feedback_sync.sync_feedback(shop_id)
+            # For full sync, look at all historical data (since_hours=0 means all data)
+            await self.pipeline.feedback_sync.sync_feedback(shop_id, since_hours=0)
 
             logger.info(f"Full sync completed successfully for shop: {shop_id}")
 
