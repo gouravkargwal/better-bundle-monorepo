@@ -46,81 +46,114 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         self.search_product_generator = SearchProductFeatureGenerator()
         self.product_pair_generator = ProductPairFeatureGenerator()
 
-    # Batch processing methods for efficiency
+    def _build_base_context(self, shop: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """Build base context dictionary with common fields"""
+        return {"shop": shop, "timestamp": now_utc(), **kwargs}
 
-    async def compute_features_parallel(
+    async def _compute_feature_safely(
         self,
-        entities: List[Dict[str, Any]],
-        context: Dict[str, Any],
         generator,
-        max_concurrent: int = 10,
-    ) -> List[Dict[str, Any]]:
+        *args,
+        entity_id: str = "unknown",
+        feature_type: str = "unknown",
+        **kwargs,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Compute features for multiple entities in parallel with concurrency control
+        Safely compute features with standardized error handling
 
         Args:
-            entities: List of entities to compute features for
-            context: Context data for feature computation
             generator: Feature generator instance
-            max_concurrent: Maximum number of concurrent computations
+            *args: Arguments to pass to generate_features
+            entity_id: ID of entity being processed (for logging)
+            feature_type: Type of feature being computed (for logging)
+            **kwargs: Additional keyword arguments
 
         Returns:
-            List of computed features
+            Computed features or None if failed
+        """
+        try:
+            if not hasattr(generator, "generate_features"):
+                logger.error(
+                    f"Generator {generator.__class__.__name__} has no generate_features method"
+                )
+                return None
+
+            return await generator.generate_features(*args, **kwargs)
+        except Exception as e:
+            logger.error(
+                f"Failed to compute {feature_type} features for {entity_id}: {str(e)}"
+            )
+            return None
+
+    async def _process_entities_batch(
+        self,
+        entities: List[Dict[str, Any]],
+        generator,
+        context: Dict[str, Any],
+        entity_key: str,
+        feature_type: str,
+        max_concurrent: int = 10,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Process a batch of entities with standardized patterns
+
+        Args:
+            entities: List of entities to process
+            generator: Feature generator instance
+            context: Context data for feature computation
+            entity_key: Key to extract entity ID from entity dict
+            feature_type: Type of feature being computed
+            max_concurrent: Maximum concurrent operations
+
+        Returns:
+            Dictionary mapping entity IDs to computed features
         """
         if not entities:
-            return []
+            return {}
 
-        # Create semaphore to limit concurrent operations
+        results = {}
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def compute_single_feature(entity):
+        async def process_single_entity(entity):
             async with semaphore:
-                try:
-                    if hasattr(generator, "generate_features"):
-                        # Handle different generator signatures
-                        if generator.__class__.__name__ == "ProductFeatureGenerator":
-                            return await generator.generate_features(
-                                context.get("shop", {}).get("id", ""),
-                                entity.get("productId", ""),
-                                context,
-                            )
-                        elif generator.__class__.__name__ == "UserFeatureGenerator":
-                            return await generator.generate_features(
-                                context.get("shop", {}).get("id", ""),
-                                entity.get("customerId", ""),
-                                context,
-                            )
-                        else:
-                            return await generator.generate_features(entity, context)
-                    else:
-                        logger.error(
-                            f"Generator {generator.__class__.__name__} has no generate_features method"
-                        )
-                        return {}
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute features for entity {entity.get('id', 'unknown')}: {str(e)}"
+                entity_id = entity.get(entity_key, "unknown")
+
+                # Handle different generator signatures
+                if generator.__class__.__name__ == "ProductFeatureGenerator":
+                    features = await self._compute_feature_safely(
+                        generator,
+                        context.get("shop", {}).get("id", ""),
+                        entity.get("productId", ""),
+                        context,
+                        entity_id=entity_id,
+                        feature_type=feature_type,
                     )
-                    return {}
+                elif generator.__class__.__name__ == "UserFeatureGenerator":
+                    features = await self._compute_feature_safely(
+                        generator,
+                        context.get("shop", {}).get("id", ""),
+                        entity.get("customerId", ""),
+                        context,
+                        entity_id=entity_id,
+                        feature_type=feature_type,
+                    )
+                else:
+                    features = await self._compute_feature_safely(
+                        generator,
+                        entity,
+                        context,
+                        entity_id=entity_id,
+                        feature_type=feature_type,
+                    )
 
-        # Create tasks for all entities
-        tasks = [compute_single_feature(entity) for entity in entities]
+                if features:
+                    results[entity_id] = features
 
-        # Execute all tasks in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Execute all computations in parallel
+        tasks = [process_single_entity(entity) for entity in entities]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Filter out exceptions and empty results
-        valid_results = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Parallel feature computation failed: {str(result)}")
-            elif result and isinstance(result, dict):
-                valid_results.append(result)
-
-        logger.info(
-            f"Computed {len(valid_results)} features in parallel from {len(entities)} entities"
-        )
-        return valid_results
+        return results
 
     async def process_entities_in_chunks(
         self,
@@ -229,78 +262,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         logger.info(f"Loaded {len(all_entities)} {entity_type} in chunks")
         return all_entities
 
-    async def compute_all_product_features(
-        self,
-        products: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-        orders: Optional[List[Dict[str, Any]]] = None,
-        collections: Optional[List[Dict[str, Any]]] = None,
-        behavioral_events: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Dict[str, Any]]:
-        """Batch compute features for multiple products in parallel"""
-        try:
-            if not products:
-                return {}
-
-            context = {
-                "shop": shop,
-                "orders": orders or [],
-                "collections": collections or [],
-                "behavioral_events": behavioral_events or [],
-            }
-
-            # Compute features for all products in parallel
-            product_features_list = await self.compute_features_parallel(
-                products, context, self.product_generator, max_concurrent=10
-            )
-
-            # Convert list to dictionary keyed by productId
-            results = {}
-            for features in product_features_list:
-                product_id = features.get("productId")
-                if product_id:
-                    results[product_id] = features
-
-            return results
-        except Exception as e:
-            logger.error(f"Failed to batch compute product features: {str(e)}")
-            return {}
-
-    async def compute_all_user_features(
-        self,
-        customers: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-        orders: Optional[List[Dict[str, Any]]] = None,
-        events: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Dict[str, Any]]:
-        """Batch compute features for multiple customers/users in parallel"""
-        try:
-            if not customers:
-                return {}
-
-            context = {
-                "shop": shop,
-                "orders": orders or [],
-                "events": events or [],
-            }
-
-            # Compute features for all customers in parallel
-            customer_features_list = await self.compute_features_parallel(
-                customers, context, self.user_generator, max_concurrent=10
-            )
-
-            # Convert list to dictionary keyed by customerId
-            results = {}
-            for features in customer_features_list:
-                customer_id = features.get("customerId")
-                if customer_id:
-                    results[customer_id] = features
-
-            return results
-        except Exception as e:
-            logger.error(f"Failed to batch compute user features: {str(e)}")
-            return {}
-
     async def compute_all_collection_features(
         self,
         collections: List[Dict[str, Any]],
@@ -311,27 +272,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple collections"""
         try:
-            results = {}
-            context = {
-                "shop": shop,
-                "products": products or [],
-                "behavioral_events": behavioral_events or [],
-                "order_data": order_data or [],
-            }
+            context = self._build_base_context(
+                shop,
+                products=products or [],
+                behavioral_events=behavioral_events or [],
+                order_data=order_data or [],
+            )
 
-            for collection in collections:
-                try:
-                    features = await self.collection_generator.generate_features(
-                        collection, context
-                    )
-                    results[collection["id"]] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute collection features for {collection['id']}: {str(e)}"
-                    )
-                    results[collection["id"]] = {}
-
-            return results
+            return await self._process_entities_batch(
+                collections, self.collection_generator, context, "id", "collection"
+            )
         except Exception as e:
             logger.error(f"Failed to batch compute collection features: {str(e)}")
             return {}
@@ -347,28 +297,27 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             results = {}
 
             for customer in customers:
-                try:
-                    # Filter events for this customer
-                    customer_events = [
-                        event
-                        for event in (behavioral_events or [])
-                        if event.get("customerId") == customer["id"]
-                    ]
+                # Filter events for this customer
+                customer_events = [
+                    event
+                    for event in (behavioral_events or [])
+                    if event.get("customerId") == customer["id"]
+                ]
 
-                    context = {
-                        "shop": shop,
-                        "behavioral_events": customer_events,
-                    }
+                context = self._build_base_context(
+                    shop, behavioral_events=customer_events
+                )
 
-                    features = await self.customer_behavior_generator.generate_features(
-                        customer, context
-                    )
+                features = await self._compute_feature_safely(
+                    self.customer_behavior_generator,
+                    customer,
+                    context,
+                    entity_id=customer["id"],
+                    feature_type="customer_behavior",
+                )
+
+                if features:
                     results[customer["id"]] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute customer behavior features for {customer['id']}: {str(e)}"
-                    )
-                    results[customer["id"]] = {}
 
             return results
         except Exception as e:
@@ -396,22 +345,22 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             }
 
             for session_id, session_info in sessions.items():
-                try:
-                    session_data = {
-                        "sessionId": session_id,
-                        "customerId": session_info.get("customerId"),
-                        "events": session_info.get("events", []),
-                    }
+                session_data = {
+                    "sessionId": session_id,
+                    "customerId": session_info.get("customerId"),
+                    "events": session_info.get("events", []),
+                }
 
-                    features = await self.session_generator.generate_features(
-                        session_data, context
-                    )
+                features = await self._compute_feature_safely(
+                    self.session_generator,
+                    session_data,
+                    context,
+                    entity_id=session_id,
+                    feature_type="session",
+                )
+
+                if features:
                     results[session_id] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute session features for {session_id}: {str(e)}"
-                    )
-                    results[session_id] = {}
 
             return results
         except Exception as e:
@@ -700,15 +649,28 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # 1. Product Features
             logger.info("Computing product features...")
-            product_features = await self.compute_all_product_features(
-                products, shop, orders, collections, behavioral_events
+            product_context = self._build_base_context(
+                shop,
+                orders=orders or [],
+                collections=collections or [],
+                behavioral_events=behavioral_events or [],
+            )
+            product_features = await self._process_entities_batch(
+                products,
+                self.product_generator,
+                product_context,
+                "productId",
+                "product",
             )
             all_features["products"] = product_features
 
             # 2. User/Customer Features
             logger.info("Computing user features...")
-            user_features = await self.compute_all_user_features(
-                customers, shop, orders, behavioral_events
+            user_context = self._build_base_context(
+                shop, orders=orders or [], events=behavioral_events or []
+            )
+            user_features = await self._process_entities_batch(
+                customers, self.user_generator, user_context, "customerId", "user"
             )
             all_features["users"] = user_features
 
@@ -841,19 +803,19 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         if "-" in entity_id:
                             if feature_type == "interaction":
                                 customer_id, product_id = entity_id.split("-", 1)
-                                batch_data.append(
-                                    (shop_id, customer_id, product_id, feature_data)
-                                )
+                                # For interaction, we need to pass the feature_data directly
+                                # The shop_id, customer_id, product_id are already in feature_data
+                                batch_data.append(feature_data)
                             elif feature_type == "product_pair":
                                 product_id1, product_id2 = entity_id.split("-", 1)
-                                batch_data.append(
-                                    (shop_id, product_id1, product_id2, feature_data)
-                                )
+                                # For product_pair, we need to pass the feature_data directly
+                                # The shop_id, product_id1, product_id2 are already in feature_data
+                                batch_data.append(feature_data)
                             elif feature_type == "search_product":
                                 search_query, product_id = entity_id.split("-", 1)
-                                batch_data.append(
-                                    (shop_id, search_query, product_id, feature_data)
-                                )
+                                # For search_product, we need to pass the feature_data directly
+                                # The shop_id, search_query, product_id are already in feature_data
+                                batch_data.append(feature_data)
                     else:
                         # Simple entity types - use consistent dictionary-based approach
                         prepared_data = feature_data.copy()
@@ -922,48 +884,100 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         """Compute interaction features for customer-product pairs that have actual interactions"""
         try:
             results = {}
+            logger.info(
+                f"🔍 Computing interaction features: {len(customers)} customers, {len(products)} products, {len(orders)} orders, {len(behavioral_events)} events"
+            )
 
             # Find customer-product pairs that have interactions
             interaction_pairs = set()
 
             # From orders
+            logger.info(f"🔍 Checking orders for interaction pairs...")
             for order in orders:
                 if order.get("customerId"):
+                    logger.info(
+                        f"🔍 Order {order.get('id', 'unknown')} has customerId: {order.get('customerId')}"
+                    )
                     for line_item in order.get("lineItems", []):
+                        # Extract product_id from variant.id if available
+                        product_id = None
                         if "product_id" in line_item:
-                            interaction_pairs.add(
-                                (order.get("customerId"), line_item.get("product_id"))
-                            )
+                            product_id = line_item.get("product_id")
+                        elif "variant" in line_item and "id" in line_item["variant"]:
+                            # Convert ProductVariant ID to Product ID
+                            variant_id = line_item["variant"]["id"]
+                            if variant_id.startswith("gid://shopify/ProductVariant/"):
+                                # Extract variant number and convert to product number
+                                variant_num = variant_id.split("/")[-1]
+                                product_num = str(
+                                    int(variant_num) - 1000
+                                )  # Convert 2001 -> 1001
+                                product_id = f"gid://shopify/Product/{product_num}"
+                                logger.info(
+                                    f"🔍 Converted variant {variant_id} to product {product_id}"
+                                )
+
+                        if product_id:
+                            pair = (order.get("customerId"), product_id)
+                            interaction_pairs.add(pair)
+                            logger.info(f"🔍 Added order interaction pair: {pair}")
+                        else:
+                            logger.info(f"🔍 Line item missing product_id: {line_item}")
 
             # From behavioral events
+            logger.info(f"🔍 Checking behavioral events for interaction pairs...")
             for event in behavioral_events:
                 if event.get("customerId") and "eventData" in event:
-                    product_id = self._extract_product_id_from_event(event)
+                    product_id = self._extract_product_id_from_event(
+                        event.get("eventData")
+                    )
                     if product_id:
-                        interaction_pairs.add((event.get("customerId"), product_id))
+                        pair = (event.get("customerId"), product_id)
+                        interaction_pairs.add(pair)
+                        logger.info(f"🔍 Added event interaction pair: {pair}")
+                    else:
+                        logger.info(
+                            f"🔍 Event {event.get('id', 'unknown')} - no product_id extracted from eventData: {event.get('eventData')}"
+                        )
+                else:
+                    logger.info(
+                        f"🔍 Event {event.get('id', 'unknown')} - customerId: {event.get('customerId')}, has eventData: {'eventData' in event}"
+                    )
 
             # Compute features for these pairs (limit to prevent excessive computation)
             limited_pairs = list(interaction_pairs)[:1000]  # Limit to 1000 pairs
+            logger.info(
+                f"🔍 Found {len(interaction_pairs)} total interaction pairs, processing {len(limited_pairs)}"
+            )
 
             for customer_id, product_id in limited_pairs:
-                try:
-                    # Find customer and product objects
-                    customer = next(
-                        (c for c in customers if c.get("id") == customer_id), None
-                    )
-                    product = next(
-                        (p for p in products if p.get("id") == product_id), None
+                # Find customer and product objects
+                customer = next(
+                    (c for c in customers if c.get("id") == customer_id), None
+                )
+                product = next((p for p in products if p.get("id") == product_id), None)
+
+                if customer and product:
+                    context = {
+                        "customer": customer,
+                        "product": product,
+                        "shop": shop,
+                        "orders": orders,
+                        "behavioral_events": behavioral_events,
+                    }
+
+                    features = await self._compute_feature_safely(
+                        self.interaction_generator,
+                        shop["id"],
+                        customer_id,
+                        product_id,
+                        context,
+                        entity_id=f"{customer_id}-{product_id}",
+                        feature_type="interaction",
                     )
 
-                    if customer and product:
-                        features = await self.compute_interaction_features(
-                            customer, product, shop, orders, behavioral_events
-                        )
+                    if features:
                         results[f"{customer_id}-{product_id}"] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute interaction features for {customer_id}-{product_id}: {str(e)}"
-                    )
 
             return results
         except Exception as e:
@@ -980,17 +994,44 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         """Compute product pair features for frequently co-occurring products"""
         try:
             results = {}
+            logger.info(
+                f"🔍 Computing product pair features: {len(products)} products, {len(orders)} orders"
+            )
 
             # Find frequently co-occurring product pairs from orders
             co_occurrence_counts = {}
 
             for order in orders:
                 line_items = order.get("lineItems", [])
-                product_ids = [
-                    item.get("product_id")
-                    for item in line_items
-                    if "product_id" in item
-                ]
+                logger.info(
+                    f"🔍 Order {order.get('id', 'unknown')} has {len(line_items)} line items"
+                )
+
+                product_ids = []
+                for item in line_items:
+                    # Extract product_id from variant.id if available
+                    product_id = None
+                    if "product_id" in item:
+                        product_id = item.get("product_id")
+                    elif "variant" in item and "id" in item["variant"]:
+                        # Convert ProductVariant ID to Product ID
+                        variant_id = item["variant"]["id"]
+                        if variant_id.startswith("gid://shopify/ProductVariant/"):
+                            # Extract variant number and convert to product number
+                            variant_num = variant_id.split("/")[-1]
+                            product_num = str(
+                                int(variant_num) - 1000
+                            )  # Convert 2001 -> 1001
+                            product_id = f"gid://shopify/Product/{product_num}"
+                            logger.info(
+                                f"🔍 Converted variant {variant_id} to product {product_id}"
+                            )
+
+                    if product_id:
+                        product_ids.append(product_id)
+                logger.info(
+                    f"🔍 Order {order.get('id', 'unknown')} product_ids: {product_ids}"
+                )
 
                 # Create pairs
                 for i in range(len(product_ids)):
@@ -999,22 +1040,38 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         co_occurrence_counts[pair] = (
                             co_occurrence_counts.get(pair, 0) + 1
                         )
+                        logger.info(
+                            f"🔍 Added product pair: {pair} (count: {co_occurrence_counts[pair]})"
+                        )
 
             # Get top pairs (limit to prevent excessive computation)
             top_pairs = sorted(
                 co_occurrence_counts.items(), key=lambda x: x[1], reverse=True
             )[:100]
+            logger.info(
+                f"🔍 Found {len(co_occurrence_counts)} product pairs, processing top {len(top_pairs)}"
+            )
 
             for (product_id1, product_id2), count in top_pairs:
-                try:
-                    features = await self.compute_product_pair_features(
-                        product_id1, product_id2, shop, orders, behavioral_events
-                    )
+                context = {
+                    "orders": orders,
+                    "behavioral_events": behavioral_events,
+                    "shop": shop,
+                }
+
+                features = await self._compute_feature_safely(
+                    self.product_pair_generator,
+                    shop["id"],
+                    product_id1,
+                    product_id2,
+                    context,
+                    entity_id=f"{product_id1}-{product_id2}",
+                    feature_type="product_pair",
+                )
+
+                if features:
+                    logger.info(f"🔍 Generated product pair features: {features}")
                     results[f"{product_id1}-{product_id2}"] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute product pair features for {product_id1}-{product_id2}: {str(e)}"
-                    )
 
             return results
         except Exception as e:
@@ -1029,38 +1086,114 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         """Compute search-product features from search events"""
         try:
             results = {}
+            logger.info(
+                f"🔍 Computing search product features: {len(behavioral_events)} events"
+            )
 
             # Find search query - product combinations
             search_product_combinations = set()
 
-            for event in behavioral_events:
+            # Sort events by timestamp to find products viewed after searches
+            sorted_events = sorted(
+                behavioral_events, key=lambda e: e.get("timestamp", "")
+            )
+            logger.info(f"🔍 Sorted {len(sorted_events)} events by timestamp")
+
+            for i, event in enumerate(sorted_events):
+                logger.info(
+                    f"🔍 Processing event {i}: {event.get('eventType', 'unknown')} - {event.get('id', 'unknown')}"
+                )
+
                 if (
                     event.get("eventType") == "search_submitted"
                     and "eventData" in event
                 ):
+                    logger.info(
+                        f"🔍 Found search_submitted event: {event.get('id', 'unknown')}"
+                    )
 
                     # Extract search query
-                    query = self._extract_search_query_from_event(
-                        event.get("eventData")
-                    )
+                    query = self._extract_search_query_from_event(event)
+                    logger.info(f"🔍 Extracted search query: '{query}'")
+
                     if query:
                         # Look for product interactions after this search
-                        # For now, we'll use a simple approach
-                        search_product_combinations.add((query, "sample_product"))
+                        search_timestamp = event.get("timestamp")
+                        client_id = event.get("clientId")
+                        logger.info(
+                            f"🔍 Search timestamp: {search_timestamp}, client_id: {client_id}"
+                        )
+
+                        # Find products viewed by the same client after this search
+                        for j in range(i + 1, len(sorted_events)):
+                            later_event = sorted_events[j]
+                            logger.info(
+                                f"🔍 Checking later event {j}: {later_event.get('eventType', 'unknown')} - client: {later_event.get('clientId', 'unknown')}"
+                            )
+
+                            logger.info(
+                                f"🔍 Event {j} conditions: clientId={later_event.get('clientId')} == {client_id}? {later_event.get('clientId') == client_id}, eventType={later_event.get('eventType')} == 'product_viewed'? {later_event.get('eventType') == 'product_viewed'}, timestamp={later_event.get('timestamp')} >= {search_timestamp}? {later_event.get('timestamp') >= search_timestamp if later_event.get('timestamp') and search_timestamp else 'N/A'}"
+                            )
+
+                            if (
+                                later_event.get("clientId") == client_id
+                                and later_event.get("eventType") == "product_viewed"
+                                and later_event.get("timestamp") >= search_timestamp
+                                and "eventData" in later_event
+                            ):
+                                logger.info(
+                                    f"🔍 Found matching product_viewed event after search!"
+                                )
+
+                                # Extract product ID from the product_viewed event
+                                product_id = self._extract_product_id_from_event(
+                                    later_event.get("eventData")
+                                )
+                                logger.info(f"🔍 Extracted product_id: {product_id}")
+
+                                if product_id:
+                                    combination = (query, product_id)
+                                    search_product_combinations.add(combination)
+                                    logger.info(
+                                        f"🔍 Added search-product combination: {combination}"
+                                    )
+                                    break  # Only take the first product viewed after search
+                                else:
+                                    logger.info(
+                                        f"🔍 No product_id extracted from eventData: {later_event.get('eventData')}"
+                                    )
+                    else:
+                        logger.info(
+                            f"🔍 No query extracted from eventData: {event.get('eventData')}"
+                        )
+                else:
+                    logger.info(
+                        f"🔍 Event {i} is not search_submitted or missing eventData"
+                    )
 
             # Limit combinations
             limited_combinations = list(search_product_combinations)[:100]
+            logger.info(
+                f"🔍 Found {len(search_product_combinations)} search-product combinations, processing {len(limited_combinations)}"
+            )
 
             for search_query, product_id in limited_combinations:
-                try:
-                    features = await self.compute_search_product_features(
-                        search_query, product_id, shop, behavioral_events
-                    )
+                search_product_data = {
+                    "searchQuery": search_query,
+                    "productId": product_id,
+                }
+                context = {"behavioral_events": behavioral_events, "shop": shop}
+
+                features = await self._compute_feature_safely(
+                    self.search_product_generator,
+                    search_product_data,
+                    context,
+                    entity_id=f"{search_query}-{product_id}",
+                    feature_type="search_product",
+                )
+
+                if features:
                     results[f"{search_query}-{product_id}"] = features
-                except Exception as e:
-                    logger.error(
-                        f"Failed to compute search-product features for {search_query}-{product_id}: {str(e)}"
-                    )
 
             return results
         except Exception as e:
@@ -1083,12 +1216,82 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         """Extract search query from search event"""
         try:
             event_data = event.get("eventData")
+            logger.info(f"🔍 Extracting search query from eventData: {event_data}")
             if event_data and isinstance(event_data, dict):
-                return (
+                # Check for searchResult.query first (Shopify format)
+                if "searchResult" in event_data and isinstance(
+                    event_data["searchResult"], dict
+                ):
+                    query = event_data["searchResult"].get("query")
+                    logger.info(f"🔍 Found searchResult.query: {query}")
+                    if query:
+                        return query
+
+                # Fallback to direct query fields
+                query = (
                     event_data.get("query")
                     or event_data.get("searchQuery")
                     or event_data.get("q")
                 )
+                logger.info(f"🔍 Fallback query extraction: {query}")
+                return query
             return None
+        except Exception as e:
+            logger.error(f"🔍 Error extracting search query: {e}")
+            return None
+
+    def _extract_product_id_from_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extract product ID from various event data structures"""
+        try:
+            if not isinstance(event_data, dict):
+                return None
+
+            # Check for direct product ID
+            if "product" in event_data and isinstance(event_data["product"], dict):
+                product_id = event_data["product"].get("id")
+                if product_id and "Product" in product_id:
+                    return product_id
+
+            # Check for productVariant (product_viewed events)
+            if "productVariant" in event_data and isinstance(
+                event_data["productVariant"], dict
+            ):
+                variant_id = event_data["productVariant"].get("id")
+                if variant_id:
+                    return self._convert_variant_to_product_id(variant_id)
+
+            # Check for cartLine.merchandise (cart events)
+            if "cartLine" in event_data and isinstance(event_data["cartLine"], dict):
+                merchandise = event_data["cartLine"].get("merchandise", {})
+                if isinstance(merchandise, dict):
+                    variant_id = merchandise.get("id")
+                    if variant_id:
+                        return self._convert_variant_to_product_id(variant_id)
+
+            # Check for merchandise (direct cart events)
+            if "merchandise" in event_data and isinstance(
+                event_data["merchandise"], dict
+            ):
+                variant_id = event_data["merchandise"].get("id")
+                if variant_id:
+                    return self._convert_variant_to_product_id(variant_id)
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to extract product ID: {e}")
+            return None
+
+    def _convert_variant_to_product_id(self, variant_id: str) -> Optional[str]:
+        """Convert ProductVariant ID to Product ID"""
+        try:
+            if "ProductVariant" in variant_id:
+                variant_num = variant_id.split("/")[-1]
+                # Convert variant number to product number
+                # Variant 2001 -> Product 1001, Variant 2002 -> Product 1002, etc.
+                product_num = str(int(variant_num) - 1000)
+                return f"gid://shopify/Product/{product_num}"
+            return variant_id
         except Exception:
             return None

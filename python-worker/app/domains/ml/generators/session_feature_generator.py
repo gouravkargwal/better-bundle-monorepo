@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import json
 from app.core.logging import get_logger
+
 from app.shared.helpers import now_utc
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -60,14 +61,17 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             features.update(self._compute_conversion_metrics(events, order_data))
 
             # Context features (device, referrer, pages)
-            features.update(self._compute_context_features(events))
+            context_features = self._compute_context_features(events)
+            logger.info(f"🔍 Context features: {context_features}")
+            features.update(context_features)
 
-            # Validate and clean features
-            features = self.validate_features(features)
+            # Validate and clean features (method doesn't exist, so skip)
+            # features = self.validate_features(features)
 
             # Add lastComputedAt timestamp
             features["lastComputedAt"] = now_utc()
 
+            logger.info(f"🔍 Final session features for {session_id}: {features}")
             logger.debug(
                 f"Computed {len(features)} session features for session: {session_id}"
             )
@@ -100,7 +104,6 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             "checkoutStarted": False,
             "checkoutCompleted": False,
             "orderValue": None,
-            "deviceType": None,
             "referrerDomain": None,
             "landingPage": None,
             "exitPage": None,
@@ -254,7 +257,6 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         """Compute device and context features"""
         if not events:
             return {
-                "deviceType": None,
                 "referrerDomain": None,
                 "landingPage": None,
                 "exitPage": None,
@@ -294,20 +296,44 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
         # Extract referrer domain
         referrer_domain = None
+        logger.info(f"🔍 Processing event_data for referrer: {event_data}")
         if "context" in event_data and "document" in event_data["context"]:
             referrer = event_data["context"]["document"].get("referrer", "")
-            referrer_domain = self._extract_domain(referrer)
+            logger.info(
+                f"🔍 Found referrer in context.document: {referrer} (type: {type(referrer)})"
+            )
+            if isinstance(referrer, str):
+                referrer_domain = self._extract_domain(referrer)
+                logger.info(
+                    f"🔍 Extracted referrer domain from context.document: {referrer_domain} (type: {type(referrer_domain)})"
+                )
         elif "referrer" in event_data:
-            referrer_domain = self._extract_domain(event_data.get("referrer", ""))
+            referrer = event_data.get("referrer", "")
+            logger.info(
+                f"🔍 Found referrer in event_data: {referrer} (type: {type(referrer)})"
+            )
+            if isinstance(referrer, str):
+                referrer_domain = self._extract_domain(referrer)
+                logger.info(
+                    f"🔍 Extracted referrer domain from referrer: {referrer_domain} (type: {type(referrer_domain)})"
+                )
+        else:
+            logger.info(f"🔍 No referrer found in event_data")
 
         # Extract landing page (from first event)
         landing_page = None
         if "context" in event_data and "page" in event_data["context"]:
-            landing_page = event_data["context"]["page"].get("url")
+            url = event_data["context"]["page"].get("url")
+            if isinstance(url, str):
+                landing_page = url
         elif "page" in event_data:
-            landing_page = event_data["page"].get("url")
+            url = event_data["page"].get("url")
+            if isinstance(url, str):
+                landing_page = url
         elif "url" in event_data:
-            landing_page = event_data.get("url")
+            url = event_data.get("url")
+            if isinstance(url, str):
+                landing_page = url
 
         # Extract exit page (from last event)
         exit_page = None
@@ -319,17 +345,24 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                 last_event_data = {}
 
         if "context" in last_event_data and "page" in last_event_data["context"]:
-            exit_page = last_event_data["context"]["page"].get("url")
+            url = last_event_data["context"]["page"].get("url")
+            if isinstance(url, str):
+                exit_page = url
         elif "page" in last_event_data:
-            exit_page = last_event_data["page"].get("url")
+            url = last_event_data["page"].get("url")
+            if isinstance(url, str):
+                exit_page = url
         elif "url" in last_event_data:
-            exit_page = last_event_data.get("url")
+            url = last_event_data.get("url")
+            if isinstance(url, str):
+                exit_page = url
 
         return {
-            "deviceType": device_type,
-            "referrerDomain": referrer_domain,
-            "landingPage": landing_page,
-            "exitPage": exit_page,
+            "referrerDomain": (
+                referrer_domain if isinstance(referrer_domain, str) else None
+            ),
+            "landingPage": landing_page if isinstance(landing_page, str) else None,
+            "exitPage": exit_page if isinstance(exit_page, str) else None,
         }
 
     def _classify_device_type(self, user_agent: str) -> str:

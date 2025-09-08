@@ -21,9 +21,7 @@ class BehavioralEvent(BaseModel):
     event_type: str = Field(
         ..., alias="eventType", description="Type of behavioral event"
     )
-    occurred_at: datetime = Field(
-        ..., alias="timestamp", description="When the event occurred"
-    )
+    timestamp: datetime = Field(..., description="When the event occurred")
     event_data: Optional[Dict[str, Any]] = Field(
         None, alias="eventData", description="Event-specific data"
     )

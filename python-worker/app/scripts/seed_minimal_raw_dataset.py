@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import sys
 import os
+import random
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
@@ -14,6 +15,44 @@ from prisma import Json
 
 # Use the shared DB client so we reuse connection lifecycle/retries
 from app.core.database.simple_db_client import get_database
+from app.domains.ml.services.feature_engineering import FeatureEngineeringService
+from app.domains.shopify.services.main_table_storage import MainTableStorageService
+from app.webhooks.handler import WebhookHandler
+from app.webhooks.repository import WebhookRepository
+
+
+# Generate unique IDs for this run
+def generate_dynamic_ids():
+    """Generate unique IDs for this run to avoid conflicts"""
+    base_id = random.randint(10000, 99999)
+    return {
+        "shop_id": f"cmfb{base_id:05d}00000v3dhw8juz526",  # Keep the same format but make it unique
+        "product_1_id": f"gid://shopify/Product/{base_id + 1}",
+        "product_2_id": f"gid://shopify/Product/{base_id + 2}",
+        "product_3_id": f"gid://shopify/Product/{base_id + 3}",
+        "variant_1_id": f"gid://shopify/ProductVariant/{base_id + 1001}",
+        "variant_2_id": f"gid://shopify/ProductVariant/{base_id + 1002}",
+        "variant_3_id": f"gid://shopify/ProductVariant/{base_id + 1003}",
+        "customer_1_id": f"gid://shopify/Customer/{base_id + 5001}",
+        "customer_2_id": f"gid://shopify/Customer/{base_id + 5002}",
+        "order_1_id": f"gid://shopify/Order/{base_id + 7001}",
+        "order_2_id": f"gid://shopify/Order/{base_id + 7002}",
+        "line_item_1_id": f"gid://shopify/LineItem/{base_id + 8001}",
+        "line_item_2_id": f"gid://shopify/LineItem/{base_id + 8002}",
+        "line_item_3_id": f"gid://shopify/LineItem/{base_id + 8003}",
+        "collection_id": f"gid://shopify/Collection/{base_id + 3001}",
+        "checkout_id": f"gid://shopify/Checkout/{base_id + 8001}",
+    }
+
+
+# Generate IDs for this run
+DYNAMIC_IDS = generate_dynamic_ids()
+
+# Print the generated IDs for this run
+print("🎲 Generated Dynamic IDs for this run:")
+for key, value in DYNAMIC_IDS.items():
+    print(f"  {key}: {value}")
+print()
 
 
 SHOP_DOMAIN = "fashion-store.myshopify.com"
@@ -46,7 +85,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
     products = [
         {
             "product": {
-                "id": "gid://shopify/Product/1001",
+                "id": DYNAMIC_IDS["product_1_id"],
                 "title": "Unisex Hoodie",
                 "handle": "unisex-hoodie",
                 "productType": "Clothing",
@@ -55,7 +94,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
                     "edges": [
                         {
                             "node": {
-                                "id": "gid://shopify/ProductVariant/2001",
+                                "id": DYNAMIC_IDS["variant_1_id"],
                                 "title": "Grey / Small",
                                 "sku": "UH-GREY-S",
                                 "price": "45.00",
@@ -70,7 +109,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
         },
         {
             "product": {
-                "id": "gid://shopify/Product/1002",
+                "id": DYNAMIC_IDS["product_2_id"],
                 "title": "V-Neck T-Shirt",
                 "handle": "v-neck-tshirt",
                 "productType": "Clothing",
@@ -79,7 +118,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
                     "edges": [
                         {
                             "node": {
-                                "id": "gid://shopify/ProductVariant/2002",
+                                "id": DYNAMIC_IDS["variant_2_id"],
                                 "title": "White / Medium",
                                 "sku": "VT-WHT-M",
                                 "price": "25.00",
@@ -94,7 +133,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
         },
         {
             "product": {
-                "id": "gid://shopify/Product/1003",
+                "id": DYNAMIC_IDS["product_3_id"],
                 "title": "Sunglasses",
                 "handle": "sunglasses",
                 "productType": "Accessories",
@@ -103,7 +142,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
                     "edges": [
                         {
                             "node": {
-                                "id": "gid://shopify/ProductVariant/2003",
+                                "id": DYNAMIC_IDS["variant_3_id"],
                                 "title": "Black",
                                 "sku": "SG-BLK",
                                 "price": "55.00",
@@ -140,7 +179,7 @@ async def insert_raw_customers(db, shop_id: str) -> List[Dict[str, Any]]:
     customers = [
         {
             "customer": {
-                "id": "gid://shopify/Customer/5001",
+                "id": DYNAMIC_IDS["customer_1_id"],
                 "email": "alice@example.com",
                 "firstName": "Alice",
                 "lastName": "Doe",
@@ -151,7 +190,7 @@ async def insert_raw_customers(db, shop_id: str) -> List[Dict[str, Any]]:
         },
         {
             "customer": {
-                "id": "gid://shopify/Customer/5002",
+                "id": DYNAMIC_IDS["customer_2_id"],
                 "email": "bob@example.com",
                 "firstName": "Bob",
                 "lastName": "Smith",
@@ -186,7 +225,7 @@ async def insert_raw_orders(
     orders = [
         {
             "order": {
-                "id": "gid://shopify/Order/7001",
+                "id": DYNAMIC_IDS["order_1_id"],
                 "name": "#1001",
                 "email": "alice@example.com",
                 "customer": {"id": customer_ids[0]},
@@ -194,7 +233,7 @@ async def insert_raw_orders(
                     "edges": [
                         {
                             "node": {
-                                "id": "gid://shopify/LineItem/8001",
+                                "id": DYNAMIC_IDS["line_item_1_id"],
                                 "quantity": 2,
                                 "originalUnitPriceSet": {
                                     "shopMoney": {
@@ -205,14 +244,28 @@ async def insert_raw_orders(
                                 "title": "Unisex Hoodie - Grey / Small",
                                 "variant": {"id": product_variant_ids[0]},
                             }
-                        }
+                        },
+                        {
+                            "node": {
+                                "id": DYNAMIC_IDS["line_item_2_id"],
+                                "quantity": 1,
+                                "originalUnitPriceSet": {
+                                    "shopMoney": {
+                                        "amount": "25.00",
+                                        "currencyCode": "USD",
+                                    }
+                                },
+                                "title": "V-Neck T-Shirt - White / Medium",
+                                "variant": {"id": product_variant_ids[1]},
+                            }
+                        },
                     ]
                 },
                 "totalPriceSet": {
-                    "shopMoney": {"amount": "90.00", "currencyCode": "USD"}
+                    "shopMoney": {"amount": "115.00", "currencyCode": "USD"}
                 },
                 "subtotalPriceSet": {
-                    "shopMoney": {"amount": "90.00", "currencyCode": "USD"}
+                    "shopMoney": {"amount": "115.00", "currencyCode": "USD"}
                 },
                 "totalTaxSet": {"shopMoney": {"amount": "0.00", "currencyCode": "USD"}},
                 "createdAt": "2025-01-08T10:00:00Z",
@@ -221,7 +274,7 @@ async def insert_raw_orders(
         },
         {
             "order": {
-                "id": "gid://shopify/Order/7002",
+                "id": DYNAMIC_IDS["order_2_id"],
                 "name": "#1002",
                 "email": "bob@example.com",
                 "customer": {"id": customer_ids[1]},
@@ -229,7 +282,7 @@ async def insert_raw_orders(
                     "edges": [
                         {
                             "node": {
-                                "id": "gid://shopify/LineItem/8002",
+                                "id": DYNAMIC_IDS["line_item_2_id"],
                                 "quantity": 1,
                                 "originalUnitPriceSet": {
                                     "shopMoney": {
@@ -243,7 +296,7 @@ async def insert_raw_orders(
                         },
                         {
                             "node": {
-                                "id": "gid://shopify/LineItem/8003",
+                                "id": DYNAMIC_IDS["line_item_3_id"],
                                 "quantity": 1,
                                 "originalUnitPriceSet": {
                                     "shopMoney": {
@@ -293,7 +346,7 @@ async def insert_raw_collection(
     """Insert one RawCollection referencing products in payload."""
     collection = {
         "collection": {
-            "id": "gid://shopify/Collection/3001",
+            "id": DYNAMIC_IDS["collection_id"],
             "title": "Summer Collection",
             "handle": "summer-collection",
             "description": "Perfect summer essentials",
@@ -426,7 +479,7 @@ async def insert_raw_behavioral_events(
             6,
             {
                 "collection": {
-                    "id": "gid://shopify/Collection/3001",
+                    "id": DYNAMIC_IDS["collection_id"],
                     "title": "Summer Collection",
                 }
             },
@@ -441,11 +494,11 @@ async def insert_raw_behavioral_events(
             7,
             {
                 "checkout": {
-                    "id": "gid://shopify/Checkout/8001",
+                    "id": DYNAMIC_IDS["checkout_id"],
                     "email": "alice@example.com",
                     "currencyCode": "USD",
                     "totalPrice": {"amount": 90.0, "currencyCode": "USD"},
-                    "order": {"id": "gid://shopify/Order/7001", "isFirstOrder": True},
+                    "order": {"id": DYNAMIC_IDS["order_1_id"], "isFirstOrder": True},
                 }
             },
         )
@@ -628,6 +681,155 @@ async def main():
         "Seeding complete: 1 shop, 3 products, 2 customers, 2 orders, 1 collection, 12 events (including 2 customer_linked events), 2 identity links"
     )
 
+    return shop_id
+
+
+async def process_raw_to_main_tables(shop_id: str):
+    """Process raw data to main tables"""
+    print("\n🔄 Processing raw data to main tables...")
+
+    try:
+        service = MainTableStorageService()
+        result = await service.store_all_data(shop_id=shop_id, incremental=True)
+        print(f"✅ Main table processing completed: {result}")
+        return True
+    except Exception as e:
+        print(f"❌ Main table processing failed: {e}")
+        return False
+
+
+async def process_behavioral_events(shop_id: str):
+    """Process behavioral events directly using webhook handler"""
+    print("\n🔄 Processing behavioral events directly...")
+
+    try:
+        # Get shop domain from shop ID
+        db = await get_database()
+        shop = await db.shop.find_unique(where={"id": shop_id})
+        if not shop:
+            print(f"❌ Shop not found: {shop_id}")
+            return False
+
+        shop_domain = shop.shopDomain
+        print(f"🔍 Processing events for shop domain: {shop_domain}")
+
+        # Initialize webhook handler
+        repository = WebhookRepository()
+        handler = WebhookHandler(repository)
+
+        # Get all raw behavioral events for this shop
+        raw_events = await db.rawbehavioralevents.find_many(
+            where={"shopId": shop_id}, order={"receivedAt": "asc"}
+        )
+
+        print(f"🔍 Found {len(raw_events)} raw behavioral events to process")
+
+        processed_count = 0
+        for raw_event in raw_events:
+            try:
+                # Process each event directly through the webhook handler
+                result = await handler.process_behavioral_event(
+                    shop_domain=shop_domain, payload=raw_event.payload
+                )
+                if result.get("status") == "success":
+                    processed_count += 1
+                    print(f"✅ Processed event: {raw_event.id}")
+                else:
+                    print(f"⚠️ Event processing warning: {result}")
+            except Exception as e:
+                print(f"❌ Failed to process event {raw_event.id}: {e}")
+
+        print(
+            f"✅ Successfully processed {processed_count}/{len(raw_events)} behavioral events"
+        )
+
+        # Verify events were saved to main table
+        event_count = await db.behavioralevents.count(where={"shopId": shop_id})
+        print(
+            f"✅ Found {event_count} behavioral events in main table after processing"
+        )
+
+        return True
+    except Exception as e:
+        print(f"❌ Behavioral events processing failed: {e}")
+        return False
+
+
+async def compute_features(shop_id: str):
+    """Compute ML features"""
+    print("\n🔄 Computing ML features...")
+
+    try:
+        service = FeatureEngineeringService()
+        # Get shop data first
+        db = await get_database()
+        shop = await db.shop.find_unique(where={"id": shop_id})
+        if not shop:
+            print(f"❌ Shop not found: {shop_id}")
+            return False
+
+        # Convert Prisma Shop object to dictionary
+        shop_dict = {
+            "id": shop.id,
+            "shopDomain": shop.shopDomain,
+            "accessToken": shop.accessToken,
+            "planType": shop.planType,
+            "currencyCode": shop.currencyCode,
+            "moneyFormat": shop.moneyFormat,
+            "isActive": shop.isActive,
+            "email": shop.email,
+            "createdAt": shop.createdAt,
+            "updatedAt": shop.updatedAt,
+            "lastAnalysisAt": shop.lastAnalysisAt,
+        }
+        result = await service.run_comprehensive_pipeline_for_shop(
+            shop_id=shop_id, batch_size=100, incremental=True
+        )
+        print(f"✅ Feature computation completed: {result}")
+        return True
+    except Exception as e:
+        print(f"❌ Feature computation failed: {e}")
+        return False
+
+
+async def run_complete_pipeline():
+    """Run the complete data pipeline: seed -> process -> compute features"""
+    print("🚀 Starting complete data pipeline...")
+
+    # Step 1: Seed raw data
+    print("\n📊 Step 1: Seeding raw data...")
+    shop_id = await main()
+
+    # Step 2: Process raw data to main tables
+    print("\n📊 Step 2: Processing raw data to main tables...")
+    main_success = await process_raw_to_main_tables(shop_id)
+
+    # Step 3: Process behavioral events
+    print("\n📊 Step 3: Processing behavioral events...")
+    events_success = await process_behavioral_events(shop_id)
+
+    # Step 4: Compute ML features
+    print("\n📊 Step 4: Computing ML features...")
+    features_success = await compute_features(shop_id)
+
+    # Summary
+    print("\n🎯 Pipeline Summary:")
+    print(f"  ✅ Raw data seeding: {'Success' if shop_id else 'Failed'}")
+    print(
+        f"  {'✅' if main_success else '❌'} Main table processing: {'Success' if main_success else 'Failed'}"
+    )
+    print(
+        f"  {'✅' if events_success else '❌'} Behavioral events processing: {'Success' if events_success else 'Failed'}"
+    )
+    print(
+        f"  {'✅' if features_success else '❌'} Feature computation: {'Success' if features_success else 'Failed'}"
+    )
+
+    if all([shop_id, main_success, events_success, features_success]):
+        print("\n🎉 Complete pipeline executed successfully!")
+    else:
+        print("\n⚠️  Pipeline completed with some failures. Check logs above.")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_complete_pipeline())

@@ -171,6 +171,12 @@ class FeatureRepository(IFeatureRepository):
             # Use Prisma's createMany with skipDuplicates for bulk operations
             # This is more efficient than individual upserts
             try:
+                logger.info(
+                    f"🔍 About to insert {len(batch_data)} records to {table_name}"
+                )
+                logger.info(
+                    f"🔍 Sample data: {batch_data[0] if batch_data else 'No data'}"
+                )
                 await model.create_many(data=batch_data, skip_duplicates=True)
                 logger.info(f"Bulk upserted {len(batch_data)} records to {table_name}")
                 return len(batch_data)
