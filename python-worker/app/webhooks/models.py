@@ -98,6 +98,23 @@ class ProductAddedToCartData(BaseModel):
     cartLine: CartLine
 
 
+class CartViewedData(BaseModel):
+    """Data for cart viewed events"""
+
+    cart: Optional[Dict[str, Any]] = None  # Cart data if available
+    cartLineCount: Optional[int] = None  # Number of items in cart
+    totalValue: Optional[Money] = None  # Total cart value
+
+    class Config:
+        extra = "allow"
+
+
+class ProductRemovedFromCartData(BaseModel):
+    """Data for product removed from cart events"""
+
+    cartLine: CartLine
+
+
 class CollectionObject(BaseModel):
     id: str
     title: Optional[str] = None
@@ -164,6 +181,16 @@ class ProductAddedToCartEvent(BaseEvent):
     data: ProductAddedToCartData
 
 
+class CartViewedEvent(BaseEvent):
+    name: Literal["cart_viewed"]
+    data: CartViewedData
+
+
+class ProductRemovedFromCartEvent(BaseEvent):
+    name: Literal["product_removed_from_cart"]
+    data: ProductRemovedFromCartData
+
+
 class CollectionViewedEvent(BaseEvent):
     name: Literal["collection_viewed"]
     data: CollectionViewedData
@@ -200,6 +227,8 @@ ShopifyBehavioralEvent = Union[
     PageViewedEvent,
     ProductViewedEvent,
     ProductAddedToCartEvent,
+    CartViewedEvent,
+    ProductRemovedFromCartEvent,
     CollectionViewedEvent,
     SearchSubmittedEvent,
     CheckoutStartedEvent,
