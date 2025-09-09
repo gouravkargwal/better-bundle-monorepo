@@ -947,12 +947,18 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         interaction_pairs.add(pair)
                         logger.info(f"🔍 Added event interaction pair: {pair}")
                     else:
+                        event_id = event.get('id', 'unknown')
+                        event_data = event.get('eventData')
                         logger.info(
-                            f"🔍 Event {event.get('id', 'unknown')} - no product_id extracted from eventData: {event.get('eventData')}"
+                            f"🔍 Event {event_id} - no product_id extracted from eventData: {event_data}"
                         )
                 else:
+                    event_id = event.get('id', 'unknown')
+                    customer_id = event.get('customerId')
+                    has_event_data = 'eventData' in event
                     logger.info(
-                        f"🔍 Event {event.get('id', 'unknown')} - customerId: {event.get('customerId')}, has eventData: {'eventData' in event}"
+                        f"🔍 Event {event_id} - customerId: {customer_id}, has eventData: {has_event_data}, "
+                        f"eventType: {event.get('eventType', 'unknown')}, clientId: {event.get('clientId', 'none')}"
                     )
 
             # Compute features for these pairs (limit to prevent excessive computation)
@@ -1311,6 +1317,43 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 variant_id = event_data["merchandise"].get("id")
                 if variant_id:
                     return self._convert_variant_to_product_id(variant_id)
+
+            # Check for checkout.lineItems (checkout events)
+            if "checkout" in event_data and isinstance(event_data["checkout"], dict):
+                checkout = event_data["checkout"]
+                if "lineItems" in checkout and isinstance(checkout["lineItems"], list):
+                    # Get the first line item's product ID
+                    for line_item in checkout["lineItems"]:
+                        if isinstance(line_item, dict) and "variant" in line_item:
+                            variant = line_item["variant"]
+                            if isinstance(variant, dict) and "id" in variant:
+                                variant_id = variant["id"]
+                                if variant_id:
+                                    return self._convert_variant_to_product_id(variant_id)
+
+            # Check for cart.lines (cart events)
+            if "cart" in event_data and isinstance(event_data["cart"], dict):
+                cart = event_data["cart"]
+                if "lines" in cart and isinstance(cart["lines"], list):
+                    # Get the first line's product ID
+                    for line in cart["lines"]:
+                        if isinstance(line, dict) and "merchandise" in line:
+                            merchandise = line["merchandise"]
+                            if isinstance(merchandise, dict) and "id" in merchandise:
+                                variant_id = merchandise["id"]
+                                if variant_id:
+                                    return self._convert_variant_to_product_id(variant_id)
+
+            # Check for collection.productVariants (collection events)
+            if "collection" in event_data and isinstance(event_data["collection"], dict):
+                collection = event_data["collection"]
+                if "productVariants" in collection and isinstance(collection["productVariants"], list):
+                    # Get the first product variant's product ID
+                    for variant in collection["productVariants"]:
+                        if isinstance(variant, dict) and "id" in variant:
+                            variant_id = variant["id"]
+                            if variant_id:
+                                return self._convert_variant_to_product_id(variant_id)
 
             return None
         except Exception as e:

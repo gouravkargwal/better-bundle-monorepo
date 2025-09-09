@@ -480,17 +480,81 @@ class GorseDataTransformers:
 
         return categories
 
-    def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from event data"""
-        # Check various possible fields for product ID
-        product_id = event.get("product_id") or event.get("productId")
-        if product_id:
-            return str(product_id)
+    def _extract_product_id_from_event(
+        self, event_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extract product ID from various event data structures"""
+        try:
+            if not isinstance(event_data, dict):
+                return None
 
-        # Check in properties
-        properties = event.get("properties", {})
-        product_id = properties.get("product_id") or properties.get("productId")
-        if product_id:
-            return str(product_id)
+            # Check for direct product ID
+            if "product" in event_data and isinstance(event_data["product"], dict):
+                product_id = event_data["product"].get("id")
+                if product_id and "Product" in product_id:
+                    return product_id
 
-        return None
+            # Check for productVariant (product_viewed events)
+            if "productVariant" in event_data and isinstance(
+                event_data["productVariant"], dict
+            ):
+                variant_id = event_data["productVariant"].get("id")
+                if variant_id:
+                    return self._convert_variant_to_product_id(variant_id)
+
+            # Check for cartLine.merchandise (cart events)
+            if "cartLine" in event_data and isinstance(event_data["cartLine"], dict):
+                merchandise = event_data["cartLine"].get("merchandise", {})
+                if isinstance(merchandise, dict):
+                    variant_id = merchandise.get("id")
+                    if variant_id:
+                        return self._convert_variant_to_product_id(variant_id)
+
+            # Check for merchandise (direct cart events)
+            if "merchandise" in event_data and isinstance(
+                event_data["merchandise"], dict
+            ):
+                variant_id = event_data["merchandise"].get("id")
+                if variant_id:
+                    return self._convert_variant_to_product_id(variant_id)
+
+            # Check for lineItems in checkout events
+            if "lineItems" in event_data and isinstance(event_data["lineItems"], list):
+                for line_item in event_data["lineItems"]:
+                    if isinstance(line_item, dict) and "variant" in line_item:
+                        variant = line_item["variant"]
+                        if isinstance(variant, dict):
+                            variant_id = variant.get("id")
+                            if variant_id:
+                                return self._convert_variant_to_product_id(variant_id)
+
+            # Fallback to direct product ID fields
+            product_id = event_data.get("product_id") or event_data.get("productId")
+            if product_id:
+                return str(product_id)
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to extract product ID: {e}")
+            return None
+
+    def _convert_variant_to_product_id(self, variant_id: str) -> Optional[str]:
+        """Convert product variant ID to product ID"""
+        try:
+            if not variant_id or "ProductVariant" not in variant_id:
+                return None
+
+            # Extract the numeric ID from the variant ID
+            # Format: gid://shopify/ProductVariant/123456789
+            parts = variant_id.split("/")
+            if len(parts) >= 4:
+                variant_num = parts[-1]
+                # Convert variant ID to product ID (this is a simplified approach)
+                # In a real implementation, you might need to look up the actual product ID
+                # from the database or use a more sophisticated mapping
+                return f"gid://shopify/Product/{variant_num}"
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to convert variant to product ID: {e}")
+            return None

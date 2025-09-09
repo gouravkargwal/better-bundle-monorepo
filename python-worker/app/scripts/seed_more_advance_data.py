@@ -788,6 +788,9 @@ def _event_payload(
     extra: Dict[str, Any],
     timestamp: datetime = None,
     device_type: str = "desktop",  # Add for metadata
+    customer_id: str = None,  # Add customer ID for proper linking
+    clients: List[str] = None,  # Client list for auto-mapping
+    customer_ids: List[str] = None,  # Customer list for auto-mapping
 ) -> Dict[str, Any]:
     base: Dict[str, Any] = {
         "id": f"e_{uuid.uuid4()}",
@@ -813,6 +816,18 @@ def _event_payload(
         },
     }
 
+    # Add customer ID if provided or auto-determined
+    if customer_id:
+        base["customerId"] = customer_id
+    elif clients and customer_ids:
+        # Auto-determine customer ID based on client ID
+        try:
+            client_index = clients.index(client_id)
+            if client_index < len(customer_ids):
+                base["customerId"] = customer_ids[client_index]
+        except ValueError:
+            pass  # Anonymous user
+
     if extra:
         base.update({"data": extra})
     else:
@@ -829,13 +844,36 @@ async def insert_raw_behavioral_events(
     # Client IDs for 5 sessions (one per customer + anonymous)
     clients = [str(uuid.uuid4()) for _ in range(5)]
 
+    # Helper function to create events with automatic customer ID mapping
+    def create_event(
+        event_name: str,
+        client_id: str,
+        seq: int,
+        extra: Dict[str, Any],
+        timestamp: datetime = None,
+        device_type: str = "desktop",
+    ) -> Dict[str, Any]:
+        """Create event with automatic customer ID mapping"""
+        # Determine customer ID based on client ID
+        customer_id = None
+        try:
+            client_index = clients.index(client_id)
+            if client_index < len(customer_ids):
+                customer_id = customer_ids[client_index]
+        except ValueError:
+            pass  # Anonymous user
+
+        return _event_payload(
+            event_name, client_id, seq, extra, timestamp, device_type, customer_id
+        )
+
     # Session 1: Alice (VIP) - Full journey: Browse, view, add, checkout (logged in later)
     # Device: mobile for metadata
     events.append(
-        _event_payload("page_viewed", clients[0], 1, {}, past_date(5), "mobile")
+        create_event("page_viewed", clients[0], 1, {}, past_date(5), "mobile")
     )
     events.append(
-        _event_payload(
+        create_event(
             "search_submitted",
             clients[0],
             2,
@@ -853,6 +891,28 @@ async def insert_raw_behavioral_events(
                 "collection": {
                     "id": DYNAMIC_IDS["collection_1_id"],
                     "title": "Summer Essentials",
+                    "productVariants": [
+                        {
+                            "id": product_variant_ids[0],
+                            "title": "Grey / Small",
+                            "price": {"amount": 45.00, "currencyCode": "USD"},
+                            "product": {
+                                "id": DYNAMIC_IDS["product_1_id"],
+                                "title": "Unisex Hoodie",
+                                "vendor": "Fashion Co",
+                            },
+                        },
+                        {
+                            "id": product_variant_ids[1],
+                            "title": "White / Medium",
+                            "price": {"amount": 25.00, "currencyCode": "USD"},
+                            "product": {
+                                "id": DYNAMIC_IDS["product_2_id"],
+                                "title": "Classic T-Shirt",
+                                "vendor": "Fashion Co",
+                            },
+                        },
+                    ],
                 }
             },
             past_date(5),
@@ -864,7 +924,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[0],
             4,
-            {"productVariant": {"id": product_variant_ids[0]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[0],
+                    "title": "Grey / Small",
+                    "price": {"amount": 45.00, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_1_id"],
+                        "title": "Unisex Hoodie",
+                        "vendor": "Fashion Co",
+                    },
+                }
+            },
             past_date(5),
             "mobile",
         )
@@ -874,7 +945,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[0],
             5,
-            {"productVariant": {"id": product_variant_ids[1]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[1],
+                    "title": "White / Medium",
+                    "price": {"amount": 25.00, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_2_id"],
+                        "title": "Classic T-Shirt",
+                        "vendor": "Fashion Co",
+                    },
+                }
+            },
             past_date(5),
             "mobile",
         )
@@ -886,8 +968,18 @@ async def insert_raw_behavioral_events(
             6,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[0]},
+                    "merchandise": {
+                        "id": product_variant_ids[0],
+                        "title": "Grey / Small",
+                        "price": {"amount": 45.00, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_1_id"],
+                            "title": "Unisex Hoodie",
+                            "vendor": "Fashion Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 45.00, "currencyCode": "USD"}},
                 }
             },
             past_date(5),
@@ -901,9 +993,29 @@ async def insert_raw_behavioral_events(
             clients[0],
             7,
             {
-                "cart": {"id": "cart_1"},
-                "cartLineCount": 1,
-                "totalValue": {"amount": 29.99, "currencyCode": "USD"},
+                "cart": {
+                    "id": "cart_1",
+                    "totalQuantity": 1,
+                    "cost": {"totalAmount": {"amount": 45.00, "currencyCode": "USD"}},
+                    "lines": [
+                        {
+                            "merchandise": {
+                                "id": product_variant_ids[0],
+                                "title": "Grey / Small",
+                                "price": {"amount": 45.00, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_1_id"],
+                                    "title": "Unisex Hoodie",
+                                    "vendor": "Fashion Co",
+                                },
+                            },
+                            "quantity": 1,
+                            "cost": {
+                                "totalAmount": {"amount": 45.00, "currencyCode": "USD"}
+                            },
+                        }
+                    ],
+                }
             },
             past_date(5),
             "mobile",
@@ -914,7 +1026,30 @@ async def insert_raw_behavioral_events(
             "checkout_started",
             clients[0],
             8,
-            {"checkout": {"id": DYNAMIC_IDS["checkout_1_id"]}},
+            {
+                "checkout": {
+                    "id": DYNAMIC_IDS["checkout_1_id"],
+                    "totalPrice": {"amount": 45.00, "currencyCode": "USD"},
+                    "lineItems": [
+                        {
+                            "id": "line_item_1",
+                            "title": "Unisex Hoodie",
+                            "quantity": 1,
+                            "finalLinePrice": {"amount": 45.00, "currencyCode": "USD"},
+                            "variant": {
+                                "id": product_variant_ids[0],
+                                "title": "Grey / Small",
+                                "price": {"amount": 45.00, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_1_id"],
+                                    "title": "Unisex Hoodie",
+                                    "vendor": "Fashion Co",
+                                },
+                            },
+                        }
+                    ],
+                }
+            },
             past_date(5),
             "mobile",
         )
@@ -927,6 +1062,25 @@ async def insert_raw_behavioral_events(
             {
                 "checkout": {
                     "id": DYNAMIC_IDS["checkout_1_id"],
+                    "totalPrice": {"amount": 45.00, "currencyCode": "USD"},
+                    "lineItems": [
+                        {
+                            "id": "line_item_1",
+                            "title": "Unisex Hoodie",
+                            "quantity": 1,
+                            "finalLinePrice": {"amount": 45.00, "currencyCode": "USD"},
+                            "variant": {
+                                "id": product_variant_ids[0],
+                                "title": "Grey / Small",
+                                "price": {"amount": 45.00, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_1_id"],
+                                    "title": "Unisex Hoodie",
+                                    "vendor": "Fashion Co",
+                                },
+                            },
+                        }
+                    ],
                     "order": {"id": DYNAMIC_IDS["order_1_id"]},
                 }
             },
@@ -952,7 +1106,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[1],
             2,
-            {"productVariant": {"id": product_variant_ids[4]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[4],
+                    "title": "Black / One Size",
+                    "price": {"amount": 89.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_5_id"],
+                        "title": "Designer Sunglasses",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(4),
         )
     )  # Sunglasses
@@ -961,7 +1126,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[1],
             3,
-            {"productVariant": {"id": product_variant_ids[5]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[5],
+                    "title": "Brown / Large",
+                    "price": {"amount": 35.00, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_6_id"],
+                        "title": "Leather Belt",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(4),
         )
     )  # Belt (recent view)
@@ -986,6 +1162,28 @@ async def insert_raw_behavioral_events(
                 "collection": {
                     "id": DYNAMIC_IDS["collection_2_id"],
                     "title": "Tech Gear",
+                    "productVariants": [
+                        {
+                            "id": product_variant_ids[7],
+                            "title": "Silver / 64GB",
+                            "price": {"amount": 299.99, "currencyCode": "USD"},
+                            "product": {
+                                "id": DYNAMIC_IDS["product_8_id"],
+                                "title": "Smart Watch",
+                                "vendor": "Tech Co",
+                            },
+                        },
+                        {
+                            "id": product_variant_ids[8],
+                            "title": "Black / 128GB",
+                            "price": {"amount": 199.99, "currencyCode": "USD"},
+                            "product": {
+                                "id": DYNAMIC_IDS["product_9_id"],
+                                "title": "Wireless Earbuds",
+                                "vendor": "Tech Co",
+                            },
+                        },
+                    ],
                 }
             },
             past_date(3),
@@ -996,19 +1194,41 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[2],
             3,
-            {"productVariant": {"id": product_variant_ids[7]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[7],
+                    "title": "Silver / 64GB",
+                    "price": {"amount": 299.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_8_id"],
+                        "title": "Smart Watch",
+                        "vendor": "Tech Co",
+                    },
+                }
+            },
             past_date(3),
         )
-    )  # Earbuds
+    )  # Smart Watch
     events.append(
         _event_payload(
             "product_viewed",
             clients[2],
             4,
-            {"productVariant": {"id": product_variant_ids[8]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[8],
+                    "title": "Black / 128GB",
+                    "price": {"amount": 199.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_9_id"],
+                        "title": "Wireless Earbuds",
+                        "vendor": "Tech Co",
+                    },
+                }
+            },
             past_date(3),
         )
-    )  # Phone Case
+    )  # Wireless Earbuds
     events.append(
         _event_payload(
             "product_added_to_cart",
@@ -1016,8 +1236,18 @@ async def insert_raw_behavioral_events(
             5,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[7]},
+                    "merchandise": {
+                        "id": product_variant_ids[7],
+                        "title": "Silver / 64GB",
+                        "price": {"amount": 299.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_8_id"],
+                            "title": "Smart Watch",
+                            "vendor": "Tech Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 299.99, "currencyCode": "USD"}},
                 }
             },
             past_date(3),
@@ -1030,9 +1260,29 @@ async def insert_raw_behavioral_events(
             clients[2],
             6,
             {
-                "cart": {"id": "cart_2"},
-                "cartLineCount": 1,
-                "totalValue": {"amount": 79.99, "currencyCode": "USD"},
+                "cart": {
+                    "id": "cart_2",
+                    "totalQuantity": 1,
+                    "cost": {"totalAmount": {"amount": 299.99, "currencyCode": "USD"}},
+                    "lines": [
+                        {
+                            "merchandise": {
+                                "id": product_variant_ids[7],
+                                "title": "Silver / 64GB",
+                                "price": {"amount": 299.99, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_8_id"],
+                                    "title": "Smart Watch",
+                                    "vendor": "Tech Co",
+                                },
+                            },
+                            "quantity": 1,
+                            "cost": {
+                                "totalAmount": {"amount": 299.99, "currencyCode": "USD"}
+                            },
+                        }
+                    ],
+                }
             },
             past_date(3),
         )
@@ -1045,8 +1295,18 @@ async def insert_raw_behavioral_events(
             7,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[7]},
+                    "merchandise": {
+                        "id": product_variant_ids[7],
+                        "title": "Silver / 64GB",
+                        "price": {"amount": 299.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_8_id"],
+                            "title": "Smart Watch",
+                            "vendor": "Tech Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 299.99, "currencyCode": "USD"}},
                 }
             },
             past_date(3),
@@ -1060,6 +1320,25 @@ async def insert_raw_behavioral_events(
             {
                 "checkout": {
                     "id": DYNAMIC_IDS["checkout_2_id"],
+                    "totalPrice": {"amount": 299.99, "currencyCode": "USD"},
+                    "lineItems": [
+                        {
+                            "id": "line_item_2",
+                            "title": "Smart Watch",
+                            "quantity": 1,
+                            "finalLinePrice": {"amount": 299.99, "currencyCode": "USD"},
+                            "variant": {
+                                "id": product_variant_ids[7],
+                                "title": "Silver / 64GB",
+                                "price": {"amount": 299.99, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_8_id"],
+                                    "title": "Smart Watch",
+                                    "vendor": "Tech Co",
+                                },
+                            },
+                        }
+                    ],
                     "order": {"id": DYNAMIC_IDS["order_3_id"]},
                 }
             },
@@ -1092,7 +1371,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[3],
             3,
-            {"productVariant": {"id": product_variant_ids[6]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[6],
+                    "title": "Red / One Size",
+                    "price": {"amount": 19.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_7_id"],
+                        "title": "Silk Scarf",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(2),
         )
     )  # Scarf
@@ -1103,8 +1393,18 @@ async def insert_raw_behavioral_events(
             4,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[6]},
+                    "merchandise": {
+                        "id": product_variant_ids[6],
+                        "title": "Red / One Size",
+                        "price": {"amount": 19.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_7_id"],
+                            "title": "Silk Scarf",
+                            "vendor": "Accessories Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 19.99, "currencyCode": "USD"}},
                 }
             },
             past_date(2),
@@ -1129,7 +1429,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[4],
             2,
-            {"productVariant": {"id": product_variant_ids[0]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[0],
+                    "title": "Grey / Small",
+                    "price": {"amount": 45.00, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_1_id"],
+                        "title": "Unisex Hoodie",
+                        "vendor": "Fashion Co",
+                    },
+                }
+            },
             past_date(1),
             "mobile",
         )
@@ -1139,11 +1450,22 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[4],
             3,
-            {"productVariant": {"id": product_variant_ids[7]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[7],
+                    "title": "Silver / 64GB",
+                    "price": {"amount": 299.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_8_id"],
+                        "title": "Smart Watch",
+                        "vendor": "Tech Co",
+                    },
+                }
+            },
             past_date(1),
             "mobile",
         )
-    )  # Earbuds (recent view)
+    )  # Smart Watch (recent view)
     events.append(
         _event_payload(
             "product_added_to_cart",
@@ -1151,8 +1473,18 @@ async def insert_raw_behavioral_events(
             4,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[0]},
+                    "merchandise": {
+                        "id": product_variant_ids[0],
+                        "title": "Grey / Small",
+                        "price": {"amount": 45.00, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_1_id"],
+                            "title": "Unisex Hoodie",
+                            "vendor": "Fashion Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 45.00, "currencyCode": "USD"}},
                 }
             },
             past_date(1),
@@ -1164,7 +1496,31 @@ async def insert_raw_behavioral_events(
             "checkout_completed",
             clients[4],
             5,
-            {"checkout": {"order": {"id": DYNAMIC_IDS["order_4_id"]}}},
+            {
+                "checkout": {
+                    "id": DYNAMIC_IDS["checkout_1_id"],
+                    "totalPrice": {"amount": 45.00, "currencyCode": "USD"},
+                    "lineItems": [
+                        {
+                            "id": "line_item_3",
+                            "title": "Unisex Hoodie",
+                            "quantity": 1,
+                            "finalLinePrice": {"amount": 45.00, "currencyCode": "USD"},
+                            "variant": {
+                                "id": product_variant_ids[0],
+                                "title": "Grey / Small",
+                                "price": {"amount": 45.00, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_1_id"],
+                                    "title": "Unisex Hoodie",
+                                    "vendor": "Fashion Co",
+                                },
+                            },
+                        }
+                    ],
+                    "order": {"id": DYNAMIC_IDS["order_4_id"]},
+                }
+            },
             past_date(1),
             "mobile",
         )
@@ -1174,7 +1530,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[4],
             6,
-            {"productVariant": {"id": product_variant_ids[6]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[6],
+                    "title": "Red / One Size",
+                    "price": {"amount": 19.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_7_id"],
+                        "title": "Silk Scarf",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(0),
             "mobile",
         )
@@ -1184,7 +1551,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             clients[4],
             7,
-            {"productVariant": {"id": product_variant_ids[9]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[9],
+                    "title": "Black / Universal",
+                    "price": {"amount": 15.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_10_id"],
+                        "title": "USB-C Charger",
+                        "vendor": "Tech Co",
+                    },
+                }
+            },
             past_date(0),
             "mobile",
         )
@@ -1196,8 +1574,18 @@ async def insert_raw_behavioral_events(
             8,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[6]},
+                    "merchandise": {
+                        "id": product_variant_ids[6],
+                        "title": "Red / One Size",
+                        "price": {"amount": 19.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_7_id"],
+                            "title": "Silk Scarf",
+                            "vendor": "Accessories Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 19.99, "currencyCode": "USD"}},
                 }
             },
             past_date(0),
@@ -1209,7 +1597,31 @@ async def insert_raw_behavioral_events(
             "checkout_completed",
             clients[4],
             9,
-            {"checkout": {"order": {"id": DYNAMIC_IDS["order_5_id"]}}},
+            {
+                "checkout": {
+                    "id": DYNAMIC_IDS["checkout_2_id"],
+                    "totalPrice": {"amount": 19.99, "currencyCode": "USD"},
+                    "lineItems": [
+                        {
+                            "id": "line_item_4",
+                            "title": "Silk Scarf",
+                            "quantity": 1,
+                            "finalLinePrice": {"amount": 19.99, "currencyCode": "USD"},
+                            "variant": {
+                                "id": product_variant_ids[6],
+                                "title": "Red / One Size",
+                                "price": {"amount": 19.99, "currencyCode": "USD"},
+                                "product": {
+                                    "id": DYNAMIC_IDS["product_7_id"],
+                                    "title": "Silk Scarf",
+                                    "vendor": "Accessories Co",
+                                },
+                            },
+                        }
+                    ],
+                    "order": {"id": DYNAMIC_IDS["order_5_id"]},
+                }
+            },
             past_date(0),
             "mobile",
         )
@@ -1234,7 +1646,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             anonymous_client,
             2,
-            {"productVariant": {"id": product_variant_ids[3]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[3],
+                    "title": "Blue / One Size",
+                    "price": {"amount": 24.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_4_id"],
+                        "title": "Baseball Cap",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(6),
         )
     )  # Baseball Cap (low stock)
@@ -1245,8 +1668,18 @@ async def insert_raw_behavioral_events(
             3,
             {
                 "cartLine": {
-                    "merchandise": {"id": product_variant_ids[3]},
+                    "merchandise": {
+                        "id": product_variant_ids[3],
+                        "title": "Blue / One Size",
+                        "price": {"amount": 24.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_4_id"],
+                            "title": "Baseball Cap",
+                            "vendor": "Accessories Co",
+                        },
+                    },
                     "quantity": 1,
+                    "cost": {"totalAmount": {"amount": 24.99, "currencyCode": "USD"}},
                 }
             },
             past_date(6),
@@ -1259,7 +1692,18 @@ async def insert_raw_behavioral_events(
             "product_viewed",
             anonymous_client,
             4,
-            {"productVariant": {"id": product_variant_ids[6]}},
+            {
+                "productVariant": {
+                    "id": product_variant_ids[6],
+                    "title": "Red / One Size",
+                    "price": {"amount": 19.99, "currencyCode": "USD"},
+                    "product": {
+                        "id": DYNAMIC_IDS["product_7_id"],
+                        "title": "Silk Scarf",
+                        "vendor": "Accessories Co",
+                    },
+                }
+            },
             past_date(1),
         )
     )  # Scarf (new)
@@ -1271,7 +1715,18 @@ async def insert_raw_behavioral_events(
                 "product_viewed",
                 str(uuid.uuid4()),
                 1,
-                {"productVariant": {"id": product_variant_ids[4]}},
+                {
+                    "productVariant": {
+                        "id": product_variant_ids[4],
+                        "title": "Black / One Size",
+                        "price": {"amount": 89.99, "currencyCode": "USD"},
+                        "product": {
+                            "id": DYNAMIC_IDS["product_5_id"],
+                            "title": "Designer Sunglasses",
+                            "vendor": "Accessories Co",
+                        },
+                    }
+                },
                 past_date(random.randint(1, 30)),
             )
         )

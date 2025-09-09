@@ -235,13 +235,17 @@ class WebhookHandler:
             db = await get_database()
 
             # Update all events with this clientId that don't have a customerId
+            # Also update the updatedAt timestamp so incremental processing picks up the changes
             result = await db.behavioralevents.update_many(
                 where={"shopId": shop_id, "clientId": client_id, "customerId": None},
-                data={"customerId": customer_id},
+                data={
+                    "customerId": customer_id,
+                    "updatedAt": now_utc(),  # Update timestamp to trigger incremental processing
+                },
             )
 
             logger.info(
-                f"Backfilled {result.count} events for {client_id} → {customer_id}"
+                f"Backfilled {result.count} events for {client_id} → {customer_id} (updated timestamps for incremental processing)"
             )
 
         except Exception as e:
@@ -283,8 +287,11 @@ class WebhookHandler:
             # Handle customer linking events specially
             if validated_event.name == "customer_linked":
                 # Check if this is actually a CustomerLinkedEvent with proper data structure
-                if hasattr(validated_event.data, "clientId") and hasattr(
-                    validated_event.data, "customerId"
+                if (
+                    hasattr(validated_event.data, "clientId")
+                    and hasattr(validated_event.data, "customerId")
+                    and validated_event.data.clientId
+                    and validated_event.data.customerId
                 ):
                     await self._handle_customer_linking(
                         shop_db_id,
@@ -293,7 +300,9 @@ class WebhookHandler:
                     )
                 else:
                     logger.warning(
-                        f"customer_linked event {validated_event.id} missing required clientId or customerId in data"
+                        f"customer_linked event {validated_event.id} missing required clientId or customerId in data. "
+                        f"clientId: {getattr(validated_event.data, 'clientId', 'missing')}, "
+                        f"customerId: {getattr(validated_event.data, 'customerId', 'missing')}"
                     )
             else:
                 # For regular events, check if clientId already has a linked customerId
