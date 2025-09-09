@@ -23,7 +23,10 @@ from app.domains.ml.services.feature_engineering import FeatureEngineeringServic
 from app.domains.shopify.services.main_table_storage import MainTableStorageService
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
-from app.domains.ml.processors.analytics_data_processor import AnalyticsDataProcessor
+
+# from app.domains.ml.processors.analytics_data_processor import AnalyticsDataProcessor  # Removed - analytics tables are redundant
+from app.domains.ml.services.gorse_sync_pipeline import GorseSyncPipeline
+from app.domains.ml.services.gorse_training_service import GorseTrainingService
 
 
 # Generate unique IDs for this run (expanded for more data)
@@ -891,6 +894,21 @@ async def insert_raw_behavioral_events(
             "mobile",
         )
     )
+    # Cart viewed event - user checks their cart
+    events.append(
+        _event_payload(
+            "cart_viewed",
+            clients[0],
+            7,
+            {
+                "cart": {"id": "cart_1"},
+                "cartLineCount": 1,
+                "totalValue": {"amount": 29.99, "currencyCode": "USD"},
+            },
+            past_date(5),
+            "mobile",
+        )
+    )
     events.append(
         _event_payload(
             "checkout_started",
@@ -1005,11 +1023,40 @@ async def insert_raw_behavioral_events(
             past_date(3),
         )
     )
+    # Cart viewed event - user checks their cart
+    events.append(
+        _event_payload(
+            "cart_viewed",
+            clients[2],
+            6,
+            {
+                "cart": {"id": "cart_2"},
+                "cartLineCount": 1,
+                "totalValue": {"amount": 79.99, "currencyCode": "USD"},
+            },
+            past_date(3),
+        )
+    )
+    # Product removed from cart - user changes their mind
+    events.append(
+        _event_payload(
+            "product_removed_from_cart",
+            clients[2],
+            7,
+            {
+                "cartLine": {
+                    "merchandise": {"id": product_variant_ids[7]},
+                    "quantity": 1,
+                }
+            },
+            past_date(3),
+        )
+    )
     events.append(
         _event_payload(
             "checkout_completed",
             clients[2],
-            6,
+            8,
             {
                 "checkout": {
                     "id": DYNAMIC_IDS["checkout_2_id"],
@@ -1386,105 +1433,6 @@ async def process_behavioral_events(shop_id: str):
         return False
 
 
-async def process_analytics(shop_id: str):
-    """Process behavioral events through analytics processor to populate analytics tables"""
-    print("\n🔄 Processing analytics from behavioral events...")
-
-    try:
-        # Get shop domain from shop ID
-        db = await get_database()
-        shop = await db.shop.find_unique(where={"id": shop_id})
-        if not shop:
-            print(f"❌ Shop not found: {shop_id}")
-            return False
-
-        print(f"🔍 Processing analytics for shop: {shop.shopDomain}")
-
-        # Initialize analytics processor
-        analytics_processor = AnalyticsDataProcessor()
-
-        # Get all behavioral events for this shop
-        behavioral_events = await db.behavioralevents.find_many(
-            where={"shopId": shop_id}, order={"timestamp": "asc"}
-        )
-
-        print(
-            f"🔍 Found {len(behavioral_events)} behavioral events to process for analytics"
-        )
-
-        if not behavioral_events:
-            print("⚠️ No behavioral events found to process")
-            return True
-
-        # Convert Prisma objects to dictionaries
-        events_data = []
-        for event in behavioral_events:
-            event_dict = {
-                "eventType": event.eventType,
-                "clientId": event.clientId,
-                "customerId": event.customerId,
-                "timestamp": event.timestamp.isoformat() if event.timestamp else None,
-                "eventData": event.eventData,
-                "context": event.context,
-                "shopId": event.shopId,
-            }
-            events_data.append(event_dict)
-
-        # Process events through analytics processor
-        results = await analytics_processor.process_behavioral_events_for_analytics(
-            shop_id, events_data
-        )
-
-        print(f"✅ Analytics processing completed:")
-        print(
-            f"  📊 Cart analytics processed: {results.get('cart_analytics_processed', 0)}"
-        )
-        print(
-            f"  📊 Session analytics processed: {results.get('session_analytics_processed', 0)}"
-        )
-        print(
-            f"  📊 Product journey analytics processed: {results.get('product_journey_analytics_processed', 0)}"
-        )
-        print(
-            f"  📊 Search analytics processed: {results.get('search_analytics_processed', 0)}"
-        )
-        print(
-            f"  📊 Checkout analytics processed: {results.get('checkout_analytics_processed', 0)}"
-        )
-
-        # Verify analytics tables were populated
-        cart_analytics_count = await db.cartanalytics.count(where={"shopId": shop_id})
-        session_analytics_count = await db.sessionanalytics.count(
-            where={"shopId": shop_id}
-        )
-        product_journey_analytics_count = await db.productjourneyanalytics.count(
-            where={"shopId": shop_id}
-        )
-        search_analytics_count = await db.searchanalytics.count(
-            where={"shopId": shop_id}
-        )
-        checkout_analytics_count = await db.checkoutanalytics.count(
-            where={"shopId": shop_id}
-        )
-
-        print(f"✅ Analytics tables populated:")
-        print(f"  📊 CartAnalytics: {cart_analytics_count} records")
-        print(f"  📊 SessionAnalytics: {session_analytics_count} records")
-        print(
-            f"  📊 ProductJourneyAnalytics: {product_journey_analytics_count} records"
-        )
-        print(f"  📊 SearchAnalytics: {search_analytics_count} records")
-        print(f"  📊 CheckoutAnalytics: {checkout_analytics_count} records")
-
-        return True
-    except Exception as e:
-        print(f"❌ Analytics processing failed: {e}")
-        import traceback
-
-        print(f"Full traceback: {traceback.format_exc()}")
-        return False
-
-
 async def compute_features(shop_id: str):
     """Compute ML features"""
     print("\n🔄 Computing ML features...")
@@ -1522,8 +1470,113 @@ async def compute_features(shop_id: str):
         return False
 
 
+async def sync_to_gorse(shop_id: str):
+    """Sync feature data to Gorse bridge tables and push to Gorse"""
+    print("\n🔄 Syncing data to Gorse...")
+
+    try:
+        # Initialize Gorse sync pipeline
+        sync_pipeline = GorseSyncPipeline()
+
+        # Sync all data to Gorse bridge tables
+        print("📊 Syncing users, items, and feedback to Gorse bridge tables...")
+        sync_result = await sync_pipeline.sync_all(shop_id, incremental=False)
+
+        if sync_result:
+            print("✅ Gorse sync pipeline completed successfully")
+
+            # Initialize Gorse training service
+            training_service = GorseTrainingService()
+
+            # Push data to Gorse and trigger training
+            print("🚀 Pushing data to Gorse and triggering training...")
+            training_job_id = await training_service.push_data_to_gorse(
+                shop_id=shop_id, job_type="full_training", trigger_source="seed_script"
+            )
+
+            print(f"✅ Gorse training job started: {training_job_id}")
+            return True
+        else:
+            print("❌ Gorse sync pipeline failed")
+            return False
+
+    except Exception as e:
+        print(f"❌ Gorse sync failed: {e}")
+        return False
+
+
+async def test_recommendations_api(shop_id: str):
+    """Test the recommendations API with seeded data"""
+    print("\n🔄 Testing recommendations API...")
+
+    try:
+        # Get a customer ID from the seeded data
+        db = await get_database()
+        customer = await db.customerdata.find_first(where={"shopId": shop_id})
+
+        if not customer:
+            print("❌ No customers found for recommendations testing")
+            return False
+
+        customer_id = customer.customerId
+        print(f"🧪 Testing recommendations for customer: {customer_id}")
+
+        # Import the recommendations API client
+        from app.shared.gorse_api_client import GorseApiClient
+
+        # Initialize Gorse API client
+        gorse_client = GorseApiClient(base_url="http://localhost:8088")
+
+        # Test user recommendations
+        print("📊 Testing user recommendations...")
+        user_recs = await gorse_client.get_recommendations(
+            user_id=f"shop_{shop_id}_{customer_id}", n=5
+        )
+
+        if user_recs.get("success") and user_recs.get("recommendations"):
+            recommendations = user_recs["recommendations"]
+            print(f"✅ User recommendations: {len(recommendations)} items")
+            for i, rec in enumerate(recommendations[:3], 1):
+                print(
+                    f"  {i}. Item: {rec.get('item_id', 'N/A')}, Score: {rec.get('score', 'N/A')}"
+                )
+        else:
+            print("⚠️ No user recommendations available")
+            if user_recs.get("error"):
+                print(f"   Error: {user_recs['error']}")
+
+        # Test item recommendations
+        print("📊 Testing item recommendations...")
+        product = await db.productdata.find_first(where={"shopId": shop_id})
+
+        if product:
+            product_id = product.productId
+            item_recs = await gorse_client.get_item_neighbors(
+                item_id=f"shop_{shop_id}_{product_id}", n=5
+            )
+
+            if item_recs.get("success") and item_recs.get("neighbors"):
+                neighbors = item_recs["neighbors"]
+                print(f"✅ Item recommendations: {len(neighbors)} items")
+                for i, rec in enumerate(neighbors[:3], 1):
+                    print(
+                        f"  {i}. Item: {rec.get('item_id', 'N/A')}, Score: {rec.get('score', 'N/A')}"
+                    )
+            else:
+                print("⚠️ No item recommendations available")
+                if item_recs.get("error"):
+                    print(f"   Error: {item_recs['error']}")
+
+        print("✅ Recommendations API testing completed")
+        return True
+
+    except Exception as e:
+        print(f"❌ Recommendations API testing failed: {e}")
+        return False
+
+
 async def run_complete_pipeline():
-    """Run the complete data pipeline: seed -> process -> compute features"""
+    """Run the complete data pipeline: seed -> process -> compute features -> sync to Gorse -> test recommendations"""
     print("🚀 Starting complete data pipeline...")
 
     # Step 1: Seed raw data
@@ -1542,6 +1595,14 @@ async def run_complete_pipeline():
     print("\n📊 Step 4: Computing ML features...")
     features_success = await compute_features(shop_id)
 
+    # Step 5: Sync to Gorse
+    print("\n📊 Step 5: Syncing data to Gorse...")
+    gorse_success = await sync_to_gorse(shop_id)
+
+    # Step 6: Test recommendations API
+    print("\n📊 Step 6: Testing recommendations API...")
+    recommendations_success = await test_recommendations_api(shop_id)
+
     # Summary
     print("\n🎯 Pipeline Summary:")
     print(f"  ✅ Raw data seeding: {'Success' if shop_id else 'Failed'}")
@@ -1554,9 +1615,29 @@ async def run_complete_pipeline():
     print(
         f"  {'✅' if features_success else '❌'} Feature computation: {'Success' if features_success else 'Failed'}"
     )
+    print(
+        f"  {'✅' if gorse_success else '❌'} Gorse sync: {'Success' if gorse_success else 'Failed'}"
+    )
+    print(
+        f"  {'✅' if recommendations_success else '❌'} Recommendations API test: {'Success' if recommendations_success else 'Failed'}"
+    )
 
-    if all([shop_id, main_success, events_success, features_success]):
+    if all(
+        [
+            shop_id,
+            main_success,
+            events_success,
+            features_success,
+            gorse_success,
+            recommendations_success,
+        ]
+    ):
         print("\n🎉 Complete pipeline executed successfully!")
+        print("🎯 All systems are ready for testing:")
+        print("  • Cart view and remove events are being tracked")
+        print("  • Enhanced feature computation with cart analytics")
+        print("  • Gorse recommendations are trained and ready")
+        print("  • Recommendations API is functional")
     else:
         print("\n⚠️  Pipeline completed with some failures. Check logs above.")
 

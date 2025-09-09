@@ -744,6 +744,8 @@ model ProductFeatures {
   viewCount30d        Int @default(0)
   uniqueViewers30d    Int @default(0)
   cartAddCount30d     Int @default(0)
+  cartViewCount30d    Int @default(0)
+  cartRemoveCount30d  Int @default(0)
   purchaseCount30d    Int @default(0)
   uniquePurchasers30d Int @default(0)
 
@@ -755,6 +757,9 @@ model ProductFeatures {
   viewToCartRate        Float? // cartAdds / views
   cartToPurchaseRate    Float? // purchases / cartAdds
   overallConversionRate Float? // purchases / views
+  cartAbandonmentRate   Float? // cart views without purchase
+  cartModificationRate  Float? // cart removes / cart adds
+  cartViewToPurchaseRate Float? // purchases / cart views
 
   // Temporal Metrics
   lastViewedAt           DateTime?
@@ -860,6 +865,8 @@ model CustomerBehaviorFeatures {
   productViewCount    Int @default(0)
   collectionViewCount Int @default(0)
   cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
   searchCount         Int @default(0)
   checkoutStartCount  Int @default(0)
   purchaseCount       Int @default(0)
@@ -910,6 +917,8 @@ model InteractionFeatures {
   // Event Counts
   viewCount     Int @default(0)
   cartAddCount  Int @default(0)
+  cartViewCount Int @default(0)
+  cartRemoveCount Int @default(0)
   purchaseCount Int @default(0)
 
   // Timestamps
@@ -964,11 +973,15 @@ model SessionFeatures {
   collectionViewCount Int @default(0)
   searchCount         Int @default(0)
   cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
 
   // Conversion
   checkoutStarted   Boolean @default(false)
   checkoutCompleted Boolean @default(false)
   orderValue        Float?
+  cartViewed        Boolean @default(false)
+  cartAbandoned     Boolean @default(false)
 
   // Context
   deviceType     String? @db.VarChar(20)
@@ -998,6 +1011,8 @@ model ProductPairFeatures {
   coPurchaseCount Int @default(0) // Same order
   coViewCount     Int @default(0) // Same session
   coCartCount     Int @default(0) // Same cart
+  coCartViews     Int @default(0) // Same cart view session
+  coCartRemoves   Int @default(0) // Same cart remove session
 
   // Timestamps
   createdAt DateTime @default(now())

@@ -140,7 +140,11 @@ class GorseDataTransformers:
         """Calculate customer segment based on user data"""
         lifetime_value = float(user.get("lifetimeValue") or 0)
         order_frequency = float(user.get("orderFrequencyPerMonth") or 0)
-        days_since_last_order = user.get("daysSinceLastOrder", 999)
+        days_since_last_order = user.get("daysSinceLastOrder")
+
+        # Handle None values for days_since_last_order
+        if days_since_last_order is None:
+            days_since_last_order = 999  # Treat as inactive if no data
 
         # High-value, frequent customers
         if lifetime_value > 1000 and order_frequency > 2:
