@@ -363,3 +363,286 @@ class GorseApiClient:
         except Exception as e:
             logger.error(f"Gorse health check failed: {str(e)}")
             return {"success": False, "status": "unhealthy", "error": str(e)}
+
+    async def get_item_neighbors(
+        self, item_id: str, n: int = 10, category: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get similar items (neighbors) for a given item
+
+        Args:
+            item_id: Item ID to get neighbors for
+            n: Number of neighbors to return
+            category: Optional category filter
+
+        Returns:
+            Item neighbors response
+        """
+        try:
+            params = {"n": n}
+            if category:
+                params["category"] = category
+
+            url = f"{self.base_url}/api/item/{item_id}/neighbors"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    url, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                return {
+                    "success": True,
+                    "neighbors": result,
+                    "item_id": item_id,
+                    "count": len(result) if isinstance(result, list) else 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting item neighbors: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "neighbors": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get item neighbors: {str(e)}")
+            return {"success": False, "error": str(e), "neighbors": []}
+
+    async def get_latest_items(
+        self, n: int = 10, category: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get latest items from Gorse
+
+        Args:
+            n: Number of items to return
+            category: Optional category filter
+
+        Returns:
+            Latest items response
+        """
+        try:
+            params = {"n": n}
+            if category:
+                params["category"] = category
+
+            url = f"{self.base_url}/api/latest"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    url, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                return {
+                    "success": True,
+                    "items": result,
+                    "count": len(result) if isinstance(result, list) else 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting latest items: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "items": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get latest items: {str(e)}")
+            return {"success": False, "error": str(e), "items": []}
+
+    async def get_popular_items(
+        self, n: int = 10, category: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get popular items from Gorse
+
+        Args:
+            n: Number of items to return
+            category: Optional category filter
+
+        Returns:
+            Popular items response
+        """
+        try:
+            params = {"n": n}
+            if category:
+                params["category"] = category
+
+            url = f"{self.base_url}/api/popular"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    url, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                return {
+                    "success": True,
+                    "items": result,
+                    "count": len(result) if isinstance(result, list) else 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting popular items: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "items": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get popular items: {str(e)}")
+            return {"success": False, "error": str(e), "items": []}
+
+    async def get_user_neighbors(self, user_id: str, n: int = 10) -> Dict[str, Any]:
+        """
+        Get similar users (neighbors) for a given user
+
+        Args:
+            user_id: User ID to get neighbors for
+            n: Number of neighbors to return
+
+        Returns:
+            User neighbors response
+        """
+        try:
+            params = {"n": n}
+            url = f"{self.base_url}/api/user/{user_id}/neighbors"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    url, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                return {
+                    "success": True,
+                    "neighbors": result,
+                    "user_id": user_id,
+                    "count": len(result) if isinstance(result, list) else 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting user neighbors: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "neighbors": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get user neighbors: {str(e)}")
+            return {"success": False, "error": str(e), "neighbors": []}
+
+    async def get_session_recommendations(
+        self, session_data: Dict[str, Any], n: int = 10, category: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get session-based recommendations from Gorse
+
+        Args:
+            session_data: Session data including user interactions
+            n: Number of recommendations to return
+            category: Optional category filter
+
+        Returns:
+            Session recommendations response
+        """
+        try:
+            params = {"n": n}
+            if category:
+                params["category"] = category
+
+            url = f"{self.base_url}/api/session/recommend"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    url, json=session_data, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
+
+                result = response.json()
+                return {
+                    "success": True,
+                    "recommendations": result,
+                    "count": len(result) if isinstance(result, list) else 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting session recommendations: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "recommendations": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get session recommendations: {str(e)}")
+            return {"success": False, "error": str(e), "recommendations": []}
+
+    async def get_user_neighbors(self, user_id: str, n: int = 10) -> Dict[str, Any]:
+        """
+        Get similar users (user neighbors) for collaborative filtering
+
+        Args:
+            user_id: User ID to find neighbors for
+            n: Number of neighbors to return
+
+        Returns:
+            Dict with success status and neighbor user data
+        """
+        try:
+            logger.debug(f"Getting user neighbors for user {user_id}")
+
+            url = f"{self.base_url}/api/user/{user_id}/neighbors"
+            params = {"n": n}
+
+            response = await self.client.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+
+            result = response.json()
+
+            # Gorse returns a list of user IDs with scores
+            if isinstance(result, list):
+                logger.info(f"Found {len(result)} user neighbors for user {user_id}")
+                return {
+                    "success": True,
+                    "neighbors": result,
+                    "count": len(result),
+                }
+            else:
+                logger.warning(
+                    f"Unexpected response format for user neighbors: {result}"
+                )
+                return {
+                    "success": False,
+                    "error": "Unexpected response format",
+                    "neighbors": [],
+                    "count": 0,
+                }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error getting user neighbors: {e.response.status_code} - {e.response.text}"
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code}: {e.response.text}",
+                "neighbors": [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get user neighbors: {str(e)}")
+            return {"success": False, "error": str(e), "neighbors": []}

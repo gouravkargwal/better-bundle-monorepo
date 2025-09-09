@@ -55,6 +55,7 @@ from typing import Optional
 # API imports
 from app.api.v1.training import router as training_router
 from app.api.v1.customer_linking import router as customer_linking_router
+from app.api.v1.recommendations import router as recommendations_router
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -90,6 +91,7 @@ app = FastAPI(
 # Include API routers
 app.include_router(training_router)
 app.include_router(customer_linking_router)
+app.include_router(recommendations_router)
 
 # Add CORS middleware
 app.add_middleware(
