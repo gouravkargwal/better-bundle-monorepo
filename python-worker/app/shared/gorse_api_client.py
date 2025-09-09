@@ -81,7 +81,7 @@ class GorseApiClient:
                 }
                 gorse_users.append(gorse_user)
 
-            url = f"{self.base_url}/api/user"
+            url = f"{self.base_url}/api/users"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -165,7 +165,7 @@ class GorseApiClient:
                 }
                 gorse_items.append(gorse_item)
 
-            url = f"{self.base_url}/api/item"
+            url = f"{self.base_url}/api/items"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -347,7 +347,8 @@ class GorseApiClient:
             Health check response
         """
         try:
-            url = f"{self.base_url}/api/health"
+            # Use the correct Gorse health check endpoint
+            url = f"{self.base_url}/api/health/ready"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url, headers=self._get_headers())

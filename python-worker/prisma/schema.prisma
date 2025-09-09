@@ -572,10 +572,29 @@ model MLTrainingLog {
   startedAt           DateTime  @default(now())
   completedAt         DateTime?
   durationMs          Int? // Training duration in milliseconds
+  
+  // Data push counts
+  usersPushed         Int       @default(0)
+  itemsPushed         Int       @default(0)
+  feedbackPushed      Int       @default(0)
+  totalPushed         Int       @default(0)
+  
+  // Job configuration
+  jobType             String?   // "full_training", "incremental_training", "model_refresh", "custom"
+  pushStrategy        String?   // "full", "incremental"
+  triggerSource       String?   // "api", "scheduled", "manual"
+  
+  // Last push timestamps for incremental logic
+  usersLastPushAt     DateTime?
+  itemsLastPushAt     DateTime?
+  feedbackLastPushAt  DateTime?
+  
+  // Legacy fields (keeping for backward compatibility)
   productsCount       Int       @default(0)
   usersCount          Int       @default(0)
   collectionsCount    Int       @default(0)
   customerEventsCount Int       @default(0)
+  
   error               String?   @db.Text
   createdAt           DateTime  @default(now())
   shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -583,6 +602,7 @@ model MLTrainingLog {
   @@index([shopId, status])
   @@index([shopId, createdAt])
   @@index([status, createdAt])
+  @@index([shopId, jobType])
   @@map("MLTrainingLog")
 }
 

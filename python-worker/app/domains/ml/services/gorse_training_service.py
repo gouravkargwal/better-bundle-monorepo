@@ -130,7 +130,7 @@ class GorseTrainingService:
             db = await self._get_database()
             await db.mltraininglog.update(
                 where={"id": training_log_id},
-                data={"status": "running", "updatedAt": now_utc()},
+                data={"status": "running"},
             )
 
             # Step 1: Check Gorse API health
@@ -162,15 +162,12 @@ class GorseTrainingService:
                 data={
                     "status": "completed",
                     "completedAt": now_utc(),
-                    "updatedAt": now_utc(),
-                    "metadata": {
-                        "users_pushed": results["users"]["pushed"],
-                        "items_pushed": results["items"]["pushed"],
-                        "feedback_pushed": results["feedback"]["pushed"],
-                        "total_pushed": total_pushed,
-                        "job_type": job_type.value,
-                        "push_strategy": "incremental",
-                    },
+                    "usersPushed": results["users"]["pushed"],
+                    "itemsPushed": results["items"]["pushed"],
+                    "feedbackPushed": results["feedback"]["pushed"],
+                    "totalPushed": total_pushed,
+                    "jobType": job_type.value,
+                    "pushStrategy": "incremental",
                 },
             )
 
@@ -187,8 +184,7 @@ class GorseTrainingService:
                     data={
                         "status": "failed",
                         "completedAt": now_utc(),
-                        "errorMessage": str(e),
-                        "updatedAt": now_utc(),
+                        "error": str(e),
                     },
                 )
             except Exception as log_error:
@@ -204,14 +200,11 @@ class GorseTrainingService:
                 where={"shopId": shop_id}, order={"startedAt": "desc"}
             )
 
-            if last_log and last_log.metadata:
-                metadata = (
-                    last_log.metadata if isinstance(last_log.metadata, dict) else {}
-                )
+            if last_log:
                 return {
-                    "usersLastPushAt": metadata.get("usersLastPushAt"),
-                    "itemsLastPushAt": metadata.get("itemsLastPushAt"),
-                    "feedbackLastPushAt": metadata.get("feedbackLastPushAt"),
+                    "usersLastPushAt": last_log.usersLastPushAt,
+                    "itemsLastPushAt": last_log.itemsLastPushAt,
+                    "feedbackLastPushAt": last_log.feedbackLastPushAt,
                 }
 
             return None
@@ -401,30 +394,26 @@ class GorseTrainingService:
     async def _update_training_log_metadata(
         self, training_log_id: str, metadata_updates: Dict[str, Any]
     ):
-        """Update training log metadata with new timestamp information"""
+        """Update training log with new timestamp information"""
         try:
             db = await self._get_database()
 
-            # Get current metadata
-            current_log = await db.mltraininglog.find_unique(
-                where={"id": training_log_id}
-            )
-            if not current_log:
-                logger.error(f"Training log {training_log_id} not found")
-                return
+            # Prepare update data for flat fields
+            update_data = {}
+            for key, value in metadata_updates.items():
+                if key == "usersLastPushAt":
+                    update_data["usersLastPushAt"] = value
+                elif key == "itemsLastPushAt":
+                    update_data["itemsLastPushAt"] = value
+                elif key == "feedbackLastPushAt":
+                    update_data["feedbackLastPushAt"] = value
 
-            current_metadata = (
-                current_log.metadata if isinstance(current_log.metadata, dict) else {}
-            )
-
-            # Merge with new updates
-            updated_metadata = {**current_metadata, **metadata_updates}
-
-            # Update the log
-            await db.mltraininglog.update(
-                where={"id": training_log_id},
-                data={"metadata": updated_metadata, "updatedAt": now_utc()},
-            )
+            # Update the log with flat fields
+            if update_data:
+                await db.mltraininglog.update(
+                    where={"id": training_log_id},
+                    data=update_data,
+                )
 
         except Exception as e:
             logger.error(f"Failed to update training log metadata: {str(e)}")
@@ -434,8 +423,7 @@ class GorseTrainingService:
         return {
             "userId": user.userId,
             "labels": user.labels if isinstance(user.labels, dict) else {},
-            "subscribe": user.subscribe if user.subscribe else [],
-            "comment": user.comment or "",
+            # GorseUsers doesn't have subscribe or comment fields, so we omit them
         }
 
     def _convert_item_to_gorse_format(self, item) -> Dict[str, Any]:
@@ -445,10 +433,7 @@ class GorseTrainingService:
             "categories": item.categories if isinstance(item.categories, list) else [],
             "labels": item.labels if isinstance(item.labels, dict) else {},
             "isHidden": item.isHidden,
-            "comment": item.comment or "",
-            "timestamp": (
-                item.timestamp.isoformat() if item.timestamp else now_utc().isoformat()
-            ),
+            # GorseItems doesn't have comment or timestamp fields, so we omit them
         }
 
     def _convert_feedback_to_gorse_format(self, feedback) -> Dict[str, Any]:
@@ -503,7 +488,30 @@ class GorseTrainingService:
                     "duration_ms": training_log.durationMs,
                     "error": training_log.error,
                     "created_at": training_log.createdAt,
-                    "metadata": training_log.metadata,
+                    "metadata": {
+                        "usersPushed": training_log.usersPushed,
+                        "itemsPushed": training_log.itemsPushed,
+                        "feedbackPushed": training_log.feedbackPushed,
+                        "totalPushed": training_log.totalPushed,
+                        "jobType": training_log.jobType,
+                        "pushStrategy": training_log.pushStrategy,
+                        "triggerSource": training_log.triggerSource,
+                        "usersLastPushAt": (
+                            training_log.usersLastPushAt.isoformat()
+                            if training_log.usersLastPushAt
+                            else None
+                        ),
+                        "itemsLastPushAt": (
+                            training_log.itemsLastPushAt.isoformat()
+                            if training_log.itemsLastPushAt
+                            else None
+                        ),
+                        "feedbackLastPushAt": (
+                            training_log.feedbackLastPushAt.isoformat()
+                            if training_log.feedbackLastPushAt
+                            else None
+                        ),
+                    },
                 }
             return None
 
@@ -533,7 +541,30 @@ class GorseTrainingService:
                     "duration_ms": log.durationMs,
                     "error": log.error,
                     "created_at": log.createdAt,
-                    "metadata": log.metadata,
+                    "metadata": {
+                        "usersPushed": training_log.usersPushed,
+                        "itemsPushed": training_log.itemsPushed,
+                        "feedbackPushed": training_log.feedbackPushed,
+                        "totalPushed": training_log.totalPushed,
+                        "jobType": training_log.jobType,
+                        "pushStrategy": training_log.pushStrategy,
+                        "triggerSource": training_log.triggerSource,
+                        "usersLastPushAt": (
+                            training_log.usersLastPushAt.isoformat()
+                            if training_log.usersLastPushAt
+                            else None
+                        ),
+                        "itemsLastPushAt": (
+                            training_log.itemsLastPushAt.isoformat()
+                            if training_log.itemsLastPushAt
+                            else None
+                        ),
+                        "feedbackLastPushAt": (
+                            training_log.feedbackLastPushAt.isoformat()
+                            if training_log.feedbackLastPushAt
+                            else None
+                        ),
+                    },
                 }
                 for log in logs
             ]
@@ -584,3 +615,79 @@ class GorseTrainingService:
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return results
+
+    async def start_training_job(
+        self,
+        shop_id: str,
+        job_type: TrainingJobType,
+        trigger_source: str = "api",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Start a training job by pushing data to Gorse
+
+        This method handles the complete training flow:
+        1. Push data to Gorse (users, items, feedback)
+        2. Gorse automatically triggers training based on the data
+
+        Args:
+            shop_id: Shop ID to train models for
+            job_type: Type of training job
+            trigger_source: Source that triggered the training
+            metadata: Additional metadata for the training job
+
+        Returns:
+            Job ID for tracking the training job
+        """
+        try:
+            logger.info(
+                f"Starting training job for shop {shop_id} (type: {job_type.value})"
+            )
+
+            # Generate job ID for tracking
+            job_id = (
+                f"training_{shop_id}_{job_type.value}_{int(datetime.now().timestamp())}"
+            )
+
+            # Push data to Gorse - this automatically triggers training
+            if job_type == TrainingJobType.FULL_TRAINING:
+                # Full training - push all data
+                await self.push_data_to_gorse(
+                    shop_id=shop_id,
+                    job_type=job_type,
+                    trigger_source=trigger_source,
+                    metadata=metadata or {},
+                )
+            elif job_type == TrainingJobType.INCREMENTAL_TRAINING:
+                # Incremental training - push recent data
+                await self.push_data_to_gorse(
+                    shop_id=shop_id,
+                    job_type=job_type,
+                    trigger_source=trigger_source,
+                    metadata=metadata or {},
+                )
+            elif job_type == TrainingJobType.MODEL_REFRESH:
+                # Model refresh - push all data to refresh models
+                await self.push_data_to_gorse(
+                    shop_id=shop_id,
+                    job_type=job_type,
+                    trigger_source=trigger_source,
+                    metadata=metadata or {},
+                )
+            else:
+                # Custom training - use default behavior
+                await self.push_data_to_gorse(
+                    shop_id=shop_id,
+                    job_type=job_type,
+                    trigger_source=trigger_source,
+                    metadata=metadata or {},
+                )
+
+            logger.info(
+                f"Training job {job_id} completed successfully for shop {shop_id}"
+            )
+            return job_id
+
+        except Exception as e:
+            logger.error(f"Training job failed for shop {shop_id}: {str(e)}")
+            raise
