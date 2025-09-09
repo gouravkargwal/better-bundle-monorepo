@@ -282,11 +282,19 @@ class WebhookHandler:
 
             # Handle customer linking events specially
             if validated_event.name == "customer_linked":
-                await self._handle_customer_linking(
-                    shop_db_id,
-                    validated_event.data.clientId,
-                    validated_event.data.customerId,
-                )
+                # Check if this is actually a CustomerLinkedEvent with proper data structure
+                if hasattr(validated_event.data, "clientId") and hasattr(
+                    validated_event.data, "customerId"
+                ):
+                    await self._handle_customer_linking(
+                        shop_db_id,
+                        validated_event.data.clientId,
+                        validated_event.data.customerId,
+                    )
+                else:
+                    logger.warning(
+                        f"customer_linked event {validated_event.id} missing required clientId or customerId in data"
+                    )
             else:
                 # For regular events, check if clientId already has a linked customerId
                 client_id = payload.get("clientId")

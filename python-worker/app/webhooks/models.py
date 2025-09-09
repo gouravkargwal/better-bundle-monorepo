@@ -129,9 +129,16 @@ class SearchResult(BaseModel):
     query: str
     productVariants: Optional[List[ProductVariant]] = None
 
+    class Config:
+        extra = "allow"
+
 
 class SearchSubmittedData(BaseModel):
-    searchResult: SearchResult
+    searchResult: Optional[SearchResult] = None
+    query: Optional[str] = None  # Fallback for direct query field
+
+    class Config:
+        extra = "allow"
 
 
 class CheckoutStartedData(BaseModel):

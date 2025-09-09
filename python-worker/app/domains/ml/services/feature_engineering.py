@@ -1254,11 +1254,18 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     if query:
                         return query
 
-                # Fallback to direct query fields
+                # Check for direct query field in eventData
+                query = event_data.get("query")
+                if query:
+                    logger.info(f"🔍 Found direct query in eventData: {query}")
+                    return query
+
+                # Fallback to other possible query fields
                 query = (
-                    event_data.get("query")
-                    or event_data.get("searchQuery")
+                    event_data.get("searchQuery")
                     or event_data.get("q")
+                    or event_data.get("search_term")
+                    or event_data.get("searchTerm")
                 )
                 logger.info(f"🔍 Fallback query extraction: {query}")
                 return query
