@@ -61,6 +61,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             # Core event counts
             view_count = self._count_product_views(product_events)
             cart_add_count = self._count_cart_adds(product_events)
+            cart_view_count = self._count_cart_views(product_events)
+            cart_remove_count = self._count_cart_removes(product_events)
             purchase_count = len(product_purchases)
 
             # Temporal features
@@ -84,6 +86,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 "productId": product_id,
                 "viewCount": view_count,
                 "cartAddCount": cart_add_count,
+                "cartViewCount": cart_view_count,
+                "cartRemoveCount": cart_remove_count,
                 "purchaseCount": purchase_count,
                 "firstViewDate": temporal_features.get("first_view_date"),
                 "lastViewDate": temporal_features.get("last_view_date"),
@@ -225,6 +229,20 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             1
             for event in product_events
             if event.get("eventType") == "product_added_to_cart"
+        )
+
+    def _count_cart_views(self, product_events: List[Dict[str, Any]]) -> int:
+        """Count cart view events"""
+        return sum(
+            1 for event in product_events if event.get("eventType") == "cart_viewed"
+        )
+
+    def _count_cart_removes(self, product_events: List[Dict[str, Any]]) -> int:
+        """Count product removed from cart events"""
+        return sum(
+            1
+            for event in product_events
+            if event.get("eventType") == "product_removed_from_cart"
         )
 
     def _compute_temporal_features(

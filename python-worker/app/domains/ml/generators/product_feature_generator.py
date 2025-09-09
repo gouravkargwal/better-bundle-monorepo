@@ -80,12 +80,19 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "viewCount30d": metrics_30d["view_count"],
                 "uniqueViewers30d": metrics_30d["unique_viewers"],
                 "cartAddCount30d": metrics_30d["cart_add_count"],
+                "cartViewCount30d": metrics_30d["cart_view_count"],
+                "cartRemoveCount30d": metrics_30d["cart_remove_count"],
                 "purchaseCount30d": metrics_30d["purchase_count"],
                 "uniquePurchasers30d": metrics_30d["unique_purchasers"],
                 # Conversion metrics
                 "viewToCartRate": conversion_metrics["view_to_cart_rate"],
                 "cartToPurchaseRate": conversion_metrics["cart_to_purchase_rate"],
                 "overallConversionRate": conversion_metrics["overall_conversion_rate"],
+                "cartAbandonmentRate": conversion_metrics["cart_abandonment_rate"],
+                "cartModificationRate": conversion_metrics["cart_modification_rate"],
+                "cartViewToPurchaseRate": conversion_metrics[
+                    "cart_view_to_purchase_rate"
+                ],
                 # Temporal metrics
                 "lastViewedAt": temporal_metrics["last_viewed_at"],
                 "lastPurchasedAt": temporal_metrics["last_purchased_at"],
@@ -144,6 +151,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         view_count = 0
         unique_viewers = set()
         cart_add_count = 0
+        cart_view_count = 0
+        cart_remove_count = 0
 
         for event in recent_events:
             event_type = event.get("eventType", "")
@@ -161,6 +170,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
             elif event_type == "product_added_to_cart":
                 cart_add_count += 1
+
+            elif event_type == "cart_viewed":
+                cart_view_count += 1
+
+            elif event_type == "product_removed_from_cart":
+                cart_remove_count += 1
 
         # Filter orders in 30-day window
         recent_orders = []
@@ -183,6 +198,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "view_count": view_count,
             "unique_viewers": len(unique_viewers),
             "cart_add_count": cart_add_count,
+            "cart_view_count": cart_view_count,
+            "cart_remove_count": cart_remove_count,
             "purchase_count": len(recent_orders),
             "unique_purchasers": len(unique_purchasers),
         }
@@ -194,6 +211,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
         view_count = metrics_30d["view_count"]
         cart_add_count = metrics_30d["cart_add_count"]
+        cart_view_count = metrics_30d["cart_view_count"]
+        cart_remove_count = metrics_30d["cart_remove_count"]
         purchase_count = metrics_30d["purchase_count"]
 
         view_to_cart_rate = (
@@ -206,10 +225,26 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             purchase_count / max(view_count, 1) if view_count > 0 else 0.0
         )
 
+        # New cart-specific metrics
+        cart_abandonment_rate = (
+            (cart_add_count - purchase_count) / max(cart_add_count, 1)
+            if cart_add_count > 0
+            else 0.0
+        )
+        cart_modification_rate = (
+            cart_remove_count / max(cart_add_count, 1) if cart_add_count > 0 else 0.0
+        )
+        cart_view_to_purchase_rate = (
+            purchase_count / max(cart_view_count, 1) if cart_view_count > 0 else 0.0
+        )
+
         return {
             "view_to_cart_rate": round(view_to_cart_rate, 4),
             "cart_to_purchase_rate": round(cart_to_purchase_rate, 4),
             "overall_conversion_rate": round(overall_conversion_rate, 4),
+            "cart_abandonment_rate": round(cart_abandonment_rate, 4),
+            "cart_modification_rate": round(cart_modification_rate, 4),
+            "cart_view_to_purchase_rate": round(cart_view_to_purchase_rate, 4),
         }
 
     def _compute_temporal_metrics(

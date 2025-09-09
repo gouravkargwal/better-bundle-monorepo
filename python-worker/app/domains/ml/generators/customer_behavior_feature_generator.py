@@ -171,6 +171,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         product_view_count = 0
         collection_view_count = 0
         cart_add_count = 0
+        cart_view_count = 0
+        cart_remove_count = 0
         search_count = 0
         checkout_start_count = 0
         purchase_count = 0
@@ -184,6 +186,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 collection_view_count += 1
             elif event_type in ["product_added_to_cart", "cart_add", "add_to_cart"]:
                 cart_add_count += 1
+            elif event_type in ["cart_viewed"]:
+                cart_view_count += 1
+            elif event_type in ["product_removed_from_cart"]:
+                cart_remove_count += 1
             elif event_type in ["search_submitted", "search", "search_query"]:
                 search_count += 1
             elif event_type in ["checkout_started", "checkout_begin", "begin_checkout"]:
@@ -196,6 +202,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "productViewCount": product_view_count,
             "collectionViewCount": collection_view_count,
             "cartAddCount": cart_add_count,
+            "cartViewCount": cart_view_count,
+            "cartRemoveCount": cart_remove_count,
             "searchCount": search_count,
             "checkoutStartCount": checkout_start_count,
             "purchaseCount": purchase_count,

@@ -138,7 +138,13 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Dict[str, Any]]:
         """Groups behavioral events by session ID for co-occurrence analysis."""
         sessions = defaultdict(
-            lambda: {"views": set(), "carts": set(), "timestamps": []}
+            lambda: {
+                "views": set(),
+                "carts": set(),
+                "cart_views": set(),
+                "cart_removes": set(),
+                "timestamps": [],
+            }
         )
 
         for event in behavioral_events:
@@ -157,6 +163,10 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
                 sessions[session_id]["views"].add(product_id)
             elif event_type == "product_added_to_cart":
                 sessions[session_id]["carts"].add(product_id)
+            elif event_type == "cart_viewed":
+                sessions[session_id]["cart_views"].add(product_id)
+            elif event_type == "product_removed_from_cart":
+                sessions[session_id]["cart_removes"].add(product_id)
 
             timestamp = self._parse_date(event.get("timestamp"))
             if timestamp:

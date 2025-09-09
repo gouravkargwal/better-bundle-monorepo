@@ -167,6 +167,8 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         collection_view_count = 0
         search_count = 0
         cart_add_count = 0
+        cart_view_count = 0
+        cart_remove_count = 0
 
         for event in events:
             event_type = event.get("eventType", "")
@@ -181,6 +183,10 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                 search_count += 1
             elif event_type in ["product_added_to_cart", "cart_add"]:
                 cart_add_count += 1
+            elif event_type in ["cart_viewed"]:
+                cart_view_count += 1
+            elif event_type in ["product_removed_from_cart"]:
+                cart_remove_count += 1
 
         return {
             "eventCount": event_count,
@@ -189,6 +195,8 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             "collectionViewCount": collection_view_count,
             "searchCount": search_count,
             "cartAddCount": cart_add_count,
+            "cartViewCount": cart_view_count,
+            "cartRemoveCount": cart_remove_count,
         }
 
     def _compute_conversion_metrics(
@@ -198,14 +206,18 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         checkout_started = False
         checkout_completed = False
         order_value = None
+        cart_viewed = False
+        cart_abandoned = False
 
-        # Check for checkout events
+        # Check for checkout and cart events
         for event in events:
             event_type = event.get("eventType", "")
             if event_type in ["checkout_started", "checkout_begin"]:
                 checkout_started = True
             elif event_type in ["checkout_completed", "purchase", "order_completed"]:
                 checkout_completed = True
+            elif event_type in ["cart_viewed"]:
+                cart_viewed = True
 
         # Find order value if checkout was completed
         if checkout_completed:
@@ -247,10 +259,15 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                     order_value = float(order.get("totalAmount", 0))
                     break
 
+        # Determine cart abandonment: cart viewed but no checkout completed
+        cart_abandoned = cart_viewed and not checkout_completed
+
         return {
             "checkoutStarted": checkout_started,
             "checkoutCompleted": checkout_completed,
             "orderValue": order_value,
+            "cartViewed": cart_viewed,
+            "cartAbandoned": cart_abandoned,
         }
 
     def _compute_context_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
