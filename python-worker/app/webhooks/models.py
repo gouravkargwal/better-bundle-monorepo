@@ -13,20 +13,20 @@ class ImageRef(BaseModel):
 
 
 class ProductRef(BaseModel):
-    id: str
-    title: Optional[str] = None
+    id: Optional[str] = None  # Shopify allows null
+    title: str  # Required in Shopify
     untranslatedTitle: Optional[str] = None
     type: Optional[str] = None
-    vendor: Optional[str] = None
+    vendor: str  # Required in Shopify
     url: Optional[str] = None
 
 
 class ProductVariant(BaseModel):
-    id: str
-    title: str
+    id: Optional[str] = None  # Shopify allows null
+    title: Optional[str] = None  # Shopify allows null
     untranslatedTitle: Optional[str] = None
     sku: Optional[str] = None
-    price: Optional[Money] = None
+    price: Money  # Required in Shopify
     image: Optional[ImageRef] = None
     product: Optional[ProductRef] = None
 
@@ -48,6 +48,11 @@ class CheckoutLineItem(BaseModel):
     finalLinePrice: Optional[Money] = None
     discountAllocations: Optional[List[dict]] = None
     variant: Optional[ProductVariant] = None
+
+    class Config:
+        extra = (
+            "allow"  # Allow additional fields from Shopify's comprehensive structure
+        )
 
 
 class Transaction(BaseModel):
@@ -80,6 +85,11 @@ class Checkout(BaseModel):
     transactions: Optional[List[Transaction]] = None
     order: Optional[OrderRef] = None
 
+    class Config:
+        extra = (
+            "allow"  # Allow additional fields from Shopify's comprehensive structure
+        )
+
 
 class PageViewedData(BaseModel):
     # Web Pixel sends minimal data for page_viewed; we keep this flexible
@@ -95,15 +105,32 @@ class ProductViewedData(BaseModel):
 
 
 class ProductAddedToCartData(BaseModel):
-    cartLine: CartLine
+    cartLine: Optional[CartLine] = None  # Shopify allows null
+
+
+class CartCost(BaseModel):
+    """Cart cost structure from Shopify"""
+
+    totalAmount: Money
+
+
+class Cart(BaseModel):
+    """Cart structure from Shopify"""
+
+    id: Optional[str] = None
+    attributes: Optional[List[dict]] = None
+    cost: Optional[CartCost] = None
+    lines: Optional[List[CartLine]] = None
+    totalQuantity: Optional[int] = None
+
+    class Config:
+        extra = "allow"
 
 
 class CartViewedData(BaseModel):
     """Data for cart viewed events"""
 
-    cart: Optional[Dict[str, Any]] = None  # Cart data if available
-    cartLineCount: Optional[int] = None  # Number of items in cart
-    totalValue: Optional[Money] = None  # Total cart value
+    cart: Optional[Cart] = None  # Shopify cart structure
 
     class Config:
         extra = "allow"
@@ -112,13 +139,13 @@ class CartViewedData(BaseModel):
 class ProductRemovedFromCartData(BaseModel):
     """Data for product removed from cart events"""
 
-    cartLine: CartLine
+    cartLine: Optional[CartLine] = None  # Shopify allows null
 
 
 class CollectionObject(BaseModel):
     id: str
-    title: Optional[str] = None
-    productVariants: Optional[List[ProductVariant]] = None
+    title: str  # Required in Shopify
+    productVariants: List[ProductVariant]  # Required in Shopify
 
 
 class CollectionViewedData(BaseModel):
@@ -134,7 +161,7 @@ class SearchResult(BaseModel):
 
 
 class SearchSubmittedData(BaseModel):
-    searchResult: Optional[SearchResult] = None
+    searchResult: SearchResult  # Required - this is the main structure from Shopify
     query: Optional[str] = None  # Fallback for direct query field
 
     class Config:
