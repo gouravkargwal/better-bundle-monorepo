@@ -325,14 +325,14 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         device_type_value = None
         if device_types:
             device_type = device_types[0]
-            if device_type is not None and device_type != 0:
+            if device_type is not None:
                 device_type_value = str(device_type)
 
         # Ensure primaryReferrer is always a string or None
         referrer_value = None
         if referrers:
             referrer = referrers[0]
-            if referrer is not None and referrer != 0:
+            if referrer is not None:
                 referrer_value = str(referrer)
 
         return {
@@ -487,7 +487,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Extract device type from event data"""
         # Try different possible locations for device info
         if "device" in event_data:
-            return event_data["device"].get("type")
+            device_type = event_data["device"].get("type")
+            # Handle case where device type is 0 or invalid
+            if device_type and device_type != 0:
+                return str(device_type)
 
         if "context" in event_data:
             context = event_data["context"]
@@ -509,10 +512,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         elif "referrer" in event_data:
             referrer = event_data.get("referrer")
 
-        if referrer:
+        if referrer and referrer != 0:
             try:
-                if "://" in referrer:
-                    domain = referrer.split("://")[1].split("/")[0]
+                if "://" in str(referrer):
+                    domain = str(referrer).split("://")[1].split("/")[0]
                     if domain.startswith("www."):
                         domain = domain[4:]
                     return domain

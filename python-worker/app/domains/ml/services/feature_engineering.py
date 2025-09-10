@@ -861,6 +861,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 orders=orders or [],
                 behavioral_events=behavioral_events or [],
             )
+            # Add variant-to-product mapping for product pair analysis
+            product_pair_context["variant_to_product_map"] = variant_to_product_map
 
             # Use the variant-to-product mapping created earlier
 
@@ -892,9 +894,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
                     # Product IDs are already normalized at data ingestion level
                     if product_id:
-                        order_products.append(product_id)
-                    elif product_id and product_id.isdigit():
-                        # Handle case where we have a numeric product ID
                         order_products.append(product_id)
 
                 # Create pairs from products in the same order

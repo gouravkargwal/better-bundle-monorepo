@@ -50,10 +50,11 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             # Get raw data from context
             orders = context.get("orders", [])
             behavioral_events = context.get("behavioral_events", [])
+            variant_to_product_map = context.get("variant_to_product_map", {})
 
             # 1. Co-purchase Analysis from Orders
             co_purchase_count, last_co_purchase_date = self._calculate_co_purchases(
-                orders, product_id1, product_id2
+                orders, product_id1, product_id2, variant_to_product_map
             )
 
             # 2. Co-occurrence Analysis from Behavioral Events
@@ -70,7 +71,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             # 3. Calculate Advanced Metrics (Support, Lift)
             # These are typically based on purchases
             metrics = self._calculate_association_metrics(
-                orders, co_purchase_count, product_id1, product_id2
+                orders, co_purchase_count, product_id1, product_id2, variant_to_product_map
             )
             support_score = metrics.get("support", 0.0)
             lift_score = metrics.get("lift", 0.0)
@@ -112,7 +113,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             return self._get_default_features(shop_id, product_id1, product_id2)
 
     def _calculate_co_purchases(
-        self, orders: List[Dict[str, Any]], product_id1: str, product_id2: str
+        self, orders: List[Dict[str, Any]], product_id1: str, product_id2: str, variant_to_product_map: Optional[Dict[str, str]] = None
     ) -> Tuple[int, Optional[datetime.datetime]]:
         """Counts how many orders contain both products."""
         count = 0
@@ -122,7 +123,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         for order in orders:
             line_items = order.get("lineItems", [])
             product_ids_in_order = {
-                self._extract_product_id_from_line_item(item) for item in line_items
+                self._extract_product_id_from_line_item(item, variant_to_product_map) for item in line_items
             }
 
             if target_ids.issubset(product_ids_in_order):
@@ -201,6 +202,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         co_purchase_count: int,
         product_id1: str,
         product_id2: str,
+        variant_to_product_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, float]:
         """Calculates Support and Lift scores."""
         total_orders = len(orders)
@@ -215,7 +217,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         p2_purchases = 0
         for order in orders:
             product_ids_in_order = {
-                self._extract_product_id_from_line_item(item)
+                self._extract_product_id_from_line_item(item, variant_to_product_map)
                 for item in order.get("lineItems", [])
             }
             if product_id1 in product_ids_in_order:
@@ -264,11 +266,23 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             return product.get("id", "")
         return None
 
-    def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
+    def _extract_product_id_from_line_item(self, line_item: Dict[str, Any], variant_to_product_map: Optional[Dict[str, str]] = None) -> str:
+        """Extract product ID from order line item using variant-to-product mapping"""
+        # Direct product ID
         if "productId" in line_item:
             return str(line_item["productId"])
-        if "id" in line_item:  # Fallback for simpler structures
-            return str(line_item["id"])
+        
+        # From variant structure
+        if "variant" in line_item and isinstance(line_item["variant"], dict):
+            variant = line_item["variant"]
+            # Check if variant has product field
+            if "product" in variant and isinstance(variant["product"], dict):
+                return variant["product"].get("id", "")
+            # If no product field, try to map variant ID to product ID
+            elif "id" in variant and variant_to_product_map:
+                variant_id = variant["id"]
+                return variant_to_product_map.get(variant_id, "")
+        
         return ""
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:

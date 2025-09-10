@@ -178,6 +178,21 @@ class BaseFeatureGenerator(ABC):
             "cancelledAt",
         }
 
+        # String fields that should preserve None values (not convert to 0)
+        string_fields = {
+            "deviceType",
+            "primaryReferrer",
+            "referrerDomain",
+            "landingPage",
+            "exitPage",
+            "preferredCategory",
+            "preferredVendor",
+            "pricePointPreference",
+            "customerState",
+            "geographicRegion",
+            "currencyPreference",
+        }
+
         for key, value in features.items():
             if value is None:
                 # Convert None to appropriate defaults
@@ -185,6 +200,8 @@ class BaseFeatureGenerator(ABC):
                     validated_features[key] = []  # Empty array for JSON list fields
                 elif key in datetime_fields:
                     validated_features[key] = None  # Preserve None for DateTime fields
+                elif key in string_fields:
+                    validated_features[key] = None  # Preserve None for String fields
                 else:
                     validated_features[key] = 0
             elif isinstance(value, (int, float)):
