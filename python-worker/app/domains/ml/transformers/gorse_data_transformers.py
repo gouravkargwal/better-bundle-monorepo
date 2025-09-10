@@ -517,6 +517,12 @@ class GorseDataTransformers:
             if "productVariant" in event_data and isinstance(
                 event_data["productVariant"], dict
             ):
+                # First try to get the product ID directly from the product field
+                product = event_data["productVariant"].get("product", {})
+                if isinstance(product, dict) and product.get("id"):
+                    return product.get("id")
+
+                # Fallback to converting variant ID
                 variant_id = event_data["productVariant"].get("id")
                 if variant_id:
                     return self._convert_variant_to_product_id(variant_id)

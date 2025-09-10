@@ -317,7 +317,9 @@ class GorseFeedbackSync:
         # Determine user ID
         user_id = event.get("customerId")
         if not user_id:
-            client_id = event_data.get("clientId")
+            client_id = event.get(
+                "clientId"
+            )  # clientId is in the main event, not event_data
             if client_id:
                 user_id = f"session_{client_id}"
             else:
