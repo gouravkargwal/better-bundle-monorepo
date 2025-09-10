@@ -10,23 +10,6 @@ services:
       timeout: 3s
       retries: 5
 
-  postgres:
-    image: postgres:16
-    restart: unless-stopped
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: gorse
-      POSTGRES_USER: gorse
-      POSTGRES_PASSWORD: gorse_pass
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gorse"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   gorse:
     image: zhenghaoz/gorse-in-one:latest
     restart: unless-stopped
@@ -35,7 +18,7 @@ services:
       - "8088:8088" # HTTP port
     environment:
       GORSE_CACHE_STORE: redis://redis:6379/0
-      GORSE_DATA_STORE: postgresql://gorse:gorse_pass@postgres:5432/gorse?sslmode=disable
+      GORSE_DATA_STORE: postgresql://postgres:postgres@localhost:5433/betterbundle?sslmode=disable
       GORSE_MASTER_HOST: 0.0.0.0
       GORSE_LOG_LEVEL: debug
       GORSE_API_KEY: secure_random_key_123
@@ -53,10 +36,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
 
 volumes:
-  postgres_data:
   gorse_logs:
   gorse_cache:

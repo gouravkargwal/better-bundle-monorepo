@@ -1,6 +1,7 @@
 [database]
 cache_store = "redis://localhost:6379/0"
-data_store = "postgresql://gorse:gorse_pass@postgres:5432/gorse?sslmode=disable"
+data_store = "postgresql://postgres:postgres@localhost:5433/betterbundle?sslmode=disable"
+
 table_prefix = "gorse_"
 cache_table_prefix = "gorse_cache_"
 
@@ -27,14 +28,14 @@ auto_insert_item = false
 [recommend]
 cache_size = 20000  # Increased for larger catalogs
 cache_expire = "1h"
-active_user_ttl = 60  # Extended based on user retention
+active_user_ttl = 0 
 
 [recommend.data_source]
 # Match your actual feedback types from sync pipeline
 positive_feedback_types = ["purchase", "cart_add", "checkout_start"]
 read_feedback_types = ["view", "search", "collection_view"]
-positive_feedback_ttl = 90  # 90 days
-item_ttl = 180  # 6 months for products
+positive_feedback_ttl = 0
+item_ttl = 0
 
 [recommend.popular]
 popular_window = "168h"  # 7 days for trending
@@ -151,3 +152,6 @@ redirect_url = ""
 # embedding_rpm = 1800
 # embedding_tpm = 1200000
 # log_file = "openai.log"
+
+[opentelemetry]
+enabled = false

@@ -6,7 +6,7 @@ Handles feedback data processing, streaming, and syncing
 import asyncio
 import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -29,6 +29,16 @@ class GorseFeedbackSync:
         """
         if not shop_id:
             return user_id
+
+        # Check if user_id is already prefixed to avoid double prefixing
+        if user_id.startswith(f"shop_{shop_id}_"):
+            return user_id
+
+        # Extract numeric ID from Shopify GID if present
+        numeric_id = self._extract_numeric_id_from_shopify_gid(user_id)
+        if numeric_id:
+            return f"shop_{shop_id}_{numeric_id}"
+
         return f"shop_{shop_id}_{user_id}"
 
     def _get_prefixed_item_id(self, item_id: str, shop_id: str) -> str:
@@ -38,7 +48,40 @@ class GorseFeedbackSync:
         """
         if not shop_id:
             return item_id
+
+        # Check if item_id is already prefixed to avoid double prefixing
+        if item_id.startswith(f"shop_{shop_id}_"):
+            return item_id
+
+        # Extract numeric ID from Shopify GID if present
+        numeric_id = self._extract_numeric_id_from_shopify_gid(item_id)
+        if numeric_id:
+            return f"shop_{shop_id}_{numeric_id}"
+
         return f"shop_{shop_id}_{item_id}"
+
+    def _extract_numeric_id_from_shopify_gid(self, gid: str) -> Optional[str]:
+        """
+        Extract numeric ID from Shopify GID
+        Examples:
+        - gid://shopify/Product/75170 -> 75170
+        - gid://shopify/ProductVariant/75183 -> 75183
+        - 75170 -> 75170 (already numeric)
+        """
+        if not gid:
+            return None
+
+        # If it's already numeric, return as is
+        if gid.isdigit():
+            return gid
+
+        # Extract from Shopify GID format
+        if "gid://shopify/" in gid:
+            parts = gid.split("/")
+            if len(parts) >= 4:
+                return parts[-1]  # Last part is the numeric ID
+
+        return None
 
     async def sync_feedback(self, shop_id: str, since_hours: int = 24):
         """
@@ -350,11 +393,19 @@ class GorseFeedbackSync:
                     * self.pipeline.transformers._apply_time_decay(timestamp)
                 )
 
+                # Apply the same user ID and item ID prefixing as user/item sync
+                prefixed_user_id = self._get_prefixed_user_id(
+                    user_id, event.get("shopId")
+                )
+                prefixed_item_id = self._get_prefixed_item_id(
+                    product_id, event.get("shopId")
+                )
+
                 feedback_list.append(
                     {
                         "feedbackType": feedback_type,
-                        "userId": user_id,
-                        "itemId": product_id,
+                        "userId": prefixed_user_id,
+                        "itemId": prefixed_item_id,
                         "timestamp": timestamp,
                         "shop_id": event.get("shopId"),
                         "comment": json.dumps({"weight": decayed_weight}),
@@ -447,11 +498,17 @@ class GorseFeedbackSync:
                         * self.pipeline.transformers._apply_time_decay(order_date)
                     )
 
+                    # Apply the same user ID and item ID prefixing as user/item sync
+                    prefixed_user_id = self._get_prefixed_user_id(user_id, shop_id)
+                    prefixed_item_id = self._get_prefixed_item_id(
+                        str(product_id), shop_id
+                    )
+
                     # Create feedback record
                     feedback = {
                         "feedbackType": "purchase",
-                        "userId": user_id,
-                        "itemId": str(product_id),
+                        "userId": prefixed_user_id,
+                        "itemId": prefixed_item_id,
                         "timestamp": order_date,
                         "shop_id": shop_id,
                         "comment": json.dumps(
