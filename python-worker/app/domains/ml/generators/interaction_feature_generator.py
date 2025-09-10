@@ -49,8 +49,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             behavioral_events = context.get("behavioral_events", [])
             orders = context.get("orders", [])
 
-            # Extract numeric product ID from GID format if needed
-            numeric_product_id = self._extract_id_from_gid(product_id)
+            # Product IDs are already normalized at data ingestion level
+            numeric_product_id = product_id
 
             # Filter events for this customer-product pair
             product_events = self._filter_product_events(
@@ -127,13 +127,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
         for event in behavioral_events:
             # Check if event is for this customer
-            # Handle both GID format (gid://shopify/Customer/123) and numeric format (123)
+            # Customer IDs are already normalized at data ingestion level
             event_customer_id = event.get("customerId", "")
-            if event_customer_id and event_customer_id.startswith(
-                "gid://shopify/Customer/"
-            ):
-                event_customer_id = event_customer_id.split("/")[-1]
-
             if event_customer_id != customer_id:
                 continue
 
@@ -163,7 +158,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 "productVariant", {}
             ) or event_data.get("productVariant", {})
             product = product_variant.get("product", {})
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
 
         elif event_type == "product_added_to_cart":
             # Handle both nested and direct structures
@@ -172,7 +167,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             ) or event_data.get("cartLine", {})
             merchandise = cart_line.get("merchandise", {})
             product = merchandise.get("product", {})
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
 
         elif event_type == "checkout_completed":
             # For checkout, we'd need to check all line items
@@ -183,36 +178,26 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             for item in line_items:
                 variant = item.get("variant", {})
                 product = variant.get("product", {})
-                product_id = self._extract_id_from_gid(product.get("id", ""))
+                product_id = product.get("id", "")
                 if product_id:
                     return product_id
 
         return None
 
-    def _extract_id_from_gid(self, gid: str) -> str:
-        """Extract numeric ID from Shopify GID"""
-        # gid://shopify/Product/7894239969419 -> 7894239969419
-        if not gid:
-            return ""
-        if "/" in gid:
-            return gid.split("/")[-1]
-        return gid
-
     def _get_product_purchases(
-        self, orders: List[Dict[str, Any]], customer_id: str, product_id: str, product_id_mapping: Optional[Dict[str, str]] = None
+        self,
+        orders: List[Dict[str, Any]],
+        customer_id: str,
+        product_id: str,
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all purchases of a product by a customer"""
         purchases = []
 
         for order in orders:
             # Check if order is for this customer
-            # Handle both GID format (gid://shopify/Customer/123) and numeric format (123)
+            # Customer IDs are already normalized at data ingestion level
             order_customer_id = order.get("customerId", "")
-            if order_customer_id and order_customer_id.startswith(
-                "gid://shopify/Customer/"
-            ):
-                order_customer_id = order_customer_id.split("/")[-1]
-
             if order_customer_id != customer_id:
                 continue
 
@@ -222,7 +207,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure
                 item_product_id = self._extract_product_id_from_line_item(item)
-                
+
                 # If we have a mapping, use it to map the item product ID to the ProductData product ID
                 if product_id_mapping and item_product_id:
                     # Check if this item product ID maps to our target product ID
@@ -260,12 +245,12 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
         # If stored as GID
         if "product" in line_item and isinstance(line_item["product"], dict):
-            return self._extract_id_from_gid(line_item["product"].get("id", ""))
+            return line_item["product"].get("id", "")
 
         # If stored in variant
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
 
         return ""
 

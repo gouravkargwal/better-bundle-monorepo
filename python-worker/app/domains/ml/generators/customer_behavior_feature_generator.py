@@ -2,7 +2,7 @@
 Customer Behavior Feature Generator for ML feature engineering
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 import json
 import statistics
@@ -226,7 +226,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
         first_event_time = self._parse_datetime(sorted_events[0].get("timestamp"))
         last_event_time = self._parse_datetime(sorted_events[-1].get("timestamp"))
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
 
         # Calculate days since first and last events
         days_since_first = 0
@@ -321,13 +321,27 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         # Get unique search terms (limit to prevent huge JSON)
         unique_search_terms = list(set(search_terms))[:20] if search_terms else []
 
+        # Ensure deviceType is always a string or None
+        device_type_value = None
+        if device_types:
+            device_type = device_types[0]
+            if device_type is not None and device_type != 0:
+                device_type_value = str(device_type)
+
+        # Ensure primaryReferrer is always a string or None
+        referrer_value = None
+        if referrers:
+            referrer = referrers[0]
+            if referrer is not None and referrer != 0:
+                referrer_value = str(referrer)
+
         return {
             "uniqueProductsViewed": len(unique_products),
             "uniqueCollectionsViewed": len(unique_collections),
             "searchTerms": Json(unique_search_terms if unique_search_terms else []),
             "topCategories": Json(top_categories if top_categories else []),
-            "deviceType": device_types[0] if device_types else None,
-            "primaryReferrer": referrers[0] if referrers else None,
+            "deviceType": device_type_value,
+            "primaryReferrer": referrer_value,
         }
 
     def _compute_conversion_metrics(self, features: Dict[str, Any]) -> Dict[str, Any]:

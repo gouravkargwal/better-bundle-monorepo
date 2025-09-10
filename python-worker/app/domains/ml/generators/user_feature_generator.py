@@ -361,11 +361,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
             if isinstance(product, dict):
-                return self._extract_id_from_gid(product.get("id", ""))
+                return product.get("id", "")
 
         # From product field
         if "product" in line_item and isinstance(line_item["product"], dict):
-            return self._extract_id_from_gid(line_item["product"].get("id", ""))
+            return line_item["product"].get("id", "")
 
         return ""
 
@@ -404,14 +404,6 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             return "premium"
         else:
             return "luxury"
-
-    def _extract_id_from_gid(self, gid: str) -> str:
-        """Extract numeric ID from Shopify GID"""
-        if not gid:
-            return ""
-        if "/" in gid:
-            return gid.split("/")[-1]
-        return gid
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
         """Parse date from various formats"""

@@ -253,7 +253,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             product = (
                 event_data.get("data", {}).get("productVariant", {}).get("product", {})
             )
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
         elif event_type == "product_added_to_cart":
             product = (
                 event_data.get("data", {})
@@ -261,13 +261,8 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
                 .get("merchandise", {})
                 .get("product", {})
             )
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
         return None
-
-    def _extract_id_from_gid(self, gid: str) -> str:
-        if not gid:
-            return ""
-        return gid.split("/")[-1] if "/" in gid else gid
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         if "productId" in line_item:

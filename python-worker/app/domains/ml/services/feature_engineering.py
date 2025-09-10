@@ -306,12 +306,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
                 for event in behavioral_events or []:
                     event_customer_id = event.get("customerId", "")
-                    # Handle GID format: gid://shopify/Customer/24256 -> 24256
-                    if event_customer_id and event_customer_id.startswith(
-                        "gid://shopify/Customer/"
-                    ):
-                        event_customer_id = event_customer_id.split("/")[-1]
-
+                    # Customer IDs are already normalized at data ingestion level
                     if event_customer_id == customer_id:
                         customer_events.append(event)
 
@@ -397,6 +392,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         for event in sorted_events:
             customer_id = event.get("customerId") or "anonymous"
+
+            # Customer IDs are already normalized at data ingestion level
+
             event_time_str = event.get("timestamp")
 
             # Parse event time to datetime object
@@ -755,8 +753,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     for variant in variants:
                         if isinstance(variant, dict) and "id" in variant:
                             variant_id = variant["id"]
-                            if variant_id.startswith("gid://shopify/ProductVariant/"):
-                                variant_to_product_map[variant_id] = product_id
+                            # Variant IDs are already normalized at data ingestion level
+                            variant_to_product_map[variant_id] = product_id
 
             # Find customer-product pairs that have interactions
             interaction_pairs = set()
@@ -772,15 +770,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     event_product_id = self._extract_product_id_from_event(event)
                     if event_product_id:
                         customer_id = event.get("customerId")
-                        # Extract numeric ID from GID
-                        if customer_id and customer_id.startswith(
-                            "gid://shopify/Customer/"
-                        ):
-                            customer_id = customer_id.split("/")[-1]
-                        if event_product_id and event_product_id.startswith(
-                            "gid://shopify/Product/"
-                        ):
-                            event_product_id = event_product_id.split("/")[-1]
+                        # IDs are already normalized at data ingestion level
 
                         # Map behavioral event product ID to ProductData product ID
                         mapped_product_id = product_id_mapping.get(
@@ -799,10 +789,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             for order in orders:
                 if order.get("customerId"):
                     customer_id = order.get("customerId")
-                    if customer_id and customer_id.startswith(
-                        "gid://shopify/Customer/"
-                    ):
-                        customer_id = customer_id.split("/")[-1]
+                    # Customer IDs are already normalized at data ingestion level
                     for line_item in order.get("lineItems", []):
                         # Extract product ID from line item structure using variant mapping
                         product_id = None
@@ -829,10 +816,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if isinstance(product, dict):
                                 product_id = product.get("id")
 
-                        if product_id and product_id.startswith(
-                            "gid://shopify/Product/"
-                        ):
-                            product_id = product_id.split("/")[-1]
+                            # Product IDs are already normalized at data ingestion level
                             # Only add if both IDs are valid
                             if customer_id and product_id:
                                 interaction_pairs.add((customer_id, product_id))
@@ -845,8 +829,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             interaction_features = {}
             for customer_id, product_id in interaction_pairs:
                 try:
-                    # Convert numeric product ID back to full GID format for the generator
-                    full_product_id = f"gid://shopify/Product/{product_id}"
+                    # Product IDs are already normalized at data ingestion level
+                    full_product_id = product_id
                     features = await self.interaction_generator.generate_features(
                         shop["id"],
                         customer_id,
@@ -906,8 +890,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if variant_id in variant_to_product_map:
                                 product_id = variant_to_product_map[variant_id]
 
-                    if product_id and product_id.startswith("gid://shopify/Product/"):
-                        product_id = product_id.split("/")[-1]
+                    # Product IDs are already normalized at data ingestion level
+                    if product_id:
                         order_products.append(product_id)
                     elif product_id and product_id.isdigit():
                         # Handle case where we have a numeric product ID
@@ -1236,9 +1220,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             }
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from behavioral event"""
+        """Extract product ID from event data (IDs are already normalized)"""
         try:
-            event_type = event.get("eventType", "")
+            event_type = event.get("eventType")
             event_data = event.get("eventData", {})
 
             # Handle string eventData
@@ -1247,69 +1231,55 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     import json
 
                     event_data = json.loads(event_data)
-                except Exception as e:
-                    logger.error(f"Failed to parse string eventData: {e}")
+                except:
                     return None
 
             if event_type == "product_viewed":
-                # Handle both structures: with and without "data" wrapper
-                product_variant = event_data.get("data", {}).get(
-                    "productVariant", {}
-                ) or event_data.get("productVariant", {})
+                # Handle nested data structure: eventData.data.productVariant.product
+                if "data" in event_data:
+                    product_variant = event_data.get("data", {}).get(
+                        "productVariant", {}
+                    )
+                else:
+                    product_variant = event_data.get("productVariant", {})
                 product = product_variant.get("product", {})
-                product_id = product.get("id", "")
-                if product_id:
-                    return self._extract_id_from_gid(product_id)
-                return None
+                return product.get("id", "")
 
             elif event_type == "product_added_to_cart":
-                # Handle both structures: with and without "data" wrapper
-                cart_line = event_data.get("data", {}).get(
-                    "cartLine", {}
-                ) or event_data.get("cartLine", {})
+                # Handle nested data structure: eventData.data.cartLine.merchandise.product
+                if "data" in event_data:
+                    cart_line = event_data.get("data", {}).get("cartLine", {})
+                else:
+                    cart_line = event_data.get("cartLine", {})
                 merchandise = cart_line.get("merchandise", {})
                 product = merchandise.get("product", {})
-                product_id = product.get("id", "")
-                if product_id:
-                    return self._extract_id_from_gid(product_id)
-                return None
+                return product.get("id", "")
 
             elif event_type == "product_removed_from_cart":
-                # Handle both structures: with and without "data" wrapper
                 cart_line = event_data.get("data", {}).get(
                     "cartLine", {}
                 ) or event_data.get("cartLine", {})
                 merchandise = cart_line.get("merchandise", {})
                 product = merchandise.get("product", {})
-                return self._extract_id_from_gid(product.get("id", ""))
+                return product.get("id", "")
+
             return None
 
         except Exception as e:
-            logger.error(f"Failed to extract product ID from event: {str(e)}")
             import traceback
 
+            logger.error(f"Error extracting product ID from event: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
-
-    def _extract_id_from_gid(self, gid: str) -> str:
-        """Extract numeric ID from Shopify GID"""
-        if not gid:
-            return ""
-
-        # Handle GID format: gid://shopify/Product/123456
-        if "/" in gid:
-            return gid.split("/")[-1]
-
-        return gid
 
     def _create_product_id_mapping(
         self, behavioral_events: List[Dict[str, Any]], products: List[Dict[str, Any]]
     ) -> Dict[str, str]:
-        """Create mapping between behavioral event product IDs and ProductData product IDs"""
+        """Create mapping between behavioral event product IDs and ProductData product IDs (IDs are already normalized)"""
         mapping = {}
 
         # Create a mapping based on product titles
-        # Behavioral events contain product information with different IDs than ProductData
+        # Since IDs are already normalized, we can directly use them
         for event in behavioral_events:
             if event.get("eventType") in [
                 "product_viewed",
@@ -1363,9 +1333,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             break
 
                 if product_info:
-                    event_product_id = self._extract_id_from_gid(
-                        product_info.get("id", "")
-                    )
+                    # IDs are already normalized, so we can use them directly
+                    event_product_id = product_info.get("id", "")
                     product_title = product_info.get("title", "")
 
                     if event_product_id and product_title:
@@ -1418,7 +1387,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 # Convert variant number to product number
                 # Variant 2001 -> Product 1001, Variant 2002 -> Product 1002, etc.
                 product_num = str(int(variant_num) - 1000)
-                return f"gid://shopify/Product/{product_num}"
+                return product_num
             return variant_id
         except Exception:
             return None

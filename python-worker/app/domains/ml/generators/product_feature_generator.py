@@ -531,7 +531,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             else:
                 product_variant = event_data.get("productVariant", {})
             product = product_variant.get("product", {})
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
 
         elif event_type == "product_added_to_cart":
             # Handle nested data structure: eventData.data.cartLine.merchandise.product
@@ -541,7 +541,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 cart_line = event_data.get("cartLine", {})
             merchandise = cart_line.get("merchandise", {})
             product = merchandise.get("product", {})
-            return self._extract_id_from_gid(product.get("id", ""))
+            return product.get("id", "")
 
         return None
 
@@ -553,7 +553,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
             if isinstance(product, dict):
-                return self._extract_id_from_gid(product.get("id", ""))
+                return product.get("id", "")
 
         return ""
 
@@ -561,14 +561,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         """Extract session ID from event"""
         event_data = event.get("eventData", {})
         return event_data.get("clientId")
-
-    def _extract_id_from_gid(self, gid: str) -> str:
-        """Extract numeric ID from Shopify GID"""
-        if not gid:
-            return ""
-        if "/" in gid:
-            return gid.split("/")[-1]
-        return gid
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
         """Parse date from various formats"""

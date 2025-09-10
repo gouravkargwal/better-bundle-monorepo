@@ -19,6 +19,8 @@ class FieldExtractorService:
 
     def __init__(self):
         self.logger = logger
+        # Simple cache for GID normalization to avoid repeated processing
+        self._gid_cache = {}
 
     def extract_fields_generic(
         self, data_type: str, payload: Dict[str, Any], shop_id: str
@@ -143,12 +145,12 @@ class FieldExtractorService:
                 "tags": tags,
                 "note": order_data.get("note"),
                 "lineItems": line_items,
-                "shippingAddress": shipping_address,
-                "billingAddress": billing_address,
+                "shippingAddress": self._normalize_gid_in_dict(shipping_address),
+                "billingAddress": self._normalize_gid_in_dict(billing_address),
                 "discountApplications": discount_applications,
                 "metafields": metafields,
-                "fulfillments": fulfillments,
-                "transactions": transactions,
+                "fulfillments": self._normalize_gid_in_dict(fulfillments),
+                "transactions": self._normalize_gid_in_dict(transactions),
             }
 
         except Exception as e:
@@ -251,7 +253,9 @@ class FieldExtractorService:
                 "templateSuffix": product_data.get("templateSuffix"),
                 "variants": variants,
                 "images": images,
-                "media": product_data.get("media", {}).get("edges", []),
+                "media": self._normalize_gid_in_dict(
+                    product_data.get("media", {}).get("edges", [])
+                ),
                 "options": options,
                 "collections": collections,
                 "metafields": metafields,
@@ -429,26 +433,57 @@ class FieldExtractorService:
     def _extract_graphql_edges(
         self, data: Any, field_name: str = "edges"
     ) -> List[Dict[str, Any]]:
-        """Generic method to extract GraphQL edges structure"""
+        """Generic method to extract GraphQL edges structure and normalize GID IDs"""
         if not isinstance(data, dict):
             return []
 
         if field_name in data and isinstance(data[field_name], list):
-            return [edge.get("node", {}) for edge in data[field_name]]
+            edges = [edge.get("node", {}) for edge in data[field_name]]
+            # Normalize GID IDs in the extracted edges
+            return [self._normalize_gid_in_dict(edge) for edge in edges]
 
         return []
 
     def _extract_shopify_id(self, gid: str) -> Optional[str]:
-        """Extract numeric ID from Shopify GraphQL GID"""
+        """Extract numeric ID from Shopify GraphQL GID with caching"""
         if not gid:
             return None
+
+        # Check cache first
+        if gid in self._gid_cache:
+            return self._gid_cache[gid]
+
         try:
             # Handle GID format: gid://shopify/Order/123456789
             if gid.startswith("gid://shopify/"):
-                return gid.split("/")[-1]
-            return gid
+                result = gid.split("/")[-1]
+            else:
+                result = gid
+
+            # Cache the result
+            self._gid_cache[gid] = result
+            return result
         except Exception:
             return None
+
+    def _normalize_gid_in_dict(self, data: Any) -> Any:
+        """Recursively normalize GID IDs in nested dictionaries and lists"""
+        if isinstance(data, dict):
+            normalized = {}
+            for key, value in data.items():
+                if isinstance(value, str) and value.startswith("gid://shopify/"):
+                    # Normalize any GID field (not just 'id')
+                    normalized[key] = self._extract_shopify_id(value)
+                elif isinstance(value, (dict, list)):
+                    # Recursively normalize nested structures
+                    normalized[key] = self._normalize_gid_in_dict(value)
+                else:
+                    normalized[key] = value
+            return normalized
+        elif isinstance(data, list):
+            return [self._normalize_gid_in_dict(item) for item in data]
+        else:
+            return data
 
     def _parse_datetime(self, date_str: Optional[str]) -> Optional[datetime]:
         """Parse datetime string to datetime object"""
