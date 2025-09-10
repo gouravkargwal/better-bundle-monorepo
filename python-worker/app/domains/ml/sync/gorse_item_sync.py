@@ -456,7 +456,7 @@ class GorseItemSync:
     ) -> List[str]:
         """
         Get categories with shopId as primary category for multi-tenancy
-        Format: ["shop_{shop_id}", "collection_abc", "collection_def", ...]
+        Format: ["shop_{shop_id}", "product_type", "collection_abc", ...]
         """
         categories = []
 
@@ -464,7 +464,12 @@ class GorseItemSync:
         if shop_id:
             categories.append(f"shop_{shop_id}")
 
-        # 2. Get from product collections
+        # 2. Add product type as a meaningful category
+        product_type = product.get("productType")
+        if product_type:
+            categories.append(product_type)
+
+        # 3. Get from product collections
         collections = product.get("collections", "[]")
         if isinstance(collections, str):
             try:
@@ -480,7 +485,7 @@ class GorseItemSync:
             elif isinstance(collection, str):
                 categories.append(collection)
 
-        # 3. Also get high-performance collections from CollectionFeatures
+        # 4. Also get high-performance collections from CollectionFeatures
         db = await self.pipeline._get_database()
         query = """
                 SELECT "collectionId" 
@@ -504,15 +509,18 @@ class GorseItemSync:
         conversion_rate = product.get("overallConversionRate")
         view_count = product.get("viewCount30d", 0)
 
-        # Hide if out of stock
-        if total_inventory is None or total_inventory <= 0:
-            return True
+        # Only hide if explicitly marked as hidden or completely out of stock with no recent activity
+        # For seed data and testing, be more permissive
+        if total_inventory is not None and total_inventory <= 0:
+            # Only hide if there's been no activity (no views) in the last 30 days
+            if view_count == 0:
+                return True
 
-        # Hide for very low conversion if there are sufficient views to make a decision
+        # Hide for very low conversion only if there are many views and very poor performance
         if (
-            view_count > 50
+            view_count > 100  # Increased threshold
             and conversion_rate is not None
-            and float(conversion_rate) < 0.01
+            and float(conversion_rate) < 0.005  # More strict threshold
         ):
             return True
 

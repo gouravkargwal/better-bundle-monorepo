@@ -293,6 +293,19 @@ class GorseTrainingService:
                 if not data_records:
                     break
 
+                # Log raw database data before conversion
+                logger.info(f"=== RAW {data_type.upper()} DATA FROM DATABASE ===")
+                logger.info(
+                    f"Fetched {len(data_records)} {data_type} records from database"
+                )
+                for i, record in enumerate(data_records[:3]):  # Show first 3 records
+                    logger.info(f"Raw {data_type.title()} {i+1}: {record}")
+                if len(data_records) > 3:
+                    logger.info(
+                        f"... and {len(data_records) - 3} more {data_type} records from database"
+                    )
+                logger.info(f"=== END RAW {data_type.upper()} DATA ===")
+
                 # Convert and push with retry logic
                 gorse_data = [config["converter"](record) for record in data_records]
                 result = await self._push_batch_with_retry(

@@ -1,6 +1,6 @@
 [database]
 cache_store = "redis://localhost:6379/0"
-data_store = "postgresql://gorse:password@localhost:5432/gorse"
+data_store = "postgresql://gorse:gorse_pass@postgres:5432/gorse?sslmode=disable"
 table_prefix = "gorse_"
 cache_table_prefix = "gorse_cache_"
 

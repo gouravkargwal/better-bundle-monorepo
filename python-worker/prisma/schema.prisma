@@ -771,6 +771,7 @@ model ProductFeatures {
   // Price & Inventory
   avgSellingPrice   Float? // Actual price from orders
   priceVariance     Float? // Price consistency
+  totalInventory    Int?   // Total inventory from ProductData
   inventoryTurnover Float? // Sales rate vs stock
   stockVelocity     Float? // Units sold per day
   priceTier         String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"

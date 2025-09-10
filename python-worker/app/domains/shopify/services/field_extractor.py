@@ -189,6 +189,9 @@ class FieldExtractorService:
                 )
                 return None
 
+            # Calculate inventory from variants
+            calculated_inventory = self._get_total_inventory(variants)
+
             return {
                 "shopId": shop_id,
                 "productId": product_id,
@@ -200,10 +203,11 @@ class FieldExtractorService:
                 "vendor": product_data.get("vendor"),
                 "tags": tags,
                 "status": product_data.get("status", "ACTIVE"),
-                "totalInventory": product_data.get("totalInventory"),
+                "totalInventory": product_data.get("totalInventory")
+                or calculated_inventory,  # Use calculated as fallback
                 "price": price,
                 "compareAtPrice": self._get_product_compare_price(variants),
-                "inventory": self._get_total_inventory(variants),
+                "inventory": calculated_inventory,
                 "imageUrl": main_image_url,
                 "imageAlt": images[0].get("altText") if images else None,
                 "productCreatedAt": self._parse_datetime(product_data.get("createdAt")),

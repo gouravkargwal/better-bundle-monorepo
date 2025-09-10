@@ -339,7 +339,7 @@ async def insert_raw_products(db, shop_id: str) -> List[Dict[str, Any]]:
                                 "title": "10000mAh",
                                 "sku": "PC-10K",
                                 "price": "40.00",
-                                "inventoryQuantity": 0,  # Out of stock edge case
+                                "inventoryQuantity": 5,  # Low stock but not out of stock
                                 "compareAtPrice": None,
                             }
                         }
@@ -816,17 +816,10 @@ def _event_payload(
         },
     }
 
-    # Add customer ID if provided or auto-determined
+    # Add customer ID only if explicitly provided
     if customer_id:
         base["customerId"] = customer_id
-    elif clients and customer_ids:
-        # Auto-determine customer ID based on client ID
-        try:
-            client_index = clients.index(client_id)
-            if client_index < len(customer_ids):
-                base["customerId"] = customer_ids[client_index]
-        except ValueError:
-            pass  # Anonymous user
+    # Note: Removed automatic customer ID assignment to keep events anonymous by default
 
     if extra:
         base.update({"data": extra})
@@ -844,7 +837,7 @@ async def insert_raw_behavioral_events(
     # Client IDs for 5 sessions (one per customer + anonymous)
     clients = [str(uuid.uuid4()) for _ in range(5)]
 
-    # Helper function to create events with automatic customer ID mapping
+    # Helper function to create events - keep them anonymous initially
     def create_event(
         event_name: str,
         client_id: str,
@@ -852,16 +845,18 @@ async def insert_raw_behavioral_events(
         extra: Dict[str, Any],
         timestamp: datetime = None,
         device_type: str = "desktop",
+        is_logged_in: bool = False,  # Whether this event should have a customer ID
     ) -> Dict[str, Any]:
-        """Create event with automatic customer ID mapping"""
-        # Determine customer ID based on client ID
+        """Create event - anonymous by default, can be logged in if specified"""
+        # Only assign customer ID if this is a logged-in event
         customer_id = None
-        try:
-            client_index = clients.index(client_id)
-            if client_index < len(customer_ids):
-                customer_id = customer_ids[client_index]
-        except ValueError:
-            pass  # Anonymous user
+        if is_logged_in:
+            try:
+                client_index = clients.index(client_id)
+                if client_index < len(customer_ids):
+                    customer_id = customer_ids[client_index]
+            except ValueError:
+                pass  # Anonymous user
 
         return _event_payload(
             event_name, client_id, seq, extra, timestamp, device_type, customer_id
@@ -883,7 +878,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "collection_viewed",
             clients[0],
             3,
@@ -920,7 +915,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[0],
             4,
@@ -941,7 +936,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Hoodie
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[0],
             5,
@@ -962,7 +957,7 @@ async def insert_raw_behavioral_events(
         )
     )  # T-Shirt (recent view)
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             clients[0],
             6,
@@ -988,7 +983,7 @@ async def insert_raw_behavioral_events(
     )
     # Cart viewed event - user checks their cart
     events.append(
-        _event_payload(
+        create_event(
             "cart_viewed",
             clients[0],
             7,
@@ -1022,7 +1017,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "checkout_started",
             clients[0],
             8,
@@ -1055,7 +1050,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "checkout_completed",
             clients[0],
             9,
@@ -1086,10 +1081,11 @@ async def insert_raw_behavioral_events(
             },
             past_date(5),
             "mobile",
+            is_logged_in=True,  # Alice is now logged in for checkout
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "customer_linked",
             clients[0],
             10,
@@ -1100,9 +1096,9 @@ async def insert_raw_behavioral_events(
     )  # Logs in
 
     # Session 2: Bob (New) - Views only, no purchase (for cold-start)
-    events.append(_event_payload("page_viewed", clients[1], 1, {}, past_date(4)))
+    events.append(create_event("page_viewed", clients[1], 1, {}, past_date(4)))
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[1],
             2,
@@ -1122,7 +1118,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Sunglasses
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[1],
             3,
@@ -1142,7 +1138,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Belt (recent view)
     events.append(
-        _event_payload(
+        create_event(
             "customer_linked",
             clients[1],
             4,
@@ -1152,9 +1148,9 @@ async def insert_raw_behavioral_events(
     )
 
     # Session 3: Charlie (Moderate) - Cross-category buy
-    events.append(_event_payload("page_viewed", clients[2], 1, {}, past_date(3)))
+    events.append(create_event("page_viewed", clients[2], 1, {}, past_date(3)))
     events.append(
-        _event_payload(
+        create_event(
             "collection_viewed",
             clients[2],
             2,
@@ -1190,7 +1186,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[2],
             3,
@@ -1210,7 +1206,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Smart Watch
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[2],
             4,
@@ -1230,7 +1226,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Wireless Earbuds
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             clients[2],
             5,
@@ -1255,7 +1251,7 @@ async def insert_raw_behavioral_events(
     )
     # Cart viewed event - user checks their cart
     events.append(
-        _event_payload(
+        create_event(
             "cart_viewed",
             clients[2],
             6,
@@ -1289,7 +1285,7 @@ async def insert_raw_behavioral_events(
     )
     # Product removed from cart - user changes their mind
     events.append(
-        _event_payload(
+        create_event(
             "product_removed_from_cart",
             clients[2],
             7,
@@ -1313,7 +1309,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "checkout_completed",
             clients[2],
             8,
@@ -1343,10 +1339,12 @@ async def insert_raw_behavioral_events(
                 }
             },
             past_date(3),
+            "desktop",
+            is_logged_in=True,  # Bob is now logged in for checkout
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "customer_linked",
             clients[2],
             7,
@@ -1356,9 +1354,9 @@ async def insert_raw_behavioral_events(
     )
 
     # Session 4: Dana (Abandoned Cart) - Add to cart, no checkout
-    events.append(_event_payload("page_viewed", clients[3], 1, {}, past_date(2)))
+    events.append(create_event("page_viewed", clients[3], 1, {}, past_date(2)))
     events.append(
-        _event_payload(
+        create_event(
             "search_submitted",
             clients[3],
             2,
@@ -1367,7 +1365,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[3],
             3,
@@ -1387,7 +1385,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Scarf
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             clients[3],
             4,
@@ -1411,7 +1409,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "customer_linked",
             clients[3],
             6,
@@ -1422,10 +1420,10 @@ async def insert_raw_behavioral_events(
 
     # Session 5: Eve (Cross-Category) - Multiple buys, recent activity
     events.append(
-        _event_payload("page_viewed", clients[4], 1, {}, past_date(1), "mobile")
+        create_event("page_viewed", clients[4], 1, {}, past_date(1), "mobile")
     )
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[4],
             2,
@@ -1446,7 +1444,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Hoodie
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[4],
             3,
@@ -1467,7 +1465,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Smart Watch (recent view)
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             clients[4],
             4,
@@ -1492,7 +1490,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "checkout_completed",
             clients[4],
             5,
@@ -1523,10 +1521,11 @@ async def insert_raw_behavioral_events(
             },
             past_date(1),
             "mobile",
+            is_logged_in=True,  # Anonymous user is now logged in for checkout
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[4],
             6,
@@ -1547,7 +1546,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Scarf (today)
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             clients[4],
             7,
@@ -1568,7 +1567,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Charger
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             clients[4],
             8,
@@ -1593,7 +1592,7 @@ async def insert_raw_behavioral_events(
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "checkout_completed",
             clients[4],
             9,
@@ -1624,10 +1623,11 @@ async def insert_raw_behavioral_events(
             },
             past_date(0),
             "mobile",
+            is_logged_in=True,  # Anonymous user is now logged in for checkout
         )
     )
     events.append(
-        _event_payload(
+        create_event(
             "customer_linked",
             clients[4],
             10,
@@ -1640,9 +1640,9 @@ async def insert_raw_behavioral_events(
     # Additional anonymous sessions for edge cases
     anonymous_client = str(uuid.uuid4())
     #  Anonymous abandonment
-    events.append(_event_payload("page_viewed", anonymous_client, 1, {}, past_date(6)))
+    events.append(create_event("page_viewed", anonymous_client, 1, {}, past_date(6)))
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             anonymous_client,
             2,
@@ -1662,7 +1662,7 @@ async def insert_raw_behavioral_events(
         )
     )  # Baseball Cap (low stock)
     events.append(
-        _event_payload(
+        create_event(
             "product_added_to_cart",
             anonymous_client,
             3,
@@ -1688,7 +1688,7 @@ async def insert_raw_behavioral_events(
 
     # Anonymous new item view (for latest)
     events.append(
-        _event_payload(
+        create_event(
             "product_viewed",
             anonymous_client,
             4,
@@ -1711,7 +1711,7 @@ async def insert_raw_behavioral_events(
     # More views for popularity (make Sunglasses popular)
     for i in range(5):  # 5 extra views
         events.append(
-            _event_payload(
+            create_event(
                 "product_viewed",
                 str(uuid.uuid4()),
                 1,
@@ -1752,18 +1752,23 @@ async def insert_raw_behavioral_events(
 async def insert_user_identity_links(
     db, shop_id: str, client_ids: List[str], customer_ids: List[str]
 ) -> List[Dict[str, Any]]:
-    """Insert UserIdentityLink records for all customers."""
+    """Insert UserIdentityLink records with proper 1:1 mapping between client IDs and customer IDs."""
     links = []
+    # Ensure we only create links for the number of client IDs we have
+    # and map them 1:1 with customer IDs
     for i, client_id in enumerate(client_ids):
-        links.append(
-            await db.useridentitylink.create(
-                data={
-                    "shopId": shop_id,
-                    "clientId": client_id,
-                    "customerId": customer_ids[i],
-                }
+        if i < len(
+            customer_ids
+        ):  # Only create link if we have a corresponding customer ID
+            links.append(
+                await db.useridentitylink.create(
+                    data={
+                        "shopId": shop_id,
+                        "clientId": client_id,
+                        "customerId": customer_ids[i],
+                    }
+                )
             )
-        )
     return links
 
 
@@ -1803,12 +1808,15 @@ async def main():
 
     # Extract client IDs from the events (Alice and Bob's client IDs)
     alice_client_id = raw_events[0].payload.get("clientId")  # First event is Alice's
-    bob_client_id = raw_events[7].payload.get("clientId")  # 8th event is Bob's first
+    bob_client_id = raw_events[10].payload.get(
+        "clientId"
+    )  # 11th event is Bob's first (after Alice's 10 events)
 
-    # Create UserIdentityLink records
-    await insert_user_identity_links(
-        db, shop_id, [alice_client_id, bob_client_id], customer_ids
-    )
+    # Create UserIdentityLink records - only link the first 2 customers to the 2 client IDs
+    client_ids = [alice_client_id, bob_client_id]
+    linked_customer_ids = customer_ids[:2]  # Only take first 2 customers for linking
+
+    await insert_user_identity_links(db, shop_id, client_ids, linked_customer_ids)
 
     print(
         "Seeding complete: 1 shop, 3 products, 2 customers, 2 orders, 1 collection, 12 events (including 2 customer_linked events), 2 identity links"
@@ -2042,8 +2050,8 @@ async def run_complete_pipeline():
     print("\n📊 Step 2: Processing raw data to main tables...")
     main_success = await process_raw_to_main_tables(shop_id)
 
-    # Step 3: Process behavioral events
-    print("\n📊 Step 3: Processing behavioral events...")
+    # Step 3: Process behavioral events using webhook handler
+    print("\n📊 Step 3: Processing behavioral events using webhook handler...")
     events_success = await process_behavioral_events(shop_id)
 
     # Step 4: Compute ML features
@@ -2098,4 +2106,6 @@ async def run_complete_pipeline():
 
 
 if __name__ == "__main__":
+    import sys
+
     asyncio.run(run_complete_pipeline())

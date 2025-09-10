@@ -345,6 +345,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         return {
             "avg_selling_price": round(avg_selling_price, 2),
             "price_variance": round(price_variance, 2),
+            "total_inventory": total_inventory,  # Include totalInventory from ProductData
             "inventory_turnover": round(inventory_turnover, 4),
             "stock_velocity": round(stock_velocity, 2),
             "price_tier": price_tier,

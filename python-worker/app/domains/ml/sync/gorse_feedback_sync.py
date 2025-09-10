@@ -202,14 +202,14 @@ class GorseFeedbackSync:
             for feedback in feedback_batch:
                 # Use prefixed IDs for multi-tenancy
                 prefixed_user_id = self._get_prefixed_user_id(
-                    feedback["user_id"], feedback["shop_id"]
+                    feedback["userId"], feedback["shop_id"]
                 )
                 prefixed_item_id = self._get_prefixed_item_id(
-                    feedback["item_id"], feedback["shop_id"]
+                    feedback["itemId"], feedback["shop_id"]
                 )
 
                 gorse_feedback_record = {
-                    "feedbackType": feedback["feedback_type"],
+                    "feedbackType": feedback["feedbackType"],
                     "userId": prefixed_user_id,
                     "itemId": prefixed_item_id,
                     "timestamp": feedback["timestamp"],

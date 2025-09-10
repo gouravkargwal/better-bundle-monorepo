@@ -83,6 +83,20 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/users"
 
+            # Log detailed payload information
+            logger.info(f"=== USERS PAYLOAD DEBUG ===")
+            logger.info(f"URL: {url}")
+            logger.info(f"Total users to send: {len(gorse_users)}")
+            logger.info(f"Headers: {self._get_headers()}")
+
+            # Log sample of first few users (truncated for readability)
+            for i, user in enumerate(gorse_users[:3]):  # Show first 3 users
+                logger.info(f"User {i+1} payload: {json.dumps(user, indent=2)}")
+
+            if len(gorse_users) > 3:
+                logger.info(f"... and {len(gorse_users) - 3} more users")
+            logger.info(f"=== END USERS PAYLOAD DEBUG ===")
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     url, json=gorse_users, headers=self._get_headers()
@@ -167,6 +181,20 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/items"
 
+            # Log detailed payload information
+            logger.info(f"=== ITEMS PAYLOAD DEBUG ===")
+            logger.info(f"URL: {url}")
+            logger.info(f"Total items to send: {len(gorse_items)}")
+            logger.info(f"Headers: {self._get_headers()}")
+
+            # Log sample of first few items (truncated for readability)
+            for i, item in enumerate(gorse_items[:3]):  # Show first 3 items
+                logger.info(f"Item {i+1} payload: {json.dumps(item, indent=2)}")
+
+            if len(gorse_items) > 3:
+                logger.info(f"... and {len(gorse_items) - 3} more items")
+            logger.info(f"=== END ITEMS PAYLOAD DEBUG ===")
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     url, json=gorse_items, headers=self._get_headers()
@@ -246,6 +274,22 @@ class GorseApiClient:
                 gorse_feedback.append(gorse_fb)
 
             url = f"{self.base_url}/api/feedback"
+
+            # Log detailed payload information
+            logger.info(f"=== FEEDBACK PAYLOAD DEBUG ===")
+            logger.info(f"URL: {url}")
+            logger.info(f"Total feedback records to send: {len(gorse_feedback)}")
+            logger.info(f"Headers: {self._get_headers()}")
+
+            # Log sample of first few feedback records (truncated for readability)
+            for i, feedback in enumerate(
+                gorse_feedback[:3]
+            ):  # Show first 3 feedback records
+                logger.info(f"Feedback {i+1} payload: {json.dumps(feedback, indent=2)}")
+
+            if len(gorse_feedback) > 3:
+                logger.info(f"... and {len(gorse_feedback) - 3} more feedback records")
+            logger.info(f"=== END FEEDBACK PAYLOAD DEBUG ===")
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(

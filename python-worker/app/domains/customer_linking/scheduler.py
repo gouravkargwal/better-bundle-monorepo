@@ -55,7 +55,7 @@ class CustomerLinkingScheduler:
 
             # Get all UserIdentityLink records
             all_links = await db.useridentitylink.find_many(
-                take=batch_size, order_by={"createdAt": "desc"}
+                take=batch_size, order={"linkedAt": "desc"}
             )
 
             for link in all_links:
@@ -98,20 +98,28 @@ class CustomerLinkingScheduler:
             for link in links:
                 try:
                     # Update all events with this clientId that don't have a customerId
-                    result = await db.behavioralevents.update_many(
+                    # Also update the timestamp to trigger feature computation
+                    from datetime import datetime
+
+                    now_utc = lambda: datetime.now()
+
+                    updated_count = await db.behavioralevents.update_many(
                         where={
                             "shopId": link.shopId,
                             "clientId": link.clientId,
                             "customerId": None,
                         },
-                        data={"customerId": link.customerId},
+                        data={
+                            "customerId": link.customerId,
+                            "timestamp": now_utc(),  # Update timestamp to trigger feature computation
+                        },
                     )
 
                     stats["processed_links"] += 1
-                    stats["total_events_backfilled"] += result.count
+                    stats["total_events_backfilled"] += updated_count
 
                     logger.info(
-                        f"Backfilled {result.count} events for link: {link.clientId} → {link.customerId}"
+                        f"Backfilled {updated_count} events for link: {link.clientId} → {link.customerId}"
                     )
 
                 except Exception as e:

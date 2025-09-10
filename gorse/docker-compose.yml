@@ -4,6 +4,11 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   postgres:
     image: postgres:16
@@ -16,38 +21,42 @@ services:
       POSTGRES_PASSWORD: gorse_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gorse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  worker:
-    image: zhenghaoz/gorse-worker:nightly
-    restart: unless-stopped
-    depends_on:
-      - master
-    env_file:
-      - local.env
-
-  server:
-    image: zhenghaoz/gorse-server:nightly
+  gorse:
+    image: zhenghaoz/gorse-in-one:latest
     restart: unless-stopped
     ports:
-      - "8087:8087"
-    depends_on:
-      - master
-    env_file:
-      - local.env
-
-  master:
-    image: zhenghaoz/gorse-master:nightly
-    restart: unless-stopped
-    ports:
-      - "8086:8086"
-      - "8088:8088"
-    env_file:
-      - local.env
+      - "8086:8086" # gRPC port
+      - "8088:8088" # HTTP port
+    environment:
+      GORSE_CACHE_STORE: redis://redis:6379/0
+      GORSE_DATA_STORE: postgresql://gorse:gorse_pass@postgres:5432/gorse?sslmode=disable
+      GORSE_MASTER_HOST: 0.0.0.0
+      GORSE_LOG_LEVEL: debug
+      GORSE_API_KEY: secure_random_key_123
+    command:
+      - -c
+      - /etc/gorse/config.toml
+      - --log-path
+      - /var/log/gorse/master.log
+      - --cache-path
+      - /var/lib/gorse/master_cache.data
     volumes:
       - ./config/config.toml:/etc/gorse/config.toml
+      - gorse_logs:/var/log/gorse
+      - gorse_cache:/var/lib/gorse
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  gorse_logs:
+  gorse_cache:

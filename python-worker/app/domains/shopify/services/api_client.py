@@ -392,6 +392,13 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         productType
                         vendor
                         totalInventory
+                        onlineStoreUrl
+                        onlineStorePreviewUrl
+                        seo {
+                            title
+                            description
+                        }
+                        templateSuffix
                         images(first: 5) {
                             edges {
                                 node {
@@ -400,6 +407,35 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     altText
                                     width
                                     height
+                                }
+                            }
+                        }
+                        media(first: 10) {
+                            edges {
+                                node {
+                                    ... on MediaImage {
+                                        id
+                                        image {
+                                            url
+                                            altText
+                                            width
+                                            height
+                                        }
+                                    }
+                                    ... on Video {
+                                        id
+                                        sources {
+                                            url
+                                            mimeType
+                                        }
+                                    }
+                                    ... on Model3d {
+                                        id
+                                        sources {
+                                            url
+                                            mimeType
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -419,6 +455,11 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     inventoryQuantity
                                     sku
                                     barcode
+                                    taxable
+                                    inventoryPolicy
+                                    position
+                                    createdAt
+                                    updatedAt
                                     selectedOptions {
                                         name
                                         value
@@ -433,6 +474,12 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     title
                                     handle
                                     description
+                                    image {
+                                        url
+                                        altText
+                                    }
+                                    updatedAt
+                                    sortOrder
                                 }
                             }
                         }
