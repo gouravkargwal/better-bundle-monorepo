@@ -248,10 +248,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 all_entities.extend(chunk)
                 offset += len(chunk)
 
-                logger.debug(
-                    f"Loaded chunk of {len(chunk)} {entity_type} (total: {len(all_entities)})"
-                )
-
                 # If we got fewer entities than requested, we've reached the end
                 if len(chunk) < current_chunk_size:
                     break
@@ -262,7 +258,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 )
                 break
 
-        logger.info(f"Loaded {len(all_entities)} {entity_type} in chunks")
         return all_entities
 
     async def compute_all_collection_features(
@@ -472,10 +467,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             repository = FeatureRepository()
 
-            logger.info(
-                f"Starting comprehensive pipeline for shop: {shop_id} (incremental: {incremental})"
-            )
-
             # Load shop data
             shop_data = await repository.get_shop_data(shop_id)
             if not shop_data:
@@ -489,9 +480,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             if incremental:
                 last_computation_time = (
                     await repository.get_last_feature_computation_time(shop_id)
-                )
-                logger.info(
-                    f"Using incremental processing since: {last_computation_time}"
                 )
 
                 # Load only data modified since last computation using chunked processing
@@ -540,9 +528,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 if not any(
                     [products, customers, orders, collections, behavioral_events]
                 ):
-                    logger.info(
-                        f"No data changes detected since {last_computation_time}. Skipping feature computation."
-                    )
+
                     return {
                         "success": True,
                         "shop_id": shop_id,
@@ -576,11 +562,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 behavioral_events = await self.process_entities_in_chunks(
                     shop_id, "behavioral_events", batch_size * 5, chunk_size=100
                 )
-
-            logger.info(
-                f"Loaded {len(products)} products, {len(customers)} customers, "
-                f"{len(orders)} orders, {len(collections)} collections, {len(behavioral_events)} events"
-            )
 
             # Compute all features using existing method
             all_features = await self.compute_all_features_for_shop(
@@ -628,9 +609,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Log the overall success status (no timestamp update needed - features are self-tracking)
             if all_features_succeeded:
-                logger.info(
-                    f"All feature types processed successfully for shop {shop_id}"
-                )
+                pass
             else:
                 logger.warning(
                     f"Some feature types failed for shop {shop_id} - will retry on next run"
@@ -681,10 +660,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             collections = collections or []
             behavioral_events = behavioral_events or []
 
-            logger.info(f"Computing comprehensive features for shop {shop['id']}")
-
             # 1. Product Features
-            logger.info("Computing product features...")
             # Create product ID mapping for product features
             product_id_mapping = self._create_product_id_mapping(
                 behavioral_events, products
@@ -706,7 +682,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["products"] = product_features
 
             # 2. User/Customer Features
-            logger.info("Computing user features...")
             user_context = self._build_base_context(
                 shop, orders=orders or [], events=behavioral_events or []
             )
@@ -716,28 +691,24 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["users"] = user_features
 
             # 3. Collection Features
-            logger.info("Computing collection features...")
             collection_features = await self.compute_all_collection_features(
                 collections, shop, products, behavioral_events, orders
             )
             all_features["collections"] = collection_features
 
             # 4. Customer Behavior Features
-            logger.info("Computing customer behavior features...")
             behavior_features = await self.compute_all_customer_behavior_features(
                 customers, shop, behavioral_events
             )
             all_features["customer_behaviors"] = behavior_features
 
             # 5. Session Features
-            logger.info("Computing session features...")
             session_features = await self.generate_session_features_from_events(
                 behavioral_events, shop, orders
             )
             all_features["sessions"] = session_features
 
             # 6. Interaction Features (sample of customer-product pairs)
-            logger.info("Computing interaction features...")
             interaction_context = self._build_base_context(
                 shop,
                 orders=orders or [],
@@ -781,10 +752,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         if customer_id and mapped_product_id:
                             interaction_pairs.add((customer_id, mapped_product_id))
 
-            logger.info(
-                f"Found {len(interaction_pairs)} interaction pairs from behavioral events"
-            )
-
             # From orders
             for order in orders:
                 if order.get("customerId"):
@@ -820,11 +787,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             # Only add if both IDs are valid
                             if customer_id and product_id:
                                 interaction_pairs.add((customer_id, product_id))
-
-            logger.info(
-                f"Found {len(interaction_pairs)} total interaction pairs (including from orders)"
-            )
-
             # Generate features for each interaction pair
             interaction_features = {}
             for customer_id, product_id in interaction_pairs:
@@ -840,22 +802,15 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     )
                     key = f"{customer_id}_{product_id}"
                     interaction_features[key] = features
-                    logger.info(
-                        f"Generated interaction features for {customer_id}-{product_id}: {len(features)} fields"
-                    )
+
                 except Exception as e:
                     logger.error(
                         f"Failed to generate interaction features for {customer_id}-{product_id}: {e}"
                     )
 
-            logger.info(
-                f"Generated {len(interaction_features)} interaction feature records"
-            )
-
             all_features["interactions"] = interaction_features
 
             # 7. Product Pair Features (top product pairs)
-            logger.info("Computing product pair features...")
             product_pair_context = self._build_base_context(
                 shop,
                 orders=orders or [],
@@ -902,8 +857,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         pair = tuple(sorted([order_products[i], order_products[j]]))
                         product_pairs.add(pair)
 
-            logger.info(f"Found {len(product_pairs)} product pairs from orders")
-
             # Generate features for each product pair
             product_pair_features = {}
             for product_id1, product_id2 in product_pairs:
@@ -921,7 +874,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["product_pairs"] = product_pair_features
 
             # 8. Search Product Features (from search events)
-            logger.info("Computing search product features...")
             search_context = self._build_base_context(
                 shop,
                 behavioral_events=behavioral_events or [],
@@ -940,10 +892,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 elif event.get("eventType") == "product_viewed":
                     product_view_events.append(event)
 
-            logger.info(
-                f"Found {len(search_events)} search events and {len(product_view_events)} product view events"
-            )
-
             # Sort all events by timestamp for time-based correlation
             all_events = search_events + product_view_events
             all_events.sort(key=lambda x: x.get("timestamp", ""))
@@ -955,9 +903,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     if search_query:
                         search_time = event.get("timestamp")
                         search_customer = event.get("customerId") or "anonymous"
-                        logger.info(
-                            f"Processing search: '{search_query}' at {search_time} by {search_customer}"
-                        )
 
                         # Look for product views within 24 hours after search
                         for j in range(i + 1, len(all_events)):
@@ -983,10 +928,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                             later_dt - search_dt
                                         ).total_seconds()
 
-                                        logger.info(
-                                            f"    Checking product view: {later_time} by {later_customer} (diff: {time_diff/3600:.1f}h)"
-                                        )
-
                                         # Only consider if within 24 hours and same customer (or both anonymous)
                                         if 0 <= time_diff < 86400 and (
                                             search_customer == later_customer
@@ -1000,31 +941,15 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                                     later_event
                                                 )
                                             )
-                                            logger.info(
-                                                f"      Product ID extracted: {product_id}"
-                                            )
                                             if product_id:
                                                 search_product_pairs.add(
                                                     (search_query, product_id)
                                                 )
-                                                logger.info(
-                                                    f"      -> MATCH: {search_query} -> {product_id}"
-                                                )
                                             else:
-                                                logger.info(
-                                                    f"      -> No valid product ID"
-                                                )
-                                        else:
-                                            logger.info(
-                                                f"      -> Time/customer mismatch"
-                                            )
+                                                continue
                                     except Exception as e:
                                         logger.debug(f"Error parsing timestamps: {e}")
                                         continue
-
-            logger.info(f"Found {len(search_product_pairs)} search-product pairs")
-            if search_product_pairs:
-                logger.info(f"Search-product pairs: {list(search_product_pairs)}")
 
             # Generate features for each search-product pair
             search_product_features = {}
@@ -1046,9 +971,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             all_features["search_products"] = search_product_features
 
-            logger.info(
-                f"Completed comprehensive feature computation for shop {shop['id']}"
-            )
             return all_features
 
         except Exception as e:
@@ -1120,7 +1042,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Handle empty feature dictionaries
             if not features:
-                logger.info(f"No {feature_type} features to save for shop {shop_id}")
                 return {
                     feature_key: {
                         "saved_count": 0,
@@ -1198,9 +1119,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             await save_method(data)
                             saved_count += 1
 
-            logger.info(
-                f"Saved {saved_count} {feature_type} feature records using bulk operations"
-            )
             return {
                 feature_key: {
                     "saved_count": saved_count,
@@ -1265,10 +1183,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             return None
 
         except Exception as e:
-            import traceback
-
             logger.error(f"Error extracting product ID from event: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     def _create_product_id_mapping(
@@ -1343,7 +1258,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                 mapping[event_product_id] = product.get("productId", "")
                                 break
 
-        logger.info(f"Created product ID mapping: {mapping}")
         return mapping
 
     def _extract_search_query_from_event(self, event: Dict[str, Any]) -> Optional[str]:
@@ -1371,11 +1285,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     or event_data.get("search_term")
                     or event_data.get("searchTerm")
                 )
-                logger.info(f"🔍 Fallback query extraction: {query}")
                 return query
             return None
         except Exception as e:
-            logger.error(f"🔍 Error extracting search query: {e}")
+            logger.error(f"Error extracting search query: {e}")
             return None
 
     def _convert_variant_to_product_id(self, variant_id: str) -> Optional[str]:

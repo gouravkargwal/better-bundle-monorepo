@@ -168,34 +168,51 @@ class FeatureRepository(IFeatureRepository):
                     f"No model found for table: {table_name} (mapped to: {model_name})"
                 )
 
-            # Use delete and recreate approach since schema doesn't have compound unique constraints
+            # Use proper upsert approach with unique constraints
             try:
                 logger.info(
-                    f"🔍 About to delete and recreate {len(batch_data)} records in {table_name}"
+                    f"🔍 About to upsert {len(batch_data)} records in {table_name}"
                 )
                 logger.info(
                     f"🔍 Sample data: {batch_data[0] if batch_data else 'No data'}"
                 )
 
-                # First, delete existing records for this shop
-                shop_id = batch_data[0].get("shopId") if batch_data else None
-                if shop_id:
-                    deleted_count = await model.delete_many(where={"shopId": shop_id})
-                    logger.info(
-                        f"Deleted {deleted_count} existing records from {table_name} for shop {shop_id}"
-                    )
+                upserted_count = 0
+                for record in batch_data:
+                    try:
+                        # Build the where clause for compound unique constraints
+                        if len(unique_key_fields) == 1:
+                            # Single field unique constraint
+                            where_clause = {
+                                unique_key_fields[0]: record[unique_key_fields[0]]
+                            }
+                        else:
+                            # Compound unique constraint - use the format expected by Prisma
+                            compound_key = "_".join(unique_key_fields)
+                            where_clause = {
+                                compound_key: {
+                                    field: record[field] for field in unique_key_fields
+                                }
+                            }
 
-                # Then create new records
-                await model.create_many(data=batch_data, skip_duplicates=False)
+                        # Use upsert to update existing or create new
+                        await model.upsert(
+                            where=where_clause,
+                            data={"update": record, "create": record},
+                        )
+                        upserted_count += 1
+                    except Exception as upsert_error:
+                        logger.error(
+                            f"Failed to upsert {table_name} record: {str(upsert_error)}"
+                        )
+                        continue
 
                 logger.info(
-                    f"Successfully created {len(batch_data)} records in {table_name}"
+                    f"Successfully upserted {upserted_count}/{len(batch_data)} records in {table_name}"
                 )
-                return len(batch_data)
-            except Exception as create_error:
-                logger.error(
-                    f"{table_name} delete and recreate failed: {str(create_error)}"
-                )
+                return upserted_count
+            except Exception as upsert_error:
+                logger.error(f"{table_name} upsert failed: {str(upsert_error)}")
                 return 0
 
         except Exception as e:
