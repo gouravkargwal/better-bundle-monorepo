@@ -212,8 +212,22 @@ class FieldExtractorService:
                 "imageAlt": images[0].get("altText") if images else None,
                 "productCreatedAt": self._parse_datetime(product_data.get("createdAt")),
                 "productUpdatedAt": self._parse_datetime(product_data.get("updatedAt")),
+                "onlineStoreUrl": product_data.get("onlineStoreUrl"),
+                "onlineStorePreviewUrl": product_data.get("onlineStorePreviewUrl"),
+                "seoTitle": (
+                    product_data.get("seo", {}).get("title")
+                    if product_data.get("seo")
+                    else None
+                ),
+                "seoDescription": (
+                    product_data.get("seo", {}).get("description")
+                    if product_data.get("seo")
+                    else None
+                ),
+                "templateSuffix": product_data.get("templateSuffix"),
                 "variants": variants,
                 "images": images,
+                "media": product_data.get("media", {}).get("edges", []),
                 "options": options,
                 "collections": collections,
                 "metafields": metafields,

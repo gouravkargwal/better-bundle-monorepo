@@ -130,34 +130,40 @@ model OrderData {
 }
 
 model ProductData {
-  id               String         @id @default(cuid())
-  shopId           String
-  productId        String
-  title            String         @db.VarChar(500)
-  handle           String         @db.VarChar(255)
-  description      String?        @db.Text
-  descriptionHtml  String?        @db.Text
-  productType      String?        @default("") @db.VarChar(100)
-  vendor           String?        @default("") @db.VarChar(255)
-  tags             Json?          @default("[]")
-  status           String?        @default("ACTIVE")
-  totalInventory   Int?           @default(0)
-  price            Float          @default(0.0)
-  compareAtPrice   Float?         @default(0.0)
-  inventory        Int?           @default(0)
-  imageUrl         String?        @db.VarChar(1000)
-  imageAlt         String?        @db.VarChar(500)
-  productCreatedAt DateTime?
-  productUpdatedAt DateTime?
-  variants         Json?          @default("[]")
-  images           Json?          @default("[]")
-  options          Json?          @default("[]")
-  collections      Json?          @default("[]")
-  metafields       Json?          @default("[]")
-  isActive         Boolean        @default(true)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  shop             Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                    String         @id @default(cuid())
+  shopId                String
+  productId             String
+  title                 String         @db.VarChar(500)
+  handle                String         @db.VarChar(255)
+  description           String?        @db.Text
+  descriptionHtml       String?        @db.Text
+  productType           String?        @default("") @db.VarChar(100)
+  vendor                String?        @default("") @db.VarChar(255)
+  tags                  Json?          @default("[]")
+  status                String?        @default("ACTIVE")
+  totalInventory        Int?           @default(0)
+  price                 Float          @default(0.0)
+  compareAtPrice        Float?         @default(0.0)
+  inventory             Int?           @default(0)
+  imageUrl              String?        @db.VarChar(1000)
+  imageAlt              String?        @db.VarChar(500)
+  productCreatedAt      DateTime?
+  productUpdatedAt      DateTime?
+  onlineStoreUrl        String?        @db.VarChar(1000)
+  onlineStorePreviewUrl String?        @db.VarChar(1000)
+  seoTitle              String?        @db.VarChar(500)
+  seoDescription        String?        @db.Text
+  templateSuffix        String?        @db.VarChar(100)
+  variants              Json?          @default("[]")
+  images                Json?          @default("[]")
+  media                 Json?          @default("[]")
+  options               Json?          @default("[]")
+  collections           Json?          @default("[]")
+  metafields            Json?          @default("[]")
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  shop                  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
   @@index([shopId, productType])
