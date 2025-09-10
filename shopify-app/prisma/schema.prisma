@@ -11,11 +11,6 @@ datasource db {
 }
 
 // Enums for better data validation
-enum ProductStatus {
-  ACTIVE
-  ARCHIVED
-  DRAFT
-}
 
 model RawOrder {
   id               String    @id @default(cuid())
@@ -102,6 +97,12 @@ model OrderData {
   customerId              String?   @db.VarChar(100)
   customerEmail           String?   @db.VarChar(255)
   customerPhone           String?   @db.VarChar(50)
+  customerDisplayName     String?   @db.VarChar(255)
+  customerState           String?   @db.VarChar(50)
+  customerVerifiedEmail   Boolean?  @default(false)
+  customerCreatedAt       DateTime?
+  customerUpdatedAt       DateTime?
+  customerDefaultAddress  Json?     @default("{}")
   totalAmount             Float     @default(0.0)
   subtotalAmount          Float?    @default(0.0)
   totalTaxAmount          Float?    @default(0.0)
@@ -124,6 +125,8 @@ model OrderData {
   billingAddress          Json?     @default("{}")
   discountApplications    Json?     @default("[]")
   metafields              Json?     @default("[]")
+  fulfillments            Json?     @default("[]")
+  transactions            Json?     @default("[]")
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
   shop                    Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -133,38 +136,45 @@ model OrderData {
   @@index([shopId, customerId])
   @@index([shopId, customerEmail])
   @@index([shopId, currencyCode])
+  @@index([shopId, customerState])
   @@map("OrderData")
 }
 
 model ProductData {
-  id               String         @id @default(cuid())
-  shopId           String
-  productId        String
-  title            String         @db.VarChar(500)
-  handle           String         @db.VarChar(255)
-  description      String?        @db.Text
-  descriptionHtml  String?        @db.Text
-  productType      String?        @default("") @db.VarChar(100)
-  vendor           String?        @default("") @db.VarChar(255)
-  tags             Json?          @default("[]")
-  status           ProductStatus? @default(ACTIVE)
-  totalInventory   Int?           @default(0)
-  price            Float          @default(0.0)
-  compareAtPrice   Float?         @default(0.0)
-  inventory        Int?           @default(0)
-  imageUrl         String?        @db.VarChar(1000)
-  imageAlt         String?        @db.VarChar(500)
-  productCreatedAt DateTime?
-  productUpdatedAt DateTime?
-  variants         Json?          @default("[]")
-  images           Json?          @default("[]")
-  options          Json?          @default("[]")
-  collections      Json?          @default("[]")
-  metafields       Json?          @default("[]")
-  isActive         Boolean        @default(true)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  shop             Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                    String         @id @default(cuid())
+  shopId                String
+  productId             String
+  title                 String         @db.VarChar(500)
+  handle                String         @db.VarChar(255)
+  description           String?        @db.Text
+  descriptionHtml       String?        @db.Text
+  productType           String?        @default("") @db.VarChar(100)
+  vendor                String?        @default("") @db.VarChar(255)
+  tags                  Json?          @default("[]")
+  status                String?        @default("ACTIVE")
+  totalInventory        Int?           @default(0)
+  price                 Float          @default(0.0)
+  compareAtPrice        Float?         @default(0.0)
+  inventory             Int?           @default(0)
+  imageUrl              String?        @db.VarChar(1000)
+  imageAlt              String?        @db.VarChar(500)
+  productCreatedAt      DateTime?
+  productUpdatedAt      DateTime?
+  onlineStoreUrl        String?        @db.VarChar(1000)
+  onlineStorePreviewUrl String?        @db.VarChar(1000)
+  seoTitle              String?        @db.VarChar(500)
+  seoDescription        String?        @db.Text
+  templateSuffix        String?        @db.VarChar(100)
+  variants              Json?          @default("[]")
+  images                Json?          @default("[]")
+  media                 Json?          @default("[]")
+  options               Json?          @default("[]")
+  collections           Json?          @default("[]")
+  metafields            Json?          @default("[]")
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  shop                  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
   @@index([shopId, productType])
@@ -243,13 +253,13 @@ model BehavioralEvents {
   customerId String?  @db.VarChar(100)
   clientId   String?  @db.VarChar(100) // Session identifier from Shopify Web Pixels
   eventType  String   @db.VarChar(100)
-  occurredAt DateTime
+  timestamp DateTime
   eventData  Json?
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, eventType])
-  @@index([shopId, occurredAt])
+  @@index([shopId, timestamp])
   @@index([shopId, customerId])
   @@index([shopId, clientId])
   @@map("BehavioralEvents")
@@ -579,10 +589,29 @@ model MLTrainingLog {
   startedAt           DateTime  @default(now())
   completedAt         DateTime?
   durationMs          Int? // Training duration in milliseconds
+  
+  // Data push counts
+  usersPushed         Int       @default(0)
+  itemsPushed         Int       @default(0)
+  feedbackPushed      Int       @default(0)
+  totalPushed         Int       @default(0)
+  
+  // Job configuration
+  jobType             String?   // "full_training", "incremental_training", "model_refresh", "custom"
+  pushStrategy        String?   // "full", "incremental"
+  triggerSource       String?   // "api", "scheduled", "manual"
+  
+  // Last push timestamps for incremental logic
+  usersLastPushAt     DateTime?
+  itemsLastPushAt     DateTime?
+  feedbackLastPushAt  DateTime?
+  
+  // Legacy fields (keeping for backward compatibility)
   productsCount       Int       @default(0)
   usersCount          Int       @default(0)
   collectionsCount    Int       @default(0)
   customerEventsCount Int       @default(0)
+  
   error               String?   @db.Text
   createdAt           DateTime  @default(now())
   shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -590,6 +619,7 @@ model MLTrainingLog {
   @@index([shopId, status])
   @@index([shopId, createdAt])
   @@index([status, createdAt])
+  @@index([shopId, jobType])
   @@map("MLTrainingLog")
 }
 
@@ -711,6 +741,15 @@ model UserFeatures {
   discountSensitivity     Float? // % of orders with discounts
   avgDiscountAmount       Float?
 
+  // Enhanced Customer Features (from Order API)
+  customerState        String? @db.VarChar(50)  // "ENABLED", "DISABLED", etc.
+  isVerifiedEmail      Boolean @default(false)  // Email verification status
+  customerAge          Int?                     // Days since customer creation
+  hasDefaultAddress    Boolean @default(false)  // Has default address
+  geographicRegion     String? @db.VarChar(100) // Geographic region from address
+  currencyPreference   String? @db.VarChar(10)  // Preferred currency
+  customerHealthScore  Int     @default(0)      // 0-100 customer health score
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -731,6 +770,8 @@ model ProductFeatures {
   viewCount30d        Int @default(0)
   uniqueViewers30d    Int @default(0)
   cartAddCount30d     Int @default(0)
+  cartViewCount30d    Int @default(0)
+  cartRemoveCount30d  Int @default(0)
   purchaseCount30d    Int @default(0)
   uniquePurchasers30d Int @default(0)
 
@@ -742,6 +783,9 @@ model ProductFeatures {
   viewToCartRate        Float? // cartAdds / views
   cartToPurchaseRate    Float? // purchases / cartAdds
   overallConversionRate Float? // purchases / views
+  cartAbandonmentRate   Float? // cart views without purchase
+  cartModificationRate  Float? // cart removes / cart adds
+  cartViewToPurchaseRate Float? // purchases / cart views
 
   // Temporal Metrics
   lastViewedAt           DateTime?
@@ -753,6 +797,7 @@ model ProductFeatures {
   // Price & Inventory
   avgSellingPrice   Float? // Actual price from orders
   priceVariance     Float? // Price consistency
+  totalInventory    Int?   // Total inventory from ProductData
   inventoryTurnover Float? // Sales rate vs stock
   stockVelocity     Float? // Units sold per day
   priceTier         String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"
@@ -762,6 +807,18 @@ model ProductFeatures {
   imageRichness        Float? // 0-1 normalized  
   tagDiversity         Float? // 0-1 normalized
   metafieldUtilization Float? // 0-1 normalized
+
+  // Enhanced Features (from new Shopify data)
+  mediaRichness        Float?  // 0-100 score based on media content
+  seoOptimization      Float?  // 0-100 SEO optimization score
+  seoTitleLength       Int?    // Length of SEO title
+  seoDescriptionLength Int?    // Length of SEO description
+  hasVideoContent      Boolean @default(false) // Has video media
+  has3DContent         Boolean @default(false) // Has 3D model media
+  mediaCount           Int     @default(0)     // Total media items
+  hasOnlineStoreUrl    Boolean @default(false) // Has online store URL
+  hasPreviewUrl        Boolean @default(false) // Has preview URL
+  hasCustomTemplate    Boolean @default(false) // Has custom template
 
   // Computed Scores
   popularityScore Float @default(0) // Normalized 0-1
@@ -847,6 +904,8 @@ model CustomerBehaviorFeatures {
   productViewCount    Int @default(0)
   collectionViewCount Int @default(0)
   cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
   searchCount         Int @default(0)
   checkoutStartCount  Int @default(0)
   purchaseCount       Int @default(0)
@@ -897,6 +956,8 @@ model InteractionFeatures {
   // Event Counts
   viewCount     Int @default(0)
   cartAddCount  Int @default(0)
+  cartViewCount Int @default(0)
+  cartRemoveCount Int @default(0)
   purchaseCount Int @default(0)
 
   // Timestamps
@@ -951,11 +1012,15 @@ model SessionFeatures {
   collectionViewCount Int @default(0)
   searchCount         Int @default(0)
   cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
 
   // Conversion
   checkoutStarted   Boolean @default(false)
   checkoutCompleted Boolean @default(false)
   orderValue        Float?
+  cartViewed        Boolean @default(false)
+  cartAbandoned     Boolean @default(false)
 
   // Context
   deviceType     String? @db.VarChar(20)
@@ -985,6 +1050,8 @@ model ProductPairFeatures {
   coPurchaseCount Int @default(0) // Same order
   coViewCount     Int @default(0) // Same session
   coCartCount     Int @default(0) // Same cart
+  coCartViews     Int @default(0) // Same cart view session
+  coCartRemoves   Int @default(0) // Same cart remove session
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -1049,45 +1116,4 @@ model UserIdentityLink {
   @@index([shopId, clientId])
   @@index([shopId, customerId])
   @@map("UserIdentityLink")
-}
-
-// ============= GORSE BRIDGE TABLES =============
-
-model GorseUsers {
-  userId    String   @id // customerId or "session_${clientId}"
-  shopId    String
-  labels    Json // Computed from feature tables
-  updatedAt DateTime @updatedAt
-
-  @@index([shopId])
-  @@map("gorse_users")
-}
-
-model GorseItems {
-  itemId     String   @id // productId
-  shopId     String
-  categories Json // Array of collectionIds
-  labels     Json // Computed from feature tables
-  isHidden   Boolean  @default(false)
-  updatedAt  DateTime @updatedAt
-
-  @@index([shopId])
-  @@index([shopId, isHidden])
-  @@map("gorse_items")
-}
-
-model GorseFeedback {
-  id           String   @id @default(cuid())
-  feedbackType String // 'view', 'cart_add', 'purchase'
-  userId       String
-  itemId       String
-  timestamp    DateTime
-  shopId       String
-  comment      String? // Additional context
-
-  @@unique([feedbackType, userId, itemId, timestamp])
-  @@index([shopId, userId, timestamp(sort: Desc)])
-  @@index([shopId, itemId, timestamp(sort: Desc)])
-  @@index([shopId, feedbackType])
-  @@map("gorse_feedback")
 }
