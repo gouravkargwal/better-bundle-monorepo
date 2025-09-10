@@ -66,6 +66,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             # Compute discount behavior
             discount_metrics = self._compute_discount_metrics(customer_orders)
 
+            # Compute enhanced customer features from new order data
+            customer_enhancement_features = self._compute_customer_enhancement_features(
+                customer_orders
+            )
+
             features = {
                 "shopId": shop_id,
                 "customerId": customer_id,
@@ -91,6 +96,20 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "ordersWithDiscountCount": discount_metrics["orders_with_discount"],
                 "discountSensitivity": discount_metrics["discount_sensitivity"],
                 "avgDiscountAmount": discount_metrics["avg_discount_amount"],
+                # Enhanced Customer Features (from Order API)
+                "customerState": customer_enhancement_features["customer_state"],
+                "isVerifiedEmail": customer_enhancement_features["is_verified_email"],
+                "customerAge": customer_enhancement_features["customer_age"],
+                "hasDefaultAddress": customer_enhancement_features[
+                    "has_default_address"
+                ],
+                "geographicRegion": customer_enhancement_features["geographic_region"],
+                "currencyPreference": customer_enhancement_features[
+                    "currency_preference"
+                ],
+                "customerHealthScore": customer_enhancement_features[
+                    "customer_health_score"
+                ],
                 "lastComputedAt": now_utc(),
             }
 
@@ -433,5 +452,100 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             "ordersWithDiscountCount": 0,
             "discountSensitivity": 0.0,
             "avgDiscountAmount": 0.0,
+            "customerState": None,
+            "isVerifiedEmail": False,
+            "customerAge": None,
+            "hasDefaultAddress": False,
+            "geographicRegion": None,
+            "currencyPreference": "USD",
+            "customerHealthScore": 0,
             "lastComputedAt": now_utc(),
         }
+
+    def _compute_customer_enhancement_features(
+        self, customer_orders: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute enhanced customer features from new order data"""
+        try:
+            if not customer_orders:
+                return {
+                    "customer_state": None,
+                    "is_verified_email": False,
+                    "customer_age": None,
+                    "has_default_address": False,
+                    "geographic_region": None,
+                    "currency_preference": None,
+                    "customer_health_score": 0,
+                }
+
+            # Get the most recent order for customer data
+            latest_order = max(customer_orders, key=lambda x: x.get("orderDate", ""))
+
+            # Extract customer data from order
+            customer_state = latest_order.get("customerState")
+            is_verified_email = latest_order.get("customerVerifiedEmail", False)
+            customer_created_at = latest_order.get("customerCreatedAt")
+            customer_default_address = latest_order.get("customerDefaultAddress", {})
+            currency_preference = latest_order.get("currencyCode", "USD")
+
+            # Calculate customer age (days since creation)
+            customer_age = None
+            if customer_created_at:
+                from datetime import datetime
+
+                try:
+                    if isinstance(customer_created_at, str):
+                        customer_created_at = datetime.fromisoformat(
+                            customer_created_at.replace("Z", "+00:00")
+                        )
+                    customer_age = (datetime.now() - customer_created_at).days
+                except:
+                    customer_age = None
+
+            # Extract geographic region from default address
+            geographic_region = None
+            has_default_address = bool(customer_default_address)
+            if customer_default_address:
+                country = customer_default_address.get("country")
+                province = customer_default_address.get("province")
+                if country:
+                    geographic_region = (
+                        f"{province}, {country}" if province else country
+                    )
+
+            # Calculate customer health score (0-100)
+            customer_health_score = 0
+            if customer_state == "ENABLED":
+                customer_health_score += 40
+            elif customer_state == "DISABLED":
+                customer_health_score += 10
+
+            if is_verified_email:
+                customer_health_score += 30
+
+            if has_default_address:
+                customer_health_score += 20
+
+            if customer_age and customer_age > 30:  # Customer for more than 30 days
+                customer_health_score += 10
+
+            return {
+                "customer_state": customer_state,
+                "is_verified_email": is_verified_email,
+                "customer_age": customer_age,
+                "has_default_address": has_default_address,
+                "geographic_region": geographic_region,
+                "currency_preference": currency_preference,
+                "customer_health_score": min(100, customer_health_score),
+            }
+        except Exception as e:
+            logger.error(f"Error computing customer enhancement features: {str(e)}")
+            return {
+                "customer_state": None,
+                "is_verified_email": False,
+                "customer_age": None,
+                "has_default_address": False,
+                "geographic_region": None,
+                "currency_preference": None,
+                "customer_health_score": 0,
+            }

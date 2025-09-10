@@ -70,6 +70,8 @@ class FieldExtractorService:
                 order_data.get("discountApplications", {})
             )
             metafields = self._extract_graphql_edges(order_data.get("metafields", {}))
+            fulfillments = order_data.get("fulfillments", [])
+            transactions = order_data.get("transactions", [])
 
             # Extract simple fields
             shipping_address = order_data.get("shippingAddress")
@@ -90,6 +92,26 @@ class FieldExtractorService:
                 "customerEmail": order_data.get("email")
                 or (customer.get("email") if customer else None),
                 "customerPhone": order_data.get("phone"),
+                "customerDisplayName": (
+                    customer.get("displayName") if customer else None
+                ),
+                "customerState": customer.get("state") if customer else None,
+                "customerVerifiedEmail": (
+                    customer.get("verifiedEmail") if customer else None
+                ),
+                "customerCreatedAt": (
+                    self._parse_datetime(customer.get("createdAt"))
+                    if customer
+                    else None
+                ),
+                "customerUpdatedAt": (
+                    self._parse_datetime(customer.get("updatedAt"))
+                    if customer
+                    else None
+                ),
+                "customerDefaultAddress": (
+                    customer.get("defaultAddress") if customer else None
+                ),
                 "totalAmount": self._extract_money_amount(
                     order_data.get("totalPriceSet", {})
                 ),
@@ -125,6 +147,8 @@ class FieldExtractorService:
                 "billingAddress": billing_address,
                 "discountApplications": discount_applications,
                 "metafields": metafields,
+                "fulfillments": fulfillments,
+                "transactions": transactions,
             }
 
         except Exception as e:

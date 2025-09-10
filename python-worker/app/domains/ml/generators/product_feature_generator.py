@@ -73,6 +73,16 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 metrics_30d, temporal_metrics
             )
 
+            # Compute enhanced features from new data
+            enhanced_metadata_scores = self._compute_enhanced_metadata_scores(
+                product_data
+            )
+            seo_features = self._compute_seo_features(product_data)
+            media_features = self._compute_media_features(product_data)
+            store_integration_features = self._compute_store_integration_features(
+                product_data
+            )
+
             features = {
                 "shopId": shop_id,
                 "productId": product_id,
@@ -102,14 +112,26 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 # Price & Inventory
                 "avgSellingPrice": price_inventory_metrics["avg_selling_price"],
                 "priceVariance": price_inventory_metrics["price_variance"],
+                "totalInventory": price_inventory_metrics["total_inventory"],
                 "inventoryTurnover": price_inventory_metrics["inventory_turnover"],
                 "stockVelocity": price_inventory_metrics["stock_velocity"],
                 "priceTier": price_inventory_metrics["price_tier"],
-                # Metadata scores
+                # Enhanced metadata scores
                 "variantComplexity": metadata_scores["variant_complexity"],
                 "imageRichness": metadata_scores["image_richness"],
                 "tagDiversity": metadata_scores["tag_diversity"],
                 "metafieldUtilization": metadata_scores["metafield_utilization"],
+                # New enhanced features
+                "mediaRichness": enhanced_metadata_scores["media_richness"],
+                "seoOptimization": seo_features["seo_optimization"],
+                "seoTitleLength": seo_features["seo_title_length"],
+                "seoDescriptionLength": seo_features["seo_description_length"],
+                "hasVideoContent": media_features["has_video_content"],
+                "has3DContent": media_features["has_3d_content"],
+                "mediaCount": media_features["media_count"],
+                "hasOnlineStoreUrl": store_integration_features["has_online_store_url"],
+                "hasPreviewUrl": store_integration_features["has_preview_url"],
+                "hasCustomTemplate": store_integration_features["has_custom_template"],
                 # Computed scores
                 "popularityScore": popularity_trending["popularity_score"],
                 "trendingScore": popularity_trending["trending_score"],
@@ -539,6 +561,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "daysSinceLastPurchase": None,
             "avgSellingPrice": None,
             "priceVariance": None,
+            "totalInventory": None,
             "inventoryTurnover": None,
             "stockVelocity": None,
             "priceTier": None,
@@ -546,7 +569,139 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "imageRichness": None,
             "tagDiversity": None,
             "metafieldUtilization": None,
+            "mediaRichness": 0,
+            "seoOptimization": 0,
+            "seoTitleLength": 0,
+            "seoDescriptionLength": 0,
+            "hasVideoContent": False,
+            "has3DContent": False,
+            "mediaCount": 0,
+            "hasOnlineStoreUrl": False,
+            "hasPreviewUrl": False,
+            "hasCustomTemplate": False,
             "popularityScore": 0.0,
             "trendingScore": 0.0,
             "lastComputedAt": now_utc(),
         }
+
+    def _compute_enhanced_metadata_scores(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute enhanced metadata scores from new product fields"""
+        try:
+            # Media richness score based on media content
+            media_data = product_data.get("media", [])
+            media_richness = 0
+
+            if media_data:
+                # Count different types of media
+                video_count = sum(
+                    1
+                    for media in media_data
+                    if media.get("node", {}).get("__typename") == "Video"
+                )
+                model_3d_count = sum(
+                    1
+                    for media in media_data
+                    if media.get("node", {}).get("__typename") == "Model3d"
+                )
+                image_count = sum(
+                    1
+                    for media in media_data
+                    if media.get("node", {}).get("__typename") == "MediaImage"
+                )
+
+                # Calculate richness score (0-100)
+                media_richness = min(
+                    100, (video_count * 30 + model_3d_count * 40 + image_count * 10)
+                )
+
+            return {
+                "media_richness": media_richness,
+            }
+        except Exception as e:
+            logger.error(f"Error computing enhanced metadata scores: {str(e)}")
+            return {"media_richness": 0}
+
+    def _compute_seo_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute SEO-related features"""
+        try:
+            seo_title = product_data.get("seoTitle", "")
+            seo_description = product_data.get("seoDescription", "")
+
+            # SEO optimization score (0-100)
+            seo_optimization = 0
+            if seo_title:
+                seo_optimization += 30
+            if seo_description:
+                seo_optimization += 30
+            if seo_title and len(seo_title) >= 30 and len(seo_title) <= 60:
+                seo_optimization += 20  # Optimal title length
+            if (
+                seo_description
+                and len(seo_description) >= 120
+                and len(seo_description) <= 160
+            ):
+                seo_optimization += 20  # Optimal description length
+
+            return {
+                "seo_optimization": seo_optimization,
+                "seo_title_length": len(seo_title) if seo_title else 0,
+                "seo_description_length": (
+                    len(seo_description) if seo_description else 0
+                ),
+            }
+        except Exception as e:
+            logger.error(f"Error computing SEO features: {str(e)}")
+            return {
+                "seo_optimization": 0,
+                "seo_title_length": 0,
+                "seo_description_length": 0,
+            }
+
+    def _compute_media_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute media-related features"""
+        try:
+            media_data = product_data.get("media", [])
+
+            has_video = False
+            has_3d = False
+            media_count = len(media_data)
+
+            for media in media_data:
+                media_type = media.get("node", {}).get("__typename", "")
+                if media_type == "Video":
+                    has_video = True
+                elif media_type == "Model3d":
+                    has_3d = True
+
+            return {
+                "has_video_content": has_video,
+                "has_3d_content": has_3d,
+                "media_count": media_count,
+            }
+        except Exception as e:
+            logger.error(f"Error computing media features: {str(e)}")
+            return {
+                "has_video_content": False,
+                "has_3d_content": False,
+                "media_count": 0,
+            }
+
+    def _compute_store_integration_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute store integration features"""
+        try:
+            return {
+                "has_online_store_url": bool(product_data.get("onlineStoreUrl")),
+                "has_preview_url": bool(product_data.get("onlineStorePreviewUrl")),
+                "has_custom_template": bool(product_data.get("templateSuffix")),
+            }
+        except Exception as e:
+            logger.error(f"Error computing store integration features: {str(e)}")
+            return {
+                "has_online_store_url": False,
+                "has_preview_url": False,
+                "has_custom_template": False,
+            }

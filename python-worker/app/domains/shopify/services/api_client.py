@@ -581,12 +581,41 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                 currencyCode
                             }
                         }
+                        totalRefundedSet {
+                            shopMoney {
+                                amount
+                                currencyCode
+                            }
+                        }
+                        totalOutstandingSet {
+                            shopMoney {
+                                amount
+                                currencyCode
+                            }
+                        }
                         customer {
                             id
                             firstName
                             lastName
+                            displayName
                             email
+                            phone
                             tags
+                            createdAt
+                            updatedAt
+                            state
+                            verifiedEmail
+                            defaultAddress {
+                                id
+                                address1
+                                city
+                                province
+                                country
+                                zip
+                                phone
+                                provinceCode
+                                countryCodeV2
+                            }
                         }
                         lineItems(first: 10) {
                             edges {
@@ -594,12 +623,29 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     id
                                     title
                                     quantity
+                                    originalUnitPriceSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                    discountedUnitPriceSet {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
                                     variant {
                                         id
                                         title
                                         price
                                         sku
                                         barcode
+                                        taxable
+                                        inventoryPolicy
+                                        position
+                                        createdAt
+                                        updatedAt
                                         product {
                                             id
                                             title
@@ -610,6 +656,22 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     }
                                 }
                             }
+                        }
+                        fulfillments {
+                            id
+                            status
+                            createdAt
+                            updatedAt
+                            displayStatus
+                        }
+                        transactions {
+                            id
+                            kind
+                            status
+                            amount
+                            gateway
+                            createdAt
+                            processedAt
                         }
                         shippingAddress {
                             address1
@@ -635,18 +697,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         note
                         confirmed
                         test
-                        totalRefundedSet {
-                            shopMoney {
-                                amount
-                                currencyCode
-                            }
-                        }
-                        totalOutstandingSet {
-                            shopMoney {
-                                amount
-                                currencyCode
-                            }
-                        }
                         customerLocale
                         currencyCode
                         presentmentCurrencyCode

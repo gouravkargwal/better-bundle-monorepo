@@ -95,6 +95,12 @@ model OrderData {
   customerId              String?   @db.VarChar(100)
   customerEmail           String?   @db.VarChar(255)
   customerPhone           String?   @db.VarChar(50)
+  customerDisplayName     String?   @db.VarChar(255)
+  customerState           String?   @db.VarChar(50)
+  customerVerifiedEmail   Boolean?  @default(false)
+  customerCreatedAt       DateTime?
+  customerUpdatedAt       DateTime?
+  customerDefaultAddress  Json?     @default("{}")
   totalAmount             Float     @default(0.0)
   subtotalAmount          Float?    @default(0.0)
   totalTaxAmount          Float?    @default(0.0)
@@ -117,6 +123,8 @@ model OrderData {
   billingAddress          Json?     @default("{}")
   discountApplications    Json?     @default("[]")
   metafields              Json?     @default("[]")
+  fulfillments            Json?     @default("[]")
+  transactions            Json?     @default("[]")
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
   shop                    Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -126,6 +134,7 @@ model OrderData {
   @@index([shopId, customerId])
   @@index([shopId, customerEmail])
   @@index([shopId, currencyCode])
+  @@index([shopId, customerState])
   @@map("OrderData")
 }
 
@@ -730,6 +739,15 @@ model UserFeatures {
   discountSensitivity     Float? // % of orders with discounts
   avgDiscountAmount       Float?
 
+  // Enhanced Customer Features (from Order API)
+  customerState        String? @db.VarChar(50)  // "ENABLED", "DISABLED", etc.
+  isVerifiedEmail      Boolean @default(false)  // Email verification status
+  customerAge          Int?                     // Days since customer creation
+  hasDefaultAddress    Boolean @default(false)  // Has default address
+  geographicRegion     String? @db.VarChar(100) // Geographic region from address
+  currencyPreference   String? @db.VarChar(10)  // Preferred currency
+  customerHealthScore  Int     @default(0)      // 0-100 customer health score
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -787,6 +805,18 @@ model ProductFeatures {
   imageRichness        Float? // 0-1 normalized  
   tagDiversity         Float? // 0-1 normalized
   metafieldUtilization Float? // 0-1 normalized
+
+  // Enhanced Features (from new Shopify data)
+  mediaRichness        Float?  // 0-100 score based on media content
+  seoOptimization      Float?  // 0-100 SEO optimization score
+  seoTitleLength       Int?    // Length of SEO title
+  seoDescriptionLength Int?    // Length of SEO description
+  hasVideoContent      Boolean @default(false) // Has video media
+  has3DContent         Boolean @default(false) // Has 3D model media
+  mediaCount           Int     @default(0)     // Total media items
+  hasOnlineStoreUrl    Boolean @default(false) // Has online store URL
+  hasPreviewUrl        Boolean @default(false) // Has preview URL
+  hasCustomTemplate    Boolean @default(false) // Has custom template
 
   // Computed Scores
   popularityScore Float @default(0) // Normalized 0-1

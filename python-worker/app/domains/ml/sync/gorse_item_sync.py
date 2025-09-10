@@ -509,18 +509,28 @@ class GorseItemSync:
         conversion_rate = product.get("overallConversionRate")
         view_count = product.get("viewCount30d", 0)
 
+        # Enhanced hiding logic with new features
+        media_richness = product.get("mediaRichness", 0)
+        seo_optimization = product.get("seoOptimization", 0)
+        has_video_content = product.get("hasVideoContent", False)
+        has_3d_content = product.get("has3DContent", False)
+
         # Only hide if explicitly marked as hidden or completely out of stock with no recent activity
         # For seed data and testing, be more permissive
         if total_inventory is not None and total_inventory <= 0:
             # Only hide if there's been no activity (no views) in the last 30 days
-            if view_count == 0:
+            # AND no rich media content to compensate
+            if view_count == 0 and media_richness == 0:
                 return True
 
         # Hide for very low conversion only if there are many views and very poor performance
+        # AND no rich media or SEO optimization to compensate
         if (
             view_count > 100  # Increased threshold
             and conversion_rate is not None
             and float(conversion_rate) < 0.005  # More strict threshold
+            and media_richness < 30  # No rich media
+            and seo_optimization < 50  # Poor SEO
         ):
             return True
 

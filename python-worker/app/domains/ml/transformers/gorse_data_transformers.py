@@ -123,6 +123,14 @@ class GorseDataTransformers:
                     float(user.get("totalSpent") or 0),
                     int(user.get("totalPurchases") or 0),
                 ),
+                # Enhanced Customer Features (from Order API)
+                "customer_state": user.get("customerState", "unknown"),
+                "is_verified_email": int(user.get("isVerifiedEmail", False)),
+                "customer_age": user.get("customerAge"),
+                "has_default_address": int(user.get("hasDefaultAddress", False)),
+                "geographic_region": user.get("geographicRegion", "unknown"),
+                "currency_preference": user.get("currencyPreference", "USD"),
+                "customer_health_score": int(user.get("customerHealthScore", 0)),
             }
 
             # Remove None values
@@ -277,6 +285,17 @@ class GorseDataTransformers:
             ),
             "has_discount": int(bool(product.get("compareAtPrice"))),
             "stock_level": min(int(product.get("totalInventory", 0)) / 100, 1.0),
+            # Enhanced Product Features (from new Shopify data)
+            "media_richness": float(product.get("mediaRichness", 0)),
+            "seo_optimization": float(product.get("seoOptimization", 0)),
+            "seo_title_length": int(product.get("seoTitleLength", 0)),
+            "seo_description_length": int(product.get("seoDescriptionLength", 0)),
+            "has_video_content": int(product.get("hasVideoContent", False)),
+            "has_3d_content": int(product.get("has3DContent", False)),
+            "media_count": int(product.get("mediaCount", 0)),
+            "has_online_store_url": int(product.get("hasOnlineStoreUrl", False)),
+            "has_preview_url": int(product.get("hasPreviewUrl", False)),
+            "has_custom_template": int(product.get("hasCustomTemplate", False)),
         }
 
         # Add tags if available
