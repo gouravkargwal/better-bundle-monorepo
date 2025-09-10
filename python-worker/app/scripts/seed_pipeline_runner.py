@@ -18,8 +18,6 @@ from app.domains.ml.services.feature_engineering import FeatureEngineeringServic
 from app.domains.shopify.services.main_table_storage import MainTableStorageService
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
-from app.domains.ml.services.gorse_sync_pipeline import GorseSyncPipeline
-from app.domains.ml.services.gorse_training_service import GorseTrainingService
 
 # Import our new generators
 from seed_data_generators.base_generator import BaseGenerator
@@ -341,38 +339,6 @@ class SeedPipelineRunner:
             print(f"❌ Feature computation failed: {e}")
             return False
 
-    async def sync_to_gorse(self, shop_id: str) -> bool:
-        """Sync feature data to Gorse."""
-        print("\n🔄 Syncing data to Gorse...")
-
-        try:
-            sync_pipeline = GorseSyncPipeline()
-
-            print("📊 Syncing users, items, and feedback to Gorse bridge tables...")
-            sync_result = await sync_pipeline.sync_all(shop_id, incremental=False)
-
-            if sync_result:
-                print("✅ Gorse sync pipeline completed successfully")
-
-                training_service = GorseTrainingService()
-
-                print("🚀 Pushing data to Gorse and triggering training...")
-                training_job_id = await training_service.push_data_to_gorse(
-                    shop_id=shop_id,
-                    job_type="full_training",
-                    trigger_source="enhanced_seed_script",
-                )
-
-                print(f"✅ Gorse training job started: {training_job_id}")
-                return True
-            else:
-                print("❌ Gorse sync pipeline failed")
-                return False
-
-        except Exception as e:
-            print(f"❌ Gorse sync failed: {e}")
-            return False
-
     async def test_recommendations_api(self, shop_id: str) -> bool:
         """Test the recommendations API with seeded data."""
         print("\n🔄 Testing recommendations API...")
@@ -469,14 +435,6 @@ class SeedPipelineRunner:
             print("\n📊 Step 5: Computing ML features...")
             features_success = await self.compute_features(shop_id)
 
-            # Step 6: Sync to Gorse
-            print("\n📊 Step 6: Syncing to Gorse...")
-            gorse_success = await self.sync_to_gorse(shop_id)
-
-            # Step 7: Test recommendations
-            print("\n📊 Step 7: Testing recommendations API...")
-            api_success = await self.test_recommendations_api(shop_id)
-
             # Summary
             print("\n🎯 Enhanced Pipeline Summary:")
             print(f"  ✅ Raw data seeding: Success")
@@ -489,14 +447,8 @@ class SeedPipelineRunner:
             print(
                 f"  {'✅' if features_success else '❌'} Feature computation: {'Success' if features_success else 'Failed'}"
             )
-            print(
-                f"  {'✅' if gorse_success else '❌'} Gorse sync: {'Success' if gorse_success else 'Failed'}"
-            )
-            print(
-                f"  {'✅' if api_success else '❌'} API testing: {'Success' if api_success else 'Failed'}"
-            )
 
-            if all([main_success, events_success, features_success, gorse_success]):
+            if all([main_success, events_success, features_success]):
                 print("\n🎉 Enhanced pipeline executed successfully!")
                 print("🎯 Realistic user journeys created with:")
                 print("  • 15 diverse products across 3 categories")
@@ -514,7 +466,7 @@ class SeedPipelineRunner:
             else:
                 print("\n⚠️ Pipeline completed with some failures. Check logs above.")
 
-            return all([main_success, events_success, features_success, gorse_success])
+            return all([main_success, events_success, features_success])
 
         except Exception as e:
             print(f"❌ Pipeline failed with error: {e}")

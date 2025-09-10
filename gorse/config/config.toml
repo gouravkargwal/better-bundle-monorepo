@@ -1,9 +1,9 @@
 [database]
 cache_store = "redis://localhost:6379/0"
-data_store = "postgresql://postgres:postgres@localhost:5433/betterbundle?sslmode=disable"
+data_store = "postgresql://postgres:postgres@host.docker.internal:5433/betterbundle?sslmode=disable"
 
-table_prefix = "gorse_"
-cache_table_prefix = "gorse_cache_"
+# table_prefix = "gorse_"
+# cache_table_prefix = "gorse_cache_"
 
 [database.mysql]
 

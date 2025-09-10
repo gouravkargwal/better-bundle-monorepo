@@ -17,8 +17,9 @@ logger = get_logger(__name__)
 class GorseDataTransformers:
     """Data transformation utilities for Gorse synchronization"""
 
-    def __init__(self, pipeline):
-        self.pipeline = pipeline
+    def __init__(self):
+        """Initialize Gorse data transformers"""
+        pass
 
     def _build_comprehensive_user_labels(self, user: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -583,3 +584,202 @@ class GorseDataTransformers:
         except Exception as e:
             logger.error(f"Failed to convert variant to product ID: {e}")
             return None
+
+    def transform_user_features_to_labels(self, user) -> Dict[str, Any]:
+        """Transform user features to Gorse labels"""
+        try:
+            # Convert user object to dict if needed
+            if hasattr(user, "__dict__"):
+                user_dict = user.__dict__
+            else:
+                user_dict = user
+
+            return self._build_comprehensive_user_labels(user_dict)
+        except Exception as e:
+            logger.error(f"Failed to transform user features: {str(e)}")
+            return {}
+
+    def transform_product_features_to_labels(
+        self, product, product_info: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Transform product features to Gorse labels"""
+        try:
+            # Convert product object to dict if needed
+            if hasattr(product, "__dict__"):
+                product_dict = product.__dict__
+            else:
+                product_dict = product
+
+            # Merge with additional product info if provided
+            if product_info:
+                product_dict.update(product_info)
+
+            return self._build_comprehensive_item_labels(product_dict)
+        except Exception as e:
+            logger.error(f"Failed to transform product features: {str(e)}")
+            return {}
+
+    def transform_behavioral_event_to_feedback(
+        self, event, shop_id: str
+    ) -> List[Dict[str, Any]]:
+        """Transform behavioral event to Gorse feedback"""
+        try:
+            feedback_list = []
+
+            # Convert event object to dict if needed
+            if hasattr(event, "__dict__"):
+                event_dict = event.__dict__
+            else:
+                event_dict = event
+
+            event_type = event_dict.get("eventType", "")
+            client_id = event_dict.get("clientId", "")
+            timestamp = event_dict.get("timestamp", now_utc())
+
+            # Extract productId from eventData JSON field
+            product_id = self._extract_product_id_from_event(event_dict)
+
+            # Skip if missing required fields
+            if not client_id or not product_id:
+                return feedback_list
+
+            # Map event types to feedback types
+            feedback_type_map = {
+                "product_viewed": "view",
+                "product_added_to_cart": "cart_add",
+                "product_removed_from_cart": "cart_remove",
+                "checkout_started": "checkout",
+                "order_completed": "purchase",
+            }
+
+            feedback_type = feedback_type_map.get(event_type)
+            if not feedback_type:
+                return feedback_list
+
+            # Create feedback record
+            feedback = {
+                "feedbackType": feedback_type,
+                "userId": f"shop_{shop_id}_{client_id}",
+                "itemId": f"shop_{shop_id}_{product_id}",
+                "timestamp": (
+                    timestamp.isoformat()
+                    if hasattr(timestamp, "isoformat")
+                    else str(timestamp)
+                ),
+            }
+
+            feedback_list.append(feedback)
+            return feedback_list
+
+        except Exception as e:
+            logger.error(f"Failed to transform behavioral event: {str(e)}")
+            return []
+
+    def transform_order_to_feedback(self, order, shop_id: str) -> List[Dict[str, Any]]:
+        """Transform order to Gorse feedback"""
+        try:
+            feedback_list = []
+
+            # Convert order object to dict if needed
+            if hasattr(order, "__dict__"):
+                order_dict = order.__dict__
+            else:
+                order_dict = order
+
+            customer_id = order_dict.get("customerId", "")
+            order_date = order_dict.get("orderDate", now_utc())
+            line_items = order_dict.get("lineItems", [])
+
+            # Skip if missing customer ID
+            if not customer_id:
+                return feedback_list
+
+            # Create feedback for each line item
+            for item in line_items:
+                if isinstance(item, dict):
+                    product_id = item.get("productId", "")
+                    quantity = item.get("quantity", 1)
+                else:
+                    # Handle object attributes
+                    product_id = getattr(item, "productId", "")
+                    quantity = getattr(item, "quantity", 1)
+
+                if not product_id:
+                    continue
+
+                # Create purchase feedback
+                feedback = {
+                    "feedbackType": "purchase",
+                    "userId": f"shop_{shop_id}_{customer_id}",
+                    "itemId": f"shop_{shop_id}_{product_id}",
+                    "timestamp": (
+                        order_date.isoformat()
+                        if hasattr(order_date, "isoformat")
+                        else str(order_date)
+                    ),
+                }
+
+                feedback_list.append(feedback)
+
+            return feedback_list
+
+        except Exception as e:
+            logger.error(f"Failed to transform order to feedback: {str(e)}")
+            return []
+
+    def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
+        """Extract product ID from behavioral event eventData"""
+        try:
+            event_type = event.get("eventType", "")
+            event_data = event.get("eventData", {})
+
+            # Handle string eventData
+            if isinstance(event_data, str):
+                try:
+                    import json
+
+                    event_data = json.loads(event_data)
+                except:
+                    return None
+
+            if event_type == "product_viewed":
+                product_variant = event_data.get("data", {}).get("productVariant", {})
+                product = product_variant.get("product", {})
+                return self._extract_id_from_gid(product.get("id", ""))
+
+            elif event_type == "product_added_to_cart":
+                cart_line = event_data.get("data", {}).get("cartLine", {})
+                merchandise = cart_line.get("merchandise", {})
+                product = merchandise.get("product", {})
+                return self._extract_id_from_gid(product.get("id", ""))
+
+            elif event_type == "product_removed_from_cart":
+                cart_line = event_data.get("data", {}).get("cartLine", {})
+                merchandise = cart_line.get("merchandise", {})
+                product = merchandise.get("product", {})
+                return self._extract_id_from_gid(product.get("id", ""))
+
+            elif event_type == "checkout_started":
+                # Checkout events might not have product info
+                return None
+
+            elif event_type == "checkout_completed":
+                # Checkout completed events might not have product info
+                return None
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to extract product ID from event: {str(e)}")
+            return None
+
+    def _extract_id_from_gid(self, gid: str) -> str:
+        """Extract numeric ID from Shopify GID"""
+        if not gid:
+            return ""
+
+        # Handle GID format: gid://shopify/Product/123456
+        if "/" in gid:
+            return gid.split("/")[-1]
+
+        return gid

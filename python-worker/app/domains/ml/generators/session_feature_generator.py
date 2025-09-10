@@ -62,16 +62,10 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
             # Context features (device, referrer, pages)
             context_features = self._compute_context_features(events)
-            logger.info(f"🔍 Context features: {context_features}")
             features.update(context_features)
-
-            # Validate and clean features (method doesn't exist, so skip)
-            # features = self.validate_features(features)
 
             # Add lastComputedAt timestamp
             features["lastComputedAt"] = now_utc()
-
-            logger.info(f"🔍 Final session features for {session_id}: {features}")
             logger.debug(
                 f"Computed {len(features)} session features for session: {session_id}"
             )
@@ -313,29 +307,14 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
         # Extract referrer domain
         referrer_domain = None
-        logger.info(f"🔍 Processing event_data for referrer: {event_data}")
         if "context" in event_data and "document" in event_data["context"]:
             referrer = event_data["context"]["document"].get("referrer", "")
-            logger.info(
-                f"🔍 Found referrer in context.document: {referrer} (type: {type(referrer)})"
-            )
             if isinstance(referrer, str):
                 referrer_domain = self._extract_domain(referrer)
-                logger.info(
-                    f"🔍 Extracted referrer domain from context.document: {referrer_domain} (type: {type(referrer_domain)})"
-                )
         elif "referrer" in event_data:
             referrer = event_data.get("referrer", "")
-            logger.info(
-                f"🔍 Found referrer in event_data: {referrer} (type: {type(referrer)})"
-            )
             if isinstance(referrer, str):
                 referrer_domain = self._extract_domain(referrer)
-                logger.info(
-                    f"🔍 Extracted referrer domain from referrer: {referrer_domain} (type: {type(referrer_domain)})"
-                )
-        else:
-            logger.info(f"🔍 No referrer found in event_data")
 
         # Extract landing page (from first event)
         landing_page = None

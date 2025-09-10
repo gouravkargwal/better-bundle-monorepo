@@ -45,15 +45,15 @@ from app.consumers.feature_computation_consumer import FeatureComputationConsume
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
-from app.consumers.gorse_sync_consumer import GorseSyncConsumer
-from app.consumers.gorse_training_consumer import GorseTrainingConsumer
+
+# Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 from app.core.database.simple_db_client import get_database, close_database
 from app.core.redis_client import streams_manager
 from datetime import datetime
 from typing import Optional
 
 # API imports
-from app.api.v1.training import router as training_router
+from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
 
@@ -89,7 +89,7 @@ app = FastAPI(
 )
 
 # Include API routers
-app.include_router(training_router)
+app.include_router(unified_gorse_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
 
@@ -135,11 +135,7 @@ async def initialize_services():
         # Initialize behavioral events consumer
         services["behavioral_events_consumer"] = BehavioralEventsConsumer()
 
-        # Initialize gorse sync consumer
-        services["gorse_sync_consumer"] = GorseSyncConsumer()
-
-        # Initialize gorse training consumer
-        services["gorse_training_consumer"] = GorseTrainingConsumer()
+        # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 
         # Initialize webhook services
         services["webhook_repository"] = WebhookRepository()
@@ -151,8 +147,7 @@ async def initialize_services():
             main_table_processing_consumer=services["main_table_processing_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
-            gorse_sync_consumer=services["gorse_sync_consumer"],
-            gorse_training_consumer=services["gorse_training_consumer"],
+            # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
         )
 
         # Start consumer manager
@@ -176,8 +171,7 @@ async def get_service(service_name: str):
         elif service_name == "ml_pipeline":
             if "feature_engineering" not in services:
                 await get_service("feature_engineering")
-            if "gorse_ml" not in services:
-                await get_service("gorse_ml")
+            # Note: gorse_ml service removed - using unified_gorse_service.py instead
         elif service_name == "business_metrics":
             services["business_metrics"] = BusinessMetricsService()
         elif service_name == "performance_analytics":
@@ -222,13 +216,7 @@ async def cleanup_services():
         # Stop consumer manager
         await consumer_manager.stop()
 
-        # Stop Gorse training monitor
-        if "gorse_training_monitor" in services:
-            await services["gorse_training_monitor"].stop_monitoring()
-
-        # Close Gorse ML service
-        if "gorse_ml" in services:
-            await services["gorse_ml"].close()
+        # Note: Old Gorse services removed - using unified_gorse_service.py instead
 
         # Shutdown database connection
         from app.core.database.simple_db_client import close_database
@@ -1490,36 +1478,7 @@ async def clear_permission_cache(shop_domain: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Gorse training monitoring endpoints
-@app.get("/api/ml/training/monitor/status")
-async def get_training_monitor_status():
-    """Get Gorse training monitor status"""
-    try:
-        if "gorse_training_monitor" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse training monitor not available"
-            )
-
-        return services["gorse_training_monitor"].get_monitoring_status()
-    except Exception as e:
-        logger.error(f"Failed to get training monitor status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/ml/training/completions")
-async def get_training_completions(shop_id: Optional[str] = None):
-    """Get training completion events"""
-    try:
-        if "gorse_training_monitor" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse training monitor not available"
-            )
-
-        events = services["gorse_training_monitor"].get_completion_events(shop_id)
-        return {"events": events, "count": len(events)}
-    except Exception as e:
-        logger.error(f"Failed to get training completions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Note: Gorse training monitoring endpoints moved to unified_gorse.py
 
 
 # Heuristic service endpoints
@@ -1699,231 +1658,7 @@ async def replay_behavioral_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Gorse sync endpoints
-@app.post("/api/gorse/sync")
-async def trigger_gorse_sync(
-    request: Request,
-    background_tasks: BackgroundTasks,
-):
-    """Trigger Gorse data synchronization via Redis stream"""
-    try:
-        from app.core.redis_client import streams_manager
-        from app.shared.helpers import now_utc
-
-        # Extract parameters from request body (JSON) or form data
-        try:
-            body = await request.json()
-        except:
-            # Fallback to form data
-            form_data = await request.form()
-            body = dict(form_data)
-
-        shop_id = body.get("shop_id")
-        sync_type = body.get("sync_type", "all")  # all, users, items, feedback
-        since_hours = int(body.get("since_hours", 24))
-
-        # Validate required parameters
-        if not shop_id:
-            raise HTTPException(status_code=400, detail="shop_id is required")
-
-        # Validate sync_type
-        valid_sync_types = ["all", "users", "items", "feedback"]
-        if sync_type not in valid_sync_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"sync_type must be one of: {', '.join(valid_sync_types)}",
-            )
-
-        # Generate a unique job ID
-        job_id = f"gorse_sync_{shop_id}_{sync_type}_{int(now_utc().timestamp())}"
-
-        # Prepare event metadata
-        metadata = {
-            "trigger_source": "api_endpoint",
-            "timestamp": now_utc().isoformat(),
-        }
-
-        # Publish the Gorse sync event to Redis stream
-        event_id = await streams_manager.publish_gorse_sync_event(
-            job_id=job_id,
-            shop_id=shop_id,
-            sync_type=sync_type,
-            since_hours=since_hours,
-            metadata=metadata,
-        )
-
-        logger.info(
-            f"Triggered Gorse sync",
-            job_id=job_id,
-            shop_id=shop_id,
-            sync_type=sync_type,
-            since_hours=since_hours,
-            event_id=event_id,
-        )
-
-        return {
-            "message": "Gorse sync triggered",
-            "job_id": job_id,
-            "shop_id": shop_id,
-            "sync_type": sync_type,
-            "since_hours": since_hours,
-            "event_id": event_id,
-            "status": "queued",
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to trigger Gorse sync: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/gorse/sync/status/{shop_id}")
-async def get_gorse_sync_status(shop_id: str):
-    """Get Gorse sync status for a shop"""
-    try:
-        # Get the Gorse sync consumer from services
-        if "gorse_sync_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse sync consumer not available"
-            )
-
-        consumer = services["gorse_sync_consumer"]
-
-        # Get active jobs for this shop
-        active_jobs = {
-            job_id: job_info
-            for job_id, job_info in consumer.active_sync_jobs.items()
-            if job_info.get("shop_id") == shop_id
-        }
-
-        return {
-            "shop_id": shop_id,
-            "consumer_status": consumer.status.value,
-            "active_jobs": len(active_jobs),
-            "jobs": active_jobs,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get Gorse sync status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/gorse/sync/health")
-async def get_gorse_sync_health():
-    """Get Gorse sync consumer health status"""
-    try:
-        if "gorse_sync_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse sync consumer not available"
-            )
-
-        health_status = await services["gorse_sync_consumer"].get_health_status()
-        return health_status
-
-    except Exception as e:
-        logger.error(f"Failed to get Gorse sync health status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/gorse/train")
-async def trigger_gorse_training(
-    shop_id: str,
-    job_type: str = Query(
-        default="full_training",
-        description="Type of training: full_training, incremental_training, model_refresh",
-    ),
-    background_tasks: BackgroundTasks = None,
-):
-    """Trigger Gorse model training for a shop"""
-    try:
-        if "gorse_training_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse training consumer not available"
-            )
-
-        consumer = services["gorse_training_consumer"]
-
-        # Create training job
-        job_id = f"training_{shop_id}_{job_type}_{int(time.time())}"
-
-        # Prepare event metadata
-        metadata = {
-            "trigger_source": "api_endpoint",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Publish the Gorse training event to Redis stream
-        from app.core.redis_client import streams_manager
-
-        event_id = await streams_manager.publish_gorse_training_event(
-            job_id=job_id,
-            shop_id=shop_id,
-            job_type=job_type,
-            trigger_source="api",
-            metadata=metadata,
-        )
-
-        logger.info(
-            f"Triggered Gorse training | job_id={job_id} | shop_id={shop_id} | job_type={job_type} | event_id={event_id}"
-        )
-
-        return {
-            "status": "success",
-            "message": "Gorse training job created and queued",
-            "job_id": job_id,
-            "shop_id": shop_id,
-            "job_type": job_type,
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to trigger Gorse training: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/gorse/training/status/{job_id}")
-async def get_training_job_status(job_id: str):
-    """Get training job status"""
-    try:
-        if "gorse_training_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse training consumer not available"
-            )
-
-        from app.domains.ml.services.gorse_training_service import GorseTrainingService
-
-        training_service = GorseTrainingService()
-        job_status = await training_service.get_training_job_status(job_id)
-
-        if not job_status:
-            raise HTTPException(
-                status_code=404, detail=f"Training job {job_id} not found"
-            )
-
-        return job_status
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get training job status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/gorse/training/health")
-async def get_training_health():
-    """Get training consumer health status"""
-    try:
-        if "gorse_training_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Gorse training consumer not available"
-            )
-
-        health_status = await services["gorse_training_consumer"].health_check()
-        return health_status
-
-    except Exception as e:
-        logger.error(f"Failed to get training health status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Note: All Gorse sync and training endpoints moved to unified_gorse.py
 
 
 # Error handlers

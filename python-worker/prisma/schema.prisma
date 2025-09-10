@@ -1116,43 +1116,4 @@ model UserIdentityLink {
   @@map("UserIdentityLink")
 }
 
-// ============= GORSE BRIDGE TABLES =============
 
-model GorseUsers {
-  userId    String   @id // customerId or "session_${clientId}"
-  shopId    String
-  labels    Json // Computed from feature tables
-  updatedAt DateTime @updatedAt
-
-  @@index([shopId])
-  @@map("gorse_users")
-}
-
-model GorseItems {
-  itemId     String   @id // productId
-  shopId     String
-  categories Json // Array of collectionIds
-  labels     Json // Computed from feature tables
-  isHidden   Boolean  @default(false)
-  updatedAt  DateTime @updatedAt
-
-  @@index([shopId])
-  @@index([shopId, isHidden])
-  @@map("gorse_items")
-}
-
-model GorseFeedback {
-  id           String   @id @default(cuid())
-  feedbackType String // 'view', 'cart_add', 'purchase'
-  userId       String
-  itemId       String
-  timestamp    DateTime
-  shopId       String
-  comment      String? // Additional context
-
-  @@unique([feedbackType, userId, itemId, timestamp])
-  @@index([shopId, userId, timestamp(sort: Desc)])
-  @@index([shopId, itemId, timestamp(sort: Desc)])
-  @@index([shopId, feedbackType])
-  @@map("gorse_feedback")
-}

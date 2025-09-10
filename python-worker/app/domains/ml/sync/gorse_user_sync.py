@@ -408,8 +408,8 @@ class GorseUserSync:
                     user["customerId"], shop_id
                 )
                 user_data = {
-                    "userId": prefixed_user_id,
-                    "shopId": shop_id,
+                    "user_id": prefixed_user_id,
+                    "shop_id": shop_id,
                     "labels": Json(labels),
                 }
                 gorse_users_data.append(user_data)
@@ -428,7 +428,7 @@ class GorseUserSync:
         await self.pipeline._generic_bulk_upsert(
             data_list=gorse_users_data,
             table_accessor=lambda db: db.gorseusers,
-            id_field="userId",
+            id_field="user_id",
             entity_name="users",
             table_name="gorse_users",
         )
@@ -480,8 +480,8 @@ class GorseUserSync:
 
             gorse_users_data.append(
                 {
-                    "userId": prefixed_user_id,
-                    "shopId": shop_id,
+                    "user_id": prefixed_user_id,
+                    "shop_id": shop_id,
                     "labels": Json(labels),
                 }
             )

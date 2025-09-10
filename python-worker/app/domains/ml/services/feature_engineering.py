@@ -386,18 +386,45 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         for event in sorted_events:
             customer_id = event.get("customerId") or "anonymous"
-            event_time = event.get("timestamp")
+            event_time_str = event.get("timestamp")
+
+            # Parse event time to datetime object
+            event_time = None
+            if event_time_str:
+                try:
+                    if isinstance(event_time_str, str):
+                        event_time = datetime.fromisoformat(
+                            event_time_str.replace("Z", "+00:00")
+                        )
+                    elif isinstance(event_time_str, datetime):
+                        event_time = event_time_str
+                except:
+                    event_time = None
 
             # Check if we need to start a new session for this customer
             should_start_new_session = True
 
             if customer_id in current_sessions:
                 current_session_id = current_sessions[customer_id]
-                last_event_time = (
-                    sessions[current_session_id]["events"][-1].get("timestamp")
+                last_event = (
+                    sessions[current_session_id]["events"][-1]
                     if sessions[current_session_id]["events"]
                     else None
                 )
+
+                last_event_time = None
+                if last_event:
+                    last_event_time_str = last_event.get("timestamp")
+                    if last_event_time_str:
+                        try:
+                            if isinstance(last_event_time_str, str):
+                                last_event_time = datetime.fromisoformat(
+                                    last_event_time_str.replace("Z", "+00:00")
+                                )
+                            elif isinstance(last_event_time_str, datetime):
+                                last_event_time = last_event_time_str
+                        except:
+                            last_event_time = None
 
                 if last_event_time and event_time:
                     time_diff = (event_time - last_event_time).total_seconds() / 60
@@ -697,25 +724,323 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # 6. Interaction Features (sample of customer-product pairs)
             logger.info("Computing interaction features...")
-            interaction_features = await self._compute_sample_interaction_features(
-                customers, products, shop, orders, behavioral_events
+            interaction_context = self._build_base_context(
+                shop,
+                orders=orders or [],
+                behavioral_events=behavioral_events or [],
             )
+
+            # Create variant ID to product ID mapping from products data
+            variant_to_product_map = {}
+            for product in products or []:
+                product_id = product.get("productId")
+                if product_id:
+                    variants = product.get("variants", [])
+                    for variant in variants:
+                        if isinstance(variant, dict) and "id" in variant:
+                            variant_id = variant["id"]
+                            if variant_id.startswith("gid://shopify/ProductVariant/"):
+                                variant_to_product_map[variant_id] = product_id
+
+            # Find customer-product pairs that have interactions
+            interaction_pairs = set()
+
+            # Create product ID mapping from behavioral events to ProductData
+            product_id_mapping = self._create_product_id_mapping(
+                behavioral_events, products
+            )
+
+            # From behavioral events
+            for event in behavioral_events:
+                if event.get("customerId") and "eventData" in event:
+                    event_product_id = self._extract_product_id_from_event(event)
+                    if event_product_id:
+                        customer_id = event.get("customerId")
+                        # Extract numeric ID from GID
+                        if customer_id and customer_id.startswith(
+                            "gid://shopify/Customer/"
+                        ):
+                            customer_id = customer_id.split("/")[-1]
+                        if event_product_id and event_product_id.startswith(
+                            "gid://shopify/Product/"
+                        ):
+                            event_product_id = event_product_id.split("/")[-1]
+
+                        # Map behavioral event product ID to ProductData product ID
+                        mapped_product_id = product_id_mapping.get(
+                            event_product_id, event_product_id
+                        )
+
+                        # Only add if both IDs are valid
+                        if customer_id and mapped_product_id:
+                            interaction_pairs.add((customer_id, mapped_product_id))
+
+            logger.info(
+                f"Found {len(interaction_pairs)} interaction pairs from behavioral events"
+            )
+
+            # From orders
+            for order in orders:
+                if order.get("customerId"):
+                    customer_id = order.get("customerId")
+                    if customer_id and customer_id.startswith(
+                        "gid://shopify/Customer/"
+                    ):
+                        customer_id = customer_id.split("/")[-1]
+                    for line_item in order.get("lineItems", []):
+                        # Extract product ID from line item structure using variant mapping
+                        product_id = None
+
+                        # Try to get product ID from variant mapping
+                        if "variant" in line_item and isinstance(
+                            line_item["variant"], dict
+                        ):
+                            variant_id = line_item["variant"].get("id")
+                            if variant_id and variant_id in variant_to_product_map:
+                                product_id = variant_to_product_map[variant_id]
+
+                        # Fallback: try direct product_id field
+                        if not product_id and "product_id" in line_item:
+                            product_id = line_item.get("product_id")
+
+                        # Fallback: try variant.product.id structure
+                        if (
+                            not product_id
+                            and "variant" in line_item
+                            and isinstance(line_item["variant"], dict)
+                        ):
+                            product = line_item["variant"].get("product", {})
+                            if isinstance(product, dict):
+                                product_id = product.get("id")
+
+                        if product_id and product_id.startswith(
+                            "gid://shopify/Product/"
+                        ):
+                            product_id = product_id.split("/")[-1]
+                            # Only add if both IDs are valid
+                            if customer_id and product_id:
+                                interaction_pairs.add((customer_id, product_id))
+
+            logger.info(
+                f"Found {len(interaction_pairs)} total interaction pairs (including from orders)"
+            )
+
+            # Generate features for each interaction pair
+            interaction_features = {}
+            for customer_id, product_id in interaction_pairs:
+                try:
+                    # Convert numeric product ID back to full GID format for the generator
+                    full_product_id = f"gid://shopify/Product/{product_id}"
+                    features = await self.interaction_generator.generate_features(
+                        shop["id"], customer_id, full_product_id, interaction_context, product_id_mapping
+                    )
+                    key = f"{customer_id}_{product_id}"
+                    interaction_features[key] = features
+                    logger.info(
+                        f"Generated interaction features for {customer_id}-{product_id}: {len(features)} fields"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate interaction features for {customer_id}-{product_id}: {e}"
+                    )
+
+            logger.info(
+                f"Generated {len(interaction_features)} interaction feature records"
+            )
+
             all_features["interactions"] = interaction_features
 
             # 7. Product Pair Features (top product pairs)
             logger.info("Computing product pair features...")
-            product_pair_features = await self._compute_top_product_pair_features(
-                products, shop, orders, behavioral_events
+            product_pair_context = self._build_base_context(
+                shop,
+                orders=orders or [],
+                behavioral_events=behavioral_events or [],
             )
+
+            # Use the variant-to-product mapping created earlier
+
+            # Find product pairs that co-occur in orders
+            product_pairs = set()
+            for order in orders:
+                order_products = []
+                for line_item in order.get("lineItems", []):
+                    # Extract product ID from line item structure
+                    product_id = None
+
+                    # Try different possible structures
+                    if "product_id" in line_item:
+                        product_id = line_item.get("product_id")
+                    elif "variant" in line_item and isinstance(
+                        line_item["variant"], dict
+                    ):
+                        variant = line_item["variant"]
+                        # Check if variant has product field
+                        if "product" in variant and isinstance(
+                            variant["product"], dict
+                        ):
+                            product_id = variant["product"].get("id")
+                        # If no product field, try to map variant ID to product ID
+                        elif "id" in variant:
+                            variant_id = variant["id"]
+                            if variant_id in variant_to_product_map:
+                                product_id = variant_to_product_map[variant_id]
+
+                    if product_id and product_id.startswith("gid://shopify/Product/"):
+                        product_id = product_id.split("/")[-1]
+                        order_products.append(product_id)
+                    elif product_id and product_id.isdigit():
+                        # Handle case where we have a numeric product ID
+                        order_products.append(product_id)
+
+                # Create pairs from products in the same order
+                for i in range(len(order_products)):
+                    for j in range(i + 1, len(order_products)):
+                        pair = tuple(sorted([order_products[i], order_products[j]]))
+                        product_pairs.add(pair)
+
+            logger.info(f"Found {len(product_pairs)} product pairs from orders")
+
+            # Generate features for each product pair
+            product_pair_features = {}
+            for product_id1, product_id2 in product_pairs:
+                try:
+                    features = await self.product_pair_generator.generate_features(
+                        shop["id"], product_id1, product_id2, product_pair_context
+                    )
+                    key = f"{product_id1}_{product_id2}"
+                    product_pair_features[key] = features
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate product pair features for {product_id1}-{product_id2}: {e}"
+                    )
+
             all_features["product_pairs"] = product_pair_features
 
             # 8. Search Product Features (from search events)
             logger.info("Computing search product features...")
-            search_product_features = (
-                await self._compute_search_product_features_from_events(
-                    behavioral_events, shop
-                )
+            search_context = self._build_base_context(
+                shop,
+                behavioral_events=behavioral_events or [],
             )
+
+            # Find search-to-product correlations
+            search_product_pairs = set()
+
+            # Get all search events and product view events
+            search_events = []
+            product_view_events = []
+
+            for event in behavioral_events:
+                if event.get("eventType") == "search_submitted":
+                    search_events.append(event)
+                elif event.get("eventType") == "product_viewed":
+                    product_view_events.append(event)
+
+            logger.info(
+                f"Found {len(search_events)} search events and {len(product_view_events)} product view events"
+            )
+
+            # Sort all events by timestamp for time-based correlation
+            all_events = search_events + product_view_events
+            all_events.sort(key=lambda x: x.get("timestamp", ""))
+
+            # Find search events followed by product views within 24 hours
+            for i, event in enumerate(all_events):
+                if event.get("eventType") == "search_submitted":
+                    search_query = self._extract_search_query_from_event(event)
+                    if search_query:
+                        search_time = event.get("timestamp")
+                        search_customer = event.get("customerId") or "anonymous"
+                        logger.info(
+                            f"Processing search: '{search_query}' at {search_time} by {search_customer}"
+                        )
+
+                        # Look for product views within 24 hours after search
+                        for j in range(i + 1, len(all_events)):
+                            later_event = all_events[j]
+                            if later_event.get("eventType") == "product_viewed":
+                                later_time = later_event.get("timestamp")
+                                later_customer = (
+                                    later_event.get("customerId") or "anonymous"
+                                )
+
+                                # Check time difference (within 24 hours)
+                                if search_time and later_time:
+                                    try:
+                                        from datetime import datetime
+
+                                        search_dt = datetime.fromisoformat(
+                                            search_time.replace("Z", "+00:00")
+                                        )
+                                        later_dt = datetime.fromisoformat(
+                                            later_time.replace("Z", "+00:00")
+                                        )
+                                        time_diff = (
+                                            later_dt - search_dt
+                                        ).total_seconds()
+
+                                        logger.info(
+                                            f"    Checking product view: {later_time} by {later_customer} (diff: {time_diff/3600:.1f}h)"
+                                        )
+
+                                        # Only consider if within 24 hours and same customer (or both anonymous)
+                                        if 0 <= time_diff < 86400 and (
+                                            search_customer == later_customer
+                                            or (
+                                                search_customer == "anonymous"
+                                                and later_customer == "anonymous"
+                                            )
+                                        ):
+                                            product_id = (
+                                                self._extract_product_id_from_event(
+                                                    later_event
+                                                )
+                                            )
+                                            logger.info(
+                                                f"      Product ID extracted: {product_id}"
+                                            )
+                                            if product_id:
+                                                search_product_pairs.add(
+                                                    (search_query, product_id)
+                                                )
+                                                logger.info(
+                                                    f"      -> MATCH: {search_query} -> {product_id}"
+                                                )
+                                            else:
+                                                logger.info(
+                                                    f"      -> No valid product ID"
+                                                )
+                                        else:
+                                            logger.info(
+                                                f"      -> Time/customer mismatch"
+                                            )
+                                    except Exception as e:
+                                        logger.debug(f"Error parsing timestamps: {e}")
+                                        continue
+
+            logger.info(f"Found {len(search_product_pairs)} search-product pairs")
+            if search_product_pairs:
+                logger.info(f"Search-product pairs: {list(search_product_pairs)}")
+
+            # Generate features for each search-product pair
+            search_product_features = {}
+            for search_query, product_id in search_product_pairs:
+                try:
+                    search_product_data = {
+                        "searchQuery": search_query,
+                        "productId": product_id,
+                    }
+                    features = await self.search_product_generator.generate_features(
+                        search_product_data, search_context
+                    )
+                    key = f"{search_query}_{product_id}"
+                    search_product_features[key] = features
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate search product features for {search_query}-{product_id}: {e}"
+                    )
+
             all_features["search_products"] = search_product_features
 
             logger.info(
@@ -811,19 +1136,25 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         "product_pair",
                         "search_product",
                     ]:
-                        if "-" in entity_id:
+                        if "_" in entity_id or "-" in entity_id:
                             if feature_type == "interaction":
-                                customer_id, product_id = entity_id.split("-", 1)
+                                # Handle both _ and - separators
+                                separator = "_" if "_" in entity_id else "-"
+                                customer_id, product_id = entity_id.split(separator, 1)
                                 # For interaction, we need to pass the feature_data directly
                                 # The shop_id, customer_id, product_id are already in feature_data
                                 batch_data.append(feature_data)
                             elif feature_type == "product_pair":
-                                product_id1, product_id2 = entity_id.split("-", 1)
+                                # Handle both _ and - separators
+                                separator = "_" if "_" in entity_id else "-"
+                                product_id1, product_id2 = entity_id.split(separator, 1)
                                 # For product_pair, we need to pass the feature_data directly
                                 # The shop_id, product_id1, product_id2 are already in feature_data
                                 batch_data.append(feature_data)
                             elif feature_type == "search_product":
-                                search_query, product_id = entity_id.split("-", 1)
+                                # Handle both _ and - separators
+                                separator = "_" if "_" in entity_id else "-"
+                                search_query, product_id = entity_id.split(separator, 1)
                                 # For search_product, we need to pass the feature_data directly
                                 # The shop_id, search_query, product_id are already in feature_data
                                 batch_data.append(feature_data)
@@ -884,386 +1215,151 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 }
             }
 
-    async def _compute_sample_interaction_features(
-        self,
-        customers: List[Dict[str, Any]],
-        products: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-        orders: List[Dict[str, Any]],
-        behavioral_events: List[Dict[str, Any]],
-    ) -> Dict[str, Dict[str, Any]]:
-        """Compute interaction features for customer-product pairs that have actual interactions"""
-        try:
-            results = {}
-            logger.info(
-                f"🔍 Computing interaction features: {len(customers)} customers, {len(products)} products, {len(orders)} orders, {len(behavioral_events)} events"
-            )
-
-            # Find customer-product pairs that have interactions
-            interaction_pairs = set()
-
-            # From orders
-            logger.info(f"🔍 Checking orders for interaction pairs...")
-            for order in orders:
-                if order.get("customerId"):
-                    logger.info(
-                        f"🔍 Order {order.get('id', 'unknown')} has customerId: {order.get('customerId')}"
-                    )
-                    for line_item in order.get("lineItems", []):
-                        # Extract product_id from variant.id if available
-                        product_id = None
-                        if "product_id" in line_item:
-                            product_id = line_item.get("product_id")
-                        elif "variant" in line_item and "id" in line_item["variant"]:
-                            # Convert ProductVariant ID to Product ID
-                            variant_id = line_item["variant"]["id"]
-                            if variant_id.startswith("gid://shopify/ProductVariant/"):
-                                # Extract variant number and convert to product number
-                                variant_num = variant_id.split("/")[-1]
-                                product_num = str(
-                                    int(variant_num) - 1000
-                                )  # Convert 2001 -> 1001
-                                product_id = f"gid://shopify/Product/{product_num}"
-                                logger.info(
-                                    f"🔍 Converted variant {variant_id} to product {product_id}"
-                                )
-
-                        if product_id:
-                            pair = (order.get("customerId"), product_id)
-                            interaction_pairs.add(pair)
-                            logger.info(f"🔍 Added order interaction pair: {pair}")
-                        else:
-                            logger.info(f"🔍 Line item missing product_id: {line_item}")
-
-            # From behavioral events
-            logger.info(f"🔍 Checking behavioral events for interaction pairs...")
-            for event in behavioral_events:
-                if event.get("customerId") and "eventData" in event:
-                    product_id = self._extract_product_id_from_event(
-                        event.get("eventData")
-                    )
-                    if product_id:
-                        pair = (event.get("customerId"), product_id)
-                        interaction_pairs.add(pair)
-                        logger.info(f"🔍 Added event interaction pair: {pair}")
-                    else:
-                        event_id = event.get('id', 'unknown')
-                        event_data = event.get('eventData')
-                        logger.info(
-                            f"🔍 Event {event_id} - no product_id extracted from eventData: {event_data}"
-                        )
-                else:
-                    event_id = event.get('id', 'unknown')
-                    customer_id = event.get('customerId')
-                    has_event_data = 'eventData' in event
-                    logger.info(
-                        f"🔍 Event {event_id} - customerId: {customer_id}, has eventData: {has_event_data}, "
-                        f"eventType: {event.get('eventType', 'unknown')}, clientId: {event.get('clientId', 'none')}"
-                    )
-
-            # Compute features for these pairs (limit to prevent excessive computation)
-            limited_pairs = list(interaction_pairs)[:1000]  # Limit to 1000 pairs
-            logger.info(
-                f"🔍 Found {len(interaction_pairs)} total interaction pairs, processing {len(limited_pairs)}"
-            )
-
-            for customer_id, product_id in limited_pairs:
-                # Find customer and product objects
-                customer = next(
-                    (c for c in customers if c.get("customerId") == customer_id), None
-                )
-                # Handle both GID format and plain product ID format
-                product = None
-                if product_id.startswith("gid://shopify/Product/"):
-                    # Extract numeric product ID from GID
-                    numeric_product_id = product_id.split("/")[-1]
-                    product = next(
-                        (
-                            p
-                            for p in products
-                            if p.get("productId") == numeric_product_id
-                        ),
-                        None,
-                    )
-                else:
-                    product = next(
-                        (p for p in products if p.get("productId") == product_id), None
-                    )
-
-                if customer and product:
-                    context = {
-                        "customer": customer,
-                        "product": product,
-                        "shop": shop,
-                        "orders": orders,
-                        "behavioral_events": behavioral_events,
-                    }
-
-                    features = await self._compute_feature_safely(
-                        self.interaction_generator,
-                        shop["id"],
-                        customer_id,
-                        product_id,
-                        context,
-                        entity_id=f"{customer_id}-{product_id}",
-                        feature_type="interaction",
-                    )
-
-                    if features:
-                        results[f"{customer_id}-{product_id}"] = features
-
-            return results
-        except Exception as e:
-            logger.error(f"Failed to compute sample interaction features: {str(e)}")
-            return {}
-
-    async def _compute_top_product_pair_features(
-        self,
-        products: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-        orders: List[Dict[str, Any]],
-        behavioral_events: List[Dict[str, Any]],
-    ) -> Dict[str, Dict[str, Any]]:
-        """Compute product pair features for frequently co-occurring products"""
-        try:
-            results = {}
-            logger.info(
-                f"🔍 Computing product pair features: {len(products)} products, {len(orders)} orders"
-            )
-
-            # Find frequently co-occurring product pairs from orders
-            co_occurrence_counts = {}
-
-            for order in orders:
-                line_items = order.get("lineItems", [])
-                logger.info(
-                    f"🔍 Order {order.get('id', 'unknown')} has {len(line_items)} line items"
-                )
-
-                product_ids = []
-                for item in line_items:
-                    # Extract product_id from variant.id if available
-                    product_id = None
-                    if "product_id" in item:
-                        product_id = item.get("product_id")
-                    elif "variant" in item and "id" in item["variant"]:
-                        # Convert ProductVariant ID to Product ID
-                        variant_id = item["variant"]["id"]
-                        if variant_id.startswith("gid://shopify/ProductVariant/"):
-                            # Extract variant number and convert to product number
-                            variant_num = variant_id.split("/")[-1]
-                            product_num = str(
-                                int(variant_num) - 1000
-                            )  # Convert 2001 -> 1001
-                            product_id = f"gid://shopify/Product/{product_num}"
-                            logger.info(
-                                f"🔍 Converted variant {variant_id} to product {product_id}"
-                            )
-
-                    if product_id:
-                        product_ids.append(product_id)
-                logger.info(
-                    f"🔍 Order {order.get('id', 'unknown')} product_ids: {product_ids}"
-                )
-
-                # Create pairs
-                for i in range(len(product_ids)):
-                    for j in range(i + 1, len(product_ids)):
-                        pair = tuple(sorted([product_ids[i], product_ids[j]]))
-                        co_occurrence_counts[pair] = (
-                            co_occurrence_counts.get(pair, 0) + 1
-                        )
-                        logger.info(
-                            f"🔍 Added product pair: {pair} (count: {co_occurrence_counts[pair]})"
-                        )
-
-            # Get top pairs (limit to prevent excessive computation)
-            top_pairs = sorted(
-                co_occurrence_counts.items(), key=lambda x: x[1], reverse=True
-            )[:100]
-            logger.info(
-                f"🔍 Found {len(co_occurrence_counts)} product pairs, processing top {len(top_pairs)}"
-            )
-
-            for (product_id1, product_id2), count in top_pairs:
-                context = {
-                    "orders": orders,
-                    "behavioral_events": behavioral_events,
-                    "shop": shop,
-                }
-
-                features = await self._compute_feature_safely(
-                    self.product_pair_generator,
-                    shop["id"],
-                    product_id1,
-                    product_id2,
-                    context,
-                    entity_id=f"{product_id1}-{product_id2}",
-                    feature_type="product_pair",
-                )
-
-                if features:
-                    logger.info(f"🔍 Generated product pair features: {features}")
-                    results[f"{product_id1}-{product_id2}"] = features
-
-            return results
-        except Exception as e:
-            logger.error(f"Failed to compute top product pair features: {str(e)}")
-            return {}
-
-    async def _compute_search_product_features_from_events(
-        self,
-        behavioral_events: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-    ) -> Dict[str, Dict[str, Any]]:
-        """Compute search-product features from search events"""
-        try:
-            results = {}
-            logger.info(
-                f"🔍 Computing search product features: {len(behavioral_events)} events"
-            )
-
-            # Find search query - product combinations
-            search_product_combinations = set()
-
-            # Sort events by timestamp to find products viewed after searches
-            sorted_events = sorted(
-                behavioral_events, key=lambda e: e.get("timestamp", "")
-            )
-            logger.info(f"🔍 Sorted {len(sorted_events)} events by timestamp")
-
-            for i, event in enumerate(sorted_events):
-                logger.info(
-                    f"🔍 Processing event {i}: {event.get('eventType', 'unknown')} - {event.get('id', 'unknown')}"
-                )
-
-                if (
-                    event.get("eventType") == "search_submitted"
-                    and "eventData" in event
-                ):
-                    logger.info(
-                        f"🔍 Found search_submitted event: {event.get('id', 'unknown')}"
-                    )
-
-                    # Extract search query
-                    query = self._extract_search_query_from_event(event)
-                    logger.info(f"🔍 Extracted search query: '{query}'")
-
-                    if query:
-                        # Look for product interactions after this search
-                        search_timestamp = event.get("timestamp")
-                        client_id = event.get("clientId")
-                        logger.info(
-                            f"🔍 Search timestamp: {search_timestamp}, client_id: {client_id}"
-                        )
-
-                        # Find products viewed by the same client after this search
-                        for j in range(i + 1, len(sorted_events)):
-                            later_event = sorted_events[j]
-                            logger.info(
-                                f"🔍 Checking later event {j}: {later_event.get('eventType', 'unknown')} - client: {later_event.get('clientId', 'unknown')}"
-                            )
-
-                            logger.info(
-                                f"🔍 Event {j} conditions: clientId={later_event.get('clientId')} == {client_id}? {later_event.get('clientId') == client_id}, eventType={later_event.get('eventType')} == 'product_viewed'? {later_event.get('eventType') == 'product_viewed'}, timestamp={later_event.get('timestamp')} >= {search_timestamp}? {later_event.get('timestamp') >= search_timestamp if later_event.get('timestamp') and search_timestamp else 'N/A'}"
-                            )
-
-                            if (
-                                later_event.get("clientId") == client_id
-                                and later_event.get("eventType") == "product_viewed"
-                                and later_event.get("timestamp") >= search_timestamp
-                                and "eventData" in later_event
-                            ):
-                                logger.info(
-                                    f"🔍 Found matching product_viewed event after search!"
-                                )
-
-                                # Extract product ID from the product_viewed event
-                                product_id = self._extract_product_id_from_event(
-                                    later_event.get("eventData")
-                                )
-                                logger.info(f"🔍 Extracted product_id: {product_id}")
-
-                                if product_id:
-                                    combination = (query, product_id)
-                                    search_product_combinations.add(combination)
-                                    logger.info(
-                                        f"🔍 Added search-product combination: {combination}"
-                                    )
-                                    break  # Only take the first product viewed after search
-                                else:
-                                    logger.info(
-                                        f"🔍 No product_id extracted from eventData: {later_event.get('eventData')}"
-                                    )
-                    else:
-                        logger.info(
-                            f"🔍 No query extracted from eventData: {event.get('eventData')}"
-                        )
-                else:
-                    logger.info(
-                        f"🔍 Event {i} is not search_submitted or missing eventData"
-                    )
-
-            # Limit combinations
-            limited_combinations = list(search_product_combinations)[:100]
-            logger.info(
-                f"🔍 Found {len(search_product_combinations)} search-product combinations, processing {len(limited_combinations)}"
-            )
-
-            for search_query, product_id in limited_combinations:
-                search_product_data = {
-                    "searchQuery": search_query,
-                    "productId": product_id,
-                }
-                context = {"behavioral_events": behavioral_events, "shop": shop}
-
-                features = await self._compute_feature_safely(
-                    self.search_product_generator,
-                    search_product_data,
-                    context,
-                    entity_id=f"{search_query}-{product_id}",
-                    feature_type="search_product",
-                )
-
-                if features:
-                    results[f"{search_query}-{product_id}"] = features
-
-            return results
-        except Exception as e:
-            logger.error(
-                f"Failed to compute search-product features from events: {str(e)}"
-            )
-            return {}
-
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract product ID from behavioral event"""
         try:
-            event_data = event.get("eventData")
-            if event_data and isinstance(event_data, dict):
-                return event_data.get("productId") or event_data.get("product_id")
+            event_type = event.get("eventType", "")
+            event_data = event.get("eventData", {})
+
+            # Handle string eventData
+            if isinstance(event_data, str):
+                try:
+                    import json
+
+                    event_data = json.loads(event_data)
+                except Exception as e:
+                    logger.error(f"Failed to parse string eventData: {e}")
+                    return None
+
+            if event_type == "product_viewed":
+                # Handle both structures: with and without "data" wrapper
+                product_variant = event_data.get("data", {}).get(
+                    "productVariant", {}
+                ) or event_data.get("productVariant", {})
+                product = product_variant.get("product", {})
+                product_id = product.get("id", "")
+                if product_id:
+                    return self._extract_id_from_gid(product_id)
+                return None
+
+            elif event_type == "product_added_to_cart":
+                # Handle both structures: with and without "data" wrapper
+                cart_line = event_data.get("data", {}).get(
+                    "cartLine", {}
+                ) or event_data.get("cartLine", {})
+                merchandise = cart_line.get("merchandise", {})
+                product = merchandise.get("product", {})
+                product_id = product.get("id", "")
+                if product_id:
+                    return self._extract_id_from_gid(product_id)
+                return None
+
+            elif event_type == "product_removed_from_cart":
+                # Handle both structures: with and without "data" wrapper
+                cart_line = event_data.get("data", {}).get(
+                    "cartLine", {}
+                ) or event_data.get("cartLine", {})
+                merchandise = cart_line.get("merchandise", {})
+                product = merchandise.get("product", {})
+                return self._extract_id_from_gid(product.get("id", ""))
             return None
-        except Exception:
+
+        except Exception as e:
+            logger.error(f"Failed to extract product ID from event: {str(e)}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
+
+    def _extract_id_from_gid(self, gid: str) -> str:
+        """Extract numeric ID from Shopify GID"""
+        if not gid:
+            return ""
+
+        # Handle GID format: gid://shopify/Product/123456
+        if "/" in gid:
+            return gid.split("/")[-1]
+
+        return gid
+
+    def _create_product_id_mapping(
+        self, behavioral_events: List[Dict[str, Any]], products: List[Dict[str, Any]]
+    ) -> Dict[str, str]:
+        """Create mapping between behavioral event product IDs and ProductData product IDs"""
+        mapping = {}
+
+        # Create a mapping based on product titles
+        # Behavioral events contain product information with different IDs than ProductData
+        for event in behavioral_events:
+            if event.get("eventType") in [
+                "product_viewed",
+                "product_added_to_cart",
+                "checkout_completed",
+            ]:
+                event_data = event.get("eventData", {})
+
+                # Handle string eventData
+                if isinstance(event_data, str):
+                    try:
+                        import json
+
+                        event_data = json.loads(event_data)
+                    except:
+                        continue
+
+                # Extract product information from different event types
+                product_info = None
+
+                if event.get("eventType") == "product_viewed":
+                    product_variant = event_data.get("productVariant", {})
+                    product_info = product_variant.get("product", {})
+
+                elif event.get("eventType") == "product_added_to_cart":
+                    cart_line = event_data.get("cartLine", {})
+                    merchandise = cart_line.get("merchandise", {})
+                    product_info = merchandise.get("product", {})
+
+                elif event.get("eventType") == "checkout_completed":
+                    checkout = event_data.get("checkout", {})
+                    line_items = checkout.get("lineItems", [])
+                    for item in line_items:
+                        variant = item.get("variant", {})
+                        product_info = variant.get("product", {})
+                        if product_info:
+                            break
+
+                if product_info:
+                    event_product_id = self._extract_id_from_gid(
+                        product_info.get("id", "")
+                    )
+                    product_title = product_info.get("title", "")
+
+                    if event_product_id and product_title:
+                        # Find matching product in ProductData by title
+                        for product in products:
+                            if product.get("title") == product_title:
+                                mapping[event_product_id] = product.get("productId", "")
+                                break
+
+        logger.info(f"Created product ID mapping: {mapping}")
+        return mapping
 
     def _extract_search_query_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract search query from search event"""
         try:
             event_data = event.get("eventData")
-            logger.info(f"🔍 Extracting search query from eventData: {event_data}")
             if event_data and isinstance(event_data, dict):
                 # Check for searchResult.query first (Shopify format)
                 if "searchResult" in event_data and isinstance(
                     event_data["searchResult"], dict
                 ):
                     query = event_data["searchResult"].get("query")
-                    logger.info(f"🔍 Found searchResult.query: {query}")
                     if query:
                         return query
 
                 # Check for direct query field in eventData
                 query = event_data.get("query")
                 if query:
-                    logger.info(f"🔍 Found direct query in eventData: {query}")
                     return query
 
                 # Fallback to other possible query fields
@@ -1278,86 +1374,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             return None
         except Exception as e:
             logger.error(f"🔍 Error extracting search query: {e}")
-            return None
-
-    def _extract_product_id_from_event(
-        self, event_data: Dict[str, Any]
-    ) -> Optional[str]:
-        """Extract product ID from various event data structures"""
-        try:
-            if not isinstance(event_data, dict):
-                return None
-
-            # Check for direct product ID
-            if "product" in event_data and isinstance(event_data["product"], dict):
-                product_id = event_data["product"].get("id")
-                if product_id and "Product" in product_id:
-                    return product_id
-
-            # Check for productVariant (product_viewed events)
-            if "productVariant" in event_data and isinstance(
-                event_data["productVariant"], dict
-            ):
-                variant_id = event_data["productVariant"].get("id")
-                if variant_id:
-                    return self._convert_variant_to_product_id(variant_id)
-
-            # Check for cartLine.merchandise (cart events)
-            if "cartLine" in event_data and isinstance(event_data["cartLine"], dict):
-                merchandise = event_data["cartLine"].get("merchandise", {})
-                if isinstance(merchandise, dict):
-                    variant_id = merchandise.get("id")
-                    if variant_id:
-                        return self._convert_variant_to_product_id(variant_id)
-
-            # Check for merchandise (direct cart events)
-            if "merchandise" in event_data and isinstance(
-                event_data["merchandise"], dict
-            ):
-                variant_id = event_data["merchandise"].get("id")
-                if variant_id:
-                    return self._convert_variant_to_product_id(variant_id)
-
-            # Check for checkout.lineItems (checkout events)
-            if "checkout" in event_data and isinstance(event_data["checkout"], dict):
-                checkout = event_data["checkout"]
-                if "lineItems" in checkout and isinstance(checkout["lineItems"], list):
-                    # Get the first line item's product ID
-                    for line_item in checkout["lineItems"]:
-                        if isinstance(line_item, dict) and "variant" in line_item:
-                            variant = line_item["variant"]
-                            if isinstance(variant, dict) and "id" in variant:
-                                variant_id = variant["id"]
-                                if variant_id:
-                                    return self._convert_variant_to_product_id(variant_id)
-
-            # Check for cart.lines (cart events)
-            if "cart" in event_data and isinstance(event_data["cart"], dict):
-                cart = event_data["cart"]
-                if "lines" in cart and isinstance(cart["lines"], list):
-                    # Get the first line's product ID
-                    for line in cart["lines"]:
-                        if isinstance(line, dict) and "merchandise" in line:
-                            merchandise = line["merchandise"]
-                            if isinstance(merchandise, dict) and "id" in merchandise:
-                                variant_id = merchandise["id"]
-                                if variant_id:
-                                    return self._convert_variant_to_product_id(variant_id)
-
-            # Check for collection.productVariants (collection events)
-            if "collection" in event_data and isinstance(event_data["collection"], dict):
-                collection = event_data["collection"]
-                if "productVariants" in collection and isinstance(collection["productVariants"], list):
-                    # Get the first product variant's product ID
-                    for variant in collection["productVariants"]:
-                        if isinstance(variant, dict) and "id" in variant:
-                            variant_id = variant["id"]
-                            if variant_id:
-                                return self._convert_variant_to_product_id(variant_id)
-
-            return None
-        except Exception as e:
-            logger.error(f"Failed to extract product ID: {e}")
             return None
 
     def _convert_variant_to_product_id(self, variant_id: str) -> Optional[str]:

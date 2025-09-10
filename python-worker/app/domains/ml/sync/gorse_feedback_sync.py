@@ -252,11 +252,11 @@ class GorseFeedbackSync:
                 )
 
                 gorse_feedback_record = {
-                    "feedbackType": feedback["feedbackType"],
-                    "userId": prefixed_user_id,
-                    "itemId": prefixed_item_id,
+                    "feedback_type": feedback["feedbackType"],
+                    "user_id": prefixed_user_id,
+                    "item_id": prefixed_item_id,
                     "timestamp": feedback["timestamp"],
-                    "shopId": feedback["shop_id"],
+                    "shop_id": feedback["shop_id"],
                     "comment": feedback.get("comment"),
                 }
                 gorse_feedback_data.append(gorse_feedback_record)
@@ -403,9 +403,9 @@ class GorseFeedbackSync:
 
                 feedback_list.append(
                     {
-                        "feedbackType": feedback_type,
-                        "userId": prefixed_user_id,
-                        "itemId": prefixed_item_id,
+                        "feedback_type": feedback_type,
+                        "user_id": prefixed_user_id,
+                        "item_id": prefixed_item_id,
                         "timestamp": timestamp,
                         "shop_id": event.get("shopId"),
                         "comment": json.dumps({"weight": decayed_weight}),
@@ -506,9 +506,9 @@ class GorseFeedbackSync:
 
                     # Create feedback record
                     feedback = {
-                        "feedbackType": "purchase",
-                        "userId": prefixed_user_id,
-                        "itemId": prefixed_item_id,
+                        "feedback_type": "purchase",
+                        "user_id": prefixed_user_id,
+                        "item_id": prefixed_item_id,
                         "timestamp": order_date,
                         "shop_id": shop_id,
                         "comment": json.dumps(

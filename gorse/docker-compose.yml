@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis/redis-stack:7.2.0-v18
+    image: redis/redis-stack-server:7.2.0-v18
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -18,7 +18,7 @@ services:
       - "8088:8088" # HTTP port
     environment:
       GORSE_CACHE_STORE: redis://redis:6379/0
-      GORSE_DATA_STORE: postgresql://postgres:postgres@localhost:5433/betterbundle?sslmode=disable
+      GORSE_DATA_STORE: postgresql://postgres:postgres@host.docker.internal:5433/betterbundle?sslmode=disable
       GORSE_MASTER_HOST: 0.0.0.0
       GORSE_LOG_LEVEL: debug
       GORSE_API_KEY: secure_random_key_123

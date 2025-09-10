@@ -420,15 +420,15 @@ class GorseItemSync:
                     item["productId"], shop_id
                 )
                 item_data = {
-                    "itemId": prefixed_item_id,
-                    "shopId": shop_id,
+                    "item_id": prefixed_item_id,
+                    "shop_id": shop_id,
                     "categories": json.dumps(
                         categories
                     ),  # Serialize to JSON string for raw SQL
                     "labels": json.dumps(
                         labels
                     ),  # Serialize to JSON string for raw SQL
-                    "isHidden": is_hidden,
+                    "is_hidden": is_hidden,
                 }
                 gorse_items_data.append(item_data)
 
@@ -446,7 +446,7 @@ class GorseItemSync:
         await self.pipeline._generic_bulk_upsert(
             data_list=gorse_items_data,
             table_accessor=lambda db: db.gorseitems,
-            id_field="itemId",
+            id_field="item_id",
             entity_name="items",
             table_name="gorse_items",
         )

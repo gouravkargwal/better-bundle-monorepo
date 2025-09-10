@@ -25,6 +25,7 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         customer_id: str,
         product_id: str,
         context: Dict[str, Any],
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Generate interaction features between a customer and product
@@ -48,14 +49,17 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             behavioral_events = context.get("behavioral_events", [])
             orders = context.get("orders", [])
 
+            # Extract numeric product ID from GID format if needed
+            numeric_product_id = self._extract_id_from_gid(product_id)
+
             # Filter events for this customer-product pair
             product_events = self._filter_product_events(
-                behavioral_events, customer_id, product_id
+                behavioral_events, customer_id, numeric_product_id, product_id_mapping
             )
 
             # Get purchase data
             product_purchases = self._get_product_purchases(
-                orders, customer_id, product_id
+                orders, customer_id, numeric_product_id, product_id_mapping
             )
 
             # Core event counts
@@ -112,20 +116,38 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             return self._get_default_features(shop_id, customer_id, product_id)
 
     def _filter_product_events(
-        self, behavioral_events: List[Dict[str, Any]], customer_id: str, product_id: str
+        self,
+        behavioral_events: List[Dict[str, Any]],
+        customer_id: str,
+        product_id: str,
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
         """Filter behavioral events for specific customer-product pair"""
         filtered_events = []
 
         for event in behavioral_events:
             # Check if event is for this customer
-            if event.get("customerId") != customer_id:
+            # Handle both GID format (gid://shopify/Customer/123) and numeric format (123)
+            event_customer_id = event.get("customerId", "")
+            if event_customer_id and event_customer_id.startswith(
+                "gid://shopify/Customer/"
+            ):
+                event_customer_id = event_customer_id.split("/")[-1]
+
+            if event_customer_id != customer_id:
                 continue
 
             # Extract product ID from event data based on event type
             event_product_id = self._extract_product_id_from_event(event)
 
-            if event_product_id == product_id:
+            # If we have a mapping, use it to map the event product ID to the ProductData product ID
+            if product_id_mapping and event_product_id:
+                # Check if this event product ID maps to our target product ID
+                mapped_product_id = product_id_mapping.get(event_product_id)
+                if mapped_product_id == product_id:
+                    filtered_events.append(event)
+            elif event_product_id == product_id:
+                # Fallback to direct comparison if no mapping provided
                 filtered_events.append(event)
 
         return filtered_events
@@ -136,19 +158,27 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         event_data = event.get("eventData", {})
 
         if event_type == "product_viewed":
-            product_variant = event_data.get("data", {}).get("productVariant", {})
+            # Handle both nested and direct structures
+            product_variant = event_data.get("data", {}).get(
+                "productVariant", {}
+            ) or event_data.get("productVariant", {})
             product = product_variant.get("product", {})
             return self._extract_id_from_gid(product.get("id", ""))
 
         elif event_type == "product_added_to_cart":
-            cart_line = event_data.get("data", {}).get("cartLine", {})
+            # Handle both nested and direct structures
+            cart_line = event_data.get("data", {}).get(
+                "cartLine", {}
+            ) or event_data.get("cartLine", {})
             merchandise = cart_line.get("merchandise", {})
             product = merchandise.get("product", {})
             return self._extract_id_from_gid(product.get("id", ""))
 
         elif event_type == "checkout_completed":
             # For checkout, we'd need to check all line items
-            checkout = event_data.get("data", {}).get("checkout", {})
+            checkout = event_data.get("data", {}).get("checkout", {}) or event_data.get(
+                "checkout", {}
+            )
             line_items = checkout.get("lineItems", [])
             for item in line_items:
                 variant = item.get("variant", {})
@@ -169,14 +199,21 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return gid
 
     def _get_product_purchases(
-        self, orders: List[Dict[str, Any]], customer_id: str, product_id: str
+        self, orders: List[Dict[str, Any]], customer_id: str, product_id: str, product_id_mapping: Optional[Dict[str, str]] = None
     ) -> List[Dict[str, Any]]:
         """Get all purchases of a product by a customer"""
         purchases = []
 
         for order in orders:
             # Check if order is for this customer
-            if order.get("customerId") != customer_id:
+            # Handle both GID format (gid://shopify/Customer/123) and numeric format (123)
+            order_customer_id = order.get("customerId", "")
+            if order_customer_id and order_customer_id.startswith(
+                "gid://shopify/Customer/"
+            ):
+                order_customer_id = order_customer_id.split("/")[-1]
+
+            if order_customer_id != customer_id:
                 continue
 
             # Check line items for this product
@@ -185,8 +222,23 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure
                 item_product_id = self._extract_product_id_from_line_item(item)
-
-                if item_product_id == product_id:
+                
+                # If we have a mapping, use it to map the item product ID to the ProductData product ID
+                if product_id_mapping and item_product_id:
+                    # Check if this item product ID maps to our target product ID
+                    mapped_product_id = product_id_mapping.get(item_product_id)
+                    if mapped_product_id == product_id:
+                        purchases.append(
+                            {
+                                "order_id": order.get("orderId"),
+                                "order_date": order.get("orderDate"),
+                                "quantity": item.get("quantity", 1),
+                                "price": item.get("price", 0.0),
+                            }
+                        )
+                        break  # Only count once per order
+                elif item_product_id == product_id:
+                    # Fallback to direct comparison if no mapping provided
                     purchases.append(
                         {
                             "order_id": order.get("orderId"),
