@@ -832,7 +832,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     # Convert numeric product ID back to full GID format for the generator
                     full_product_id = f"gid://shopify/Product/{product_id}"
                     features = await self.interaction_generator.generate_features(
-                        shop["id"], customer_id, full_product_id, interaction_context, product_id_mapping
+                        shop["id"],
+                        customer_id,
+                        full_product_id,
+                        interaction_context,
+                        product_id_mapping,
                     )
                     key = f"{customer_id}_{product_id}"
                     interaction_features[key] = features
