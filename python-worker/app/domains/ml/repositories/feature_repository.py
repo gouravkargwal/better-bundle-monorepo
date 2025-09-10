@@ -229,39 +229,36 @@ class FeatureRepository(IFeatureRepository):
             if not model:
                 raise ValueError(f"No model found for table: {table_name}")
 
-            # Use Prisma's create_many with skip_duplicates for bulk insert
-            try:
-                await model.create_many(data=create_data, skip_duplicates=True)
-                return len(create_data)
-            except Exception as create_error:
-                # Fallback to individual upserts if batch insert fails
-                logger.warning(
-                    f"{table_name} batch insert failed, falling back to individual upserts: {str(create_error)}"
-                )
-
-                success_count = 0
-                for feature_data in create_data:
-                    try:
-                        # Build unique key dynamically
+            # Use individual upserts to properly update existing records
+            success_count = 0
+            for feature_data in create_data:
+                try:
+                    # Build unique key dynamically for Prisma compound unique constraints
+                    if len(unique_key_fields) == 1:
                         unique_key = {
-                            "_".join(unique_key_fields): {
+                            unique_key_fields[0]: feature_data[unique_key_fields[0]]
+                        }
+                    else:
+                        # For compound unique constraints, use the format: field1_field2_field3
+                        compound_key = "_".join(unique_key_fields)
+                        unique_key = {
+                            compound_key: {
                                 field: feature_data[field]
                                 for field in unique_key_fields
                             }
                         }
-                        await model.upsert(
-                            where=unique_key,
-                            data=feature_data,
-                            update=feature_data,
-                        )
-                        success_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert {table_name} feature: {str(upsert_error)}"
-                        )
-                        continue
+                    await model.upsert(
+                        where=unique_key,
+                        data={"create": feature_data, "update": feature_data},
+                    )
+                    success_count += 1
+                except Exception as upsert_error:
+                    logger.error(
+                        f"Failed to upsert {table_name} feature: {str(upsert_error)}"
+                    )
+                    continue
 
-                return success_count
+            return success_count
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert {table_name} features: {str(e)}")

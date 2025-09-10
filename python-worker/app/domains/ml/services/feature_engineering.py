@@ -120,6 +120,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
                 # Handle different generator signatures
                 if generator.__class__.__name__ == "ProductFeatureGenerator":
+                    # Get product ID mapping from context if available
+                    product_id_mapping = context.get("product_id_mapping")
                     features = await self._compute_feature_safely(
                         generator,
                         context.get("shop", {}).get("id", ""),
@@ -127,6 +129,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         context,
                         entity_id=entity_id,
                         feature_type=feature_type,
+                        product_id_mapping=product_id_mapping,
                     )
                 elif generator.__class__.__name__ == "UserFeatureGenerator":
                     features = await self._compute_feature_safely(
@@ -298,11 +301,19 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             for customer in customers:
                 # Filter events for this customer
-                customer_events = [
-                    event
-                    for event in (behavioral_events or [])
-                    if event.get("customerId") == customer["id"]
-                ]
+                customer_id = customer.get("customerId", "")
+                customer_events = []
+
+                for event in behavioral_events or []:
+                    event_customer_id = event.get("customerId", "")
+                    # Handle GID format: gid://shopify/Customer/24256 -> 24256
+                    if event_customer_id and event_customer_id.startswith(
+                        "gid://shopify/Customer/"
+                    ):
+                        event_customer_id = event_customer_id.split("/")[-1]
+
+                    if event_customer_id == customer_id:
+                        customer_events.append(event)
 
                 context = self._build_base_context(
                     shop, behavioral_events=customer_events
@@ -676,11 +687,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # 1. Product Features
             logger.info("Computing product features...")
+            # Create product ID mapping for product features
+            product_id_mapping = self._create_product_id_mapping(
+                behavioral_events, products
+            )
             product_context = self._build_base_context(
                 shop,
                 orders=orders or [],
                 collections=collections or [],
                 behavioral_events=behavioral_events or [],
+                product_id_mapping=product_id_mapping,
             )
             product_features = await self._process_entities_batch(
                 products,
@@ -1315,16 +1331,30 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 product_info = None
 
                 if event.get("eventType") == "product_viewed":
-                    product_variant = event_data.get("productVariant", {})
+                    # Handle nested data structure: eventData.data.productVariant.product
+                    if "data" in event_data:
+                        product_variant = event_data.get("data", {}).get(
+                            "productVariant", {}
+                        )
+                    else:
+                        product_variant = event_data.get("productVariant", {})
                     product_info = product_variant.get("product", {})
 
                 elif event.get("eventType") == "product_added_to_cart":
-                    cart_line = event_data.get("cartLine", {})
+                    # Handle nested data structure: eventData.data.cartLine.merchandise.product
+                    if "data" in event_data:
+                        cart_line = event_data.get("data", {}).get("cartLine", {})
+                    else:
+                        cart_line = event_data.get("cartLine", {})
                     merchandise = cart_line.get("merchandise", {})
                     product_info = merchandise.get("product", {})
 
                 elif event.get("eventType") == "checkout_completed":
-                    checkout = event_data.get("checkout", {})
+                    # Handle nested data structure: eventData.data.checkout.lineItems
+                    if "data" in event_data:
+                        checkout = event_data.get("data", {}).get("checkout", {})
+                    else:
+                        checkout = event_data.get("checkout", {})
                     line_items = checkout.get("lineItems", [])
                     for item in line_items:
                         variant = item.get("variant", {})

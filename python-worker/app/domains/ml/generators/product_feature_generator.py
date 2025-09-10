@@ -24,6 +24,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         shop_id: str,
         product_id: str,
         context: Dict[str, Any],
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Generate product features
@@ -49,7 +50,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
             # Compute 30-day metrics
             metrics_30d = self._compute_30day_metrics(
-                product_id, orders, behavioral_events
+                product_id, orders, behavioral_events, product_id_mapping
             )
 
             # Compute conversion metrics
@@ -57,7 +58,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
             # Compute temporal metrics
             temporal_metrics = self._compute_temporal_metrics(
-                product_id, orders, behavioral_events
+                product_id, orders, behavioral_events, product_id_mapping
             )
 
             # Compute price and inventory metrics
@@ -154,6 +155,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         product_id: str,
         orders: List[Dict[str, Any]],
         behavioral_events: List[Dict[str, Any]],
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Compute 30-day window metrics"""
 
@@ -166,7 +168,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             event_time = self._parse_date(event.get("timestamp"))
             if event_time and event_time >= thirty_days_ago:
                 event_product_id = self._extract_product_id_from_event(event)
-                if event_product_id == product_id:
+                # Use product ID mapping to match behavioral event product ID to ProductData product ID
+                if product_id_mapping and event_product_id:
+                    mapped_product_id = product_id_mapping.get(event_product_id)
+                    if mapped_product_id == product_id:
+                        recent_events.append(event)
+                elif event_product_id == product_id:
                     recent_events.append(event)
 
         # Count views and unique viewers
@@ -209,7 +216,16 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 # Check if this order contains the product
                 for line_item in order.get("lineItems", []):
                     item_product_id = self._extract_product_id_from_line_item(line_item)
-                    if item_product_id == product_id:
+                    # Use product ID mapping to match order product ID to ProductData product ID
+                    if product_id_mapping and item_product_id:
+                        mapped_product_id = product_id_mapping.get(item_product_id)
+                        if mapped_product_id == product_id:
+                            recent_orders.append(order)
+                            customer_id = order.get("customerId")
+                            if customer_id:
+                                unique_purchasers.add(customer_id)
+                            break
+                    elif item_product_id == product_id:
                         recent_orders.append(order)
                         customer_id = order.get("customerId")
                         if customer_id:
@@ -274,6 +290,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         product_id: str,
         orders: List[Dict[str, Any]],
         behavioral_events: List[Dict[str, Any]],
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Compute temporal metrics"""
 
@@ -282,7 +299,15 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         for event in behavioral_events:
             if event.get("eventType") == "product_viewed":
                 event_product_id = self._extract_product_id_from_event(event)
-                if event_product_id == product_id:
+                # Use product ID mapping to match behavioral event product ID to ProductData product ID
+                if product_id_mapping and event_product_id:
+                    mapped_product_id = product_id_mapping.get(event_product_id)
+                    if mapped_product_id == product_id:
+                        event_time = self._parse_date(event.get("timestamp"))
+                        if event_time:
+                            if not last_viewed_at or event_time > last_viewed_at:
+                                last_viewed_at = event_time
+                elif event_product_id == product_id:
                     event_time = self._parse_date(event.get("timestamp"))
                     if event_time:
                         if not last_viewed_at or event_time > last_viewed_at:
@@ -295,7 +320,21 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         for order in orders:
             for line_item in order.get("lineItems", []):
                 item_product_id = self._extract_product_id_from_line_item(line_item)
-                if item_product_id == product_id:
+                # Use product ID mapping to match order product ID to ProductData product ID
+                if product_id_mapping and item_product_id:
+                    mapped_product_id = product_id_mapping.get(item_product_id)
+                    if mapped_product_id == product_id:
+                        order_date = self._parse_date(order.get("orderDate"))
+                        if order_date:
+                            if (
+                                not first_purchased_at
+                                or order_date < first_purchased_at
+                            ):
+                                first_purchased_at = order_date
+                            if not last_purchased_at or order_date > last_purchased_at:
+                                last_purchased_at = order_date
+                        break
+                elif item_product_id == product_id:
                     order_date = self._parse_date(order.get("orderDate"))
                     if order_date:
                         if not first_purchased_at or order_date < first_purchased_at:
@@ -486,12 +525,20 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         event_data = event.get("eventData", {})
 
         if event_type == "product_viewed":
-            product_variant = event_data.get("data", {}).get("productVariant", {})
+            # Handle nested data structure: eventData.data.productVariant.product
+            if "data" in event_data:
+                product_variant = event_data.get("data", {}).get("productVariant", {})
+            else:
+                product_variant = event_data.get("productVariant", {})
             product = product_variant.get("product", {})
             return self._extract_id_from_gid(product.get("id", ""))
 
         elif event_type == "product_added_to_cart":
-            cart_line = event_data.get("data", {}).get("cartLine", {})
+            # Handle nested data structure: eventData.data.cartLine.merchandise.product
+            if "data" in event_data:
+                cart_line = event_data.get("data", {}).get("cartLine", {})
+            else:
+                cart_line = event_data.get("cartLine", {})
             merchandise = cart_line.get("merchandise", {})
             product = merchandise.get("product", {})
             return self._extract_id_from_gid(product.get("id", ""))
