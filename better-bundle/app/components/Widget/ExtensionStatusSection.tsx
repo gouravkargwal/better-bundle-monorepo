@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useNavigate } from "@remix-run/react";
 import {
   Card,
   BlockStack,
@@ -44,15 +45,17 @@ interface ExtensionStatus {
   multiThemeStatus?: ThemeStatus[];
 }
 
-export function ExtensionStatusSection() {
+interface ExtensionStatusSectionProps {
+  config?: any; // Widget configuration from parent
+}
+
+export function ExtensionStatusSection({
+  config,
+}: ExtensionStatusSectionProps) {
   const [extensionStatus, setExtensionStatus] =
     useState<ExtensionStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  useEffect(() => {
-    checkExtensionStatus();
-  }, []);
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
   const checkExtensionStatus = async () => {
     try {
@@ -68,12 +71,11 @@ export function ExtensionStatusSection() {
       console.error("Error checking extension status:", error);
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
     }
   };
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
+  const handleCheckStatus = async () => {
+    setIsLoading(true);
     await checkExtensionStatus();
   };
 
@@ -87,13 +89,53 @@ export function ExtensionStatusSection() {
     return displayNames[pageType] || pageType;
   };
 
+  // Compare widget config with actual installation status
+  const getConfigurationGap = () => {
+    if (!extensionStatus) return null;
+
+    const workingPages = [];
+    const missingPages = [];
+
+    // Use the current config from extension status instead of stale prop
+    const currentConfig = extensionStatus.pageConfigs || {};
+
+    // Check each page type
+    const pageTypes = [
+      { key: "product_page", configKey: "product_page" },
+      { key: "cart_page", configKey: "cart_page" },
+      { key: "homepage", configKey: "homepage" },
+      { key: "collection", configKey: "collection" },
+    ];
+
+    for (const pageType of pageTypes) {
+      const isEnabledInConfig = currentConfig[pageType.configKey]?.enabled;
+
+      // Find the ACTIVE page status (not just any page status)
+      const activePageStatus = extensionStatus.pageStatuses?.find(
+        (p) => p.pageType === pageType.key && p.isActive === true,
+      );
+
+      const isActiveInTheme = !!activePageStatus;
+
+      if (isEnabledInConfig) {
+        if (isActiveInTheme) {
+          workingPages.push(getPageDisplayName(pageType.key));
+        } else {
+          missingPages.push(getPageDisplayName(pageType.key));
+        }
+      }
+    }
+
+    return { workingPages, missingPages };
+  };
+
   const getStatusBadge = () => {
     if (isLoading) {
       return <Badge tone="info">Checking...</Badge>;
     }
 
     if (!extensionStatus) {
-      return <Badge tone="critical">Error</Badge>;
+      return <Badge tone="info">Not Checked</Badge>;
     }
 
     if (extensionStatus.isInstalled) {
@@ -111,12 +153,13 @@ export function ExtensionStatusSection() {
     }
 
     if (!extensionStatus) {
-      return "Unable to check installation status.";
+      return "Click 'Check Status' to verify if the extension is installed in your theme.";
     }
 
     if (extensionStatus.isInstalled) {
       const activePages =
         extensionStatus.pageStatuses?.filter((page) => page.isActive) || [];
+
       if (activePages.length > 0) {
         return `✅ Widget is active on ${activePages.length} page type${activePages.length > 1 ? "s" : ""}!`;
       }
@@ -139,11 +182,11 @@ export function ExtensionStatusSection() {
             {getStatusBadge()}
             <Button
               size="slim"
-              onClick={handleRefresh}
-              loading={isRefreshing}
-              disabled={isLoading}
+              onClick={handleCheckStatus}
+              loading={isLoading}
+              variant="primary"
             >
-              Refresh
+              Check Status
             </Button>
           </InlineStack>
         </InlineStack>
@@ -193,52 +236,44 @@ export function ExtensionStatusSection() {
               your theme.
             </Text>
 
-            {/* Show active pages in a friendly way */}
-            {extensionStatus?.pageStatuses &&
-              extensionStatus.pageStatuses.length > 0 && (
+            {/* Show configuration gap analysis */}
+            {(() => {
+              const gap = getConfigurationGap();
+              if (!gap) return null;
+
+              return (
                 <Box padding="200" background="bg-surface" borderRadius="100">
                   <Text as="p" variant="bodySm" fontWeight="medium">
-                    Active on:
+                    Configuration Status:
                   </Text>
-                  <InlineStack gap="100" wrap={true}>
-                    {extensionStatus.pageStatuses
-                      .slice(0, 4) // Show only main theme pages
-                      .filter((page) => page.isActive)
-                      .map((page, index) => (
-                        <Badge
-                          key={`${page.pageType}-${index}`}
-                          tone="success"
-                          size="small"
-                        >
-                          {getPageDisplayName(page.pageType)}
-                        </Badge>
-                      ))}
-                    {extensionStatus.pageStatuses
-                      .slice(0, 4)
-                      .filter((page) => page.isActive).length === 0 && (
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        No pages currently active
+
+                  {/* Pages that are enabled and working */}
+                  {gap.workingPages.length > 0 && (
+                    <Box padding="100">
+                      <Text as="p" variant="bodySm" tone="success">
+                        ✅ Working: {gap.workingPages.join(", ")}
                       </Text>
-                    )}
-                  </InlineStack>
+                    </Box>
+                  )}
+
+                  {/* Pages that are enabled but not installed */}
+                  {gap.missingPages.length > 0 && (
+                    <Box padding="100">
+                      <Text as="p" variant="bodySm" tone="critical">
+                        ⚠️ Configured but not installed:{" "}
+                        {gap.missingPages.join(", ")}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        These pages are enabled in your settings but the widget
+                        isn't added to them yet.
+                      </Text>
+                    </Box>
+                  )}
                 </Box>
-              )}
+              );
+            })()}
           </Box>
         )}
-
-        {/* Action Buttons */}
-        <InlineStack gap="200">
-          <Button url="/admin/themes" external variant="primary">
-            {extensionStatus?.isInstalled
-              ? "Manage in Theme Editor"
-              : "Open Theme Editor"}
-          </Button>
-          {extensionStatus?.isInstalled && (
-            <Button url="/app/widget-config" variant="secondary">
-              Configure Widget
-            </Button>
-          )}
-        </InlineStack>
       </BlockStack>
     </Card>
   );

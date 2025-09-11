@@ -8,6 +8,7 @@ import { authenticate } from "../shopify.server";
 import {
   getWidgetConfiguration,
   createDefaultConfiguration,
+  updateWidgetConfiguration,
 } from "../services/widget-config.service";
 import { Page, Layout, InlineGrid, BlockStack } from "@shopify/polaris";
 import { WidgetConfigForm } from "../components/Widget/WidgetConfigSection";
@@ -42,26 +43,59 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
 
-  const formData = await request.formData();
-  const action = formData.get("_action") as string;
+  try {
+    const formData = await request.formData();
+    const action = formData.get("_action") as string;
 
-  if (action === "update") {
-    // Forward to the API route
-    const response = await fetch(
-      `${request.url.replace("/app/widget-config", "/app/api/widget-config")}`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
+    console.log("🔧 Widget config action called:", action);
+    console.log("📋 Form data keys:", Array.from(formData.keys()));
 
-    const result = await response.json();
-    return json(result);
+    if (action === "update") {
+      // Process directly instead of forwarding
+      const updateData: any = {};
+
+      // Check if each field exists in form data before adding to updateData
+      if (formData.has("productPageEnabled")) {
+        updateData.productPageEnabled =
+          formData.get("productPageEnabled") === "true";
+      }
+      if (formData.has("cartPageEnabled")) {
+        updateData.cartPageEnabled = formData.get("cartPageEnabled") === "true";
+      }
+      if (formData.has("homepageEnabled")) {
+        updateData.homepageEnabled = formData.get("homepageEnabled") === "true";
+      }
+      if (formData.has("collectionPageEnabled")) {
+        updateData.collectionPageEnabled =
+          formData.get("collectionPageEnabled") === "true";
+      }
+
+      console.log("📝 Update data:", updateData);
+
+      const updatedConfig = await updateWidgetConfiguration(
+        session.shop,
+        updateData,
+      );
+
+      console.log("✅ Configuration updated successfully");
+
+      return json({
+        success: true,
+        config: updatedConfig,
+        message: "Widget configuration updated successfully",
+      });
+    }
+
+    return json({ success: false, error: "Invalid action" });
+  } catch (error) {
+    console.error("Error in widget config action:", error);
+    return json({
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    });
   }
-
-  return json({ success: false, error: "Invalid action" });
 };
 
 export default function WidgetConfig() {
@@ -111,7 +145,7 @@ export default function WidgetConfig() {
               >
                 <WidgetConfigForm
                   config={config}
-                  actionData={actionData}
+                  actionData={actionData || {}}
                   isSubmitting={isSubmitting}
                 />
               </div>
@@ -125,7 +159,7 @@ export default function WidgetConfig() {
                 }}
               >
                 <BlockStack gap="500">
-                  <ExtensionStatusSection />
+                  <ExtensionStatusSection config={config} />
                   <WidgetPreviewSection
                     selectedPageType=""
                     pageConfigs={pageConfigs}

@@ -2,7 +2,6 @@ import {
   Card,
   BlockStack,
   Text,
-  Checkbox,
   Button,
   Banner,
   InlineStack,
@@ -10,7 +9,7 @@ import {
   Badge,
 } from "@shopify/polaris";
 import { Form } from "@remix-run/react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 interface WidgetConfigFormProps {
   config: any; // Using any to handle the dynamic config structure
@@ -23,15 +22,28 @@ export function WidgetConfigForm({
   actionData,
   isSubmitting,
 }: WidgetConfigFormProps) {
-  const [formState, setFormState] = useState(config);
-  const [selectedPageType, setSelectedPageType] = useState<string>("");
-  const [previewModal, setPreviewModal] = useState<{
-    open: boolean;
-    pageType: string;
-  }>({
-    open: false,
-    pageType: "",
+  // Initialize form state with config data (database defaults are already applied)
+  const [formState, setFormState] = useState({
+    // Only track the fields that users can actually configure
+    productPageEnabled: config?.productPageEnabled ?? true,
+    cartPageEnabled: config?.cartPageEnabled ?? true,
+    homepageEnabled: config?.homepageEnabled ?? false,
+    collectionPageEnabled: config?.collectionPageEnabled ?? true,
   });
+
+  // Auto-dismiss success messages after 5 seconds
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccessMessage(true);
+      const timer = setTimeout(() => {
+        setShowSuccessMessage(false);
+      }, 5000); // Auto-dismiss after 5 seconds
+
+      return () => clearTimeout(timer);
+    }
+  }, [actionData?.success]);
 
   const handleFormChange = useCallback((key: string, value: any) => {
     setFormState((prev: any) => ({ ...prev, [key]: value }));
@@ -43,32 +55,32 @@ export function WidgetConfigForm({
       key: "product_page",
       label: "Product Pages",
       description: "Show related products to increase cross-selling",
-      title: formState.product_page_title || "You might also like",
-      enabled: formState.product_page_enabled,
+      title: config?.productPageTitle || "You might also like",
+      enabled: formState.productPageEnabled,
       icon: "🛍️",
     },
     {
       key: "cart_page",
       label: "Cart Page",
       description: "Suggest additional items to boost order value",
-      title: formState.cart_page_title || "Frequently bought together",
-      enabled: formState.cart_page_enabled,
+      title: config?.cartPageTitle || "Frequently bought together",
+      enabled: formState.cartPageEnabled,
       icon: "🛒",
     },
     {
       key: "homepage",
       label: "Homepage",
       description: "Display popular products to new visitors",
-      title: formState.homepage_title || "Popular products",
-      enabled: formState.homepage_enabled,
+      title: config?.homepageTitle || "Popular products",
+      enabled: formState.homepageEnabled,
       icon: "🏠",
     },
     {
       key: "collection",
       label: "Collection Pages",
       description: "Show similar products within collections",
-      title: formState.collection_page_title || "Similar products",
-      enabled: formState.collection_page_enabled,
+      title: config?.collectionPageTitle || "Similar products",
+      enabled: formState.collectionPageEnabled,
       icon: "📦",
     },
   ];
@@ -77,12 +89,34 @@ export function WidgetConfigForm({
     <Form method="post">
       <input type="hidden" name="id" value={config.id} />
       <input type="hidden" name="_action" value="update" />
-      <input type="hidden" name="shop_id" value={config.shop_id} />
-      <input type="hidden" name="shop_domain" value={config.shop_domain} />
+      <input type="hidden" name="shop_id" value={config.shopId} />
+      <input type="hidden" name="shop_domain" value={config.shopDomain} />
+
+      {/* Only send the fields that users can actually configure */}
+      <input
+        type="hidden"
+        name="productPageEnabled"
+        value={formState.productPageEnabled}
+      />
+      <input
+        type="hidden"
+        name="cartPageEnabled"
+        value={formState.cartPageEnabled}
+      />
+      <input
+        type="hidden"
+        name="homepageEnabled"
+        value={formState.homepageEnabled}
+      />
+      <input
+        type="hidden"
+        name="collectionPageEnabled"
+        value={formState.collectionPageEnabled}
+      />
 
       <BlockStack gap="600">
         {/* Status Messages */}
-        {actionData?.success && (
+        {actionData?.success && showSuccessMessage && (
           <Banner tone="success">
             <p>{actionData.message || "Configuration saved successfully!"}</p>
           </Banner>
@@ -125,10 +159,16 @@ export function WidgetConfigForm({
                 // Map the page key to the correct form field name
                 const getFormFieldName = (key: string) => {
                   switch (key) {
+                    case "product_page":
+                      return "productPageEnabled";
+                    case "cart_page":
+                      return "cartPageEnabled";
+                    case "homepage":
+                      return "homepageEnabled";
                     case "collection":
-                      return "collection_page_enabled";
+                      return "collectionPageEnabled";
                     default:
-                      return `${key}_enabled`;
+                      return `${key}Enabled`;
                   }
                 };
 
@@ -147,7 +187,6 @@ export function WidgetConfigForm({
                       boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
                     }}
                     onClick={() => {
-                      setSelectedPageType(page.key);
                       handleFormChange(
                         getFormFieldName(page.key),
                         !page.enabled,
@@ -182,7 +221,15 @@ export function WidgetConfigForm({
           <InlineStack align="end" gap="300">
             <Button
               variant="secondary"
-              onClick={() => setFormState({ ...config })}
+              onClick={() => {
+                setFormState({
+                  // Reset only the fields that users can actually configure
+                  productPageEnabled: config?.productPageEnabled ?? true,
+                  cartPageEnabled: config?.cartPageEnabled ?? true,
+                  homepageEnabled: config?.homepageEnabled ?? false,
+                  collectionPageEnabled: config?.collectionPageEnabled ?? true,
+                });
+              }}
             >
               Reset to Defaults
             </Button>

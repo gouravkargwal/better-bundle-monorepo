@@ -4,10 +4,7 @@ import {
   type LoaderFunctionArgs,
 } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import {
-  getMultiThemeExtensionStatus,
-  checkExtensionInstallation,
-} from "../services/extension-detection.service";
+import { getMultiThemeExtensionStatus } from "../services/extension-detection.service";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -67,8 +64,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       case "check_installation": {
-        // Detailed installation check
-        const installationStatus = await checkExtensionInstallation(
+        // Detailed installation check using multi-theme status
+        const installationStatus = await getMultiThemeExtensionStatus(
           session.shop,
           admin,
           session,

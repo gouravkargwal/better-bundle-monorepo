@@ -23,7 +23,8 @@ export function WidgetInstallationSection() {
         </InlineStack>
 
         <Text as="p" variant="bodyMd" tone="subdued">
-          Get your recommendations widget up and running in your Shopify theme
+          Get your Phoenix recommendations widget up and running in your Shopify
+          theme
         </Text>
 
         <BlockStack gap="300">
@@ -48,13 +49,15 @@ export function WidgetInstallationSection() {
               Click <strong>"Customize"</strong> on your active theme
             </List.Item>
             <List.Item>
-              Navigate to the page where you want recommendations
+              Navigate to the page where you want recommendations (Product,
+              Collection, Homepage, or Cart)
             </List.Item>
             <List.Item>
-              Click <strong>"Add section"</strong> →{" "}
-              <strong>"Star Rating & Recommendations"</strong>
+              Click <strong>"Add section"</strong> → <strong>"Phoenix"</strong>
             </List.Item>
-            <List.Item>Configure settings and save</List.Item>
+            <List.Item>
+              Configure the recommendation settings and save your changes
+            </List.Item>
           </List>
 
           <Button variant="primary" size="slim" url="/admin/themes" external>
@@ -64,9 +67,9 @@ export function WidgetInstallationSection() {
 
         <Box background="bg-surface-brand" padding="300" borderRadius="200">
           <Text as="p" variant="bodySm" tone="subdued">
-            💡 <strong>Pro Tip:</strong> The widget automatically adapts to each
-            page type and shows relevant recommendations based on your
-            configuration.
+            💡 <strong>Pro Tip:</strong> The Phoenix widget automatically adapts
+            to each page type and shows relevant recommendations. Configure
+            which pages are enabled in the Widget Configuration section above.
           </Text>
         </Box>
       </BlockStack>

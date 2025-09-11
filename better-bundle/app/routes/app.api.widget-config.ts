@@ -44,105 +44,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const formData = await request.formData();
     const action = formData.get("_action") as string;
 
+    console.log("🔧 API action called:", action);
+    console.log("📋 Form data keys:", Array.from(formData.keys()));
+
     switch (action) {
       case "create":
       case "update": {
-        // Extract all form fields
-        const updateData = {
-          isActive: formData.get("isActive") === "true",
-          layoutStyle: formData.get("layoutStyle") as string,
-          gridColumns: parseInt(formData.get("gridColumns") as string) || 3,
-          useThemeColors: formData.get("useThemeColors") === "true",
+        // Only update fields that are actually being sent from the form
+        const updateData: any = {};
 
-          // Product Page Settings
-          productPageEnabled: formData.get("productPageEnabled") === "true",
-          productPageTitle: formData.get("productPageTitle") as string,
-          productPageLimit:
-            parseInt(formData.get("productPageLimit") as string) || 6,
-          productPageShowPrices:
-            formData.get("productPageShowPrices") === "true",
-          productPageShowReasons:
-            formData.get("productPageShowReasons") === "true",
+        // Check if each field exists in form data before adding to updateData
+        if (formData.has("productPageEnabled")) {
+          updateData.productPageEnabled =
+            formData.get("productPageEnabled") === "true";
+        }
+        if (formData.has("cartPageEnabled")) {
+          updateData.cartPageEnabled =
+            formData.get("cartPageEnabled") === "true";
+        }
+        if (formData.has("homepageEnabled")) {
+          updateData.homepageEnabled =
+            formData.get("homepageEnabled") === "true";
+        }
+        if (formData.has("collectionPageEnabled")) {
+          updateData.collectionPageEnabled =
+            formData.get("collectionPageEnabled") === "true";
+        }
 
-          // Cart Page Settings
-          cartPageEnabled: formData.get("cartPageEnabled") === "true",
-          cartPageTitle: formData.get("cartPageTitle") as string,
-          cartPageLimit: parseInt(formData.get("cartPageLimit") as string) || 4,
-          cartPageShowPrices: formData.get("cartPageShowPrices") === "true",
-          cartPageShowReasons: formData.get("cartPageShowReasons") === "true",
-
-          // Homepage Settings
-          homepageEnabled: formData.get("homepageEnabled") === "true",
-          homepageTitle: formData.get("homepageTitle") as string,
-          homepageLimit: parseInt(formData.get("homepageLimit") as string) || 8,
-          homepageShowPrices: formData.get("homepageShowPrices") === "true",
-          homepageShowReasons: formData.get("homepageShowReasons") === "true",
-
-          // Collection Page Settings
-          collectionPageEnabled:
-            formData.get("collectionPageEnabled") === "true",
-          collectionPageTitle: formData.get("collectionPageTitle") as string,
-          collectionPageLimit:
-            parseInt(formData.get("collectionPageLimit") as string) || 6,
-          collectionPageShowPrices:
-            formData.get("collectionPageShowPrices") === "true",
-          collectionPageShowReasons:
-            formData.get("collectionPageShowReasons") === "true",
-
-          // Search Results Settings
-          searchPageEnabled: formData.get("searchPageEnabled") === "true",
-          searchPageTitle: formData.get("searchPageTitle") as string,
-          searchPageLimit:
-            parseInt(formData.get("searchPageLimit") as string) || 6,
-          searchPageShowPrices: formData.get("searchPageShowPrices") === "true",
-          searchPageShowReasons:
-            formData.get("searchPageShowReasons") === "true",
-
-          // Blog Post Settings
-          blogPageEnabled: formData.get("blogPageEnabled") === "true",
-          blogPageTitle: formData.get("blogPageTitle") as string,
-          blogPageLimit: parseInt(formData.get("blogPageLimit") as string) || 4,
-          blogPageShowPrices: formData.get("blogPageShowPrices") === "true",
-          blogPageShowReasons: formData.get("blogPageShowReasons") === "true",
-
-          // Checkout Settings
-          checkoutPageEnabled: formData.get("checkoutPageEnabled") === "true",
-          checkoutPageTitle: formData.get("checkoutPageTitle") as string,
-          checkoutPageLimit:
-            parseInt(formData.get("checkoutPageLimit") as string) || 3,
-          checkoutPageShowPrices:
-            formData.get("checkoutPageShowPrices") === "true",
-          checkoutPageShowReasons:
-            formData.get("checkoutPageShowReasons") === "true",
-
-          // Customer Account Settings
-          accountPageEnabled: formData.get("accountPageEnabled") === "true",
-          accountPageTitle: formData.get("accountPageTitle") as string,
-          accountPageLimit:
-            parseInt(formData.get("accountPageLimit") as string) || 6,
-          accountPageShowPrices:
-            formData.get("accountPageShowPrices") === "true",
-          accountPageShowReasons:
-            formData.get("accountPageShowReasons") === "true",
-
-          // 404 Page Settings
-          notFoundPageEnabled: formData.get("notFoundPageEnabled") === "true",
-          notFoundPageTitle: formData.get("notFoundPageTitle") as string,
-          notFoundPageLimit:
-            parseInt(formData.get("notFoundPageLimit") as string) || 6,
-          notFoundPageShowPrices:
-            formData.get("notFoundPageShowPrices") === "true",
-          notFoundPageShowReasons:
-            formData.get("notFoundPageShowReasons") === "true",
-
-          // Analytics
-          analyticsEnabled: formData.get("analyticsEnabled") === "true",
-        };
+        console.log("📝 Update data:", updateData);
 
         const updatedConfig = await updateWidgetConfiguration(
           session.shop,
           updateData,
         );
+
+        console.log("✅ Configuration updated successfully");
 
         return json({
           success: true,

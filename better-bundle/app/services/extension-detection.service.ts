@@ -37,34 +37,6 @@ function getPageConfigValue(
       showPrices: "collectionPageShowPrices",
       showReasons: "collectionPageShowReasons",
     },
-    search: {
-      enabled: "searchPageEnabled",
-      title: "searchPageTitle",
-      limit: "searchPageLimit",
-      showPrices: "searchPageShowPrices",
-      showReasons: "searchPageShowReasons",
-    },
-    blog: {
-      enabled: "blogPageEnabled",
-      title: "blogPageTitle",
-      limit: "blogPageLimit",
-      showPrices: "blogPageShowPrices",
-      showReasons: "blogPageShowReasons",
-    },
-    checkout: {
-      enabled: "checkoutPageEnabled",
-      title: "checkoutPageTitle",
-      limit: "checkoutPageLimit",
-      showPrices: "checkoutPageShowPrices",
-      showReasons: "checkoutPageShowReasons",
-    },
-    account: {
-      enabled: "accountPageEnabled",
-      title: "accountPageTitle",
-      limit: "accountPageLimit",
-      showPrices: "accountPageShowPrices",
-      showReasons: "accountPageShowReasons",
-    },
   };
 
   const pageConfig = propertyMap[pageType];
@@ -328,97 +300,6 @@ export async function getMultiThemeExtensionStatus(
   }
 }
 
-// Keep the original function for backward compatibility
-export async function checkExtensionInstallation(
-  shopDomain: string,
-  admin: any,
-  session: any,
-): Promise<ExtensionInstallationStatus> {
-  if (!admin) {
-    return {
-      isInstalled: false,
-      lastChecked: new Date(),
-      error: "No admin client provided for API calls",
-      pageStatuses: [],
-    };
-  }
-
-  try {
-    console.log(`🔧 Checking extension installation for shop: ${shopDomain}`);
-
-    // Query themes (removed sortKey as it’s not supported)
-    const query = `
-      query getThemes {
-        themes(first: 10) {
-          edges {
-            node {
-              id
-              name
-              role
-            }
-          }
-        }
-      }
-    `;
-
-    const response = await admin.graphql(query);
-    const data = await response.json();
-
-    if (data.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
-    }
-
-    const themes = data.data?.themes?.edges || [];
-    // Sort themes by updated_at manually if needed (since sortKey is not supported)
-    const mainTheme = themes.find(
-      (edge: any) => edge.node.role === "main",
-    )?.node;
-
-    if (!mainTheme) {
-      return {
-        isInstalled: false,
-        lastChecked: new Date(),
-        error: "No main theme found",
-        pageStatuses: [],
-      };
-    }
-
-    console.log(`📋 Found main theme: ${mainTheme.name} (${mainTheme.id})`);
-
-    // Check for app blocks in the main theme using accurate REST API method
-    const { hasAppBlocks } = await checkAppBlockUsageAccurate(
-      shopDomain,
-      mainTheme.id,
-      admin,
-      session,
-    );
-
-    // Get page-specific installation statuses using accurate REST API method
-    const pageStatuses = await checkPageSpecificInstallationsAccurate(
-      shopDomain,
-      mainTheme.id,
-      admin,
-      session,
-    );
-
-    return {
-      isInstalled: hasAppBlocks,
-      themeId: mainTheme.id,
-      themeName: mainTheme.name,
-      lastChecked: new Date(),
-      pageStatuses,
-    };
-  } catch (error) {
-    console.error("Error checking extension installation:", error);
-    return {
-      isInstalled: false,
-      lastChecked: new Date(),
-      error: "Unable to check extension status",
-      pageStatuses: [],
-    };
-  }
-}
-
 // Helper function to check JSON content for app blocks
 export function checkJsonForAppBlocks(
   jsonContent: any,
@@ -440,7 +321,7 @@ export function checkJsonForAppBlocks(
   return traverse(jsonContent);
 }
 
-// 100% Accurate App Block Detection using REST API
+// Optimized App Block Detection - Single API call for all assets
 export async function checkAppBlockUsageAccurate(
   shopDomain: string,
   themeId: string,
@@ -452,70 +333,338 @@ export async function checkAppBlockUsageAccurate(
   }
 
   try {
-    console.log(`🔍 Accurate app block detection for theme: ${themeId}`);
+    console.log(`🔍 Optimized app block detection for theme: ${themeId}`);
 
-    // Your app's unique block identifier
+    // App block identifiers to search for
     const appBlockId =
-      "shopify://apps/better-bundle/blocks/phoenix/ebf2bbf3-ac07-95dc-4552-0633f958c425ea14e806";
+      "shopify://apps/betterbundle/blocks/phoenix/0199379f-82d0-7b3b-9980-329260e4bf4b";
+    const appBlockHandle = "phoenix";
+    const appBlockClass = "shopify-app-block";
 
+    console.log(`🔍 Searching for app block ID: ${appBlockId}`);
     const locations: string[] = [];
 
-    // Key template files to check (4 core pages only)
-    const templateFiles = [
-      "templates/product.json",
-      "templates/index.json",
-      "templates/collection.json",
-      "templates/cart.json",
-    ];
+    // Extract numeric theme ID from GraphQL ID
+    const numericThemeId = themeId.replace(
+      "gid://shopify/OnlineStoreTheme/",
+      "",
+    );
 
-    // Check each template file
-    for (const templateFile of templateFiles) {
-      try {
-        console.log(`📄 Checking template: ${templateFile}`);
+    // Single API call to get all assets at once
+    const response = await fetch(
+      `https://${shopDomain}/admin/api/2024-07/themes/${numericThemeId}/assets.json`,
+      {
+        headers: {
+          "X-Shopify-Access-Token": session.accessToken,
+          "Content-Type": "application/json",
+        },
+      },
+    );
 
-        // Use REST API to get file content
-        const response = await fetch(
-          `https://${shopDomain}/admin/api/2025-07/themes/${themeId}/assets.json?asset[key]=${templateFile}`,
-          {
-            headers: {
-              "X-Shopify-Access-Token": session.accessToken,
-              "Content-Type": "application/json",
-            },
-          },
-        );
+    if (!response.ok) {
+      console.log(`⚠️ Could not fetch assets: ${response.status}`);
+      return { hasAppBlocks: false, locations: [] };
+    }
 
-        if (response.ok) {
-          const asset = await response.json();
+    const assetsData = await response.json();
+    const assets = assetsData.assets || [];
 
-          if (asset.asset && asset.asset.value) {
-            try {
-              const jsonContent = JSON.parse(asset.asset.value);
+    // Check ALL available files in the theme for app blocks (not just hardcoded ones)
+    const relevantFiles = assets.filter((asset: any) => {
+      const key = asset.key;
+      // Check sections, templates, config, and layout files
+      return (
+        key.includes("sections/") ||
+        key.includes("templates/") ||
+        key.includes("config/") ||
+        key.includes("layout/") ||
+        key.endsWith(".liquid") ||
+        key.endsWith(".json")
+      );
+    });
 
-              // Check if this file contains our app block
-              if (checkJsonForAppBlocks(jsonContent, appBlockId)) {
-                locations.push(templateFile);
-                console.log(`✅ Found app block in: ${templateFile}`);
+    console.log(
+      `🔍 Checking ${relevantFiles.length} relevant files for app blocks`,
+    );
+
+    // CORRECT APPROACH: Check for app blocks in theme JSON template files
+    console.log("🔍 Checking for app blocks in theme JSON template files...");
+
+    try {
+      // Use GraphQL to get theme template files where app blocks are stored
+      const graphqlQuery = `
+        query getThemeTemplateFiles($themeId: ID!) {
+          theme(id: $themeId) {
+            files(filenames: ["templates/product.json", "templates/collection.json", "templates/index.json", "templates/cart.json"]) {
+              nodes {
+                filename
+                body {
+                  ... on OnlineStoreThemeFileBodyText {
+                    content
+                  }
+                }
               }
-            } catch (parseError) {
-              console.log(
-                `⚠️ Could not parse JSON for ${templateFile}:`,
-                parseError,
-              );
             }
           }
-        } else {
-          console.log(`⚠️ Could not fetch ${templateFile}: ${response.status}`);
         }
-      } catch (error) {
-        console.log(`⚠️ Error checking ${templateFile}:`, error);
+      `;
+
+      const graphqlResponse = await fetch(
+        `https://${shopDomain}/admin/api/2024-07/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": session.accessToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: graphqlQuery,
+            variables: { themeId: themeId },
+          }),
+        },
+      );
+
+      if (graphqlResponse.ok) {
+        const graphqlData = await graphqlResponse.json();
+        console.log("📋 GraphQL response received, checking for app blocks...");
+
+        if (graphqlData.errors) {
+          console.log("❌ GraphQL errors:", graphqlData.errors);
+          return {
+            hasAppBlocks: false,
+            locations: [],
+          };
+        }
+
+        // Check template files for app blocks
+        const templateFiles = graphqlData.data?.theme?.files?.nodes || [];
+        let foundAppBlocks: string[] = [];
+        let totalAppBlocks = 0;
+
+        for (const file of templateFiles) {
+          if (file.body?.content) {
+            try {
+              // Parse the JSON content (remove comments first)
+              const cleanContent = file.body.content.replace(
+                /\/\*[\s\S]*?\*\//g,
+                "",
+              );
+              const templateData = JSON.parse(cleanContent);
+
+              // Check sections for app blocks
+              if (templateData.sections) {
+                for (const [sectionId, section] of Object.entries(
+                  templateData.sections,
+                )) {
+                  const sectionData = section as any;
+
+                  // Check if this section has blocks
+                  if (sectionData.blocks) {
+                    for (const [blockId, block] of Object.entries(
+                      sectionData.blocks,
+                    )) {
+                      const blockData = block as any;
+
+                      // Check if this is our app block
+                      if (
+                        blockData.type &&
+                        (blockData.type === appBlockId ||
+                          blockData.type.includes("better-bundle") ||
+                          blockData.type.includes("phoenix") ||
+                          blockData.type.includes("bundle-recommendations"))
+                      ) {
+                        foundAppBlocks.push(
+                          `${file.filename} -> ${sectionId} -> ${blockId}`,
+                        );
+                        totalAppBlocks++;
+                        console.log(
+                          `🎯 Found app block: ${blockData.type} in ${file.filename}`,
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (parseError) {
+              console.log(`⚠️ Could not parse ${file.filename}:`, parseError);
+            }
+          }
+        }
+
+        if (totalAppBlocks > 0) {
+          console.log(
+            `🎯 Found ${totalAppBlocks} app blocks in theme template files`,
+          );
+          return {
+            hasAppBlocks: true,
+            locations: foundAppBlocks,
+          };
+        } else {
+          console.log("❌ No app blocks found in theme template files");
+          return {
+            hasAppBlocks: false,
+            locations: [],
+          };
+        }
+      } else {
+        console.log(
+          "❌ GraphQL request failed:",
+          graphqlResponse.status,
+          graphqlResponse.statusText,
+        );
+        return {
+          hasAppBlocks: false,
+          locations: [],
+        };
+      }
+    } catch (error) {
+      console.log("❌ GraphQL error:", error);
+      return {
+        hasAppBlocks: false,
+        locations: [],
+      };
+    }
+
+    // Check each relevant file for app blocks
+    for (const asset of relevantFiles) {
+      const fileKey = asset.key;
+
+      if (asset && asset.value) {
+        try {
+          // Handle both JSON and Liquid files
+          if (fileKey.endsWith(".json")) {
+            const jsonContent = JSON.parse(asset.value);
+            if (checkJsonForAppBlocks(jsonContent, appBlockId)) {
+              locations.push(fileKey);
+              console.log(`✅ Found app block in: ${fileKey}`);
+            }
+          } else {
+            // For Liquid files, check for multiple identifiers
+            const hasAppBlock =
+              asset.value.includes(appBlockId) ||
+              asset.value.includes(appBlockHandle) ||
+              asset.value.includes(appBlockClass) ||
+              asset.value.includes('data-block-handle="phoenix"') ||
+              asset.value.includes("shopify-app-block") ||
+              asset.value.includes("blocks.phoenix") ||
+              asset.value.includes("render 'app-block'") ||
+              asset.value.includes("phoenix-recommendations") ||
+              asset.value.includes("Phoenix Smart Recommendations") ||
+              asset.value.includes("phoenix-recommendations-grid") ||
+              asset.value.includes("PhoenixRecommendations") ||
+              asset.value.includes("PhoenixContextDetection") ||
+              asset.value.includes("phoenix-recommendation-item") ||
+              asset.value.includes(
+                "cdn.shopify.com/extensions/019938dd-10be-71dc-b84f-ad55193f5e51",
+              ) ||
+              asset.value.includes("context-detection.js") ||
+              asset.value.includes("recommendations.js") ||
+              asset.value.includes("phoenix-recommendations.css") ||
+              asset.value.includes("019938dd-10be-71dc-b84f-ad55193f5e51");
+
+            if (hasAppBlock) {
+              locations.push(fileKey);
+              console.log(`✅ Found app block in: ${fileKey}`);
+            } else {
+              // Debug: Log a sample of the file content to see what's actually there
+              if (
+                fileKey.includes("collection") ||
+                fileKey.includes("product")
+              ) {
+                const sampleContent = asset.value.substring(0, 2000);
+                console.log(
+                  `🔍 Debug - ${fileKey} content sample:`,
+                  sampleContent,
+                );
+              }
+            }
+          }
+        } catch (parseError) {
+          console.log(`⚠️ Could not parse ${fileKey}:`, parseError);
+        }
       }
     }
 
-    // Also check settings_data.json for app block configuration
-    try {
-      console.log(`📄 Checking settings_data.json`);
+    const hasAppBlocks = locations.length > 0;
+    console.log(
+      `🎯 Optimized detection result: ${hasAppBlocks ? "FOUND" : "NOT FOUND"} in ${locations.length} file(s)`,
+    );
+
+    return { hasAppBlocks, locations };
+  } catch (error) {
+    console.error("Error in optimized app block detection:", error);
+    throw new Error("Unable to check app block usage");
+  }
+}
+
+// Optimized Page-Specific Detection - Reuses assets data
+export async function checkPageSpecificInstallationsAccurate(
+  shopDomain: string,
+  themeId: string,
+  admin: any,
+  session: any,
+  assets?: any[], // Optional: reuse assets from previous call
+): Promise<PageStatus[]> {
+  if (!admin) {
+    return [];
+  }
+
+  try {
+    console.log(`🔍 Optimized page-specific detection for theme: ${themeId}`);
+
+    // App block identifiers to search for
+    const appBlockId =
+      "shopify://apps/betterbundle/blocks/phoenix/0199379f-82d0-7b3b-9980-329260e4bf4b";
+    const appBlockHandle = "phoenix";
+    const appBlockClass = "shopify-app-block";
+
+    // Get widget configuration for page settings
+    const config = await getWidgetConfiguration(shopDomain);
+
+    // Define page types and their corresponding template files (4 core pages only)
+    const pageTypes = [
+      {
+        type: "product_page",
+        templateFiles: [
+          "templates/product.json",
+          "sections/product-template.liquid",
+          "sections/main-product.liquid",
+        ],
+        displayName: "Product Page",
+      },
+      {
+        type: "homepage",
+        templateFiles: ["templates/index.json", "sections/index.liquid"],
+        displayName: "Homepage",
+      },
+      {
+        type: "collection",
+        templateFiles: [
+          "templates/collection.json",
+          "sections/collection-template.liquid",
+        ],
+        displayName: "Collection Page",
+      },
+      {
+        type: "cart_page",
+        templateFiles: ["templates/cart.json", "sections/cart-template.liquid"],
+        displayName: "Cart Page",
+      },
+    ];
+
+    const pageStatuses: PageStatus[] = [];
+
+    // If assets not provided, fetch them once
+    let themeAssets = assets;
+    if (!themeAssets) {
+      // Extract numeric theme ID from GraphQL ID
+      const numericThemeId = themeId.replace(
+        "gid://shopify/OnlineStoreTheme/",
+        "",
+      );
+
       const response = await fetch(
-        `https://${shopDomain}/admin/api/2025-07/themes/${themeId}/assets.json?asset[key]=config/settings_data.json`,
+        `https://${shopDomain}/admin/api/2024-07/themes/${numericThemeId}/assets.json`,
         {
           headers: {
             "X-Shopify-Access-Token": session.accessToken,
@@ -525,164 +674,221 @@ export async function checkAppBlockUsageAccurate(
       );
 
       if (response.ok) {
-        const asset = await response.json();
+        const assetsData = await response.json();
+        themeAssets = assetsData.assets || [];
+      } else {
+        console.log(`⚠️ Could not fetch assets: ${response.status}`);
+        themeAssets = [];
+      }
+    }
 
-        if (asset.asset && asset.asset.value) {
-          try {
-            const jsonContent = JSON.parse(asset.asset.value);
+    // Use the same GraphQL approach that successfully finds app blocks
+    console.log(
+      "🔍 Using GraphQL to check page-specific app block installations...",
+    );
 
-            if (checkJsonForAppBlocks(jsonContent, appBlockId)) {
-              locations.push("config/settings_data.json");
-              console.log(`✅ Found app block in: config/settings_data.json`);
+    try {
+      const graphqlQuery = `
+        query getThemeTemplateFiles($themeId: ID!) {
+          theme(id: $themeId) {
+            files(filenames: ["templates/product.json", "templates/collection.json", "templates/index.json", "templates/cart.json"]) {
+              nodes {
+                filename
+                body {
+                  ... on OnlineStoreThemeFileBodyText {
+                    content
+                  }
+                }
+              }
             }
-          } catch (parseError) {
-            console.log(`⚠️ Could not parse settings_data.json:`, parseError);
           }
+        }
+      `;
+
+      const graphqlResponse = await fetch(
+        `https://${shopDomain}/admin/api/2024-07/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": session.accessToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: graphqlQuery,
+            variables: { themeId: themeId },
+          }),
+        },
+      );
+
+      if (graphqlResponse.ok) {
+        const graphqlData = await graphqlResponse.json();
+
+        if (graphqlData.errors) {
+          console.log(
+            "❌ GraphQL errors in page detection:",
+            graphqlData.errors,
+          );
+        } else {
+          const templateFiles = graphqlData.data?.theme?.files?.nodes || [];
+
+          // Create a map of template files to their content for quick lookup
+          const templateMap = new Map();
+          for (const file of templateFiles) {
+            if (file.body?.content) {
+              templateMap.set(file.filename, file.body.content);
+            }
+          }
+
+          // Check each page type using the GraphQL data
+          for (const pageType of pageTypes) {
+            const pageStatus: PageStatus = {
+              pageType: pageType.type,
+              isActive: false,
+              templateFile: pageType.templateFiles[0], // Use first template file as primary
+              configuration: {
+                enabled:
+                  getPageConfigValue(config, pageType.type, "enabled") || false,
+                title:
+                  getPageConfigValue(config, pageType.type, "title") ||
+                  "You Might Also Like",
+                limit: getPageConfigValue(config, pageType.type, "limit") || 6,
+                showPrices:
+                  getPageConfigValue(config, pageType.type, "showPrices") ||
+                  true,
+                showReasons:
+                  getPageConfigValue(config, pageType.type, "showReasons") ||
+                  true,
+              },
+            };
+
+            // Check all template files for this page type
+            for (const templateFile of pageType.templateFiles) {
+              const content = templateMap.get(templateFile);
+
+              if (content) {
+                try {
+                  // Handle both JSON and Liquid files
+                  let hasAppBlock = false;
+                  if (templateFile.endsWith(".json")) {
+                    // Parse JSON and check for app blocks
+                    const cleanContent = content.replace(
+                      /\/\*[\s\S]*?\*\//g,
+                      "",
+                    );
+                    const templateData = JSON.parse(cleanContent);
+                    hasAppBlock = checkJsonForAppBlocks(
+                      templateData,
+                      appBlockId,
+                    );
+                  } else {
+                    // For Liquid files, check for multiple identifiers
+                    hasAppBlock =
+                      content.includes(appBlockId) ||
+                      content.includes(appBlockHandle) ||
+                      content.includes(appBlockClass) ||
+                      content.includes('data-block-handle="phoenix"') ||
+                      content.includes("shopify-app-block") ||
+                      content.includes("blocks.phoenix") ||
+                      content.includes("render 'app-block'") ||
+                      content.includes("phoenix-recommendations") ||
+                      content.includes("Phoenix Smart Recommendations") ||
+                      content.includes("phoenix-recommendations-grid") ||
+                      content.includes("PhoenixRecommendations") ||
+                      content.includes("PhoenixContextDetection") ||
+                      content.includes("phoenix-recommendation-item") ||
+                      content.includes(
+                        "cdn.shopify.com/extensions/019938dd-10be-71dc-b84f-ad55193f5e51",
+                      ) ||
+                      content.includes("context-detection.js") ||
+                      content.includes("recommendations.js") ||
+                      content.includes("phoenix-recommendations.css") ||
+                      content.includes("019938dd-10be-71dc-b84f-ad55193f5e51");
+                  }
+
+                  if (hasAppBlock) {
+                    pageStatus.isActive = true;
+                    pageStatus.sectionName = "phoenix";
+                    pageStatus.templateFile = templateFile; // Update to the actual file found
+                    console.log(
+                      `✅ Found app block in ${pageType.displayName} (${templateFile})`,
+                    );
+                    break; // Found it, no need to check other template files
+                  }
+                } catch (parseError) {
+                  console.log(
+                    `⚠️ Could not parse ${templateFile}:`,
+                    parseError,
+                  );
+                }
+              }
+            }
+
+            if (!pageStatus.isActive) {
+              console.log(`❌ No app block found in ${pageType.displayName}`);
+            }
+
+            pageStatuses.push(pageStatus);
+          }
+        }
+      } else {
+        console.log(
+          "❌ GraphQL request failed for page detection:",
+          graphqlResponse.status,
+        );
+        // Fallback to empty page statuses
+        for (const pageType of pageTypes) {
+          pageStatuses.push({
+            pageType: pageType.type,
+            isActive: false,
+            templateFile: pageType.templateFiles[0],
+            configuration: {
+              enabled:
+                getPageConfigValue(config, pageType.type, "enabled") || false,
+              title:
+                getPageConfigValue(config, pageType.type, "title") ||
+                "You Might Also Like",
+              limit: getPageConfigValue(config, pageType.type, "limit") || 6,
+              showPrices:
+                getPageConfigValue(config, pageType.type, "showPrices") || true,
+              showReasons:
+                getPageConfigValue(config, pageType.type, "showReasons") ||
+                true,
+            },
+          });
         }
       }
     } catch (error) {
-      console.log(`⚠️ Error checking settings_data.json:`, error);
-    }
-
-    const hasAppBlocks = locations.length > 0;
-    console.log(
-      `🎯 Accurate detection result: ${hasAppBlocks ? "FOUND" : "NOT FOUND"} in ${locations.length} file(s)`,
-    );
-
-    return { hasAppBlocks, locations };
-  } catch (error) {
-    console.error("Error in accurate app block detection:", error);
-    throw new Error("Unable to check app block usage");
-  }
-}
-
-// 100% Accurate Page-Specific Detection using REST API
-export async function checkPageSpecificInstallationsAccurate(
-  shopDomain: string,
-  themeId: string,
-  admin: any,
-  session: any,
-): Promise<PageStatus[]> {
-  if (!admin) {
-    return [];
-  }
-
-  try {
-    console.log(`🔍 Accurate page-specific detection for theme: ${themeId}`);
-
-    // Your app's unique block identifier
-    const appBlockId =
-      "shopify://apps/better-bundle/blocks/phoenix/ebf2bbf3-ac07-95dc-4552-0633f958c425ea14e806";
-
-    // Get widget configuration for page settings
-    const config = await getWidgetConfiguration(shopDomain);
-
-    // Define page types and their corresponding template files (4 core pages only)
-    const pageTypes = [
-      {
-        type: "product_page",
-        templateFile: "templates/product.json",
-        displayName: "Product Page",
-      },
-      {
-        type: "homepage",
-        templateFile: "templates/index.json",
-        displayName: "Homepage",
-      },
-      {
-        type: "collection",
-        templateFile: "templates/collection.json",
-        displayName: "Collection Page",
-      },
-      {
-        type: "cart_page",
-        templateFile: "templates/cart.json",
-        displayName: "Cart Page",
-      },
-    ];
-
-    const pageStatuses: PageStatus[] = [];
-
-    // Check each page type
-    for (const pageType of pageTypes) {
-      const pageStatus: PageStatus = {
-        pageType: pageType.type,
-        isActive: false,
-        templateFile: pageType.templateFile,
-        configuration: {
-          enabled:
-            getPageConfigValue(config, pageType.type, "enabled") || false,
-          title:
-            getPageConfigValue(config, pageType.type, "title") ||
-            "You Might Also Like",
-          limit: getPageConfigValue(config, pageType.type, "limit") || 6,
-          showPrices:
-            getPageConfigValue(config, pageType.type, "showPrices") || true,
-          showReasons:
-            getPageConfigValue(config, pageType.type, "showReasons") || true,
-        },
-      };
-
-      try {
-        console.log(
-          `📄 Checking ${pageType.displayName}: ${pageType.templateFile}`,
-        );
-
-        // Use REST API to get file content
-        const response = await fetch(
-          `https://${shopDomain}/admin/api/2025-07/themes/${themeId}/assets.json?asset[key]=${pageType.templateFile}`,
-          {
-            headers: {
-              "X-Shopify-Access-Token": session.accessToken,
-              "Content-Type": "application/json",
-            },
+      console.log("❌ GraphQL error in page detection:", error);
+      // Fallback to empty page statuses
+      for (const pageType of pageTypes) {
+        pageStatuses.push({
+          pageType: pageType.type,
+          isActive: false,
+          templateFile: pageType.templateFiles[0],
+          configuration: {
+            enabled:
+              getPageConfigValue(config, pageType.type, "enabled") || false,
+            title:
+              getPageConfigValue(config, pageType.type, "title") ||
+              "You Might Also Like",
+            limit: getPageConfigValue(config, pageType.type, "limit") || 6,
+            showPrices:
+              getPageConfigValue(config, pageType.type, "showPrices") || true,
+            showReasons:
+              getPageConfigValue(config, pageType.type, "showReasons") || true,
           },
-        );
-
-        if (response.ok) {
-          const asset = await response.json();
-
-          if (asset.asset && asset.asset.value) {
-            try {
-              const jsonContent = JSON.parse(asset.asset.value);
-
-              // Check if this file contains our app block
-              if (checkJsonForAppBlocks(jsonContent, appBlockId)) {
-                pageStatus.isActive = true;
-                pageStatus.sectionName = "phoenix";
-                console.log(`✅ Found app block in ${pageType.displayName}`);
-              } else {
-                console.log(`❌ No app block found in ${pageType.displayName}`);
-              }
-            } catch (parseError) {
-              console.log(
-                `⚠️ Could not parse JSON for ${pageType.templateFile}:`,
-                parseError,
-              );
-            }
-          } else {
-            console.log(`⚠️ No content found for ${pageType.templateFile}`);
-          }
-        } else {
-          console.log(
-            `⚠️ Could not fetch ${pageType.templateFile}: ${response.status}`,
-          );
-        }
-      } catch (error) {
-        console.log(`⚠️ Error checking ${pageType.templateFile}:`, error);
+        });
       }
-
-      pageStatuses.push(pageStatus);
     }
 
     const activePages = pageStatuses.filter((p) => p.isActive).length;
     console.log(
-      `🎯 Page-specific detection: ${activePages}/${pageStatuses.length} pages have the extension active`,
+      `🎯 Optimized page-specific detection: ${activePages}/${pageStatuses.length} pages have the extension active`,
     );
 
     return pageStatuses;
   } catch (error) {
-    console.error("Error in accurate page-specific detection:", error);
+    console.error("Error in optimized page-specific detection:", error);
     throw new Error("Unable to check page-specific installations");
   }
 }
