@@ -44,9 +44,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const formData = await request.formData();
     const action = formData.get("_action") as string;
 
-    console.log("🔧 API action called:", action);
-    console.log("📋 Form data keys:", Array.from(formData.keys()));
-
     switch (action) {
       case "create":
       case "update": {
@@ -71,14 +68,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             formData.get("collectionPageEnabled") === "true";
         }
 
-        console.log("📝 Update data:", updateData);
-
         const updatedConfig = await updateWidgetConfiguration(
           session.shop,
           updateData,
         );
-
-        console.log("✅ Configuration updated successfully");
 
         return json({
           success: true,

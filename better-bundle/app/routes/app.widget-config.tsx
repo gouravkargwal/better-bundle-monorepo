@@ -32,17 +32,12 @@ import {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  console.log("🔧 Widget config loader - shop:", session.shop);
-
   // Get widget configuration (create default if doesn't exist)
   let config = await getWidgetConfiguration(session.shop);
-  console.log("📋 Existing config found:", !!config);
 
   if (!config) {
-    console.log("⚙️ Creating default configuration for:", session.shop);
     try {
       config = await createDefaultConfiguration(session.shop);
-      console.log("✅ Default configuration created successfully");
     } catch (error) {
       console.error("❌ Error creating default configuration:", error);
       throw error;
@@ -61,9 +56,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const formData = await request.formData();
     const action = formData.get("_action") as string;
-
-    console.log("🔧 Widget config action called:", action);
-    console.log("📋 Form data keys:", Array.from(formData.keys()));
 
     if (action === "auto_update_config") {
       // Handle auto-update from extension status detection
@@ -85,14 +77,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           formData.get("collectionPageEnabled") === "true";
       }
 
-      console.log("🔄 Auto-update data:", updateData);
-
       const updatedConfig = await updateWidgetConfiguration(
         session.shop,
         updateData,
       );
-
-      console.log("✅ Configuration auto-updated successfully");
 
       return json({
         success: true,
@@ -119,14 +107,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           formData.get("collectionPageEnabled") === "true";
       }
 
-      console.log("📝 Update data:", updateData);
-
       const updatedConfig = await updateWidgetConfiguration(
         session.shop,
         updateData,
       );
-
-      console.log("✅ Configuration updated successfully");
 
       return json({
         success: true,
@@ -185,7 +169,6 @@ export default function WidgetConfig() {
       setCurrentConfig(fetcher.data.config);
       configRef.current = fetcher.data.config;
       updateRetryCount.current = 0; // Reset retry count on successful update
-      console.log("✅ Configuration updated via fetcher:", fetcher.data.config);
     }
   }, [fetcher.data]);
 
@@ -262,7 +245,7 @@ export default function WidgetConfig() {
           const timeSinceLastUpdate = now - lastUpdateTime.current;
 
           if (timeSinceLastUpdate < MIN_UPDATE_INTERVAL) {
-            console.log(
+            console.error(
               `⏰ Skipping update - too soon since last update (${timeSinceLastUpdate}ms < ${MIN_UPDATE_INTERVAL}ms)`,
             );
             return;
@@ -270,13 +253,13 @@ export default function WidgetConfig() {
 
           // Safeguard: Check retry count
           if (updateRetryCount.current >= MAX_RETRIES) {
-            console.log(
+            console.error(
               `🚫 Max retries reached (${MAX_RETRIES}), skipping auto-update`,
             );
             return;
           }
 
-          console.log(
+          console.error(
             "🔄 Auto-updating config based on detected installations:",
             updates,
           );
