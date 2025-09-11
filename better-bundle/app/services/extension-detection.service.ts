@@ -108,8 +108,6 @@ export async function getMultiThemeExtensionStatus(
   }
 
   try {
-    console.log(`🔧 Multi-theme extension check for shop: ${shopDomain}`);
-
     // Get widget configuration and page configs
     const pageConfigs = await getPageConfigurationStatus(shopDomain);
 
@@ -149,22 +147,12 @@ export async function getMultiThemeExtensionStatus(
     }
 
     const themes = data.data?.themes?.edges || [];
-    console.log(
-      `📋 Found ${themes.length} themes:`,
-      themes.map((t: any) => ({
-        name: t.node.name,
-        role: t.node.role,
-        id: t.node.id,
-      })),
-    );
 
     // Filter to relevant themes (main, live, unpublished)
     const relevantThemes = themes.filter((themeEdge: any) => {
       const role = themeEdge.node.role;
       return role === "main" || role === "live" || role === "unpublished";
     });
-
-    console.log(`📋 Found ${relevantThemes.length} relevant themes to check`);
 
     // If no relevant themes, use all themes as fallback
     const themesToCheck = relevantThemes.length > 0 ? relevantThemes : themes;
@@ -185,7 +173,6 @@ export async function getMultiThemeExtensionStatus(
     // For single theme, use simple logic
     if (themesToCheck.length === 1) {
       const theme = themesToCheck[0].node;
-      console.log(`📋 Using single theme: ${theme.name} (${theme.role})`);
 
       const blockUsage = await checkAppBlockUsageAccurate(
         shopDomain,
@@ -214,7 +201,6 @@ export async function getMultiThemeExtensionStatus(
     }
 
     // For multiple themes, check all and provide comprehensive status
-    console.log(`🔍 Checking extension across ${themesToCheck.length} themes`);
 
     const themeStatuses = [];
     let hasAnyAppBlocks = false;
@@ -223,7 +209,6 @@ export async function getMultiThemeExtensionStatus(
 
     for (const themeEdge of themesToCheck) {
       const theme = themeEdge.node;
-      console.log(`🔍 Checking theme: ${theme.name} (${theme.role})`);
 
       try {
         const blockUsage = await checkAppBlockUsageAccurate(
@@ -252,7 +237,30 @@ export async function getMultiThemeExtensionStatus(
           hasAnyAppBlocks = true;
           allLocations.push(...blockUsage.locations);
         }
-        allPageStatuses.push(...pageStatuses);
+
+        // Consolidate page statuses - if a page is active in any theme, mark it as active
+        pageStatuses.forEach((pageStatus: any) => {
+          const existingIndex = allPageStatuses.findIndex(
+            (existing: any) => existing.pageType === pageStatus.pageType,
+          );
+
+          if (existingIndex === -1) {
+            // First time seeing this page type
+            allPageStatuses.push(pageStatus);
+          } else {
+            // Update existing entry - if either is active, mark as active
+            const existing = allPageStatuses[existingIndex];
+            if (pageStatus.isActive || existing.isActive) {
+              allPageStatuses[existingIndex] = {
+                ...existing,
+                isActive: true,
+                // Keep the most recent template file info
+                templateFile: pageStatus.templateFile || existing.templateFile,
+                sectionName: pageStatus.sectionName || existing.sectionName,
+              };
+            }
+          }
+        });
       } catch (error) {
         console.error(`Error checking theme ${theme.name}:`, error);
         themeStatuses.push({
@@ -279,7 +287,7 @@ export async function getMultiThemeExtensionStatus(
       themeId: primaryTheme.node.id,
       themeName: primaryTheme.node.name,
       lastChecked: new Date(),
-      pageStatuses: allPageStatuses,
+      pageStatuses: allPageStatuses, // Use consolidated page statuses from all themes
       blockUsage: { hasAppBlocks: hasAnyAppBlocks, locations: allLocations },
       pageConfigs,
       shopDomain,
@@ -333,16 +341,9 @@ export async function checkAppBlockUsageAccurate(
   }
 
   try {
-    console.log(`🔍 Optimized app block detection for theme: ${themeId}`);
-
     // App block identifiers to search for
     const appBlockId =
       "shopify://apps/betterbundle/blocks/phoenix/0199379f-82d0-7b3b-9980-329260e4bf4b";
-    const appBlockHandle = "phoenix";
-    const appBlockClass = "shopify-app-block";
-
-    console.log(`🔍 Searching for app block ID: ${appBlockId}`);
-    const locations: string[] = [];
 
     // Extract numeric theme ID from GraphQL ID
     const numericThemeId = themeId.replace(
@@ -362,7 +363,6 @@ export async function checkAppBlockUsageAccurate(
     );
 
     if (!response.ok) {
-      console.log(`⚠️ Could not fetch assets: ${response.status}`);
       return { hasAppBlocks: false, locations: [] };
     }
 
@@ -370,7 +370,7 @@ export async function checkAppBlockUsageAccurate(
     const assets = assetsData.assets || [];
 
     // Check ALL available files in the theme for app blocks (not just hardcoded ones)
-    const relevantFiles = assets.filter((asset: any) => {
+    assets.filter((asset: any) => {
       const key = asset.key;
       // Check sections, templates, config, and layout files
       return (
@@ -382,13 +382,6 @@ export async function checkAppBlockUsageAccurate(
         key.endsWith(".json")
       );
     });
-
-    console.log(
-      `🔍 Checking ${relevantFiles.length} relevant files for app blocks`,
-    );
-
-    // CORRECT APPROACH: Check for app blocks in theme JSON template files
-    console.log("🔍 Checking for app blocks in theme JSON template files...");
 
     try {
       // Use GraphQL to get theme template files where app blocks are stored
@@ -426,10 +419,8 @@ export async function checkAppBlockUsageAccurate(
 
       if (graphqlResponse.ok) {
         const graphqlData = await graphqlResponse.json();
-        console.log("📋 GraphQL response received, checking for app blocks...");
 
         if (graphqlData.errors) {
-          console.log("❌ GraphQL errors:", graphqlData.errors);
           return {
             hasAppBlocks: false,
             locations: [],
@@ -477,120 +468,40 @@ export async function checkAppBlockUsageAccurate(
                           `${file.filename} -> ${sectionId} -> ${blockId}`,
                         );
                         totalAppBlocks++;
-                        console.log(
-                          `🎯 Found app block: ${blockData.type} in ${file.filename}`,
-                        );
                       }
                     }
                   }
                 }
               }
             } catch (parseError) {
-              console.log(`⚠️ Could not parse ${file.filename}:`, parseError);
+              console.error(`⚠️ Could not parse ${file.filename}:`, parseError);
             }
           }
         }
 
         if (totalAppBlocks > 0) {
-          console.log(
-            `🎯 Found ${totalAppBlocks} app blocks in theme template files`,
-          );
           return {
             hasAppBlocks: true,
             locations: foundAppBlocks,
           };
         } else {
-          console.log("❌ No app blocks found in theme template files");
           return {
             hasAppBlocks: false,
             locations: [],
           };
         }
       } else {
-        console.log(
-          "❌ GraphQL request failed:",
-          graphqlResponse.status,
-          graphqlResponse.statusText,
-        );
         return {
           hasAppBlocks: false,
           locations: [],
         };
       }
     } catch (error) {
-      console.log("❌ GraphQL error:", error);
       return {
         hasAppBlocks: false,
         locations: [],
       };
     }
-
-    // Check each relevant file for app blocks
-    for (const asset of relevantFiles) {
-      const fileKey = asset.key;
-
-      if (asset && asset.value) {
-        try {
-          // Handle both JSON and Liquid files
-          if (fileKey.endsWith(".json")) {
-            const jsonContent = JSON.parse(asset.value);
-            if (checkJsonForAppBlocks(jsonContent, appBlockId)) {
-              locations.push(fileKey);
-              console.log(`✅ Found app block in: ${fileKey}`);
-            }
-          } else {
-            // For Liquid files, check for multiple identifiers
-            const hasAppBlock =
-              asset.value.includes(appBlockId) ||
-              asset.value.includes(appBlockHandle) ||
-              asset.value.includes(appBlockClass) ||
-              asset.value.includes('data-block-handle="phoenix"') ||
-              asset.value.includes("shopify-app-block") ||
-              asset.value.includes("blocks.phoenix") ||
-              asset.value.includes("render 'app-block'") ||
-              asset.value.includes("phoenix-recommendations") ||
-              asset.value.includes("Phoenix Smart Recommendations") ||
-              asset.value.includes("phoenix-recommendations-grid") ||
-              asset.value.includes("PhoenixRecommendations") ||
-              asset.value.includes("PhoenixContextDetection") ||
-              asset.value.includes("phoenix-recommendation-item") ||
-              asset.value.includes(
-                "cdn.shopify.com/extensions/019938dd-10be-71dc-b84f-ad55193f5e51",
-              ) ||
-              asset.value.includes("context-detection.js") ||
-              asset.value.includes("recommendations.js") ||
-              asset.value.includes("phoenix-recommendations.css") ||
-              asset.value.includes("019938dd-10be-71dc-b84f-ad55193f5e51");
-
-            if (hasAppBlock) {
-              locations.push(fileKey);
-              console.log(`✅ Found app block in: ${fileKey}`);
-            } else {
-              // Debug: Log a sample of the file content to see what's actually there
-              if (
-                fileKey.includes("collection") ||
-                fileKey.includes("product")
-              ) {
-                const sampleContent = asset.value.substring(0, 2000);
-                console.log(
-                  `🔍 Debug - ${fileKey} content sample:`,
-                  sampleContent,
-                );
-              }
-            }
-          }
-        } catch (parseError) {
-          console.log(`⚠️ Could not parse ${fileKey}:`, parseError);
-        }
-      }
-    }
-
-    const hasAppBlocks = locations.length > 0;
-    console.log(
-      `🎯 Optimized detection result: ${hasAppBlocks ? "FOUND" : "NOT FOUND"} in ${locations.length} file(s)`,
-    );
-
-    return { hasAppBlocks, locations };
   } catch (error) {
     console.error("Error in optimized app block detection:", error);
     throw new Error("Unable to check app block usage");
@@ -610,8 +521,6 @@ export async function checkPageSpecificInstallationsAccurate(
   }
 
   try {
-    console.log(`🔍 Optimized page-specific detection for theme: ${themeId}`);
-
     // App block identifiers to search for
     const appBlockId =
       "shopify://apps/betterbundle/blocks/phoenix/0199379f-82d0-7b3b-9980-329260e4bf4b";
@@ -677,15 +586,12 @@ export async function checkPageSpecificInstallationsAccurate(
         const assetsData = await response.json();
         themeAssets = assetsData.assets || [];
       } else {
-        console.log(`⚠️ Could not fetch assets: ${response.status}`);
+        console.error(`⚠️ Could not fetch assets: ${response.status}`);
         themeAssets = [];
       }
     }
 
     // Use the same GraphQL approach that successfully finds app blocks
-    console.log(
-      "🔍 Using GraphQL to check page-specific app block installations...",
-    );
 
     try {
       const graphqlQuery = `
@@ -724,7 +630,7 @@ export async function checkPageSpecificInstallationsAccurate(
         const graphqlData = await graphqlResponse.json();
 
         if (graphqlData.errors) {
-          console.log(
+          console.error(
             "❌ GraphQL errors in page detection:",
             graphqlData.errors,
           );
@@ -809,13 +715,10 @@ export async function checkPageSpecificInstallationsAccurate(
                     pageStatus.isActive = true;
                     pageStatus.sectionName = "phoenix";
                     pageStatus.templateFile = templateFile; // Update to the actual file found
-                    console.log(
-                      `✅ Found app block in ${pageType.displayName} (${templateFile})`,
-                    );
                     break; // Found it, no need to check other template files
                   }
                 } catch (parseError) {
-                  console.log(
+                  console.error(
                     `⚠️ Could not parse ${templateFile}:`,
                     parseError,
                   );
@@ -823,18 +726,10 @@ export async function checkPageSpecificInstallationsAccurate(
               }
             }
 
-            if (!pageStatus.isActive) {
-              console.log(`❌ No app block found in ${pageType.displayName}`);
-            }
-
             pageStatuses.push(pageStatus);
           }
         }
       } else {
-        console.log(
-          "❌ GraphQL request failed for page detection:",
-          graphqlResponse.status,
-        );
         // Fallback to empty page statuses
         for (const pageType of pageTypes) {
           pageStatuses.push({
@@ -858,7 +753,7 @@ export async function checkPageSpecificInstallationsAccurate(
         }
       }
     } catch (error) {
-      console.log("❌ GraphQL error in page detection:", error);
+      console.error("❌ GraphQL error in page detection:", error);
       // Fallback to empty page statuses
       for (const pageType of pageTypes) {
         pageStatuses.push({
@@ -880,11 +775,6 @@ export async function checkPageSpecificInstallationsAccurate(
         });
       }
     }
-
-    const activePages = pageStatuses.filter((p) => p.isActive).length;
-    console.log(
-      `🎯 Optimized page-specific detection: ${activePages}/${pageStatuses.length} pages have the extension active`,
-    );
 
     return pageStatuses;
   } catch (error) {
@@ -922,9 +812,6 @@ export async function checkExtensionAvailability(
     }
 
     const isAvailable = !!data.data?.currentAppInstallation?.app?.embedded;
-    if (isAvailable) {
-      console.log("App installation found, extension available");
-    }
     return isAvailable;
   } catch (error) {
     console.error("Error checking extension availability:", error);

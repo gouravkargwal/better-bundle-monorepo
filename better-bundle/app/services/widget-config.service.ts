@@ -45,10 +45,44 @@ export async function updateWidgetConfiguration(
   const shop = await getShopByDomain(shopDomain);
   if (!shop) throw new Error("Shop not found");
 
-  return prisma.widgetConfiguration.update({
-    where: { shopId: shop.id },
-    data,
-  });
+  try {
+    // Add timestamp for consistency tracking
+    const updateData = {
+      ...data,
+      updatedAt: new Date(),
+    };
+
+    const result = await prisma.widgetConfiguration.update({
+      where: { shopId: shop.id },
+      data: updateData,
+    });
+
+    console.log(`✅ Widget configuration updated for shop: ${shopDomain}`, {
+      updatedFields: Object.keys(data),
+      timestamp: result.updatedAt,
+    });
+
+    return result;
+  } catch (error) {
+    console.error(
+      `❌ Error updating widget configuration for shop: ${shopDomain}`,
+      error,
+    );
+
+    // Check if it's a record not found error
+    if (
+      error instanceof Error &&
+      error.message.includes("Record to update not found")
+    ) {
+      // Try to create the configuration if it doesn't exist
+      console.log(
+        `🔄 Configuration not found, creating default for shop: ${shopDomain}`,
+      );
+      return await createDefaultConfiguration(shopDomain);
+    }
+
+    throw error;
+  }
 }
 
 export function getContextSettings(config: any, context: ContextKey) {
