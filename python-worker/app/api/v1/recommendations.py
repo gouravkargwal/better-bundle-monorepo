@@ -77,7 +77,11 @@ class ProductEnrichment:
         return self.db
 
     async def enrich_items(
-        self, shop_id: str, item_ids: List[str]
+        self,
+        shop_id: str,
+        item_ids: List[str],
+        context: str = "product_page",
+        source: str = "unknown",
     ) -> List[Dict[str, Any]]:
         """
         Enrich Gorse item IDs with Shopify product data
@@ -122,25 +126,16 @@ class ProductEnrichment:
             for item_id in item_ids:
                 if item_id in product_map:
                     product = product_map[item_id]
+                    # Only include essential fields that Phoenix extension actually uses
                     enriched_items.append(
                         {
-                            "item_id": item_id,
-                            "product_id": product["productId"],
                             "title": product["title"],
                             "handle": product["handle"],
                             "price": product["price"],
-                            "compare_at_price": product["compareAtPrice"],
-                            "image_url": product["imageUrl"],
-                            "image_alt": product["imageAlt"],
-                            "inventory": product["totalInventory"],
-                            "status": product["status"],
-                            "product_type": product["productType"],
-                            "vendor": product["vendor"],
-                            "available": (
-                                product["totalInventory"] > 0
-                                if product["totalInventory"] is not None
-                                else True
-                            ),
+                            "currency": "USD",  # TODO: Get from shop settings
+                            "image": product["imageUrl"],
+                            "imageAlt": product["imageAlt"],
+                            "reason": self._get_recommendation_reason(context, source),
                         }
                     )
                 else:
@@ -154,6 +149,33 @@ class ProductEnrichment:
         except Exception as e:
             logger.error(f"Failed to enrich items: {str(e)}")
             return []
+
+    def _get_recommendation_reason(self, context: str, source: str) -> str:
+        """Get contextual recommendation reason based on context and source"""
+
+        # More specific reasons based on ML source
+        if "item_neighbors" in source:
+            return "Similar products"
+        elif "user_recommendations" in source:
+            return "Recommended for you"
+        elif "session_recommendations" in source:
+            return "Based on your browsing"
+        elif "popular" in source:
+            return "Popular choice"
+        elif "latest" in source:
+            return "New arrival"
+        elif "fallback" in source:
+            return "Trending now"
+        else:
+            # Context-based fallback reasons
+            context_reasons = {
+                "product_page": "Customers also bought",
+                "homepage": "Featured product",
+                "cart": "Perfect addition",
+                "profile": "Just for you",
+                "checkout": "Don't miss out",
+            }
+            return context_reasons.get(context, "Recommended for you")
 
 
 # Initialize enrichment service
@@ -1296,7 +1318,9 @@ async def get_recommendations(request: RecommendationRequest):
 
         # Enrich with Shopify product data
         item_ids = result["items"]
-        enriched_items = await enrichment_service.enrich_items(shop.id, item_ids)
+        enriched_items = await enrichment_service.enrich_items(
+            shop.id, item_ids, request.context, result["source"]
+        )
 
         # Prepare response data
         response_data = {
