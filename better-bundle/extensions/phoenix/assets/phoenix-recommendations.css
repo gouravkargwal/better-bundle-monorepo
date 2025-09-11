@@ -27,6 +27,23 @@
   margin-top: 16px;
 }
 
+/* Column-specific layouts */
+.phoenix-recommendations-grid[data-columns="2"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.phoenix-recommendations-grid[data-columns="3"] {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.phoenix-recommendations-grid[data-columns="4"] {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.phoenix-recommendations-grid[data-columns="auto"] {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
 /* Layout Variations */
 .phoenix-layout-grid {
   display: grid;
@@ -155,8 +172,17 @@
 /* Responsive Design */
 @media (max-width: 768px) {
   .phoenix-recommendations-grid {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
     gap: 12px;
+  }
+
+  /* Override column settings on mobile for better UX */
+  .phoenix-recommendations-grid[data-columns="4"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .phoenix-recommendations-grid[data-columns="3"] {
+    grid-template-columns: repeat(2, 1fr) !important;
   }
 
   .phoenix-recommendation-image {
@@ -243,6 +269,36 @@
   .phoenix-recommendation-item:hover {
     transform: none;
   }
+}
+
+/* Theme-specific adjustments */
+.phoenix-theme-dawn .phoenix-recommendations {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.phoenix-theme-dawn .phoenix-recommendation-item {
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 4px;
+}
+
+.phoenix-theme-debut .phoenix-recommendations {
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 0;
+  background: var(--color-background, #fff);
+}
+
+.phoenix-theme-brooklyn .phoenix-recommendations {
+  border: none;
+  background: transparent;
+  padding: 20px 0;
+}
+
+.phoenix-theme-brooklyn .phoenix-recommendation-item {
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* Dark Mode Support */

@@ -48,19 +48,41 @@ function applyThemeStyling(container) {
   const root = document.documentElement;
   const computedStyle = getComputedStyle(root);
 
-  // Try to inherit theme colors
+  // Try to inherit theme colors from various common theme CSS variables
   const primaryColor = computedStyle.getPropertyValue('--color-primary') ||
     computedStyle.getPropertyValue('--primary-color') ||
     computedStyle.getPropertyValue('--color-accent') ||
+    computedStyle.getPropertyValue('--color-button') ||
+    computedStyle.getPropertyValue('--color-button-text') ||
     '#2c5aa0';
 
   const textColor = computedStyle.getPropertyValue('--color-text') ||
     computedStyle.getPropertyValue('--text-color') ||
+    computedStyle.getPropertyValue('--color-foreground') ||
     '#333';
+
+  const bgColor = computedStyle.getPropertyValue('--color-background') ||
+    computedStyle.getPropertyValue('--background-color') ||
+    '#fff';
+
+  const borderColor = computedStyle.getPropertyValue('--color-border') ||
+    computedStyle.getPropertyValue('--border-color') ||
+    '#e0e0e0';
 
   // Apply theme colors to our container
   container.style.setProperty('--phoenix-primary-color', primaryColor);
   container.style.setProperty('--phoenix-text-color', textColor);
+  container.style.setProperty('--phoenix-bg-color', bgColor);
+  container.style.setProperty('--phoenix-border-color', borderColor);
+
+  // Apply theme-specific adjustments for popular themes
+  if (themeName.toLowerCase().includes('dawn')) {
+    container.classList.add('phoenix-theme-dawn');
+  } else if (themeName.toLowerCase().includes('debut')) {
+    container.classList.add('phoenix-theme-debut');
+  } else if (themeName.toLowerCase().includes('brooklyn')) {
+    container.classList.add('phoenix-theme-brooklyn');
+  }
 }
 
 // Fetch recommendations from API
@@ -74,8 +96,10 @@ function fetchRecommendations(container, context) {
   const loadingEl = container.querySelector('.recommendations-loading');
   const contentEl = container.querySelector('.recommendations-content');
   const gridEl = container.querySelector('.phoenix-recommendations-grid');
+  const previewEl = container.querySelector('.phoenix-preview');
 
-  // Show loading state
+  // Hide preview and show loading state
+  if (previewEl) previewEl.style.display = 'none';
   loadingEl.style.display = 'block';
 
   // Get current user session info
@@ -101,15 +125,26 @@ function fetchRecommendations(container, context) {
         renderRecommendations(data.recommendations, gridEl, { layout, columns, showPrices, showReasons });
         contentEl.style.display = 'block';
       } else {
-        // Hide the entire widget if no recommendations
-        container.style.display = 'none';
+        // Only show preview in theme editor, not on live website
+        if (previewEl && window.Shopify?.designMode) {
+          previewEl.style.display = 'block';
+        } else {
+          // Hide the entire widget if no recommendations on live website
+          container.style.display = 'none';
+        }
       }
     })
     .catch(error => {
       console.error('Recommendations fetch error:', error);
       loadingEl.style.display = 'none';
-      // Hide the entire widget on error
-      container.style.display = 'none';
+
+      // Only show preview in theme editor on error, not on live website
+      if (previewEl && window.Shopify?.designMode) {
+        previewEl.style.display = 'block';
+      } else {
+        // Hide the entire widget on error on live website
+        container.style.display = 'none';
+      }
     });
 }
 
@@ -119,10 +154,37 @@ function renderRecommendations(recommendations, container, options = {}) {
 
   container.innerHTML = '';
 
-  // Apply layout-specific CSS classes
+  // Apply layout-specific CSS classes and styling
   container.className = `phoenix-recommendations-grid phoenix-layout-${layout}`;
-  if (columns !== 'auto') {
-    container.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+
+  // Set data attributes for CSS targeting
+  container.setAttribute('data-columns', columns);
+  container.setAttribute('data-layout', layout);
+
+  // Handle different layout types
+  if (layout === 'carousel') {
+    container.style.display = 'flex';
+    container.style.overflowX = 'auto';
+    container.style.scrollBehavior = 'smooth';
+    container.style.gap = '16px';
+    container.style.paddingBottom = '10px';
+    container.style.gridTemplateColumns = 'none';
+  } else if (layout === 'list') {
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.gap = '12px';
+    container.style.gridTemplateColumns = 'none';
+  } else {
+    // Grid layout
+    container.style.display = 'grid';
+    container.style.gap = '16px';
+
+    if (columns !== 'auto') {
+      container.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+    } else {
+      // Responsive grid - let CSS handle it
+      container.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+    }
   }
 
   recommendations.forEach(product => {

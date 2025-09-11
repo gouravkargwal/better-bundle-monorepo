@@ -99,7 +99,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function WidgetConfig() {
-  const { config } = useLoaderData<typeof loader>();
+  const { config, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -163,8 +163,9 @@ export default function WidgetConfig() {
                   <WidgetPreviewSection
                     selectedPageType=""
                     pageConfigs={pageConfigs}
+                    shopDomain={shopDomain}
                   />
-                  <WidgetInstallationSection />
+                  <WidgetInstallationSection shopDomain={shopDomain} />
                 </BlockStack>
               </div>
             </InlineGrid>

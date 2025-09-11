@@ -12,6 +12,7 @@ import {
   RangeSlider,
 } from "@shopify/polaris";
 import { useState } from "react";
+import { openThemeEditorForPreview } from "../../utils/theme-editor";
 
 interface WidgetPreviewSectionProps {
   selectedPageType: string;
@@ -20,11 +21,13 @@ interface WidgetPreviewSectionProps {
     label: string;
     title: string;
   }>;
+  shopDomain?: string;
 }
 
 export function WidgetPreviewSection({
   selectedPageType,
   pageConfigs,
+  shopDomain,
 }: WidgetPreviewSectionProps) {
   const [previewModal, setPreviewModal] = useState<{
     open: boolean;
@@ -37,6 +40,15 @@ export function WidgetPreviewSection({
 
   const getPageConfig = (pageType: string) => {
     return pageConfigs.find((page) => page.key === pageType);
+  };
+
+  const handleThemeEditorPreview = () => {
+    if (!shopDomain) {
+      console.error("Missing shop domain for preview.");
+      return;
+    }
+
+    openThemeEditorForPreview(shopDomain);
   };
 
   const SkeletonProductCard = () => (
@@ -64,21 +76,45 @@ export function WidgetPreviewSection({
                 👀 Preview
               </Text>
               <Text as="p" variant="bodyMd" tone="subdued">
-                See how your recommendations will look to customers
+                See how your recommendations will look to customers. Use the
+                mockup preview to see a general idea, or preview on your live
+                theme if you've already installed the widget.
               </Text>
             </BlockStack>
-            <Button
-              variant="secondary"
-              onClick={() =>
-                setPreviewModal({
-                  open: true,
-                  pageType: selectedPageType || "product_page",
-                })
-              }
-            >
-              Open Preview
-            </Button>
+            <InlineStack gap="200">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setPreviewModal({
+                    open: true,
+                    pageType: selectedPageType || "product_page",
+                  })
+                }
+              >
+                Preview Mockup
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleThemeEditorPreview}
+                disabled={!shopDomain}
+              >
+                Preview & Install Widget
+              </Button>
+            </InlineStack>
           </InlineStack>
+
+          {!shopDomain && (
+            <Box
+              background="bg-surface-warning"
+              padding="300"
+              borderRadius="200"
+            >
+              <Text as="p" variant="bodySm" tone="subdued">
+                💡 <strong>Note:</strong> Shop domain is required to open the
+                theme editor.
+              </Text>
+            </Box>
+          )}
         </BlockStack>
       </Card>
 
@@ -108,7 +144,9 @@ export function WidgetPreviewSection({
                 value={previewProductCount}
                 onChange={(value) =>
                   setPreviewProductCount(
-                    typeof value === "number" ? value : parseInt(value),
+                    typeof value === "number"
+                      ? value
+                      : parseInt(value.toString()),
                   )
                 }
               />

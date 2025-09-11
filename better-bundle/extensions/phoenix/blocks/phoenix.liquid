@@ -1,13 +1,4 @@
 <!-- Phoenix Smart Recommendations Section -->
-{% assign avg_rating = block.settings.product.metafields.demo.avg_rating.value | round %}
-<span style="color:{{ block.settings.colour }}">
-  {% render 'stars', rating: avg_rating %}
-</span>
-{% if avg_rating >= 4 %}
-  <br>
-  <img src="{{ "thumbs-up.png" | asset_img_url: '15x' }}" height="15" width="15" loading="lazy">
-  {{ 'ratings.home.recommendationText' | t }}
-{% endif %}
 
 <!-- Recommendations Section -->
 {% if block.settings.show_recommendations %}
@@ -23,9 +14,13 @@
      data-page-type="{{ request.page_type }}"
      data-locale="{{ request.locale.iso_code }}"
      data-theme="{{ theme.name | handleize }}">
+  
+  <!-- Loading State -->
   <div class="recommendations-loading" style="display: none;">
     <p>{{ 'recommendations.loading' | t }}</p>
   </div>
+  
+  <!-- Live Recommendations (populated by JavaScript) -->
   <div class="recommendations-content" style="display: none;">
     <h3>
       {% if block.settings.custom_title != blank %}
@@ -38,6 +33,112 @@
     </h3>
     <div class="phoenix-recommendations-grid">
       <!-- Recommendations will be populated here by JavaScript -->
+    </div>
+  </div>
+  
+  <!-- Preview/Dummy Data (shows only in theme editor) -->
+  {% if request.design_mode %}
+    <div class="phoenix-preview" style="display: block;">
+  {% else %}
+    <div class="phoenix-preview" style="display: none;">
+  {% endif %}
+    <h3>
+      {% if block.settings.custom_title != blank %}
+        {{ block.settings.custom_title }}
+      {% elsif block.settings.context == 'auto' %}
+        {{ 'recommendations.title' | t }}
+      {% else %}
+        {{ 'recommendations.contexts.' | append: block.settings.context | t }}
+      {% endif %}
+    </h3>
+    
+    <!-- Preview Grid -->
+    <div class="phoenix-preview-grid" style="
+      display: grid;
+      {% if block.settings.grid_columns == 'auto' %}
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      {% else %}
+        grid-template-columns: repeat({{ block.settings.grid_columns }}, 1fr);
+      {% endif %}
+      gap: 1rem;
+      margin-top: 1rem;
+    " data-layout="{{ block.settings.layout_style | default: 'grid' }}" data-columns="{{ block.settings.grid_columns | default: 'auto' }}">
+      {% assign preview_limit = block.settings.recommendation_limit | default: 6 %}
+      {% for i in (1..preview_limit) %}
+        <div class="phoenix-preview-item" style="
+          border: 1px solid #e0e0e0;
+          border-radius: 8px;
+          padding: 1rem;
+          background: #f9f9f9;
+          text-align: center;
+        ">
+          <!-- Product Image Placeholder -->
+          <div style="
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(45deg, #f0f0f0 25%, transparent 25%), 
+                        linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), 
+                        linear-gradient(45deg, transparent 75%, #f0f0f0 75%), 
+                        linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 14px;
+          ">
+            Product {{ i }}
+          </div>
+          
+          <!-- Product Title Placeholder -->
+          <div style="
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+          "></div>
+          
+          <!-- Product Price Placeholder -->
+          {% if block.settings.show_prices %}
+            <div style="
+              height: 16px;
+              background: #e0e0e0;
+              border-radius: 4px;
+              width: 60%;
+              margin: 0 auto 0.5rem;
+            "></div>
+          {% endif %}
+          
+          <!-- Recommendation Reason Placeholder -->
+          {% if block.settings.show_reasons %}
+            <div style="
+              height: 14px;
+              background: #e0e0e0;
+              border-radius: 4px;
+              width: 80%;
+              margin: 0 auto;
+            "></div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    
+    <!-- Preview Notice -->
+    <div style="
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #e3f2fd;
+      border: 1px solid #2196f3;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 14px;
+      color: #1976d2;
+    ">
+      <strong>Preview Mode:</strong> This shows how your recommendations will look. 
+      Real product recommendations will appear here once the widget is active.
     </div>
   </div>
 </div>
@@ -73,7 +174,6 @@ document.addEventListener('DOMContentLoaded', function() {
   "target": "section",
   "settings": [
     { "type": "product", "id": "product", "label": "Product", "autofill": true },
-    { "type": "color", "id": "colour", "label": "Star Colour", "default": "#ff0000" },
     { 
       "type": "select", 
       "id": "context", 

@@ -8,8 +8,15 @@ import {
   Badge,
   List,
 } from "@shopify/polaris";
+import { openThemeEditorForInstall } from "../../utils/theme-editor";
 
-export function WidgetInstallationSection() {
+interface WidgetInstallationSectionProps {
+  shopDomain?: string;
+}
+
+export function WidgetInstallationSection({
+  shopDomain,
+}: WidgetInstallationSectionProps) {
   return (
     <Card>
       <BlockStack gap="400">
@@ -38,7 +45,8 @@ export function WidgetInstallationSection() {
           </InlineStack>
 
           <Text as="p" variant="bodyMd" tone="subdued">
-            Use Shopify's theme editor for a no-code setup
+            Choose which page you want to add the widget to, or use the manual
+            steps below
           </Text>
 
           <List type="number">
@@ -60,9 +68,49 @@ export function WidgetInstallationSection() {
             </List.Item>
           </List>
 
-          <Button variant="primary" size="slim" url="/admin/themes" external>
-            Open Theme Editor
-          </Button>
+          <InlineStack gap="200" wrap={false}>
+            <Button
+              variant="primary"
+              size="slim"
+              onClick={() =>
+                shopDomain && openThemeEditorForInstall(shopDomain, "product")
+              }
+              disabled={!shopDomain}
+            >
+              Add to Product Page
+            </Button>
+            <Button
+              variant="secondary"
+              size="slim"
+              onClick={() =>
+                shopDomain && openThemeEditorForInstall(shopDomain, "index")
+              }
+              disabled={!shopDomain}
+            >
+              Add to Homepage
+            </Button>
+            <Button
+              variant="secondary"
+              size="slim"
+              onClick={() =>
+                shopDomain &&
+                openThemeEditorForInstall(shopDomain, "collection")
+              }
+              disabled={!shopDomain}
+            >
+              Add to Collection
+            </Button>
+            <Button
+              variant="secondary"
+              size="slim"
+              onClick={() =>
+                shopDomain && openThemeEditorForInstall(shopDomain, "cart")
+              }
+              disabled={!shopDomain}
+            >
+              Add to Cart
+            </Button>
+          </InlineStack>
         </BlockStack>
 
         <Box background="bg-surface-brand" padding="300" borderRadius="200">
