@@ -1,0 +1,32 @@
+type = "web_pixel_extension"
+name = "atlas"
+uid = "atlas-web-pixel-001"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = true
+marketing = false
+preferences = false
+sale_of_data = "disabled"
+
+[build]
+command = "npm run build"
+watch = ["src/**/*"]
+
+[capabilities]
+network_calls = true
+
+[runtime_configuration_definition]
+type = "object"
+
+[runtime_configuration_definition.properties.backend_url]
+type = "string"
+required = true
+
+[settings]
+type = "object"
+
+[settings.fields.backend_url]
+type = "single_line_text_field"
+name = "Backend URL"
+description = "https://2f761eaf98c1.ngrok-free.app"

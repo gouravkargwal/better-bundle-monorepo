@@ -1,0 +1,1186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model RawOrder {
+  id               String    @id @default(cuid())
+  shopId           String
+  payload          Json
+  extractedAt      DateTime  @default(now())
+  shopifyId        String?   @db.VarChar(100) // Shopify order ID for efficient lookups
+  shopifyCreatedAt DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt DateTime? // Shopify update timestamp
+
+  @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
+  @@map("RawOrder")
+}
+
+model RawProduct {
+  id               String    @id @default(cuid())
+  shopId           String
+  payload          Json
+  extractedAt      DateTime  @default(now())
+  shopifyId        String?   @db.VarChar(100) // Shopify product ID for efficient lookups
+  shopifyCreatedAt DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt DateTime? // Shopify update timestamp
+
+  @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
+  @@map("RawProduct")
+}
+
+model RawCustomer {
+  id               String    @id @default(cuid())
+  shopId           String
+  payload          Json
+  extractedAt      DateTime  @default(now())
+  shopifyId        String?   @db.VarChar(100) // Shopify customer ID for efficient lookups
+  shopifyCreatedAt DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt DateTime? // Shopify update timestamp
+
+  @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
+  @@map("RawCustomer")
+}
+
+model RawCollection {
+  id               String    @id @default(cuid())
+  shopId           String
+  payload          Json
+  extractedAt      DateTime  @default(now())
+  shopifyId        String?   @db.VarChar(100) // Shopify collection ID for efficient lookups
+  shopifyCreatedAt DateTime? // Shopify creation timestamp
+  shopifyUpdatedAt DateTime? // Shopify update timestamp
+
+  @@index([shopId])
+  @@index([shopId, shopifyId])
+  @@index([shopId, shopifyUpdatedAt])
+  @@index([shopId, shopifyCreatedAt])
+  @@map("RawCollection")
+}
+
+model RawBehavioralEvents {
+  id         String   @id @default(cuid())
+  shopId     String
+  payload    Json
+  receivedAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([shopId, receivedAt])
+  @@map("RawBehavioralEvents")
+}
+
+model OrderData {
+  id                      String    @id @default(cuid())
+  shopId                  String
+  orderId                 String
+  orderName               String?   @db.VarChar(100) // Shopify order name (e.g., "#1001")
+  customerId              String?   @db.VarChar(100)
+  customerEmail           String?   @db.VarChar(255)
+  customerPhone           String?   @db.VarChar(50)
+  customerDisplayName     String?   @db.VarChar(255)
+  customerState           String?   @db.VarChar(50)
+  customerVerifiedEmail   Boolean?  @default(false)
+  customerCreatedAt       DateTime?
+  customerUpdatedAt       DateTime?
+  customerDefaultAddress  Json?     @default("{}")
+  totalAmount             Float     @default(0.0)
+  subtotalAmount          Float?    @default(0.0)
+  totalTaxAmount          Float?    @default(0.0)
+  totalShippingAmount     Float?    @default(0.0)
+  totalRefundedAmount     Float?    @default(0.0)
+  totalOutstandingAmount  Float?    @default(0.0)
+  orderDate               DateTime
+  processedAt             DateTime?
+  cancelledAt             DateTime?
+  cancelReason            String?   @default("") @db.VarChar(500)
+  orderLocale             String?   @default("en") @db.VarChar(10)
+  currencyCode            String?   @default("USD") @db.VarChar(10)
+  presentmentCurrencyCode String?   @default("USD") @db.VarChar(10)
+  confirmed               Boolean   @default(false)
+  test                    Boolean   @default(false)
+  tags                    Json?     @default("[]")
+  note                    String?   @default("") @db.Text
+  lineItems               Json      @default("[]")
+  shippingAddress         Json?     @default("{}")
+  billingAddress          Json?     @default("{}")
+  discountApplications    Json?     @default("[]")
+  metafields              Json?     @default("[]")
+  fulfillments            Json?     @default("[]")
+  transactions            Json?     @default("[]")
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  shop                    Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, orderId])
+  @@index([shopId, orderDate])
+  @@index([shopId, customerId])
+  @@index([shopId, customerEmail])
+  @@index([shopId, currencyCode])
+  @@index([shopId, customerState])
+  @@map("OrderData")
+}
+
+model ProductData {
+  id                    String         @id @default(cuid())
+  shopId                String
+  productId             String
+  title                 String         @db.VarChar(500)
+  handle                String         @db.VarChar(255)
+  description           String?        @db.Text
+  descriptionHtml       String?        @db.Text
+  productType           String?        @default("") @db.VarChar(100)
+  vendor                String?        @default("") @db.VarChar(255)
+  tags                  Json?          @default("[]")
+  status                String?        @default("ACTIVE")
+  totalInventory        Int?           @default(0)
+  price                 Float          @default(0.0)
+  compareAtPrice        Float?         @default(0.0)
+  inventory             Int?           @default(0)
+  imageUrl              String?        @db.VarChar(1000)
+  imageAlt              String?        @db.VarChar(500)
+  productCreatedAt      DateTime?
+  productUpdatedAt      DateTime?
+  onlineStoreUrl        String?        @db.VarChar(1000)
+  onlineStorePreviewUrl String?        @db.VarChar(1000)
+  seoTitle              String?        @db.VarChar(500)
+  seoDescription        String?        @db.Text
+  templateSuffix        String?        @db.VarChar(100)
+  variants              Json?          @default("[]")
+  images                Json?          @default("[]")
+  media                 Json?          @default("[]")
+  options               Json?          @default("[]")
+  collections           Json?          @default("[]")
+  metafields            Json?          @default("[]")
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  shop                  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, productType])
+  @@index([shopId, vendor])
+  @@index([shopId, price])
+  @@index([shopId, status])
+  @@index([shopId, isActive])
+  @@index([shopId, totalInventory])
+  @@map("ProductData")
+}
+
+model CustomerData {
+  id               String    @id @default(cuid())
+  shopId           String
+  customerId       String
+  email            String?   @db.VarChar(255)
+  firstName        String?   @db.VarChar(100)
+  lastName         String?   @db.VarChar(100)
+  totalSpent       Float     @default(0.0)
+  orderCount       Int       @default(0)
+  lastOrderDate    DateTime?
+  tags             Json?     @default("[]")
+  createdAtShopify DateTime?
+  lastOrderId      String?   @db.VarChar(100)
+  location         Json?     @default("{}")
+  metafields       Json?     @default("[]")
+  state            String?   @default("") @db.VarChar(50)
+  verifiedEmail    Boolean   @default(false)
+  taxExempt        Boolean   @default(false)
+  defaultAddress   Json?     @default("{}")
+  addresses        Json?     @default("[]")
+  currencyCode     String?   @default("USD") @db.VarChar(10)
+  customerLocale   String?   @default("en") @db.VarChar(10)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, email])
+  @@index([shopId, totalSpent])
+  @@index([shopId, lastOrderDate])
+  @@index([shopId, state])
+  @@index([shopId, verifiedEmail])
+  @@map("CustomerData")
+}
+
+model CollectionData {
+  id             String   @id @default(cuid())
+  shopId         String
+  collectionId   String
+  title          String   @db.VarChar(500)
+  handle         String   @db.VarChar(255)
+  description    String?  @default("") @db.Text
+  templateSuffix String?  @default("") @db.VarChar(100)
+  seoTitle       String?  @default("") @db.VarChar(500)
+  seoDescription String?  @default("") @db.Text
+  imageUrl       String?  @db.VarChar(1000)
+  imageAlt       String?  @db.VarChar(500)
+  productCount   Int      @default(0)
+  isAutomated    Boolean  @default(false)
+  metafields     Json?    @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, collectionId])
+  @@index([shopId, title])
+  @@index([shopId, handle])
+  @@index([shopId, isAutomated])
+  @@map("CollectionData")
+}
+
+model BehavioralEvents {
+  eventId    String   @id
+  shopId     String
+  customerId String?  @db.VarChar(100)
+  clientId   String?  @db.VarChar(100) // Session identifier from Shopify Web Pixels
+  eventType  String   @db.VarChar(100)
+  timestamp DateTime
+  eventData  Json?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, eventType])
+  @@index([shopId, timestamp])
+  @@index([shopId, customerId])
+  @@index([shopId, clientId])
+  @@map("BehavioralEvents")
+}
+
+model ProductAnalytics {
+  id              String    @id @default(cuid())
+  shopId          String
+  productId       String
+  viewCount       Int       @default(0)
+  addToCartCount  Int       @default(0)
+  purchaseCount   Int       @default(0)
+  revenue         Float     @default(0)
+  avgOrderValue   Float     @default(0)
+  lastViewedAt    DateTime?
+  lastPurchasedAt DateTime?
+  lastComputedAt  DateTime  @default(now())
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, viewCount])
+  @@index([shopId, purchaseCount])
+  @@index([shopId, revenue])
+  @@index([shopId, lastViewedAt])
+  @@map("ProductAnalytics")
+}
+
+model CustomerAnalytics {
+  id                  String    @id @default(cuid())
+  shopId              String
+  customerId          String
+  totalSessions       Int       @default(0)
+  totalPageViews      Int       @default(0)
+  totalSearchQueries  Int       @default(0)
+  cartAbandonmentRate Float     @default(0)
+  avgSessionDuration  Float     @default(0)
+  lastActivityAt      DateTime?
+  preferredCategories Json?
+  lastComputedAt      DateTime  @default(now())
+  shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, totalSessions])
+  @@index([shopId, lastActivityAt])
+  @@map("CustomerAnalytics")
+}
+
+model CollectionAnalytics {
+  id     String @id @default(cuid())
+  shopId String
+
+  // Collection counts
+  totalCollections     Int @default(0)
+  manualCollections    Int @default(0)
+  automatedCollections Int @default(0)
+
+  // Performance metrics
+  avgProductsPerCollection  Float @default(0)
+  collectionAutomationRatio Float @default(0)
+
+  // Top collections
+  topCollectionsByProducts Json? // Top 10 collections by product count
+  topCollectionsByRevenue  Json? // Top 10 collections by revenue
+
+  lastComputedAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId])
+  @@index([shopId, totalCollections])
+  @@index([shopId, collectionAutomationRatio])
+  @@map("CollectionAnalytics")
+}
+
+model CustomerBehaviorAnalytics {
+  id     String @id @default(cuid())
+  shopId String
+
+  // Customer counts
+  totalCustomersWithBehavior Int @default(0)
+  highEngagementCustomers    Int @default(0)
+  activeCustomers            Int @default(0)
+
+  // Average scores
+  avgEngagementScore Float @default(0)
+  avgRecencyScore    Float @default(0)
+  avgDiversityScore  Float @default(0)
+
+  // Behavioral distribution
+  engagementDistribution Json? // Distribution of engagement scores
+  recencyDistribution    Json? // Distribution of recency scores
+
+  lastComputedAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId])
+  @@index([shopId, totalCustomersWithBehavior])
+  @@index([shopId, avgEngagementScore])
+  @@map("CustomerBehaviorAnalytics")
+}
+
+model BundleAnalysisResult {
+  id              String   @id @default(cuid())
+  shopId          String
+  productIds      String[]
+  bundleSize      Int
+  coPurchaseCount Int
+  confidence      Float
+  lift            Float
+  support         Float
+  revenue         Float
+  avgOrderValue   Float
+  analysisDate    DateTime @default(now())
+  isActive        Boolean  @default(true)
+  discount        Float    @default(0)
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productIds])
+  @@index([shopId, confidence])
+  @@index([shopId, lift])
+  @@index([shopId, revenue])
+  @@index([shopId, isActive])
+  @@index([shopId, bundleSize])
+  @@index([shopId, analysisDate])
+  @@map("BundleAnalysisResult")
+}
+
+model TrackedSale {
+  id               String   @id @default(cuid())
+  shopId           String
+  shopifyOrderId   String
+  revenueGenerated Float
+  commissionOwed   Float
+  status           String   @default("pending")
+  billingPeriod    String?  @db.VarChar(50)
+  createdAt        DateTime @default(now())
+  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, shopifyOrderId])
+  @@index([shopId, billingPeriod])
+  @@index([shopId, status])
+  @@map("TrackedSale")
+}
+
+model WidgetEvent {
+  id         String   @id @default(cuid())
+  shopId     String
+  sessionId  String
+  bundleId   String?  @db.VarChar(100)
+  action     String
+  productIds String[]
+  timestamp  DateTime @default(now())
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, sessionId])
+  @@index([shopId, action])
+  @@index([shopId, timestamp])
+  @@map("WidgetEvent")
+}
+
+model WidgetConfiguration {
+  id                    String   @id @default(cuid())
+  shopId                String   @unique
+  // Global enable/disable
+  isActive              Boolean  @default(true)
+
+  // Global styling
+  layoutStyle           String   @default("grid") // grid | carousel | list
+  gridColumns           Int      @default(3)
+  useThemeColors        Boolean  @default(true)
+
+  // Product Page Settings
+  productPageEnabled     Boolean @default(true)
+  productPageTitle       String  @default("You might also like")
+  productPageLimit       Int     @default(6)
+  productPageShowPrices  Boolean @default(true)
+  productPageShowReasons Boolean @default(true)
+
+  // Cart Page Settings
+  cartPageEnabled        Boolean @default(true)
+  cartPageTitle          String  @default("Frequently bought together")
+  cartPageLimit          Int     @default(4)
+  cartPageShowPrices     Boolean @default(true)
+  cartPageShowReasons    Boolean @default(true)
+
+  // Homepage Settings
+  homepageEnabled        Boolean @default(false)
+  homepageTitle          String  @default("Popular products")
+  homepageLimit          Int     @default(8)
+  homepageShowPrices     Boolean @default(true)
+  homepageShowReasons    Boolean @default(false)
+
+  // Collection Page Settings
+  collectionPageEnabled        Boolean @default(true)
+  collectionPageTitle          String  @default("Similar products")
+  collectionPageLimit          Int     @default(6)
+  collectionPageShowPrices     Boolean @default(true)
+  collectionPageShowReasons    Boolean @default(true)
+
+  // Search Results Settings
+  searchPageEnabled        Boolean @default(true)
+  searchPageTitle          String  @default("You might also like")
+  searchPageLimit          Int     @default(6)
+  searchPageShowPrices     Boolean @default(true)
+  searchPageShowReasons    Boolean @default(true)
+
+  // Blog Post Settings
+  blogPageEnabled        Boolean @default(false)
+  blogPageTitle          String  @default("Featured products")
+  blogPageLimit          Int     @default(4)
+  blogPageShowPrices     Boolean @default(true)
+  blogPageShowReasons    Boolean @default(false)
+
+  // Checkout Settings (note: implement via Checkout UI Extension if supported)
+  checkoutPageEnabled        Boolean @default(false)
+  checkoutPageTitle          String  @default("Last chance to add")
+  checkoutPageLimit          Int     @default(3)
+  checkoutPageShowPrices     Boolean @default(true)
+  checkoutPageShowReasons    Boolean @default(false)
+
+  // Customer Account Settings
+  accountPageEnabled        Boolean @default(false)
+  accountPageTitle          String  @default("Recommended for you")
+  accountPageLimit          Int     @default(6)
+  accountPageShowPrices     Boolean @default(true)
+  accountPageShowReasons    Boolean @default(true)
+
+  // 404 Page Settings
+  notFoundPageEnabled        Boolean @default(false)
+  notFoundPageTitle          String  @default("Popular products")
+  notFoundPageLimit          Int     @default(6)
+  notFoundPageShowPrices     Boolean @default(true)
+  notFoundPageShowReasons    Boolean @default(false)
+
+  // Analytics
+  analyticsEnabled        Boolean @default(true)
+
+  // Custom page contexts (JSON array of regex patterns and contexts)
+  customContexts         Json?   @default("[]")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("WidgetConfiguration")
+}
+
+model AnalysisJob {
+  id          String    @id @default(cuid())
+  shopId      String
+  status      String    @default("pending")
+  jobId       String    @unique
+  progress    Int       @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?   @db.Text
+  result      Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@index([status, createdAt])
+  @@map("AnalysisJob")
+}
+
+model ShopAnalysisConfig {
+  id               String   @id @default(cuid())
+  shopId           String   @unique
+  similarityConfig Json?
+  bundleConfig     Json?
+  isEnabled        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model HeuristicDecision {
+  id                String @id @default(cuid())
+  shopId            String
+  decision          String @db.VarChar(500) // Human-readable decision
+  reason            String @db.Text // Detailed reasoning
+  nextAnalysisHours Int // Next analysis interval in hours
+  confidence        Float // Confidence score (0.0 to 1.0)
+
+  // Key heuristic factors as individual fields
+  orderVolume         Float // Orders per day
+  revenueVelocity     Float // Revenue per day
+  bundleEffectiveness Float // Bundle performance score (0.0 to 1.0)
+  dataChangeRate      Float // Data change percentage
+  shopActivityLevel   String @db.VarChar(20) // 'low', 'medium', 'high'
+  userEngagement      Float // User engagement score (0.0 to 1.0)
+
+  // Additional metadata
+  reasoningSummary  String?  @db.Text // Summary of reasoning
+  analysisTimestamp DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, decision])
+  @@index([shopId, createdAt])
+  @@index([nextAnalysisHours])
+  @@index([confidence])
+  @@map("HeuristicDecision")
+}
+
+model IncrementalAnalysisLog {
+  id        String   @id @default(cuid())
+  shopId    String
+  jobId     String
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, jobId])
+  @@index([shopId, action])
+  @@index([shopId, createdAt])
+}
+
+// New tracking models
+model TrackingEvent {
+  id         String   @id @default(cuid())
+  shopId     String
+  eventType  String   @db.VarChar(100) // "recommendation_displayed", "recommendation_clicked", etc.
+  sessionId  String   @db.VarChar(100)
+  trackingId String   @db.VarChar(100)
+  userId     String?  @db.VarChar(100)
+  timestamp  DateTime
+  metadata   Json
+  rawEvent   Json
+  createdAt  DateTime @default(now())
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId, eventType])
+  @@index([sessionId])
+  @@index([trackingId])
+  @@index([timestamp])
+  @@index([userId])
+}
+
+// Billing models
+model BillingSubscription {
+  id               String   @id @default(cuid())
+  shopId           String
+  planName         String   @db.VarChar(100)
+  status           String   @db.VarChar(50) // "active", "cancelled", "declined", "frozen"
+  trialDays        Int      @default(14)
+  currentPeriodEnd DateTime
+  nextBillingDate  DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  shop    Shop            @relation(fields: [shopId], references: [id])
+  charges BillingCharge[]
+
+  @@index([shopId, status])
+  @@index([status, nextBillingDate])
+}
+
+model BillingCharge {
+  id             String    @id @default(cuid())
+  shopId         String
+  subscriptionId String
+  amount         Float
+  currency       String    @default("USD") @db.VarChar(10)
+  description    String    @db.VarChar(500)
+  billingPeriod  String    @db.VarChar(50)
+  status         String    @db.VarChar(50) // "pending", "active", "cancelled", "declined"
+  createdAt      DateTime  @default(now())
+  dueDate        DateTime
+  paidAt         DateTime?
+
+  // Relations
+  shop         Shop                @relation(fields: [shopId], references: [id])
+  subscription BillingSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([shopId, status])
+  @@index([subscriptionId])
+  @@index([billingPeriod])
+  @@index([dueDate])
+}
+
+// ML Training Logs - Simple and Clean
+model MLTrainingLog {
+  id                  String    @id @default(cuid())
+  shopId              String
+  status              String    @default("started") // "started", "completed", "failed", "skipped"
+  startedAt           DateTime  @default(now())
+  completedAt         DateTime?
+  durationMs          Int? // Training duration in milliseconds
+  
+  // Data push counts
+  usersPushed         Int       @default(0)
+  itemsPushed         Int       @default(0)
+  feedbackPushed      Int       @default(0)
+  totalPushed         Int       @default(0)
+  
+  // Job configuration
+  jobType             String?   // "full_training", "incremental_training", "model_refresh", "custom"
+  pushStrategy        String?   // "full", "incremental"
+  triggerSource       String?   // "api", "scheduled", "manual"
+  
+  // Last push timestamps for incremental logic
+  usersLastPushAt     DateTime?
+  itemsLastPushAt     DateTime?
+  feedbackLastPushAt  DateTime?
+  
+  // Legacy fields (keeping for backward compatibility)
+  productsCount       Int       @default(0)
+  usersCount          Int       @default(0)
+  collectionsCount    Int       @default(0)
+  customerEventsCount Int       @default(0)
+  
+  error               String?   @db.Text
+  createdAt           DateTime  @default(now())
+  shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@index([status, createdAt])
+  @@index([shopId, jobType])
+  @@map("MLTrainingLog")
+}
+
+model FeatureComputation {
+  id           String    @id @default(cuid())
+  shopId       String
+  jobId        String
+  status       String    @default("pending") // "pending", "computing", "completed", "failed"
+  featureCount Int       @default(0)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@map("FeatureComputation")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?   @db.VarChar(500)
+  expires       DateTime?
+  accessToken   String    @db.VarChar(1000)
+  userId        BigInt?
+  firstName     String?   @db.VarChar(100)
+  lastName      String?   @db.VarChar(100)
+  email         String?   @db.VarChar(255)
+  accountOwner  Boolean   @default(false)
+  locale        String?   @db.VarChar(10)
+  collaborator  Boolean?
+  emailVerified Boolean?
+}
+
+model Shop {
+  id                   String                   @id @default(cuid())
+  shopDomain           String                   @unique @db.VarChar(255)
+  accessToken          String                   @db.VarChar(1000)
+  planType             String                   @default("Free") @db.VarChar(50)
+  currencyCode         String?                  @db.VarChar(10)
+  moneyFormat          String?                  @db.VarChar(100)
+  isActive             Boolean                  @default(true)
+  email                String?                  @db.VarChar(255)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  lastAnalysisAt       DateTime?
+  analysisJobs         AnalysisJob[]
+  bundleAnalysis       BundleAnalysisResult[]
+  heuristicDecisions   HeuristicDecision[]
+  incrementalLogs      IncrementalAnalysisLog[]
+  orderData            OrderData[]
+  productData          ProductData[]
+  customerData         CustomerData[]
+  collectionData       CollectionData[]
+  analysisConfig       ShopAnalysisConfig?
+  trackedSales         TrackedSale[]
+  widgetConfig         WidgetConfiguration?
+  widgetEvents         WidgetEvent[]
+  trackingEvents       TrackingEvent[]
+  featureComputations  FeatureComputation[]
+  mlTrainingLogs       MLTrainingLog[]
+  billingSubscriptions BillingSubscription[]
+  billingCharges       BillingCharge[]
+  userFeatures         UserFeatures[]
+  productFeatures      ProductFeatures[]
+  interactionFeatures  InteractionFeatures[]
+  productAnalytics     ProductAnalytics[]
+  customerAnalytics    CustomerAnalytics[]
+
+  // Enhanced feature models
+  collectionFeatures        CollectionFeatures[]
+  customerBehaviorFeatures  CustomerBehaviorFeatures[]
+  sessionFeatures           SessionFeatures[]
+  productPairFeatures       ProductPairFeatures[]
+  searchProductFeatures     SearchProductFeatures[]
+  collectionAnalytics       CollectionAnalytics?
+  customerBehaviorAnalytics CustomerBehaviorAnalytics?
+
+  // Behavioral events
+  rawBehavioralEvents RawBehavioralEvents[]
+  behavioralEvents    BehavioralEvents[]
+}
+
+// ============= USER/CUSTOMER FEATURES =============
+
+model UserFeatures {
+  id         String @id @default(cuid())
+  shopId     String
+  customerId String
+
+  // Purchase Metrics
+  totalPurchases Int   @default(0)
+  totalSpent     Float @default(0)
+  avgOrderValue  Float @default(0)
+  lifetimeValue  Float @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Time-based Metrics
+  daysSinceFirstOrder    Int?
+  daysSinceLastOrder     Int?
+  avgDaysBetweenOrders   Float?
+  orderFrequencyPerMonth Float?
+
+  // Product Preferences
+  distinctProductsPurchased   Int     @default(0)
+  distinctCategoriesPurchased Int     @default(0)
+  preferredCategory           String? @db.VarChar(100)
+  preferredVendor             String? @db.VarChar(255)
+  pricePointPreference        String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"
+
+  // Discount Behavior
+  ordersWithDiscountCount Int    @default(0)
+  discountSensitivity     Float? // % of orders with discounts
+  avgDiscountAmount       Float?
+
+  // Enhanced Customer Features (from Order API)
+  customerState        String? @db.VarChar(50)  // "ENABLED", "DISABLED", etc.
+  isVerifiedEmail      Boolean @default(false)  // Email verification status
+  customerAge          Int?                     // Days since customer creation
+  hasDefaultAddress    Boolean @default(false)  // Has default address
+  geographicRegion     String? @db.VarChar(100) // Geographic region from address
+  currencyPreference   String? @db.VarChar(10)  // Preferred currency
+  customerHealthScore  Int     @default(0)      // 0-100 customer health score
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, totalSpent])
+  @@index([shopId, daysSinceLastOrder])
+  @@map("UserFeatures")
+}
+
+// ============= PRODUCT FEATURES =============
+
+model ProductFeatures {
+  id        String @id @default(cuid())
+  shopId    String
+  productId String
+
+  // View & Engagement Metrics (30-day window)
+  viewCount30d        Int @default(0)
+  uniqueViewers30d    Int @default(0)
+  cartAddCount30d     Int @default(0)
+  cartViewCount30d    Int @default(0)
+  cartRemoveCount30d  Int @default(0)
+  purchaseCount30d    Int @default(0)
+  uniquePurchasers30d Int @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Conversion Metrics
+  viewToCartRate        Float? // cartAdds / views
+  cartToPurchaseRate    Float? // purchases / cartAdds
+  overallConversionRate Float? // purchases / views
+  cartAbandonmentRate   Float? // cart views without purchase
+  cartModificationRate  Float? // cart removes / cart adds
+  cartViewToPurchaseRate Float? // purchases / cart views
+
+  // Temporal Metrics
+  lastViewedAt           DateTime?
+  lastPurchasedAt        DateTime?
+  firstPurchasedAt       DateTime?
+  daysSinceFirstPurchase Int?
+  daysSinceLastPurchase  Int?
+
+  // Price & Inventory
+  avgSellingPrice   Float? // Actual price from orders
+  priceVariance     Float? // Price consistency
+  totalInventory    Int?   // Total inventory from ProductData
+  inventoryTurnover Float? // Sales rate vs stock
+  stockVelocity     Float? // Units sold per day
+  priceTier         String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"
+
+  // Product Metadata Scores (existing fields)
+  variantComplexity    Float? // 0-1 normalized
+  imageRichness        Float? // 0-1 normalized  
+  tagDiversity         Float? // 0-1 normalized
+  metafieldUtilization Float? // 0-1 normalized
+
+  // Enhanced Features (from new Shopify data)
+  mediaRichness        Float?  // 0-100 score based on media content
+  seoOptimization      Float?  // 0-100 SEO optimization score
+  seoTitleLength       Int?    // Length of SEO title
+  seoDescriptionLength Int?    // Length of SEO description
+  hasVideoContent      Boolean @default(false) // Has video media
+  has3DContent         Boolean @default(false) // Has 3D model media
+  mediaCount           Int     @default(0)     // Total media items
+  hasOnlineStoreUrl    Boolean @default(false) // Has online store URL
+  hasPreviewUrl        Boolean @default(false) // Has preview URL
+  hasCustomTemplate    Boolean @default(false) // Has custom template
+
+  // Computed Scores
+  popularityScore Float @default(0) // Normalized 0-1
+  trendingScore   Float @default(0) // Velocity change
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId])
+  @@index([shopId, popularityScore])
+  @@index([shopId, trendingScore])
+  @@index([shopId, viewCount30d])
+  @@index([shopId, purchaseCount30d])
+  @@map("ProductFeatures")
+}
+
+// ============= COLLECTION FEATURES =============
+
+model CollectionFeatures {
+  id           String @id @default(cuid())
+  shopId       String
+  collectionId String
+
+  // Basic Metrics
+  productCount Int     @default(0)
+  isAutomated  Boolean @default(false)
+
+  // Engagement Metrics (30-day window)
+  viewCount30d     Int    @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  uniqueViewers30d Int    @default(0)
+  clickThroughRate Float? // Product clicks / collection views
+  bounceRate       Float? // Single page visits / total visits
+
+  // Product Metrics
+  avgProductPrice Float?
+  minProductPrice Float?
+  maxProductPrice Float?
+  priceRange      Float? // max - min
+  priceVariance   Float? // Standard deviation
+
+  // Performance
+  conversionRate      Float? // Purchases from collection / views
+  revenueContribution Float? // % of total store revenue
+  topProducts         Json @default("[]") // Array of top 5 product IDs
+  topVendors          Json @default("[]") // Array of main vendors
+
+  // Scores
+  performanceScore Float @default(0)
+  seoScore         Int   @default(0)
+  imageScore       Int   @default(0)
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, collectionId])
+  @@index([shopId, productCount])
+  @@index([shopId, performanceScore])
+  @@map("CollectionFeatures")
+}
+
+// ============= CUSTOMER BEHAVIOR FEATURES =============
+
+model CustomerBehaviorFeatures {
+  id         String @id @default(cuid())
+  shopId     String
+  customerId String
+
+  // Session Metrics
+  sessionCount        Int    @default(0)
+  avgSessionDuration  Int? // seconds
+  avgEventsPerSession Float?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Event Counts
+  totalEventCount     Int @default(0)
+  productViewCount    Int @default(0)
+  collectionViewCount Int @default(0)
+  cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
+  searchCount         Int @default(0)
+  checkoutStartCount  Int @default(0)
+  purchaseCount       Int @default(0)
+
+  // Temporal Patterns
+  daysSinceFirstEvent Int  @default(0)
+  daysSinceLastEvent  Int  @default(0)
+  mostActiveHour      Int? // 0-23
+  mostActiveDay       Int? // 0-6 (Sun-Sat)
+
+  // Behavior Patterns
+  uniqueProductsViewed    Int     @default(0)
+  uniqueCollectionsViewed Int     @default(0)
+  searchTerms             Json @default("[]") // Array of search queries
+  topCategories           Json @default("[]") // Top 3 preferred categories
+  deviceType              String? @db.VarChar(20) // "mobile", "desktop", "tablet"
+  primaryReferrer         String? @db.VarChar(255)
+
+  // Conversion Metrics
+  browseToCartRate     Float? // Cart adds / product views
+  cartToPurchaseRate   Float? // Purchases / cart adds
+  searchToPurchaseRate Float? // Purchases after search / searches
+
+  // Computed Scores (0-1 normalized)
+  engagementScore Float @default(0)
+  recencyScore    Float @default(0)
+  diversityScore  Float @default(0)
+  behavioralScore Float @default(0)
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId])
+  @@index([shopId, engagementScore])
+  @@index([shopId, behavioralScore])
+  @@index([shopId, daysSinceLastEvent])
+  @@map("CustomerBehaviorFeatures")
+}
+
+// ============= INTERACTION FEATURES =============
+
+model InteractionFeatures {
+  id         String @id @default(cuid())
+  shopId     String
+  customerId String
+  productId  String
+
+  // Event Counts
+  viewCount     Int @default(0)
+  cartAddCount  Int @default(0)
+  cartViewCount Int @default(0)
+  cartRemoveCount Int @default(0)
+  purchaseCount Int @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Temporal Data
+  firstViewDate     DateTime?
+  lastViewDate      DateTime?
+  firstPurchaseDate DateTime?
+  lastPurchaseDate  DateTime?
+
+  // Conversion Metrics
+  viewToPurchaseDays  Int? // Days between first view and purchase
+  interactionSpanDays Int? // Days between first and last interaction
+
+  // Computed Scores
+  interactionScore Float  @default(0) // Weighted: views*1 + cart*3 + purchase*7
+  affinityScore    Float? // Normalized 0-1
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, customerId, productId])
+  @@index([shopId, customerId])
+  @@index([shopId, productId])
+  @@index([shopId, interactionScore])
+  @@map("InteractionFeatures")
+}
+
+// ============= SESSION FEATURES =============
+
+model SessionFeatures {
+  id         String  @id @default(cuid())
+  shopId     String
+  sessionId  String // From clientId
+  customerId String? // Null if anonymous
+
+  // Session Timing
+  startTime       DateTime
+  endTime         DateTime
+  durationSeconds Int
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Event Counts
+  eventCount          Int @default(0)
+  pageViewCount       Int @default(0)
+  productViewCount    Int @default(0)
+  collectionViewCount Int @default(0)
+  searchCount         Int @default(0)
+  cartAddCount        Int @default(0)
+  cartViewCount       Int @default(0)
+  cartRemoveCount     Int @default(0)
+
+  // Conversion
+  checkoutStarted   Boolean @default(false)
+  checkoutCompleted Boolean @default(false)
+  orderValue        Float?
+  cartViewed        Boolean @default(false)
+  cartAbandoned     Boolean @default(false)
+
+  // Context
+  deviceType     String? @db.VarChar(20)
+  referrerDomain String? @db.VarChar(255)
+  landingPage    String? @db.VarChar(500)
+  exitPage       String? @db.VarChar(500)
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, sessionId])
+  @@index([shopId, customerId])
+  @@index([shopId, startTime])
+  @@index([shopId, checkoutCompleted])
+  @@map("SessionFeatures")
+}
+
+// ============= PRODUCT PAIR FEATURES =============
+
+model ProductPairFeatures {
+  id         String @id @default(cuid())
+  shopId     String
+  productId1 String
+  productId2 String
+
+  // Co-occurrence Counts
+  coPurchaseCount Int @default(0) // Same order
+  coViewCount     Int @default(0) // Same session
+  coCartCount     Int @default(0) // Same cart
+  coCartViews     Int @default(0) // Same cart view session
+  coCartRemoves   Int @default(0) // Same cart remove session
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Metrics
+  supportScore     Float? // Confidence metric
+  liftScore        Float? // Correlation strength
+  lastCoOccurrence DateTime?
+
+  lastComputedAt DateTime @default(now())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId1, productId2])
+  @@index([shopId, productId1])
+  @@index([shopId, productId2])
+  @@index([shopId, coPurchaseCount])
+  @@map("ProductPairFeatures")
+}
+
+// ============= SEARCH PRODUCT FEATURES =============
+
+model SearchProductFeatures {
+  id          String @id @default(cuid())
+  shopId      String
+  searchQuery String @db.VarChar(500)
+  productId   String
+
+  // Metrics
+  impressionCount Int    @default(0) // Times shown in results
+  clickCount      Int    @default(0) // Times clicked
+  purchaseCount   Int    @default(0) // Times purchased after search
+  avgPosition     Float? // Average position in results
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Rates
+  clickThroughRate Float? // Clicks / impressions
+  conversionRate   Float? // Purchases / clicks
+
+  lastOccurrence DateTime?
+  lastComputedAt DateTime  @default(now())
+  shop           Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, searchQuery, productId])
+  @@index([shopId, searchQuery])
+  @@index([shopId, productId])
+  @@index([shopId, clickThroughRate])
+  @@map("SearchProductFeatures")
+}
+
+model UserIdentityLink {
+  id         String   @id @default(cuid())
+  shopId     String
+  clientId   String // Anonymous session/client ID
+  customerId String // Permanent customer ID
+  linkedAt   DateTime @default(now())
+
+  @@unique([shopId, clientId, customerId])
+  @@index([shopId, clientId])
+  @@index([shopId, customerId])
+  @@map("UserIdentityLink")
+}
+
+
+

@@ -1,0 +1,152 @@
+<!-- Star Rating Section -->
+{% assign avg_rating = block.settings.product.metafields.demo.avg_rating.value | round %}
+<span style="color:{{ block.settings.colour }}">
+  {% render 'stars', rating: avg_rating %}
+</span>
+{% if avg_rating >= 4 %}
+  <br>
+  <img src="{{ "thumbs-up.png" | asset_img_url: '15x' }}" height="15" width="15" loading="lazy">
+  {{ 'ratings.home.recommendationText' | t }}
+{% endif %}
+
+<!-- Recommendations Section -->
+{% if block.settings.show_recommendations %}
+<div class="phoenix-recommendations" 
+     data-product-id="{{ block.settings.product.id }}" 
+     data-context="{{ block.settings.context | default: 'auto' }}"
+     data-limit="{{ block.settings.recommendation_limit | default: 6 }}"
+     data-layout="{{ block.settings.layout_style | default: 'grid' }}"
+     data-columns="{{ block.settings.grid_columns | default: 'auto' }}"
+     data-show-prices="{{ block.settings.show_prices | default: true }}"
+     data-show-reasons="{{ block.settings.show_reasons | default: true }}"
+     data-template="{{ template }}"
+     data-page-type="{{ request.page_type }}"
+     data-locale="{{ request.locale.iso_code }}"
+     data-theme="{{ theme.name | handleize }}">
+  <div class="recommendations-loading" style="display: none;">
+    <p>{{ 'recommendations.loading' | t }}</p>
+  </div>
+  <div class="recommendations-content" style="display: none;">
+    <h3>
+      {% if block.settings.custom_title != blank %}
+        {{ block.settings.custom_title }}
+      {% else %}
+        {{ 'recommendations.contexts.' | append: block.settings.context | t | default: 'recommendations.title' | t }}
+      {% endif %}
+    </h3>
+    <div class="phoenix-recommendations-grid">
+      <!-- Recommendations will be populated here by JavaScript -->
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- External Assets -->
+<link rel="stylesheet" href="{{ 'phoenix-recommendations.css' | asset_url }}">
+<script src="{{ 'context-detection.js' | asset_url }}" defer></script>
+<script src="{{ 'recommendations.js' | asset_url }}" defer></script>
+
+<!-- Initialization Script -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Wait for external scripts to load
+  if (window.PhoenixRecommendations && window.PhoenixContextDetection) {
+    window.PhoenixRecommendations.initializePhoenixRecommendations();
+  } else {
+    // Fallback: retry after a short delay
+    setTimeout(() => {
+      if (window.PhoenixRecommendations && window.PhoenixContextDetection) {
+        window.PhoenixRecommendations.initializePhoenixRecommendations();
+      }
+    }, 100);
+  }
+});
+</script>
+
+
+
+{% schema %}
+{
+  "name": "Smart Recommendations",
+  "target": "section",
+  "settings": [
+    { "type": "product", "id": "product", "label": "Product", "autofill": true },
+    { "type": "color", "id": "colour", "label": "Star Colour", "default": "#ff0000" },
+    { 
+      "type": "select", 
+      "id": "context", 
+      "label": "Recommendation Context", 
+      "info": "Choose where this widget will be used to get relevant recommendations (or set to 'auto' for automatic detection)",
+      "options": [
+        { "value": "auto", "label": "Auto-detect (Recommended)" },
+        { "value": "product_page", "label": "Product Page - 'Customers also bought'" },
+        { "value": "homepage", "label": "Homepage - 'Popular products'" },
+        { "value": "cart", "label": "Cart - 'Frequently bought together'" },
+        { "value": "collection", "label": "Collection - 'Similar products'" },
+        { "value": "search", "label": "Search - 'You might also like'" },
+        { "value": "blog", "label": "Blog - 'Featured products'" },
+        { "value": "checkout", "label": "Checkout - 'Last chance to add'" },
+        { "value": "account", "label": "Account - 'Recommended for you'" },
+        { "value": "not_found", "label": "404 Page - 'Popular products'" }
+      ],
+      "default": "auto"
+    },
+    { "type": "checkbox", "id": "show_recommendations", "label": "Show Recommendations", "default": true },
+    { 
+      "type": "range", 
+      "id": "recommendation_limit", 
+      "label": "Number of Recommendations", 
+      "info": "How many products to show (3-12)",
+      "min": 3, 
+      "max": 12, 
+      "step": 1, 
+      "default": 6 
+    },
+    {
+      "type": "select",
+      "id": "layout_style",
+      "label": "Layout Style",
+      "info": "Choose how recommendations are displayed",
+      "options": [
+        { "value": "grid", "label": "Grid Layout" },
+        { "value": "carousel", "label": "Carousel/Slider" },
+        { "value": "list", "label": "List Layout" }
+      ],
+      "default": "grid"
+    },
+    {
+      "type": "select",
+      "id": "grid_columns",
+      "label": "Grid Columns",
+      "info": "Number of columns in grid layout",
+      "options": [
+        { "value": "2", "label": "2 Columns" },
+        { "value": "3", "label": "3 Columns" },
+        { "value": "4", "label": "4 Columns" },
+        { "value": "auto", "label": "Auto (Responsive)" }
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_prices",
+      "label": "Show Product Prices",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_reasons",
+      "label": "Show Recommendation Reasons",
+      "info": "Display why each product is recommended",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "custom_title",
+      "label": "Custom Section Title",
+      "info": "Override the default title (leave empty for auto-generated)"
+    }
+  ]
+}
+{% endschema %}
+
