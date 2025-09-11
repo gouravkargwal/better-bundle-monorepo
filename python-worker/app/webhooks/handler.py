@@ -1,14 +1,13 @@
 import uuid
 import asyncio
 from typing import Dict, Any, List, Optional, Set
-from datetime import datetime, timezone, timedelta
-from collections import defaultdict, deque
+from datetime import timedelta
+from collections import deque
 from pydantic import ValidationError, TypeAdapter
 from .repository import WebhookRepository
 from .models import ShopifyBehavioralEvent
 from .distributed_rate_limiter import DistributedRateLimiter, RateLimitConfig
 from .distributed_batch_manager import DistributedBatchManager, BatchConfig
-from .shopify_webhook_verifier import ShopifyWebhookVerifier
 from app.core.logging import get_logger
 from app.core.redis_client import streams_manager
 from app.core.database.simple_db_client import get_database
@@ -42,7 +41,6 @@ class WebhookHandler:
         # Initialize distributed components
         self.rate_limiter = DistributedRateLimiter(rate_limit_config)
         self.batch_manager = DistributedBatchManager(batch_config)
-        self.webhook_verifier = ShopifyWebhookVerifier()
 
         # Register batch processor for each shop
         self._registered_shops: Set[str] = set()
@@ -268,7 +266,11 @@ class WebhookHandler:
 
     async def process_behavioral_event(self, shop_domain: str, payload: Dict[str, Any]):
         """
-        Validates and processes an incoming behavioral event from a Web Pixel.
+        Processes an incoming behavioral event from a Web Pixel.
+
+        This method saves the raw payload first (without validation), then attempts
+        to validate and save structured data. If validation fails, the raw payload
+        is still preserved for debugging.
 
         This method is intended to be called by a background worker that consumes
         messages from a Redis stream.
@@ -281,63 +283,91 @@ class WebhookHandler:
             # Resolve shop domain to database ID
             shop_db_id = await self._resolve_shop_id(shop_domain)
 
-            # Use the pre-initialized TypeAdapter to correctly validate the Union type.
-            validated_event = self.event_adapter.validate_python(payload)
+            # Step 1: Save raw payload immediately (no validation)
+            await self.repository.save_raw_behavioral_event(shop_db_id, payload)
+            logger.info(f"Raw payload saved for shop {shop_domain}")
 
-            # Handle customer linking events specially
-            if validated_event.name == "customer_linked":
-                # Check if this is actually a CustomerLinkedEvent with proper data structure
-                if (
-                    hasattr(validated_event.data, "clientId")
-                    and hasattr(validated_event.data, "customerId")
-                    and validated_event.data.clientId
-                    and validated_event.data.customerId
-                ):
-                    await self._handle_customer_linking(
-                        shop_db_id,
-                        validated_event.data.clientId,
-                        validated_event.data.customerId,
-                    )
-                else:
-                    logger.warning(
-                        f"customer_linked event {validated_event.id} missing required clientId or customerId in data. "
-                        f"clientId: {getattr(validated_event.data, 'clientId', 'missing')}, "
-                        f"customerId: {getattr(validated_event.data, 'customerId', 'missing')}"
-                    )
-            else:
-                # For regular events, check if clientId already has a linked customerId
-                client_id = payload.get("clientId")
-                if client_id and not validated_event.customer_id:
-                    existing_customer_id = await self._check_existing_customer_link(
-                        shop_db_id, client_id
-                    )
-                    if existing_customer_id:
-                        # Update the validated event with the linked customer ID
-                        validated_event.customer_id = existing_customer_id
-                        logger.info(
-                            f"Auto-linked event {validated_event.id} to customer {existing_customer_id}"
+            # Step 2: Attempt validation and structured data saving
+            try:
+                # Use the pre-initialized TypeAdapter to correctly validate the Union type.
+                validated_event = self.event_adapter.validate_python(payload)
+
+                # Handle customer linking events specially
+                if validated_event.name == "customer_linked":
+                    # Check if this is actually a CustomerLinkedEvent with proper data structure
+                    if (
+                        hasattr(validated_event.data, "clientId")
+                        and hasattr(validated_event.data, "customerId")
+                        and validated_event.data.clientId
+                        and validated_event.data.customerId
+                    ):
+                        await self._handle_customer_linking(
+                            shop_db_id,
+                            validated_event.data.clientId,
+                            validated_event.data.customerId,
                         )
+                    else:
+                        logger.warning(
+                            f"customer_linked event {validated_event.id} missing required clientId or customerId in data. "
+                            f"clientId: {getattr(validated_event.data, 'clientId', 'missing')}, "
+                            f"customerId: {getattr(validated_event.data, 'customerId', 'missing')}"
+                        )
+                else:
+                    # For regular events, check if clientId already has a linked customerId
+                    client_id = payload.get("clientId")
+                    if client_id and not validated_event.customer_id:
+                        existing_customer_id = await self._check_existing_customer_link(
+                            shop_db_id, client_id
+                        )
+                        if existing_customer_id:
+                            # Update the validated event with the linked customer ID
+                            validated_event.customer_id = existing_customer_id
+                            logger.info(
+                                f"Auto-linked event {validated_event.id} to customer {existing_customer_id}"
+                            )
 
-            await self.repository.save_behavioral_event(
-                shop_db_id, payload, validated_event
-            )
+                # Save structured data
+                await self.repository.save_structured_behavioral_event(
+                    shop_db_id, payload, validated_event
+                )
 
-            logger.info(
-                "Successfully processed behavioral event.",
-                event_id=validated_event.id,
-                type=validated_event.name,
-                shop_domain=shop_domain,
-            )
-            return {"status": "success"}
+                logger.info(
+                    "Successfully processed behavioral event.",
+                    event_id=validated_event.id,
+                    type=validated_event.name,
+                    shop_domain=shop_domain,
+                )
+                return {"status": "success"}
 
-        except ValidationError as e:
-            logger.error(
-                "Behavioral event validation failed.", error=str(e), payload=payload
-            )
-            return {"status": "validation_error", "details": str(e)}
+            except ValidationError as e:
+                logger.error(
+                    "Behavioral event validation failed, but raw payload was saved.",
+                    error=str(e),
+                    payload=payload,
+                    shop_domain=shop_domain,
+                )
+                return {
+                    "status": "validation_error",
+                    "details": str(e),
+                    "raw_payload_saved": True,
+                }
+            except Exception as e:
+                logger.error(
+                    "Failed to save structured data, but raw payload was saved.",
+                    error=str(e),
+                    shop_domain=shop_domain,
+                )
+                return {
+                    "status": "structured_data_error",
+                    "details": str(e),
+                    "raw_payload_saved": True,
+                }
+
         except Exception as e:
-            logger.error("Failed to process behavioral event.", error=str(e))
-            return {"status": "processing_error"}
+            logger.error(
+                "Failed to save raw payload.", error=str(e), shop_domain=shop_domain
+            )
+            return {"status": "raw_payload_error", "details": str(e)}
 
     # Enhanced Methods for High-Volume Processing
 
@@ -713,21 +743,6 @@ class WebhookHandler:
             # Ensure shop is registered with batch manager
             await self._ensure_shop_registered(shop_id)
 
-            # Verify webhook signature (if provided)
-            if signature:
-                verification_result = (
-                    await self.webhook_verifier.verify_behavioral_event_signature(
-                        shop_domain, payload, signature, timestamp
-                    )
-                )
-                if not verification_result["verified"]:
-                    self._metrics["verification_failures"] += 1
-                    return {
-                        "status": "verification_failed",
-                        "message": verification_result["error"],
-                        "details": verification_result,
-                    }
-
             # Extract identifiers for rate limiting
             client_id = payload.get("clientId")
 
@@ -807,63 +822,6 @@ class WebhookHandler:
         except Exception as e:
             logger.error(f"Failed to get comprehensive metrics: {e}")
             return {"error": str(e), "timestamp": now_utc().isoformat()}
-
-    async def health_check(self) -> Dict[str, Any]:
-        """
-        Perform comprehensive health check
-
-        Returns:
-            Health status of all components
-        """
-        try:
-            health_status = {
-                "status": "healthy",
-                "timestamp": now_utc().isoformat(),
-                "components": {},
-            }
-
-            # Check rate limiter
-            try:
-                await self.rate_limiter.get_rate_limit_status("health_check")
-                health_status["components"]["rate_limiter"] = "healthy"
-            except Exception as e:
-                health_status["components"]["rate_limiter"] = f"unhealthy: {e}"
-                health_status["status"] = "degraded"
-
-            # Check batch manager
-            try:
-                await self.batch_manager.get_metrics()
-                health_status["components"]["batch_manager"] = "healthy"
-            except Exception as e:
-                health_status["components"]["batch_manager"] = f"unhealthy: {e}"
-                health_status["status"] = "degraded"
-
-            # Check webhook verifier
-            try:
-                await self.webhook_verifier.get_webhook_secret_status("health_check")
-                health_status["components"]["webhook_verifier"] = "healthy"
-            except Exception as e:
-                health_status["components"]["webhook_verifier"] = f"unhealthy: {e}"
-                health_status["status"] = "degraded"
-
-            # Check database connection
-            try:
-                db = await get_database()
-                await db.shop.find_first(take=1)
-                health_status["components"]["database"] = "healthy"
-            except Exception as e:
-                health_status["components"]["database"] = f"unhealthy: {e}"
-                health_status["status"] = "unhealthy"
-
-            return health_status
-
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            return {
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": now_utc().isoformat(),
-            }
 
     async def graceful_shutdown(self, timeout_seconds: int = 30) -> Dict[str, Any]:
         """

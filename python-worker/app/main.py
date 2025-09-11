@@ -3,6 +3,7 @@ Main application for BetterBundle Python Worker
 """
 
 import asyncio
+import json
 import time
 import uvicorn
 from datetime import datetime
@@ -1500,27 +1501,82 @@ async def evaluate_analysis_need(shop_id: str):
 
 # Webhook endpoints
 @app.post("/collect/behavioral-events")
-async def handle_behavioral_event(
-    request: Request,
-    x_shopify_shop_domain: Optional[str] = Header(None),
-):
-    """This endpoint receives behavioral events from the Shopify Web Pixel and queues them for background processing."""
+async def handle_behavioral_event(request: Request):
+    """This endpoint receives behavioral events from the Shopify Web Pixel and queues them for background processing.
+
+    Authentication: Uses shop domain validation for basic security.
+    """
     try:
         if "webhook_handler" not in services:
             raise HTTPException(status_code=500, detail="Webhook handler not available")
 
+        # Get payload from request body
         payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+        shop_domain = payload.get("shop_domain")
 
-    shop_domain = x_shopify_shop_domain or payload.get("context", {}).get(
-        "shop", {}
-    ).get("domain")
+        # Validate shop domain
+        if not shop_domain:
+            raise HTTPException(
+                status_code=400, detail="shop_domain required in payload."
+            )
 
-    if not shop_domain:
-        raise HTTPException(status_code=400, detail="Shop domain not found in request.")
+        # Basic shop validation with Redis caching
+        try:
+            from app.core.redis_client import get_redis_client
 
-    # Queue the event for background processing instead of processing directly
+            # Try Redis cache first
+            redis_client = await get_redis_client()
+            cache_key = f"shop_domain:{shop_domain}"
+            cached_shop_data = await redis_client.get(cache_key)
+
+            if cached_shop_data:
+                # Cache hit - decode and validate
+                shop_data = json.loads(
+                    cached_shop_data.decode("utf-8")
+                    if isinstance(cached_shop_data, bytes)
+                    else cached_shop_data
+                )
+                if not shop_data.get("isActive", False):
+                    raise HTTPException(status_code=403, detail="Shop is not active.")
+            else:
+                # Cache miss - query database
+                db = await get_database()
+                shop = await db.shop.find_unique(
+                    where={"shopDomain": shop_domain},
+                    select={"id": True, "isActive": True, "shopDomain": True},
+                )
+
+                if not shop:
+                    raise HTTPException(
+                        status_code=404, detail="Shop not found in our system."
+                    )
+
+                if not shop.isActive:
+                    raise HTTPException(status_code=403, detail="Shop is not active.")
+
+                # Cache the result for 1 hour
+                shop_data = {
+                    "id": shop.id,
+                    "shopDomain": shop.shopDomain,
+                    "isActive": shop.isActive,
+                }
+                await redis_client.setex(cache_key, 3600, json.dumps(shop_data))
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to validate shop domain: {e}")
+            raise HTTPException(status_code=500, detail="Failed to validate request.")
+
+        logger.info(f"Shop validation successful for: {shop_domain}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to process behavioral event: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process request.")
+
+    # Queue the event for background processing
     result = await services["webhook_handler"].queue_behavioral_event(
         shop_domain, payload
     )

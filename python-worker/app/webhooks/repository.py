@@ -57,17 +57,16 @@ class WebhookRepository:
         else:
             return data
 
-    async def save_behavioral_event(
+    async def save_raw_behavioral_event(
         self,
         shop_id: str,
         raw_payload: Dict[str, Any],
-        validated_event: ShopifyBehavioralEvent,
     ):
-        """Saves the raw payload and the flexible, validated behavioral event."""
+        """Saves the raw payload without any validation."""
         try:
             db = await self._get_database()
 
-            # Step 1: Save the full, raw payload for auditing using Prisma native method
+            # Save the full, raw payload for auditing using Prisma native method
             await db.rawbehavioralevents.create(
                 data={
                     "shopId": shop_id,
@@ -76,7 +75,24 @@ class WebhookRepository:
                 }
             )
 
-            # Step 2: Save the structured data to the main table using Prisma native method
+            logger.info(f"Successfully saved raw behavioral event for shop {shop_id}")
+
+        except Exception as e:
+            logger.error(
+                f"Failed to save raw behavioral event for shop {shop_id}: {str(e)}"
+            )
+            raise
+
+    async def save_structured_behavioral_event(
+        self,
+        shop_id: str,
+        raw_payload: Dict[str, Any],
+        validated_event: ShopifyBehavioralEvent,
+    ):
+        """Saves the structured, validated behavioral event data."""
+        try:
+            db = await self._get_database()
+
             # Convert the specific 'data' part of the model to a dictionary
             event_data_dict = (
                 validated_event.data.model_dump(by_alias=True, exclude_unset=True)
@@ -128,7 +144,37 @@ class WebhookRepository:
             )
 
             logger.info(
-                f"Successfully saved behavioral event {validated_event.id} for shop {shop_id}"
+                f"Successfully saved structured behavioral event {validated_event.id} for shop {shop_id}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to save structured behavioral event {validated_event.id} for shop {shop_id}: {str(e)}"
+            )
+            raise
+
+    async def save_behavioral_event(
+        self,
+        shop_id: str,
+        raw_payload: Dict[str, Any],
+        validated_event: ShopifyBehavioralEvent,
+    ):
+        """Legacy method that saves both raw payload and structured data.
+
+        This method is kept for backward compatibility but is deprecated.
+        Use save_raw_behavioral_event and save_structured_behavioral_event instead.
+        """
+        try:
+            # Save raw payload first
+            await self.save_raw_behavioral_event(shop_id, raw_payload)
+
+            # Then save structured data
+            await self.save_structured_behavioral_event(
+                shop_id, raw_payload, validated_event
+            )
+
+            logger.info(
+                f"Successfully saved behavioral event {validated_event.id} for shop {shop_id} (legacy method)"
             )
 
         except Exception as e:
