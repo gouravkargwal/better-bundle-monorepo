@@ -125,6 +125,7 @@ export default function WidgetConfig() {
                 }}
               >
                 <BlockStack gap="500">
+                  <ExtensionStatusSection />
                   <WidgetPreviewSection
                     selectedPageType=""
                     pageConfigs={pageConfigs}
@@ -133,7 +134,6 @@ export default function WidgetConfig() {
                 </BlockStack>
               </div>
             </InlineGrid>
-            <ExtensionStatusSection />
           </BlockStack>
         </Layout.Section>
       </Layout>
