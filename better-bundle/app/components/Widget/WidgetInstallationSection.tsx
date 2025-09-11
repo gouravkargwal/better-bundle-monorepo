@@ -13,11 +13,17 @@ export function WidgetInstallationSection() {
   return (
     <Card>
       <BlockStack gap="400">
-        <Text as="h2" variant="headingMd">
-          🚀 Installation Guide
-        </Text>
+        <InlineStack align="space-between">
+          <Text as="h2" variant="headingMd">
+            🚀 Installation Guide
+          </Text>
+          <Badge tone="info" size="small">
+            Step-by-step
+          </Badge>
+        </InlineStack>
+
         <Text as="p" variant="bodyMd" tone="subdued">
-          Get your recommendations widget up and running
+          Get your recommendations widget up and running in your Shopify theme
         </Text>
 
         <BlockStack gap="300">
@@ -51,7 +57,7 @@ export function WidgetInstallationSection() {
             <List.Item>Configure settings and save</List.Item>
           </List>
 
-          <Button variant="primary" size="slim">
+          <Button variant="primary" size="slim" url="/admin/themes" external>
             Open Theme Editor
           </Button>
         </BlockStack>
@@ -59,7 +65,8 @@ export function WidgetInstallationSection() {
         <Box background="bg-surface-brand" padding="300" borderRadius="200">
           <Text as="p" variant="bodySm" tone="subdued">
             💡 <strong>Pro Tip:</strong> The widget automatically adapts to each
-            page type.
+            page type and shows relevant recommendations based on your
+            configuration.
           </Text>
         </Box>
       </BlockStack>

@@ -13,6 +13,7 @@ import { Page, Layout, InlineGrid, BlockStack } from "@shopify/polaris";
 import { WidgetConfigForm } from "../components/Widget/WidgetConfigSection";
 import { WidgetPreviewSection } from "../components/Widget/WidgetPreviewSection";
 import { WidgetInstallationSection } from "../components/Widget/WidgetInstallationSection";
+import { ExtensionStatusSection } from "../components/Widget/ExtensionStatusSection";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -97,39 +98,43 @@ export default function WidgetConfig() {
     <Page>
       <Layout>
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 2 }} gap="600">
-            {/* Left Column - Configuration Form */}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-              }}
-            >
-              <WidgetConfigForm
-                config={config}
-                actionData={actionData}
-                isSubmitting={isSubmitting}
-              />
-            </div>
-
-            {/* Right Column - Preview & Installation */}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-              }}
-            >
-              <BlockStack gap="500">
-                <WidgetPreviewSection
-                  selectedPageType=""
-                  pageConfigs={pageConfigs}
+          <BlockStack gap="500">
+            {/* Main Content Grid */}
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="600">
+              {/* Left Column - Configuration Form */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "100%",
+                }}
+              >
+                <WidgetConfigForm
+                  config={config}
+                  actionData={actionData}
+                  isSubmitting={isSubmitting}
                 />
-                <WidgetInstallationSection />
-              </BlockStack>
-            </div>
-          </InlineGrid>
+              </div>
+
+              {/* Right Column - Preview & Installation */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "100%",
+                }}
+              >
+                <BlockStack gap="500">
+                  <WidgetPreviewSection
+                    selectedPageType=""
+                    pageConfigs={pageConfigs}
+                  />
+                  <WidgetInstallationSection />
+                </BlockStack>
+              </div>
+            </InlineGrid>
+            <ExtensionStatusSection />
+          </BlockStack>
         </Layout.Section>
       </Layout>
     </Page>

@@ -1,4 +1,4 @@
-<!-- Star Rating Section -->
+<!-- Phoenix Smart Recommendations Section -->
 {% assign avg_rating = block.settings.product.metafields.demo.avg_rating.value | round %}
 <span style="color:{{ block.settings.colour }}">
   {% render 'stars', rating: avg_rating %}
@@ -30,8 +30,10 @@
     <h3>
       {% if block.settings.custom_title != blank %}
         {{ block.settings.custom_title }}
+      {% elsif block.settings.context == 'auto' %}
+        {{ 'recommendations.title' | t }}
       {% else %}
-        {{ 'recommendations.contexts.' | append: block.settings.context | t | default: 'recommendations.title' | t }}
+        {{ 'recommendations.contexts.' | append: block.settings.context | t }}
       {% endif %}
     </h3>
     <div class="phoenix-recommendations-grid">
@@ -67,7 +69,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 {% schema %}
 {
-  "name": "Smart Recommendations",
+  "name": "Phoenix",
   "target": "section",
   "settings": [
     { "type": "product", "id": "product", "label": "Product", "autofill": true },
@@ -149,4 +151,3 @@ document.addEventListener('DOMContentLoaded', function() {
   ]
 }
 {% endschema %}
-
