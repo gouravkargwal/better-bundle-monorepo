@@ -7,7 +7,6 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 import { createDefaultConfiguration } from "./services/widget-config.service";
-import { AnalysisPipelineService } from "./services/analysis-pipeline.service";
 
 /**
  * Activates the Atlas web pixel extension for the shop
@@ -16,12 +15,10 @@ async function activateAtlasWebPixel(admin: any, shopDomain: string) {
   try {
     // Get the backend URL from environment or use a default
     const backendUrl =
-      process.env.SHOPIFY_APP_URL ||
-      "https://namibia-nokia-internet-secretariat.trycloudflare.com";
+      "https://recruitment-quoted-pipeline-window.trycloudflare.com";
 
     const webPixelSettings = {
       backend_url: backendUrl,
-      shop_domain: shopDomain,
     };
 
     const mutation = `

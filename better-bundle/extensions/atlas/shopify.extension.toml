@@ -29,4 +29,4 @@ type = "object"
 [settings.fields.backend_url]
 type = "single_line_text_field"
 name = "Backend URL"
-description = "https://2f761eaf98c1.ngrok-free.app"
+description = "https://3000bb1b27f3.ngrok-free.app"

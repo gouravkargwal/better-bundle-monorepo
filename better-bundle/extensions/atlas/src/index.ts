@@ -12,10 +12,21 @@ const createConfig = (settings: any, init: any): AtlasConfig => {
 };
 
 register(({ analytics, settings, init }) => {
+  console.log("🎯 Atlas Web Pixel: Initializing...", {
+    settings,
+    init: {
+      data: init?.data,
+      shop: init?.data?.shop?.myshopifyDomain,
+    },
+  });
+
   const config = createConfig(settings, init);
+
+  console.log("⚙️ Atlas Web Pixel: Configuration created", config);
 
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
+    console.log("📄 Atlas Pixel: PAGE_VIEWED event triggered", event);
     await sendEvent(event, config);
   });
   analytics.subscribe(
@@ -35,6 +46,7 @@ register(({ analytics, settings, init }) => {
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_VIEWED,
     async (event: any) => {
+      console.log("🛍️ Atlas Pixel: PRODUCT_VIEWED event triggered", event);
       await sendEvent(event, config);
     },
   );
@@ -71,31 +83,31 @@ register(({ analytics, settings, init }) => {
     },
   );
 
-  // Custom widget interaction events
-  window.addEventListener("betterbundle:widget:interaction", (event) => {
-    // Send widget interaction to Python worker
-    const customEvent = event as CustomEvent;
-    sendEvent(
-      {
-        ...customEvent.detail,
-        eventType: "widget_interaction",
-        shop_domain: config.shopDomain,
-      },
-      config,
-    );
-  });
+  // // Custom widget interaction events
+  // window.addEventListener("betterbundle:widget:interaction", (event) => {
+  //   // Send widget interaction to Python worker
+  //   const customEvent = event as CustomEvent;
+  //   sendEvent(
+  //     {
+  //       ...customEvent.detail,
+  //       eventType: "widget_interaction",
+  //       shop_domain: config.shopDomain,
+  //     },
+  //     config,
+  //   );
+  // });
 
-  // Attribution events for revenue tracking
-  window.addEventListener("betterbundle:attribution:created", (event) => {
-    // Send attribution to Python worker for revenue tracking
-    const customEvent = event as CustomEvent;
-    sendEvent(
-      {
-        ...customEvent.detail,
-        eventType: "attribution_created",
-        shop_domain: config.shopDomain,
-      },
-      config,
-    );
-  });
+  // // Attribution events for revenue tracking
+  // window.addEventListener("betterbundle:attribution:created", (event) => {
+  //   // Send attribution to Python worker for revenue tracking
+  //   const customEvent = event as CustomEvent;
+  //   sendEvent(
+  //     {
+  //       ...customEvent.detail,
+  //       eventType: "attribution_created",
+  //       shop_domain: config.shopDomain,
+  //     },
+  //     config,
+  //   );
+  // });
 });

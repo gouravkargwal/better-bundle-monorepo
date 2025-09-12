@@ -10,16 +10,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
   try {
-    console.log("🔍 Checking extension status for shop:", session.shop);
-
     // Use multi-theme detection for comprehensive status
     const status = await getMultiThemeExtensionStatus(
       session.shop,
       admin,
       session,
     );
-
-    console.log("📊 Extension status:", status);
 
     return json({
       success: true,
@@ -47,7 +43,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     switch (action) {
       case "refresh": {
         // Force refresh the extension status
-        console.log("🔄 Refreshing extension status for shop:", session.shop);
 
         // Multi-theme comprehensive call that handles everything internally
         const status = await getMultiThemeExtensionStatus(
