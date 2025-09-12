@@ -783,3 +783,124 @@ class GorseDataTransformers:
             return gid.split("/")[-1]
 
         return gid
+
+    def transform_session_features_to_gorse(
+        self, session, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Transform session features to Gorse session data"""
+        try:
+            # Convert session object to dict if needed
+            if hasattr(session, "__dict__"):
+                session_dict = session.__dict__
+            else:
+                session_dict = session
+
+            if not session_dict.get("customerId"):
+                return None
+
+            return {
+                "userId": f"shop_{shop_id}_{session_dict['customerId']}",
+                "sessionId": f"shop_{shop_id}_{session_dict.get('sessionId', 'unknown')}",
+                "timestamp": session_dict.get("lastComputedAt", now_utc()).isoformat(),
+                "labels": {
+                    "session_duration": session_dict.get("sessionDuration", 0),
+                    "page_views": session_dict.get("pageViews", 0),
+                    "products_viewed": session_dict.get("productsViewed", 0),
+                    "cart_adds": session_dict.get("cartAdds", 0),
+                    "conversion": session_dict.get("conversion", False),
+                    "bounce_rate": session_dict.get("bounceRate", 0),
+                    "avg_time_on_page": session_dict.get("avgTimeOnPage", 0),
+                },
+            }
+        except Exception as e:
+            logger.error(f"Failed to transform session features: {str(e)}")
+            return None
+
+    def transform_product_pair_features_to_feedback(
+        self, pair, shop_id: str
+    ) -> List[Dict[str, Any]]:
+        """Transform product pair features to Gorse feedback for item-to-item recommendations"""
+        try:
+            feedback_list = []
+
+            # Convert pair object to dict if needed
+            if hasattr(pair, "__dict__"):
+                pair_dict = pair.__dict__
+            else:
+                pair_dict = pair
+
+            co_occurrence_strength = pair_dict.get("coOccurrenceStrength", 0)
+            if co_occurrence_strength <= 0:
+                return feedback_list
+
+            # Create bidirectional feedback for item-to-item recommendations
+            feedback_list.extend(
+                [
+                    {
+                        "feedbackType": "co_occurrence",
+                        "userId": f"shop_{shop_id}_system",  # System-generated feedback
+                        "itemId": f"shop_{shop_id}_{pair_dict['productId1']}",
+                        "timestamp": pair_dict.get(
+                            "lastComputedAt", now_utc()
+                        ).isoformat(),
+                        "labels": {
+                            "related_item": f"shop_{shop_id}_{pair_dict['productId2']}",
+                            "strength": co_occurrence_strength,
+                            "lift_score": pair_dict.get("liftScore", 0),
+                            "confidence": pair_dict.get("confidence", 0),
+                        },
+                    },
+                    {
+                        "feedbackType": "co_occurrence",
+                        "userId": f"shop_{shop_id}_system",
+                        "itemId": f"shop_{shop_id}_{pair_dict['productId2']}",
+                        "timestamp": pair_dict.get(
+                            "lastComputedAt", now_utc()
+                        ).isoformat(),
+                        "labels": {
+                            "related_item": f"shop_{shop_id}_{pair_dict['productId1']}",
+                            "strength": co_occurrence_strength,
+                            "lift_score": pair_dict.get("liftScore", 0),
+                            "confidence": pair_dict.get("confidence", 0),
+                        },
+                    },
+                ]
+            )
+
+            return feedback_list
+        except Exception as e:
+            logger.error(f"Failed to transform product pair features: {str(e)}")
+            return []
+
+    def transform_search_product_features_to_feedback(
+        self, search_product, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Transform search product features to Gorse feedback for search-based recommendations"""
+        try:
+            # Convert search_product object to dict if needed
+            if hasattr(search_product, "__dict__"):
+                search_dict = search_product.__dict__
+            else:
+                search_dict = search_product
+
+            correlation_strength = search_dict.get("correlationStrength", 0)
+            if correlation_strength <= 0:
+                return None
+
+            return {
+                "feedbackType": "search_result",
+                "userId": f"shop_{shop_id}_search",  # Search-based feedback
+                "itemId": f"shop_{shop_id}_{search_dict['productId']}",
+                "timestamp": search_dict.get("lastComputedAt", now_utc()).isoformat(),
+                "labels": {
+                    "search_query": search_dict.get("searchQuery", ""),
+                    "correlation_strength": correlation_strength,
+                    "search_context": True,
+                    "ctr": search_dict.get("ctr", 0),
+                    "conversion_rate": search_dict.get("conversionRate", 0),
+                    "search_volume": search_dict.get("searchVolume", 0),
+                },
+            }
+        except Exception as e:
+            logger.error(f"Failed to transform search product features: {str(e)}")
+            return None

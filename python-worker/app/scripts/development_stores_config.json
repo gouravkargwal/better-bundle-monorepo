@@ -1,0 +1,25 @@
+{
+  "development_stores": [
+    {
+      "name": "My Development Store",
+      "domain": "vnsaid.myshopify.com",
+      "access_token": "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",
+      "description": "Development store for testing products and recommendations",
+      "enabled": true
+    }
+  ],
+  "seeding_options": {
+    "create_products": false,
+    "create_customers": false,
+    "create_orders": true,
+    "create_collections": false,
+    "clear_existing_data": false,
+    "batch_size": 10
+  },
+  "data_customization": {
+    "product_count": 15,
+    "customer_count": 8,
+    "order_count": 12,
+    "include_behavioral_events": false
+  }
+}

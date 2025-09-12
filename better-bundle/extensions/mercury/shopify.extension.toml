@@ -53,8 +53,15 @@ description = "Title for the recommendation section"
 default = "Last chance to add"
 
 [[extensions.settings.fields]]
+key = "placement_instructions"
+type = "multi_line_text_field"
+name = "Placement Instructions"
+description = "Instructions for merchants on where to place this extension"
+default = "For best results, drag this extension to appear after the order summary in your checkout editor. This ensures customers see recommendations after reviewing their cart but before completing payment."
+
+[[extensions.settings.fields]]
 key = "recommendation_limit"
-type = "number_integer_field"
+type = "number_integer"
 name = "Number of Recommendations"
 description = "How many products to show"
 default = 3
@@ -64,3 +71,4 @@ key = "backend_url"
 type = "single_line_text_field"
 name = "Backend URL"
 description = "Your BetterBundle backend URL"
+default = "http://localhost:8000"

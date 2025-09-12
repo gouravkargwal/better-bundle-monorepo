@@ -578,6 +578,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 shop_id, all_features
             )
 
+            # Trigger unified Gorse sync after successful feature computation
+            await self._trigger_gorse_sync(shop_id, save_results)
+
             # Check if all feature types succeeded for logging purposes
             all_features_succeeded = True
             expected_feature_types = [
@@ -1303,3 +1306,45 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             return variant_id
         except Exception:
             return None
+
+    async def _trigger_gorse_sync(self, shop_id: str, save_results: Dict[str, Any]):
+        """Trigger unified Gorse sync after successful feature computation"""
+        try:
+            from app.domains.ml.services.unified_gorse_service import (
+                UnifiedGorseService,
+            )
+
+            # Initialize unified Gorse service
+            gorse_service = UnifiedGorseService()
+
+            logger.info(
+                f"Starting unified Gorse sync after feature computation",
+                shop_id=shop_id,
+                feature_results=save_results,
+            )
+
+            # Run unified sync and training with incremental sync since we just computed features
+            result = await gorse_service.sync_and_train(
+                shop_id=shop_id,
+                sync_type="incremental",
+                since_hours=1,  # Only sync data from last hour since we just computed features
+                trigger_source="feature_computation",
+            )
+
+            logger.info(
+                f"Unified Gorse sync completed after feature computation",
+                shop_id=shop_id,
+                gorse_success=result.get("success", False),
+                gorse_job_id=result.get("job_id"),
+                training_triggered=result.get("training_status", {}).get(
+                    "triggered", False
+                ),
+                sync_results=result.get("sync_results", {}),
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger unified Gorse sync after feature computation: {str(e)}",
+                shop_id=shop_id,
+            )
+            # Don't raise the exception - feature computation succeeded, Gorse sync failure shouldn't fail the whole job

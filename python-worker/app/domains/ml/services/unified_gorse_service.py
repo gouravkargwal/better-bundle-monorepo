@@ -51,6 +51,40 @@ class UnifiedGorseService:
             self._db_client = await get_database()
         return self._db_client
 
+    async def _check_feature_table_has_data(
+        self, table_name: str, shop_id: str, since_time: Optional[datetime] = None
+    ) -> bool:
+        """Check if a feature table has data for the given shop and time range"""
+        try:
+            db = await self._get_database()
+
+            # Get the table model
+            table_model = getattr(db, table_name.lower(), None)
+            if not table_model:
+                logger.warning(f"Table {table_name} not found in database")
+                return False
+
+            # Check if there's any data
+            if since_time:
+                count = await table_model.count(
+                    where={
+                        "shopId": shop_id,
+                        "lastComputedAt": {"gte": since_time},
+                    }
+                )
+            else:
+                count = await table_model.count(where={"shopId": shop_id})
+
+            has_data = count > 0
+            logger.info(f"Table {table_name} has {count} records for shop {shop_id}")
+            return has_data
+
+        except Exception as e:
+            logger.error(
+                f"Failed to check data in table {table_name} for shop {shop_id}: {str(e)}"
+            )
+            return False
+
     async def _get_last_sync_timestamp(self, shop_id: str) -> Optional[datetime]:
         """Get the last sync timestamp for incremental sync"""
         try:
@@ -71,6 +105,10 @@ class UnifiedGorseService:
                     SELECT MAX("lastComputedAt") as last_computed FROM "InteractionFeatures" WHERE "shopId" = $1
                     UNION ALL
                     SELECT MAX("lastComputedAt") as last_computed FROM "SessionFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "ProductPairFeatures" WHERE "shopId" = $1
+                    UNION ALL
+                    SELECT MAX("lastComputedAt") as last_computed FROM "SearchProductFeatures" WHERE "shopId" = $1
                 ) as all_features
                 """,
                 shop_id,
@@ -136,6 +174,9 @@ class UnifiedGorseService:
                 "users_synced": 0,
                 "items_synced": 0,
                 "feedback_synced": 0,
+                "sessions_synced": 0,
+                "product_pairs_synced": 0,
+                "search_products_synced": 0,
                 "training_triggered": False,
                 "errors": [],
             }
@@ -157,6 +198,65 @@ class UnifiedGorseService:
                 sync_tasks.append(
                     ("feedback", self._sync_feedback_to_gorse(shop_id, since_time))
                 )
+
+            # Add new feature table sync tasks with graceful skipping
+            if sync_type in ["all", "sessions"]:
+                # Check if session features exist before adding sync task
+                has_session_data = await self._check_feature_table_has_data(
+                    "sessionfeatures", shop_id, since_time
+                )
+                if has_session_data:
+                    sync_tasks.append(
+                        (
+                            "sessions",
+                            self._sync_session_features_to_gorse(shop_id, since_time),
+                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping session features sync - no data found for shop {shop_id}"
+                    )
+                    results["sessions_synced"] = 0
+
+            if sync_type in ["all", "product_pairs"]:
+                # Check if product pair features exist before adding sync task
+                has_product_pair_data = await self._check_feature_table_has_data(
+                    "productpairfeatures", shop_id, since_time
+                )
+                if has_product_pair_data:
+                    sync_tasks.append(
+                        (
+                            "product_pairs",
+                            self._sync_product_pair_features_to_gorse(
+                                shop_id, since_time
+                            ),
+                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping product pair features sync - no data found for shop {shop_id}"
+                    )
+                    results["product_pairs_synced"] = 0
+
+            if sync_type in ["all", "search_products"]:
+                # Check if search product features exist before adding sync task
+                has_search_product_data = await self._check_feature_table_has_data(
+                    "searchproductfeatures", shop_id, since_time
+                )
+                if has_search_product_data:
+                    sync_tasks.append(
+                        (
+                            "search_products",
+                            self._sync_search_product_features_to_gorse(
+                                shop_id, since_time
+                            ),
+                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping search product features sync - no data found for shop {shop_id}"
+                    )
+                    results["search_products_synced"] = 0
 
             # Execute all sync tasks in parallel
             if sync_tasks:
@@ -571,6 +671,204 @@ class UnifiedGorseService:
         except Exception as e:
             logger.error(
                 f"Failed to sync customer behavior features for shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def _sync_session_features_to_gorse(
+        self, shop_id: str, since_time: Optional[datetime] = None
+    ) -> int:
+        """Sync session features to Gorse as user session data"""
+        try:
+            db = await self._get_database()
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Stream session features in batches
+                if since_time:
+                    sessions = await db.sessionfeatures.find_many(
+                        where={
+                            "shopId": shop_id,
+                            "lastComputedAt": {"gte": since_time},
+                        },
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+                else:
+                    sessions = await db.sessionfeatures.find_many(
+                        where={"shopId": shop_id},
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+
+                if not sessions:
+                    break
+
+                # Convert session features to user session data for Gorse using transformers
+                session_batch = []
+                for session in sessions:
+                    if session.customerId:  # Only process sessions with known customers
+                        # Use transformer to convert session features to Gorse format
+                        session_data = (
+                            self.transformers.transform_session_features_to_gorse(
+                                session, shop_id
+                            )
+                        )
+                        if session_data:
+                            session_batch.append(session_data)
+
+                # Push session data to Gorse API (if Gorse supports session data)
+                if session_batch:
+                    # Note: This assumes Gorse has session support, otherwise we can skip
+                    logger.info(
+                        f"Found {len(session_batch)} sessions to sync (session sync not implemented in Gorse yet)"
+                    )
+                    total_synced += len(session_batch)
+
+                # Check if we got fewer records than batch size (end of data)
+                if len(sessions) < self.batch_size:
+                    break
+
+                offset += self.batch_size
+
+            logger.info(
+                f"Processed {total_synced} session features (session sync not implemented in Gorse yet)"
+            )
+            return total_synced
+
+        except Exception as e:
+            logger.error(
+                f"Failed to sync session features for shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def _sync_product_pair_features_to_gorse(
+        self, shop_id: str, since_time: Optional[datetime] = None
+    ) -> int:
+        """Sync product pair features to Gorse as item-to-item relationships"""
+        try:
+            db = await self._get_database()
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Stream product pair features in batches
+                if since_time:
+                    product_pairs = await db.productpairfeatures.find_many(
+                        where={
+                            "shopId": shop_id,
+                            "lastComputedAt": {"gte": since_time},
+                        },
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+                else:
+                    product_pairs = await db.productpairfeatures.find_many(
+                        where={"shopId": shop_id},
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+
+                if not product_pairs:
+                    break
+
+                # Convert product pair features to item-to-item feedback using transformers
+                feedback_batch = []
+                for pair in product_pairs:
+                    # Use transformer to convert product pair features to Gorse feedback
+                    pair_feedback = (
+                        self.transformers.transform_product_pair_features_to_feedback(
+                            pair, shop_id
+                        )
+                    )
+                    if pair_feedback:
+                        feedback_batch.extend(pair_feedback)
+
+                # Push feedback to Gorse API
+                if feedback_batch:
+                    await self.gorse_client.insert_feedback_batch(feedback_batch)
+                    total_synced += len(feedback_batch)
+
+                # Check if we got fewer records than batch size (end of data)
+                if len(product_pairs) < self.batch_size:
+                    break
+
+                offset += self.batch_size
+
+            logger.info(f"Synced {total_synced} product pair relationships to Gorse")
+            return total_synced
+
+        except Exception as e:
+            logger.error(
+                f"Failed to sync product pair features for shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def _sync_search_product_features_to_gorse(
+        self, shop_id: str, since_time: Optional[datetime] = None
+    ) -> int:
+        """Sync search product features to Gorse as search-based feedback"""
+        try:
+            db = await self._get_database()
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Stream search product features in batches
+                if since_time:
+                    search_products = await db.searchproductfeatures.find_many(
+                        where={
+                            "shopId": shop_id,
+                            "lastComputedAt": {"gte": since_time},
+                        },
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+                else:
+                    search_products = await db.searchproductfeatures.find_many(
+                        where={"shopId": shop_id},
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+
+                if not search_products:
+                    break
+
+                # Convert search product features to search-based feedback using transformers
+                feedback_batch = []
+                for search_product in search_products:
+                    # Use transformer to convert search product features to Gorse feedback
+                    search_feedback = (
+                        self.transformers.transform_search_product_features_to_feedback(
+                            search_product, shop_id
+                        )
+                    )
+                    if search_feedback:
+                        feedback_batch.append(search_feedback)
+
+                # Push feedback to Gorse API
+                if feedback_batch:
+                    await self.gorse_client.insert_feedback_batch(feedback_batch)
+                    total_synced += len(feedback_batch)
+
+                # Check if we got fewer records than batch size (end of data)
+                if len(search_products) < self.batch_size:
+                    break
+
+                offset += self.batch_size
+
+            logger.info(f"Synced {total_synced} search-product correlations to Gorse")
+            return total_synced
+
+        except Exception as e:
+            logger.error(
+                f"Failed to sync search product features for shop {shop_id}: {str(e)}"
             )
             return 0
 
