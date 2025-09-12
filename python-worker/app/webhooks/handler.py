@@ -243,7 +243,7 @@ class WebhookHandler:
             )
 
             logger.info(
-                f"Backfilled {result.count} events for {client_id} → {customer_id} (updated timestamps for incremental processing)"
+                f"Backfilled {result} events for {client_id} → {customer_id} (updated timestamps for incremental processing)"
             )
 
         except Exception as e:
@@ -292,7 +292,7 @@ class WebhookHandler:
                 # Use the pre-initialized TypeAdapter to correctly validate the Union type.
                 validated_event = self.event_adapter.validate_python(payload)
 
-                # Handle customer linking events specially
+                # Handle customer linking events specially - don't save to behavioral events table
                 if validated_event.name == "customer_linked":
                     # Check if this is actually a CustomerLinkedEvent with proper data structure
                     if (
@@ -306,12 +306,19 @@ class WebhookHandler:
                             validated_event.data.clientId,
                             validated_event.data.customerId,
                         )
+                        logger.info(
+                            f"Customer linking processed for {validated_event.data.clientId} → {validated_event.data.customerId} (not saved to behavioral events)"
+                        )
+                        # Skip saving to behavioral events table - this is just a linking event
+                        return
                     else:
                         logger.warning(
                             f"customer_linked event {validated_event.id} missing required clientId or customerId in data. "
                             f"clientId: {getattr(validated_event.data, 'clientId', 'missing')}, "
                             f"customerId: {getattr(validated_event.data, 'customerId', 'missing')}"
                         )
+                        # Skip saving malformed customer_linked events
+                        return
                 else:
                     # For regular events, check if clientId already has a linked customerId
                     client_id = payload.get("clientId")

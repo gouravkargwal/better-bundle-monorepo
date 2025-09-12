@@ -372,7 +372,8 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "https://*.vercel.app"], env="CORS_ORIGINS"
+        default=["*"],
+        env="CORS_ORIGINS",
     )
 
     # SendPulse Email Configuration

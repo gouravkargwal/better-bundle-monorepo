@@ -4,110 +4,116 @@ import { SUBSCRIBABLE_EVENTS } from "./config/constants";
 import { sendEvent } from "./utils/api-client";
 
 const createConfig = (settings: any, init: any): AtlasConfig => {
-  let shopDomain = init?.data?.shop?.myshopifyDomain;
   return {
     backendUrl: settings.backend_url,
-    shopDomain: shopDomain,
+    shopDomain: init?.data?.shop?.myshopifyDomain,
   };
 };
 
 register(({ analytics, settings, init }) => {
-  console.log("🎯 Atlas Web Pixel: Initializing...", {
-    settings,
-    init: {
-      data: init?.data,
-      shop: init?.data?.shop?.myshopifyDomain,
-    },
-  });
-
   const config = createConfig(settings, init);
 
-  console.log("⚙️ Atlas Web Pixel: Configuration created", config);
+  // Get customer ID from init object
+  const customerId = init?.data?.customer?.id;
+  let clientId: string | null = null;
+  let customerLinkingEventSent = false;
+
+  // Helper function to enhance events with customer ID and send customer linking event
+  const enhanceEventWithCustomerId = (event: any) => {
+    // Extract clientId from the event if available
+    if (event.clientId && !clientId) {
+      clientId = event.clientId;
+
+      // Send customer linking event now that we have both customerId and clientId
+      if (customerId && !customerLinkingEventSent) {
+        sendEvent(
+          {
+            name: "customer_linked",
+            id: `customer_linked_${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            customerId: customerId,
+            clientId: clientId,
+            data: {
+              customerId: customerId,
+              clientId: clientId,
+              linkedAt: new Date().toISOString(),
+            },
+          },
+          config,
+        );
+        customerLinkingEventSent = true;
+      }
+    }
+
+    return {
+      ...event,
+      ...(customerId && { customerId }),
+    };
+  };
 
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
-    console.log("📄 Atlas Pixel: PAGE_VIEWED event triggered", event);
-    await sendEvent(event, config);
+    const enhancedEvent = enhanceEventWithCustomerId(event);
+    await sendEvent(enhancedEvent, config);
   });
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_ADDED_TO_CART,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_REMOVED_FROM_CART,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_VIEWED,
     async (event: any) => {
-      console.log("🛍️ Atlas Pixel: PRODUCT_VIEWED event triggered", event);
-      await sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(SUBSCRIBABLE_EVENTS.CART_VIEWED, async (event: any) => {
-    sendEvent(event, config);
+    const enhancedEvent = enhanceEventWithCustomerId(event);
+    await sendEvent(enhancedEvent, config);
   });
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.COLLECTION_VIEWED,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.SEARCH_SUBMITTED,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.CHECKOUT_STARTED,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
 
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.CHECKOUT_COMPLETED,
     async (event: any) => {
-      sendEvent(event, config);
+      const enhancedEvent = enhanceEventWithCustomerId(event);
+      await sendEvent(enhancedEvent, config);
     },
   );
-
-  // // Custom widget interaction events
-  // window.addEventListener("betterbundle:widget:interaction", (event) => {
-  //   // Send widget interaction to Python worker
-  //   const customEvent = event as CustomEvent;
-  //   sendEvent(
-  //     {
-  //       ...customEvent.detail,
-  //       eventType: "widget_interaction",
-  //       shop_domain: config.shopDomain,
-  //     },
-  //     config,
-  //   );
-  // });
-
-  // // Attribution events for revenue tracking
-  // window.addEventListener("betterbundle:attribution:created", (event) => {
-  //   // Send attribution to Python worker for revenue tracking
-  //   const customEvent = event as CustomEvent;
-  //   sendEvent(
-  //     {
-  //       ...customEvent.detail,
-  //       eventType: "attribution_created",
-  //       shop_domain: config.shopDomain,
-  //     },
-  //     config,
-  //   );
-  // });
 });

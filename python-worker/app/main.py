@@ -1514,6 +1514,9 @@ async def handle_behavioral_event(request: Request):
         payload = await request.json()
         shop_domain = payload.get("shop_domain")
 
+        logger.info(f"Received behavioral event for shop domain: {shop_domain}")
+        logger.info(f"Payload: {payload}")
+
         # Validate shop domain
         if not shop_domain:
             raise HTTPException(
@@ -1543,7 +1546,6 @@ async def handle_behavioral_event(request: Request):
                 db = await get_database()
                 shop = await db.shop.find_unique(
                     where={"shopDomain": shop_domain},
-                    select={"id": True, "isActive": True, "shopDomain": True},
                 )
 
                 if not shop:

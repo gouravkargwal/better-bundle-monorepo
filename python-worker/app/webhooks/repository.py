@@ -117,6 +117,26 @@ class WebhookRepository:
             # Extract clientId from raw payload for session tracking
             client_id = raw_payload.get("clientId")
 
+            # Whitelist of allowed Shopify behavioral events
+            ALLOWED_BEHAVIORAL_EVENTS = {
+                "page_viewed",
+                "product_viewed",
+                "product_added_to_cart",
+                "product_removed_from_cart",
+                "cart_viewed",
+                "collection_viewed",
+                "search_submitted",
+                "checkout_started",
+                "checkout_completed",
+            }
+
+            # Only save allowed Shopify events to behavioral events table
+            if validated_event.name not in ALLOWED_BEHAVIORAL_EVENTS:
+                logger.warning(
+                    f"Rejecting non-whitelisted event '{validated_event.name}' from behavioral events table"
+                )
+                return
+
             # Normalize customer ID from GID format to numeric format
             normalized_customer_id = self._normalize_customer_id(
                 validated_event.customer_id
