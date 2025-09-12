@@ -13,6 +13,8 @@ const createConfig = (settings: any, init: any): AtlasConfig => {
 
 register(({ analytics, settings, init }) => {
   const config = createConfig(settings, init);
+
+  // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
     await sendEvent(event, config);
   });
@@ -68,4 +70,32 @@ register(({ analytics, settings, init }) => {
       sendEvent(event, config);
     },
   );
+
+  // Custom widget interaction events
+  window.addEventListener("betterbundle:widget:interaction", (event) => {
+    // Send widget interaction to Python worker
+    const customEvent = event as CustomEvent;
+    sendEvent(
+      {
+        ...customEvent.detail,
+        eventType: "widget_interaction",
+        shop_domain: config.shopDomain,
+      },
+      config,
+    );
+  });
+
+  // Attribution events for revenue tracking
+  window.addEventListener("betterbundle:attribution:created", (event) => {
+    // Send attribution to Python worker for revenue tracking
+    const customEvent = event as CustomEvent;
+    sendEvent(
+      {
+        ...customEvent.detail,
+        eventType: "attribution_created",
+        shop_domain: config.shopDomain,
+      },
+      config,
+    );
+  });
 });

@@ -1,0 +1,11 @@
+name = "Apollo"
+type = "checkout_post_purchase"
+uid = "93d08f52-a85e-d71e-88b9-5587a3613ded5abe7a5a"
+
+# [[metafields]]
+# namespace = "my-namespace"
+# key = "my-key"
+
+# [[metafields]]
+# namespace = "my-namespace"
+# key = "my-key-2"

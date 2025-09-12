@@ -1,25 +1,3 @@
 {
-  "ratings": {
-    "stars": {
-      "label": "Ratings"
-    },
-    "home": {
-      "recommendationText": "Recommended Product!"
-    }
-  },
-  "recommendations": {
-    "title": "You might also like",
-    "loading": "Loading recommendations...",
-    "contexts": {
-      "product_page": "Customers who viewed this also bought",
-      "homepage": "Popular products",
-      "cart": "Frequently bought together",
-      "collection": "Similar products",
-      "search": "You might also like",
-      "blog": "Featured products",
-      "checkout": "Last chance to add",
-      "account": "Recommended for you",
-      "not_found": "Popular products"
-    }
-  }
+  "recommendations": {}
 }

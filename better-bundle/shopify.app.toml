@@ -2,7 +2,7 @@
 
 client_id = "87c44f5966daa80691a480bcd03c225c"
 name = "BetterBundle"
-application_url = "https://namibia-nokia-internet-secretariat.trycloudflare.com"
+application_url = "https://topic-attorney-carol-maps.trycloudflare.com"
 embedded = true
 handle = "better-bundle-1"
 
@@ -26,9 +26,9 @@ scopes = "read_analytics,read_content,read_customer_events,read_customers,read_d
 
 [auth]
 redirect_urls = [
-  "https://namibia-nokia-internet-secretariat.trycloudflare.com/auth/callback",
-  "https://namibia-nokia-internet-secretariat.trycloudflare.com/auth/shopify/callback",
-  "https://namibia-nokia-internet-secretariat.trycloudflare.com/api/auth/callback"
+  "https://topic-attorney-carol-maps.trycloudflare.com/auth/callback",
+  "https://topic-attorney-carol-maps.trycloudflare.com/auth/shopify/callback",
+  "https://topic-attorney-carol-maps.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]

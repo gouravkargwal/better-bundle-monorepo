@@ -1,208 +1,334 @@
-<!-- Phoenix Smart Recommendations Section -->
+<!-- Phoenix Recommendations Widget - Polaris Integration -->
 
-<!-- Recommendations Section -->
-{% if block.settings.show_recommendations %}
-<div class="phoenix-recommendations" 
-     data-product-id="{{ block.settings.product.id }}" 
-     data-context="{{ block.settings.context | default: 'auto' }}"
-     data-limit="{{ block.settings.recommendation_limit | default: 3 }}"
-     data-layout="{{ block.settings.layout_style | default: 'grid' }}"
-     data-columns="{{ block.settings.grid_columns | default: 'auto' }}"
-     data-show-prices="{{ block.settings.show_prices | default: true }}"
-     data-show-reasons="{{ block.settings.show_reasons | default: true }}"
-     data-template="{{ template }}"
-     data-page-type="{{ request.page_type }}"
-     data-locale="{{ request.locale.iso_code }}"
-     data-theme="{{ theme.name | handleize }}">
+{%- comment -%}
+  Liquid Variables for Cleaner Code
+{%- endcomment -%}
+{%- assign product_id = block.settings.product.id | default: '' -%}
+{%- assign layout_style = block.settings.layout_style | default: 'grid' -%}
+{%- assign show_prices = block.settings.show_prices | default: true -%}
+{%- assign show_reasons = block.settings.show_reasons | default: true -%}
+{%- assign show_add_to_cart = block.settings.show_add_to_cart | default: true -%}
+{%- assign custom_css_class = block.settings.custom_css_class | default: '' -%}
+
+<!-- Phoenix Widget Debug: Widget is being rendered -->
+<div class="phoenix-recommendations-widget {{ custom_css_class }}"
+     data-product-id="{{ product_id }}" 
+     data-limit="8"
+     data-layout="{{ layout_style }}"
+     data-show-prices="{{ show_prices }}"
+     data-show-reasons="{{ show_reasons }}"
+     data-show-add-to-cart="{{ show_add_to_cart }}"
+     data-auto-theme-colors="true"
+     style="
+       --phx-theme-font-family: inherit;
+       --phx-theme-text-color: inherit;
+       background: transparent;
+       color: inherit;
+       display: none;
+     ">
   
-  <!-- Loading State -->
-  <div class="recommendations-loading" style="display: none;">
-    <p>{{ 'recommendations.loading' | t }}</p>
-  </div>
-  
-  <!-- Live Recommendations (populated by JavaScript) -->
-  <div class="recommendations-content" style="display: none;">
-    <h3>
-      {% if block.settings.custom_title != blank %}
-        {{ block.settings.custom_title }}
-      {% elsif block.settings.context == 'auto' %}
-        {{ 'recommendations.title' | t }}
-      {% else %}
-        {{ 'recommendations.contexts.' | append: block.settings.context | t }}
-      {% endif %}
-    </h3>
-    <div class="phoenix-recommendations-grid">
-      <!-- Recommendations will be populated here by JavaScript -->
+  <h3 class="phoenix-widget-title" style="display: none;">
+    <!-- Title will be populated by JavaScript from API response -->
+  </h3>
+
+  <div class="phoenix-widget-content" style="display: none;">
+    <div class="phoenix-widget-grid">
+      {%- comment -%} This grid will be populated by JavaScript {%- endcomment -%}
     </div>
   </div>
-  
-  <!-- Preview/Dummy Data (shows only in theme editor) -->
-  {% if request.design_mode %}
-    <div class="phoenix-preview" style="display: block;">
-  {% else %}
-    <div class="phoenix-preview" style="display: none;">
-  {% endif %}
-    <h3>
-      {% if block.settings.custom_title != blank %}
-        {{ block.settings.custom_title }}
-      {% elsif block.settings.context == 'auto' %}
-        {{ 'recommendations.title' | t }}
-      {% else %}
-        {{ 'recommendations.contexts.' | append: block.settings.context | t }}
-      {% endif %}
-    </h3>
-    
-    <!-- Preview Grid -->
-    <div class="phoenix-preview-grid" style="
-      display: grid;
-      {% if block.settings.grid_columns == 'auto' %}
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      {% else %}
-        grid-template-columns: repeat({{ block.settings.grid_columns }}, 1fr);
-      {% endif %}
-      gap: 1rem;
-      margin-top: 1rem;
-    " data-layout="{{ block.settings.layout_style | default: 'grid' }}" data-columns="{{ block.settings.grid_columns | default: 'auto' }}">
-      {% assign preview_limit = block.settings.recommendation_limit | default: 3 %}
-      {% for i in (1..preview_limit) %}
-        <div class="phoenix-preview-item" style="
-          border: 1px solid #e0e0e0;
-          border-radius: 8px;
-          padding: 1rem;
-          background: #f9f9f9;
-          text-align: center;
-        ">
-          <!-- Product Image Placeholder -->
-          <div style="
-            width: 100%;
-            height: 200px;
-            background: linear-gradient(45deg, #f0f0f0 25%, transparent 25%), 
-                        linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), 
-                        linear-gradient(45deg, transparent 75%, #f0f0f0 75%), 
-                        linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
-            background-size: 20px 20px;
-            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-            border-radius: 4px;
-            margin-bottom: 0.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #999;
-            font-size: 14px;
-          ">
-            Product {{ i }}
+
+  {%- comment -%}
+    Template for product cards - uses theme-compatible structure
+  {%- endcomment -%}
+  <template data-template="phoenix-product-card">
+    <div class="phoenix-product-card">
+      <a href="#" class="phoenix-product-link">
+        <div class="phoenix-product-image-carousel">
+          <div class="phoenix-image-container">
+            <img src="" alt="" loading="lazy" class="phoenix-main-image">
           </div>
-          
-          <!-- Product Title Placeholder -->
-          <div style="
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 4px;
-            margin-bottom: 0.5rem;
-          "></div>
-          
-          <!-- Product Price Placeholder -->
-          {% if block.settings.show_prices %}
-            <div style="
-              height: 16px;
-              background: #e0e0e0;
-              border-radius: 4px;
-              width: 60%;
-              margin: 0 auto 0.5rem;
-            "></div>
-          {% endif %}
-          
-          <!-- Recommendation Reason Placeholder -->
-          {% if block.settings.show_reasons %}
-            <div style="
-              height: 14px;
-              background: #e0e0e0;
-              border-radius: 4px;
-              width: 80%;
-              margin: 0 auto;
-            "></div>
-          {% endif %}
+          <div class="phoenix-image-dots">
+            <!-- Dots will be generated by JavaScript -->
+          </div>
+          <button class="phoenix-image-prev" aria-label="Previous image">‹</button>
+          <button class="phoenix-image-next" aria-label="Next image">›</button>
         </div>
-      {% endfor %}
+        <div class="phoenix-product-info">
+          <h4 class="phoenix-product-title"></h4>
+          <p class="phoenix-product-price"></p>
+          <span class="phoenix-product-reason" style="display: none;"></span>
+        </div>
+      </a>
+      <div class="phoenix-product-actions">
+        {% comment %} The button will be created by JavaScript later {% endcomment %}
+      </div>
     </div>
-    
-    <!-- Preview Notice -->
-    <div style="
-      margin-top: 1rem;
-      padding: 0.75rem;
-      background: #e3f2fd;
-      border: 1px solid #2196f3;
-      border-radius: 4px;
-      text-align: center;
-      font-size: 14px;
-      color: #1976d2;
+  </template>
+
+  <!-- Enhanced Design Mode Preview (shown in theme customizer) -->
+  {% if request.design_mode %}
+  <div class="phoenix-widget-preview" style="display: block;">
+    <!-- Design Mode Header -->
+    <div class="phoenix-preview-header" style="
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: var(--phx-spacing-md) var(--phx-spacing-lg);
+      margin: calc(-1 * var(--phx-spacing-lg)) calc(-1 * var(--phx-spacing-lg)) var(--phx-spacing-lg) calc(-1 * var(--phx-spacing-lg));
+      border-radius: var(--phx-border-radius-md) var(--phx-border-radius-md) 0 0;
+      font-size: var(--phx-font-size-sm);
+      font-weight: var(--phx-font-weight-semibold);
+      display: flex;
+      align-items: center;
+      gap: var(--phx-spacing-sm);
     ">
-      <strong>Preview Mode:</strong> This shows how your recommendations will look. 
-      Real product recommendations will appear here once the widget is active.
+      <span style="font-size: var(--phx-font-size-base);">🎨</span>
+      <span>Phoenix Recommendations Preview</span>
+      <span style="
+        background: rgba(255,255,255,0.2);
+        padding: var(--phx-spacing-xs) var(--phx-spacing-sm);
+        border-radius: var(--phx-spacing-md);
+        font-size: var(--phx-font-size-sm);
+        font-weight: var(--phx-font-weight-normal);
+      ">Smart Recommendations</span>
+    </div>
+
+    <!-- Responsive Preview Controls -->
+    <div class="phoenix-preview-controls" style="
+      display: flex;
+      gap: var(--phx-spacing-sm);
+      margin-bottom: var(--phx-spacing-lg);
+      padding: var(--phx-spacing-sm);
+      background: var(--phx-color-gray-50);
+      border-radius: var(--phx-border-radius);
+      border: var(--phx-border-width) solid var(--phx-color-gray-200);
+    ">
+      <button class="phoenix-preview-btn active" data-view="desktop" style="
+        padding: var(--phx-spacing-xs) var(--phx-spacing-md);
+        border: var(--phx-border-width) solid var(--phx-color-gray-300);
+        background: var(--phx-color-white);
+        border-radius: var(--phx-border-radius-sm);
+        font-size: var(--phx-font-size-sm);
+        cursor: pointer;
+        transition: all var(--phx-transition-normal);
+      ">🖥️ Desktop</button>
+      <button class="phoenix-preview-btn" data-view="tablet" style="
+        padding: var(--phx-spacing-xs) var(--phx-spacing-md);
+        border: var(--phx-border-width) solid var(--phx-color-gray-300);
+        background: var(--phx-color-white);
+        border-radius: var(--phx-border-radius-sm);
+        font-size: var(--phx-font-size-sm);
+        cursor: pointer;
+        transition: all var(--phx-transition-normal);
+      ">📱 Tablet</button>
+      <button class="phoenix-preview-btn" data-view="mobile" style="
+        padding: var(--phx-spacing-xs) var(--phx-spacing-md);
+        border: var(--phx-border-width) solid var(--phx-color-gray-300);
+        background: var(--phx-color-white);
+        border-radius: var(--phx-border-radius-sm);
+        font-size: var(--phx-font-size-sm);
+        cursor: pointer;
+        transition: all var(--phx-transition-normal);
+      ">📱 Mobile</button>
+    </div>
+
+    <!-- Preview Container with Responsive Views -->
+    <div class="phoenix-preview-container" style="
+      border: 2px dashed var(--phx-color-gray-300);
+      border-radius: var(--phx-border-radius-md);
+      padding: var(--phx-spacing-lg);
+      background: var(--phx-color-white);
+      transition: all var(--phx-transition-slow);
+    ">
+      <div class="phoenix-widget-grid phoenix-widget-grid--{{ layout_style }} phoenix-preview-grid" style="
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(var(--phx-grid-min-width), 1fr));
+        gap: var(--phx-grid-gap);
+        transition: all var(--phx-transition-slow);
+      ">
+        <!-- Enhanced Preview Product Cards -->
+        {% for i in (1..8) %}
+          <div class="phoenix-product-card phoenix-preview-card" style="
+            background: var(--phx-card-background);
+            border: var(--phx-border-width) solid var(--phx-card-border);
+            border-radius: var(--phx-card-border-radius);
+            padding: var(--phx-card-padding);
+            transition: all var(--phx-transition-slow);
+            position: relative;
+            overflow: hidden;
+          ">
+            <!-- Preview Badge -->
+            {% if show_preview_badges %}
+            <div style="
+              position: absolute;
+              top: var(--phx-spacing-sm);
+              right: var(--phx-spacing-sm);
+              background: var(--phx-color-success);
+              color: var(--phx-color-white);
+              padding: var(--phx-spacing-xs) var(--phx-spacing-xs);
+              border-radius: var(--phx-border-radius-sm);
+              font-size: var(--phx-font-size-sm);
+              font-weight: var(--phx-font-weight-semibold);
+              z-index: 2;
+            ">PREVIEW</div>
+            {% endif %}
+            
+            <a href="#" class="phoenix-product-link" style="text-decoration: none; color: inherit;">
+              <div class="phoenix-product-image" style="
+                height: var(--phx-image-height);
+                overflow: hidden;
+                border-radius: var(--phx-image-border-radius);
+                margin-bottom: var(--phx-spacing-md);
+                position: relative;
+              ">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPlByb2R1Y3QgSW1hZ2U8L3RleHQ+PC9zdmc+" 
+                     alt="Preview Product {{ i }}" 
+                     loading="lazy"
+                     style="
+                       width: 100%;
+                       height: 100%;
+                       object-fit: cover;
+                       transition: transform var(--phx-transition-slow);
+                     "
+                     {% if enable_hover_effects %}
+                     onmouseover="this.style.transform='scale(1.05)'"
+                     onmouseout="this.style.transform='scale(1)'"
+                     {% endif %}>
+              </div>
+              <div class="phoenix-product-info">
+                <h4 class="phoenix-product-title" style="
+                  font-size: var(--phx-product-title-font-size);
+                  font-weight: var(--phx-product-title-font-weight);
+                  color: var(--phx-product-title-color);
+                  margin: 0 0 var(--phx-spacing-sm) 0;
+                  line-height: var(--phx-line-height-tight);
+                ">Sample Product {{ i }}</h4>
+                {% if show_prices %}
+                  <p class="phoenix-product-price" style="
+                    font-size: var(--phx-price-font-size);
+                    font-weight: var(--phx-price-font-weight);
+                    color: var(--phx-price-color);
+                    margin: 0 0 var(--phx-spacing-sm) 0;
+                  ">${{ 19.99 | plus: i | times: 5 | money_without_currency }}</p>
+                {% endif %}
+                {% if show_reasons %}
+                  <span class="phoenix-product-reason" style="
+                    font-size: var(--phx-font-size-sm);
+                    color: var(--phx-color-gray-500);
+                    background: var(--phx-color-gray-50);
+                    padding: var(--phx-spacing-xs) var(--phx-spacing-sm);
+                    border-radius: var(--phx-border-radius-sm);
+                    display: inline-block;
+                    margin-top: var(--phx-spacing-sm);
+                  ">✨ Recommended for you</span>
+                {% endif %}
+              </div>
+            </a>
+            {% if show_add_to_cart %}
+              <div class="phoenix-product-actions" style="margin-top: 12px;">
+                <button class="phoenix-add-to-cart-btn" disabled style="
+                  width: 100%;
+                  padding: 10px 16px;
+                  background: #2c5aa0;
+                  color: #ffffff;
+                  border: none;
+                  border-radius: 4px;
+                  font-size: 14px;
+                  font-weight: 600;
+                  cursor: not-allowed;
+                  opacity: 0.7;
+                  transition: all 0.3s ease;
+                ">
+                  Add to Cart
+                </button>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Preview Footer with Settings Summary -->
+    <div class="phoenix-preview-footer" style="
+      margin-top: 16px;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      border: 1px solid #e9ecef;
+      font-size: 12px;
+      color: #6c757d;
+    ">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <strong>Settings:</strong> {{ layout_style | capitalize }} layout • 
+          {% if show_prices %}Prices{% else %}No prices{% endif %} • 
+          {% if show_reasons %}Reasons{% else %}No reasons{% endif %} • 
+          {% if show_add_to_cart %}Add to cart{% else %}No buttons{% endif %}
+        </div>
+        <div style="color: #28a745; font-weight: 600;">
+          ✓ Responsive Grid
+        </div>
+      </div>
     </div>
   </div>
+  {% endif %}
 </div>
-{% endif %}
 
 <!-- External Assets -->
 <link rel="stylesheet" href="{{ 'phoenix-recommendations.css' | asset_url }}">
-<script src="{{ 'context-detection.js' | asset_url }}" defer></script>
-<script src="{{ 'recommendations.js' | asset_url }}" defer></script>
 
-<!-- Initialization Script -->
+
+  {% unless request.design_mode %}
+<!-- Phoenix Modular JavaScript Files (load in dependency order) -->
+  <script src="{{ 'phoenix-polaris-integration.js' | asset_url }}" defer></script>
+  <script src="{{ 'context-detection.js' | asset_url }}" defer></script>
+  <script src="{{ 'phoenix-config.js' | asset_url }}" defer></script>
+  <script src="{{ 'phoenix-security.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-utils.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-api.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-queue.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-cart.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-analytics.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-renderer.js' | asset_url }}" defer></script>
+<script src="{{ 'phoenix-main.js' | asset_url }}" defer></script>
+{% endunless %}
+
+{% unless request.design_mode %}
+<!-- AJAX Support for Dynamic Themes -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  // Wait for external scripts to load
-  if (window.PhoenixRecommendations && window.PhoenixContextDetection) {
-    window.PhoenixRecommendations.initializePhoenixRecommendations();
-  } else {
-    // Fallback: retry after a short delay
+  // Re-initialize Phoenix when new content is loaded via AJAX
+  document.addEventListener('shopify:section:load', function(event) {
+    if (event.target.querySelector('.phoenix-recommendations-widget')) {
+      setTimeout(() => {
+        if (window.PhoenixRecommendations && window.PhoenixRecommendations.initializePhoenixRecommendations) {
+          window.PhoenixRecommendations.initializePhoenixRecommendations();
+        }
+      }, 100);
+    }
+  });
+  
+  // Re-initialize when sections are reordered
+  document.addEventListener('shopify:section:reorder', function() {
     setTimeout(() => {
-      if (window.PhoenixRecommendations && window.PhoenixContextDetection) {
+      if (window.PhoenixRecommendations && window.PhoenixRecommendations.initializePhoenixRecommendations) {
         window.PhoenixRecommendations.initializePhoenixRecommendations();
       }
     }, 100);
-  }
+  });
 });
 </script>
-
-
+{% endunless %}
 
 {% schema %}
 {
-  "name": "Phoenix",
+  "name": "Phoenix Recommendations",
   "target": "section",
   "settings": [
-    { "type": "product", "id": "product", "label": "Product", "autofill": true },
-    { 
-      "type": "select", 
-      "id": "context", 
-      "label": "Recommendation Context", 
-      "info": "Choose where this widget will be used to get relevant recommendations (or set to 'auto' for automatic detection)",
-      "options": [
-        { "value": "auto", "label": "Auto-detect (Recommended)" },
-        { "value": "product_page", "label": "Product Page - 'Customers also bought'" },
-        { "value": "homepage", "label": "Homepage - 'Popular products'" },
-        { "value": "cart", "label": "Cart - 'Frequently bought together'" },
-        { "value": "collection", "label": "Collection - 'Similar products'" },
-        { "value": "search", "label": "Search - 'You might also like'" },
-        { "value": "blog", "label": "Blog - 'Featured products'" },
-        { "value": "checkout", "label": "Checkout - 'Last chance to add'" },
-        { "value": "account", "label": "Account - 'Recommended for you'" },
-        { "value": "not_found", "label": "404 Page - 'Popular products'" }
-      ],
-      "default": "auto"
-    },
-    { "type": "checkbox", "id": "show_recommendations", "label": "Show Recommendations", "default": true },
-    { 
-      "type": "range", 
-      "id": "recommendation_limit", 
-      "label": "Number of Recommendations", 
-      "info": "How many products to show (1-6)",
-      "min": 1, 
-      "max": 6, 
-      "step": 1, 
-      "default": 3 
+    {
+      "type": "product",
+      "id": "product",
+      "label": "Product",
+      "info": "Choose a specific product (or leave empty for auto-detection)"
     },
     {
       "type": "select",
@@ -215,19 +341,6 @@ document.addEventListener('DOMContentLoaded', function() {
         { "value": "list", "label": "List Layout" }
       ],
       "default": "grid"
-    },
-    {
-      "type": "select",
-      "id": "grid_columns",
-      "label": "Grid Columns",
-      "info": "Number of columns in grid layout",
-      "options": [
-        { "value": "2", "label": "2 Columns" },
-        { "value": "3", "label": "3 Columns" },
-        { "value": "4", "label": "4 Columns" },
-        { "value": "auto", "label": "Auto (Responsive)" }
-      ],
-      "default": "auto"
     },
     {
       "type": "checkbox",
@@ -243,10 +356,16 @@ document.addEventListener('DOMContentLoaded', function() {
       "default": true
     },
     {
+      "type": "checkbox",
+      "id": "show_add_to_cart",
+      "label": "Show Add to Cart Buttons",
+      "default": true
+    },
+    {
       "type": "text",
-      "id": "custom_title",
-      "label": "Custom Section Title",
-      "info": "Override the default title (leave empty for auto-generated)"
+      "id": "custom_css_class",
+      "label": "Custom CSS Class",
+      "info": "Add custom CSS class for additional styling"
     }
   ]
 }
