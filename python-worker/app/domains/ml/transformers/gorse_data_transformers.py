@@ -904,3 +904,118 @@ class GorseDataTransformers:
         except Exception as e:
             logger.error(f"Failed to transform search product features: {str(e)}")
             return None
+
+    def transform_collection_features_to_item(
+        self, collection, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Transform collection features to Gorse item for collection-based recommendations"""
+        try:
+            # Convert collection object to dict if needed
+            if hasattr(collection, "__dict__"):
+                collection_dict = collection.__dict__
+            else:
+                collection_dict = collection
+
+            collection_id = collection_dict.get("collectionId", "")
+            if not collection_id:
+                return None
+
+            # Build collection item for Gorse
+            collection_item = {
+                "ItemId": f"shop_{shop_id}_collection_{collection_id}",
+                "Categories": [
+                    f"shop_{shop_id}",
+                    "Collections",
+                    collection_dict.get("collectionType", "manual"),
+                ],
+                "Labels": [
+                    f"product_count:{collection_dict.get('productCount', 0)}",
+                    f"is_automated:{int(collection_dict.get('isAutomated', False))}",
+                    f"view_count_30d:{collection_dict.get('viewCount30d', 0)}",
+                    f"unique_viewers_30d:{collection_dict.get('uniqueViewers30d', 0)}",
+                    f"click_through_rate:{collection_dict.get('clickThroughRate', 0)}",
+                    f"bounce_rate:{collection_dict.get('bounceRate', 0)}",
+                    f"avg_product_price:{collection_dict.get('avgProductPrice', 0)}",
+                    f"min_product_price:{collection_dict.get('minProductPrice', 0)}",
+                    f"max_product_price:{collection_dict.get('maxProductPrice', 0)}",
+                    f"price_range:{collection_dict.get('priceRange', 0)}",
+                    f"price_variance:{collection_dict.get('priceVariance', 0)}",
+                    f"conversion_rate:{collection_dict.get('conversionRate', 0)}",
+                    f"revenue_contribution:{collection_dict.get('revenueContribution', 0)}",
+                    f"seo_score:{collection_dict.get('seoScore', 0)}",
+                    f"image_score:{collection_dict.get('imageScore', 0)}",
+                    f"performance_score:{collection_dict.get('performanceScore', 0)}",
+                ],
+                "IsHidden": False,
+                "Timestamp": collection_dict.get(
+                    "lastComputedAt", now_utc()
+                ).isoformat(),
+                "Comment": f"Collection: {collection_id}",
+            }
+
+            return collection_item
+        except Exception as e:
+            logger.error(f"Failed to transform collection features: {str(e)}")
+            return None
+
+    def transform_customer_behavior_to_user_features(
+        self, behavior, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Transform customer behavior features to enhanced Gorse user features"""
+        try:
+            # Convert behavior object to dict if needed
+            if hasattr(behavior, "__dict__"):
+                behavior_dict = behavior.__dict__
+            else:
+                behavior_dict = behavior
+
+            customer_id = behavior_dict.get("customerId", "")
+            if not customer_id:
+                return None
+
+            # Build enhanced user features for Gorse
+            enhanced_user = {
+                "UserId": f"shop_{shop_id}_{customer_id}",
+                "Labels": [
+                    # Session metrics
+                    f"session_count:{behavior_dict.get('sessionCount', 0)}",
+                    f"avg_session_duration:{behavior_dict.get('avgSessionDuration', 0)}",
+                    f"avg_events_per_session:{behavior_dict.get('avgEventsPerSession', 0)}",
+                    # Event counts
+                    f"total_event_count:{behavior_dict.get('totalEventCount', 0)}",
+                    f"product_view_count:{behavior_dict.get('productViewCount', 0)}",
+                    f"collection_view_count:{behavior_dict.get('collectionViewCount', 0)}",
+                    f"cart_add_count:{behavior_dict.get('cartAddCount', 0)}",
+                    f"cart_view_count:{behavior_dict.get('cartViewCount', 0)}",
+                    f"cart_remove_count:{behavior_dict.get('cartRemoveCount', 0)}",
+                    f"search_count:{behavior_dict.get('searchCount', 0)}",
+                    f"checkout_start_count:{behavior_dict.get('checkoutStartCount', 0)}",
+                    f"purchase_count:{behavior_dict.get('purchaseCount', 0)}",
+                    # Temporal patterns
+                    f"days_since_first_event:{behavior_dict.get('daysSinceFirstEvent', 0)}",
+                    f"days_since_last_event:{behavior_dict.get('daysSinceLastEvent', 0)}",
+                    f"most_active_hour:{behavior_dict.get('mostActiveHour', 0)}",
+                    f"most_active_day:{behavior_dict.get('mostActiveDay', 0)}",
+                    # Behavior patterns
+                    f"unique_products_viewed:{behavior_dict.get('uniqueProductsViewed', 0)}",
+                    f"unique_collections_viewed:{behavior_dict.get('uniqueCollectionsViewed', 0)}",
+                    f"device_type:{behavior_dict.get('deviceType', 'unknown')}",
+                    f"primary_referrer:{behavior_dict.get('primaryReferrer', 'direct')}",
+                    # Conversion metrics
+                    f"browse_to_cart_rate:{behavior_dict.get('browseToCartRate', 0)}",
+                    f"cart_to_purchase_rate:{behavior_dict.get('cartToPurchaseRate', 0)}",
+                    f"search_to_purchase_rate:{behavior_dict.get('searchToPurchaseRate', 0)}",
+                    # Computed scores
+                    f"engagement_score:{behavior_dict.get('engagementScore', 0)}",
+                    f"recency_score:{behavior_dict.get('recencyScore', 0)}",
+                    f"diversity_score:{behavior_dict.get('diversityScore', 0)}",
+                    f"behavioral_score:{behavior_dict.get('behavioralScore', 0)}",
+                ],
+                "Subscribe": [],
+                "Comment": f"Enhanced behavior features for customer {customer_id}",
+            }
+
+            return enhanced_user
+        except Exception as e:
+            logger.error(f"Failed to transform customer behavior features: {str(e)}")
+            return None

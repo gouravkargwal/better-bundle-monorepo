@@ -1327,7 +1327,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             result = await gorse_service.sync_and_train(
                 shop_id=shop_id,
                 sync_type="incremental",
-                since_hours=1,  # Only sync data from last hour since we just computed features
+                since_hours=0,  # Only sync data from last hour since we just computed features
                 trigger_source="feature_computation",
             )
 

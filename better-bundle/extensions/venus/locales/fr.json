@@ -1,3 +1,16 @@
 {
-  "earnPoints": "Vous avez gagné 1,000 points avec cette commande. Vous avez été promu au niveau Platine."
+  "earnPoints": "Vous avez gagné 1,000 points avec cette commande. Vous avez été promu au niveau Platine.",
+  "recommendedForYou": "Recommandé pour vous",
+  "recommendedBasedOnYourOrders": "Recommandé selon vos commandes",
+  "trendingInYourOrders": "Tendances dans vos commandes",
+  "youMightAlsoLike": "Vous pourriez aussi aimer",
+  "completeYourLook": "Complétez votre look",
+  "discoverNewFavorites": "Découvrez de nouveaux favoris",
+  "discoverMoreProducts": "Découvrez d'autres produits que vous adorerez",
+  "personalizedForYou": "Sélectionné spécialement pour vous",
+  "loadingRecommendations": "Chargement des recommandations...",
+  "noRecommendationsAvailable": "Aucune recommandation disponible pour le moment.",
+  "errorLoadingRecommendations": "Impossible de charger les recommandations. Veuillez réessayer plus tard.",
+  "viewProduct": "Voir le produit",
+  "outOfStock": "Rupture de stock"
 }

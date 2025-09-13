@@ -6,36 +6,33 @@ import {
   useApi,
   Divider,
   useAuthenticatedAccountCustomer,
-  useShop,
 } from "@shopify/ui-extensions-react/customer-account";
 import { ProductRecommendations } from "./components/ProductRecommendations";
 
-export default reactExtension(
-  "customer-account.order-status.block.render",
-  () => <OrderStatusWithRecommendations />,
-);
+export default reactExtension("customer-account.profile.block.render", () => (
+  <ProfileWithRecommendations />
+));
 
-function OrderStatusWithRecommendations() {
+function ProfileWithRecommendations() {
   const { i18n } = useApi();
   const { id: customerId } = useAuthenticatedAccountCustomer();
-  const { myshopifyDomain } = useShop();
 
   return (
     <BlockStack spacing="base">
       <Banner>
         <BlockStack inlineAlignment="center">
-          <TextBlock>{i18n.translate("earnPoints")}</TextBlock>
+          <TextBlock>{i18n.translate("personalizedForYou")}</TextBlock>
         </BlockStack>
       </Banner>
 
       <Divider />
 
+      {/* Product recommendations optimized for profile context */}
       <ProductRecommendations
-        context="order_status"
-        title={i18n.translate("completeYourLook")}
+        context="profile"
+        title={i18n.translate("discoverNewFavorites")}
         limit={4}
-        category="complementary"
-        shopDomain={myshopifyDomain}
+        category="discovery"
         customerId={customerId}
       />
     </BlockStack>

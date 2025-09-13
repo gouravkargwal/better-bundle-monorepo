@@ -1,3 +1,16 @@
 {
-  "earnPoints": "You've earned 1,000 points from this order. You've been upgraded to Platinum tier."
+  "earnPoints": "You've earned 1,000 points from this order. You've been upgraded to Platinum tier.",
+  "recommendedForYou": "Recommended for You",
+  "recommendedBasedOnYourOrders": "Recommended Based on Your Orders",
+  "trendingInYourOrders": "Trending in Your Orders",
+  "youMightAlsoLike": "You Might Also Like",
+  "completeYourLook": "Complete Your Look",
+  "discoverNewFavorites": "Discover New Favorites",
+  "discoverMoreProducts": "Discover more products you'll love",
+  "personalizedForYou": "Curated just for you",
+  "loadingRecommendations": "Loading recommendations...",
+  "noRecommendationsAvailable": "No recommendations available at the moment.",
+  "errorLoadingRecommendations": "Unable to load recommendations. Please try again later.",
+  "viewProduct": "View Product",
+  "outOfStock": "Out of Stock"
 }

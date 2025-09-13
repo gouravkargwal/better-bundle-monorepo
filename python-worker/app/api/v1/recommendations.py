@@ -28,13 +28,55 @@ gorse_client = GorseApiClient(
 )
 
 
+async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
+    """
+    Get shop domain from customer ID using Prisma ORM
+    """
+    try:
+        db = await get_database()
+
+        # First, find the customer by customerId (not id)
+        customer = await db.customerdata.find_first(where={"customerId": customer_id})
+
+        if not customer:
+            logger.warning(f"⚠️ Customer not found with customerId: {customer_id}")
+            return None
+
+        # Get the shopId from the customer
+        shop_id = customer.shopId
+        if not shop_id:
+            logger.warning(f"⚠️ No shopId found for customer {customer_id}")
+            return None
+
+        # Now find the shop by shopId to get shopDomain
+        shop = await db.shop.find_unique(where={"id": shop_id})
+
+        if shop and shop.shopDomain:
+            shop_domain = shop.shopDomain
+            logger.info(
+                f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
+            )
+            return shop_domain
+        else:
+            logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
+            return None
+
+    except Exception as e:
+        logger.error(f"❌ Error looking up shop_domain for customer {customer_id}: {e}")
+        return None
+
+
 # Pydantic models for request/response
 class RecommendationRequest(BaseModel):
     """Request model for recommendations"""
 
-    shop_domain: str = Field(..., description="Shop domain")
+    shop_domain: Optional[str] = Field(
+        None,
+        description="Shop domain (optional - will be looked up from user_id if not provided)",
+    )
     context: str = Field(
-        ..., description="Context: product_page, homepage, cart, profile, checkout"
+        ...,
+        description="Context: product_page, homepage, cart, profile, checkout, order_history, order_status",
     )
     product_id: Optional[str] = Field(
         None, description="Product ID for product-specific recommendations"
@@ -60,8 +102,6 @@ class RecommendationResponse(BaseModel):
     count: int
     source: str  # "gorse", "fallback", "database"
     context: str
-    shop_id: str
-    user_id: Optional[str] = None
     timestamp: datetime
 
 
@@ -94,60 +134,117 @@ class ProductEnrichment:
             List of enriched product data
         """
         try:
+            logger.debug(
+                f"🎨 Starting enrichment | shop_id={shop_id} | item_count={len(item_ids)} | context={context} | source={source}"
+            )
             db = await self.get_database()
 
-            # Fetch products from database
+            # Strip prefixes from Gorse item IDs to match database format
+            # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+            # Database uses: 7903465537675
+            # Only include items from the current shop for multi-tenancy
+            clean_item_ids = []
+            for item_id in item_ids:
+                if item_id.startswith("shop_"):
+                    # Extract shop ID and product ID
+                    parts = item_id.split("_")
+                    if len(parts) >= 3:
+                        gorse_shop_id = parts[
+                            1
+                        ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+                        product_id = parts[2]  # 7903465537675
+
+                        # Only include if it's from the current shop
+                        if gorse_shop_id == shop_id:
+                            clean_item_ids.append(product_id)
+                        else:
+                            logger.debug(
+                                f"🚫 Skipping product from different shop | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
+                            )
+                    else:
+                        logger.warning(f"⚠️ Invalid Gorse item ID format: {item_id}")
+                else:
+                    # Assume it's already a clean product ID
+                    clean_item_ids.append(item_id)
+
+            logger.info(
+                f"🧹 Cleaned item IDs | original={item_ids[:3]} | cleaned={clean_item_ids[:3]}"
+            )
+
+            # Fetch products from database using cleaned IDs
             products = await db.productdata.find_many(
                 where={
                     "shopId": shop_id,
-                    "productId": {"in": item_ids},
-                    "isActive": True,
-                },
-                select={
-                    "productId": True,
-                    "title": True,
-                    "handle": True,
-                    "price": True,
-                    "compareAtPrice": True,
-                    "imageUrl": True,
-                    "imageAlt": True,
-                    "totalInventory": True,
-                    "status": True,
-                    "productType": True,
-                    "vendor": True,
-                },
+                    "productId": {"in": clean_item_ids},
+                }
             )
 
-            # Create a mapping for quick lookup
-            product_map = {p["productId"]: p for p in products}
+            logger.debug(
+                f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
+            )
+
+            # Create a mapping for quick lookup using cleaned IDs
+            product_map = {p.productId: p for p in products}
 
             # Enrich items in the same order as requested
             enriched_items = []
+            missing_items = []
             for item_id in item_ids:
-                if item_id in product_map:
-                    product = product_map[item_id]
-                    # Only include essential fields that Phoenix extension actually uses
+                # Find the corresponding clean_id for this item_id
+                clean_id = None
+                if item_id.startswith("shop_"):
+                    parts = item_id.split("_")
+                    if len(parts) >= 3:
+                        gorse_shop_id = parts[1]
+                        product_id = parts[2]
+                        if gorse_shop_id == shop_id:
+                            clean_id = product_id
+                else:
+                    clean_id = item_id
+
+                if clean_id and clean_id in product_map:
+                    product = product_map[clean_id]
+                    # Format for frontend ProductRecommendation interface
                     enriched_items.append(
                         {
-                            "title": product["title"],
-                            "handle": product["handle"],
-                            "price": product["price"],
-                            "currency": "USD",  # TODO: Get from shop settings
-                            "image": product["imageUrl"],
-                            "imageAlt": product["imageAlt"],
-                            "reason": self._get_recommendation_reason(context, source),
+                            "id": product.productId,
+                            "title": product.title,
+                            "handle": product.handle,
+                            "price": {
+                                "amount": str(product.price),
+                                "currency_code": "USD",  # TODO: Get from shop settings
+                            },
+                            "image": (
+                                {
+                                    "url": product.imageUrl or "",
+                                    "alt_text": product.imageAlt or product.title,
+                                }
+                                if product.imageUrl
+                                else None
+                            ),
+                            "vendor": product.vendor or "",
+                            "product_type": product.productType or "",
+                            "available": product.status == "ACTIVE",
+                            "score": 0.8,  # Default recommendation score
                         }
                     )
                 else:
                     # Item not found in database, skip it
-                    logger.warning(
-                        f"Product {item_id} not found in database for shop {shop_id}"
-                    )
+                    if clean_id:
+                        missing_items.append(clean_id)
 
+            if missing_items:
+                logger.warning(
+                    f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
+                )
+
+            logger.info(
+                f"✅ Enrichment complete | enriched={len(enriched_items)} | missing={len(missing_items)} | success_rate={len(enriched_items)/len(item_ids)*100:.1f}%"
+            )
             return enriched_items
 
         except Exception as e:
-            logger.error(f"Failed to enrich items: {str(e)}")
+            logger.error(f"💥 Failed to enrich items: {str(e)}")
             return []
 
     def _get_recommendation_reason(self, context: str, source: str) -> str:
@@ -277,6 +374,8 @@ class RecommendationCacheService:
         "cart": 300,  # 5 minutes (dynamic)
         "profile": 900,  # 15 minutes (user-specific)
         "checkout": 0,  # No cache (fast, fresh)
+        "order_history": 0,  # Temporarily disable caching
+        "order_status": 900,  # 15 minutes (order-specific)
     }
 
     def generate_cache_key(
@@ -418,6 +517,16 @@ class HybridRecommendationService:
             "popular": 0.2,  # 20% popular items
         },
         "checkout": {"popular": 1.0},  # 100% popular (fast, reliable)
+        "order_history": {
+            "user_recommendations": 0.6,  # 60% personalized based on order history
+            "popular_category": 0.3,  # 30% popular in order history categories
+            "popular": 0.1,  # 10% general popular items
+        },
+        "order_status": {
+            "item_neighbors": 0.5,  # 50% similar to ordered products
+            "user_recommendations": 0.3,  # 30% personalized
+            "popular_category": 0.2,  # 20% popular in same category
+        },
     }
 
     async def blend_recommendations(
@@ -448,8 +557,12 @@ class HybridRecommendationService:
             Blended recommendations result
         """
         try:
+            logger.debug(
+                f"🔄 Starting hybrid blend | context={context} | shop_id={shop_id} | limit={limit}"
+            )
             # Get blending ratios for context
             ratios = self.BLENDING_RATIOS.get(context, {"popular": 1.0})
+            logger.debug(f"📊 Blending ratios | context={context} | ratios={ratios}")
 
             # Collect recommendations from different sources
             all_recommendations = []
@@ -462,6 +575,9 @@ class HybridRecommendationService:
 
                 # Calculate how many items to get from this source
                 source_limit = max(1, int(limit * ratio))
+                logger.debug(
+                    f"🎯 Getting {source} recommendations | ratio={ratio} | source_limit={source_limit}"
+                )
 
                 try:
                     # Get recommendations from this source
@@ -488,6 +604,9 @@ class HybridRecommendationService:
                             "ratio": ratio,
                             "success": True,
                         }
+                        logger.debug(
+                            f"✅ {source} source successful | items={len(source_result['items'])}"
+                        )
                     else:
                         source_info[source] = {
                             "count": 0,
@@ -495,9 +614,14 @@ class HybridRecommendationService:
                             "success": False,
                             "error": source_result.get("error", "No items returned"),
                         }
+                        logger.warning(
+                            f"⚠️ {source} source failed | error={source_result.get('error', 'No items returned')}"
+                        )
 
                 except Exception as e:
-                    logger.warning(f"Failed to get {source} recommendations: {str(e)}")
+                    logger.warning(
+                        f"💥 Failed to get {source} recommendations: {str(e)}"
+                    )
                     source_info[source] = {
                         "count": 0,
                         "ratio": ratio,
@@ -506,7 +630,13 @@ class HybridRecommendationService:
                     }
 
             # Deduplicate and blend results
+            logger.debug(
+                f"🔄 Deduplicating and blending | total_collected={len(all_recommendations)} | target_limit={limit}"
+            )
             blended_items = self._deduplicate_and_blend(all_recommendations, limit)
+            logger.info(
+                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len([s for s in source_info.values() if s['success']])}"
+            )
 
             return {
                 "success": True,
@@ -522,7 +652,7 @@ class HybridRecommendationService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to blend recommendations: {str(e)}")
+            logger.error(f"💥 Failed to blend recommendations: {str(e)}")
             return {
                 "success": False,
                 "items": [],
@@ -544,17 +674,25 @@ class HybridRecommendationService:
         """Get recommendations from a specific source"""
 
         if source == "item_neighbors" and product_id:
+            # Apply shop prefix for multi-tenancy
+            prefixed_item_id = f"shop_{shop_id}_{product_id}"
             return await self.gorse_client.get_item_neighbors(
-                item_id=product_id, n=limit, category=category
+                item_id=prefixed_item_id, n=limit, category=category
             )
 
         elif source == "user_recommendations" and user_id:
+            # Apply shop prefix for multi-tenancy
+            prefixed_user_id = f"shop_{shop_id}_{user_id}"
             return await self.gorse_client.get_recommendations(
-                user_id=user_id, n=limit, category=category
+                user_id=prefixed_user_id, n=limit, category=category
             )
 
         elif source == "session_recommendations" and session_id:
-            session_data = self._build_session_data(session_id, user_id, metadata)
+            # Apply shop prefix for multi-tenancy
+            prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
+            session_data = self._build_session_data(
+                session_id, prefixed_user_id, metadata
+            )
             return await self.gorse_client.get_session_recommendations(
                 session_data=session_data, n=limit, category=category
             )
@@ -564,6 +702,9 @@ class HybridRecommendationService:
 
         elif source == "latest":
             return await self.gorse_client.get_latest_items(n=limit, category=category)
+
+        elif source == "popular_category":
+            return await self.gorse_client.get_popular_items(n=limit, category=category)
 
         elif source == "user_neighbors" and user_id:
             # Use the UserNeighborsService for collaborative filtering
@@ -903,6 +1044,79 @@ analytics_service = RecommendationAnalytics()
 user_neighbors_service = UserNeighborsService()
 
 
+@router.get("/debug/check-products/{shop_id}")
+async def debug_check_products(shop_id: str, limit: int = 10):
+    """Debug endpoint to check what products exist in database"""
+    try:
+        db = await get_database()
+
+        # Get sample products from database
+        products = await db.productdata.find_many(where={"shopId": shop_id}, take=limit)
+
+        # Get total count
+        total_count = await db.productdata.count(where={"shopId": shop_id})
+
+        # Get sample product IDs
+        product_ids = [p.productId for p in products]
+
+        return {
+            "shop_id": shop_id,
+            "total_products": total_count,
+            "sample_products": [
+                {
+                    "id": p.id,
+                    "productId": p.productId,
+                    "title": p.title,
+                    "handle": p.handle,
+                    "price": p.price,
+                    "status": p.status,
+                }
+                for p in products
+            ],
+            "sample_product_ids": product_ids,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to check products: {e}")
+        return {"error": str(e), "shop_id": shop_id}
+
+
+@router.get("/debug/check-missing-products/{shop_id}")
+async def debug_check_missing_products(shop_id: str, product_ids: str):
+    """Debug endpoint to check if specific product IDs exist in database"""
+    try:
+        db = await get_database()
+
+        # Parse comma-separated product IDs
+        missing_ids = [pid.strip() for pid in product_ids.split(",")]
+
+        # Check which ones exist
+        existing_products = await db.productdata.find_many(
+            where={"shopId": shop_id, "productId": {"in": missing_ids}}
+        )
+
+        existing_ids = {p.productId for p in existing_products}
+        actually_missing = [pid for pid in missing_ids if pid not in existing_ids]
+
+        return {
+            "shop_id": shop_id,
+            "requested_ids": missing_ids,
+            "existing_count": len(existing_products),
+            "missing_count": len(actually_missing),
+            "existing_products": [
+                {"productId": p.productId, "title": p.title, "handle": p.handle}
+                for p in existing_products
+            ],
+            "actually_missing": actually_missing,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to check missing products: {e}")
+        return {"error": str(e), "shop_id": shop_id}
+
+
 async def get_fallback_recommendations(
     shop_id: str, n: int = 10, category: Optional[str] = None
 ) -> List[Dict[str, Any]]:
@@ -918,6 +1132,9 @@ async def get_fallback_recommendations(
         List of fallback recommendations
     """
     try:
+        logger.debug(
+            f"🔄 Getting fallback recommendations | shop_id={shop_id} | n={n} | category={category}"
+        )
         db = await get_database()
 
         # Build where clause
@@ -950,6 +1167,10 @@ async def get_fallback_recommendations(
             },
         )
 
+        logger.info(
+            f"📊 Fallback query complete | found_products={len(products)} | requested={n} | category={category}"
+        )
+
         return [
             {
                 "item_id": p["productId"],
@@ -973,7 +1194,7 @@ async def get_fallback_recommendations(
         ]
 
     except Exception as e:
-        logger.error(f"Failed to get fallback recommendations: {str(e)}")
+        logger.error(f"💥 Failed to get fallback recommendations: {str(e)}")
         return []
 
 
@@ -999,6 +1220,16 @@ FALLBACK_LEVELS = {
         "popular",  # Level 2: Popular items
     ],
     "checkout": ["popular"],  # Level 1: Popular items (fast)
+    "order_history": [
+        "user_recommendations",  # Level 1: Personalized based on order history
+        "popular_category",  # Level 2: Popular in categories from order history
+        "popular",  # Level 3: General popular items
+    ],
+    "order_status": [
+        "item_neighbors",  # Level 1: Similar to ordered products
+        "user_recommendations",  # Level 2: Personalized
+        "popular_category",  # Level 3: Popular in same category
+    ],
 }
 
 
@@ -1030,8 +1261,10 @@ async def execute_recommendation_level(
     """
     try:
         if level == "item_neighbors" and product_id:
+            # Apply shop prefix for multi-tenancy
+            prefixed_item_id = f"shop_{shop_id}_{product_id}"
             result = await gorse_client.get_item_neighbors(
-                item_id=product_id, n=limit, category=category
+                item_id=prefixed_item_id, n=limit, category=category
             )
             if result["success"]:
                 return {
@@ -1041,8 +1274,10 @@ async def execute_recommendation_level(
                 }
 
         elif level == "user_recommendations" and user_id:
+            # Apply shop prefix for multi-tenancy
+            prefixed_user_id = f"shop_{shop_id}_{user_id}"
             result = await gorse_client.get_recommendations(
-                user_id=user_id, n=limit, category=category
+                user_id=prefixed_user_id, n=limit, category=category
             )
             if result["success"]:
                 return {
@@ -1052,9 +1287,11 @@ async def execute_recommendation_level(
                 }
 
         elif level == "session_recommendations" and session_id:
+            # Apply shop prefix for multi-tenancy
+            prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
             session_data = {
                 "SessionId": session_id,
-                "UserId": user_id,
+                "UserId": prefixed_user_id,
                 "Timestamp": datetime.now().isoformat(),
             }
 
@@ -1091,17 +1328,14 @@ async def execute_recommendation_level(
                 }
 
         elif level == "popular_category":
-            # This is handled by the popular level with category filter
-            return await execute_recommendation_level(
-                "popular",
-                shop_id,
-                product_id,
-                user_id,
-                session_id,
-                category,
-                limit,
-                metadata,
-            )
+            # Use popular items with category filter
+            result = await gorse_client.get_popular_items(n=limit, category=category)
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_popular_category",
+                }
 
         return {"success": False, "items": [], "source": "none"}
 
@@ -1137,9 +1371,15 @@ async def execute_fallback_chain(
         Recommendation result with fallback information
     """
     levels = FALLBACK_LEVELS.get(context, ["popular"])
+    logger.info(
+        f"🔄 Starting fallback chain | context={context} | levels={levels} | limit={limit}"
+    )
 
-    for level in levels:
+    for i, level in enumerate(levels, 1):
         try:
+            logger.debug(
+                f"🎯 Trying level {i}/{len(levels)}: {level} | context={context}"
+            )
             result = await execute_recommendation_level(
                 level,
                 shop_id,
@@ -1153,25 +1393,28 @@ async def execute_fallback_chain(
 
             if result["success"] and result["items"]:
                 logger.info(
-                    f"Recommendation level {level} succeeded for context {context}"
+                    f"✅ Level {level} succeeded | context={context} | items={len(result['items'])} | source={result.get('source', 'unknown')}"
                 )
                 return result
             else:
                 logger.warning(
-                    f"Recommendation level {level} returned no items for context {context}"
+                    f"⚠️ Level {level} returned no items | context={context} | success={result['success']} | items_count={len(result.get('items', []))}"
                 )
 
         except Exception as e:
             logger.error(
-                f"Recommendation level {level} failed for context {context}: {str(e)}"
+                f"💥 Level {level} failed | context={context} | error={str(e)}"
             )
             continue
 
     # All levels failed, use database fallback
     logger.warning(
-        f"All recommendation levels failed for context {context}, using database fallback"
+        f"❌ All fallback levels failed | context={context} | using database fallback"
     )
     fallback_items = await get_fallback_recommendations(shop_id, limit, category)
+    logger.info(
+        f"📊 Database fallback complete | items={len(fallback_items)} | context={context}"
+    )
 
     return {"success": True, "items": fallback_items, "source": "database_fallback"}
 
@@ -1190,35 +1433,83 @@ async def get_recommendations(request: RecommendationRequest):
     - Performance optimization for checkout context
     """
     try:
+        # Handle shop_domain: use provided value or lookup from customer_id
+        shop_domain = request.shop_domain
+        if not shop_domain and request.user_id:
+            logger.info(
+                f"🔍 Shop domain not provided, looking up from customer_id: {request.user_id}"
+            )
+            shop_domain = await get_shop_domain_from_customer_id(request.user_id)
+            if shop_domain:
+                request.shop_domain = shop_domain
+            else:
+                logger.warning(
+                    f"⚠️ Could not find shop_domain for customer {request.user_id}, using fallback"
+                )
+                shop_domain = "demo-shop"
+                request.shop_domain = shop_domain
+        elif not shop_domain:
+            logger.warning("⚠️ No shop_domain or user_id provided, using fallback")
+            shop_domain = "demo-shop"
+            request.shop_domain = shop_domain
+
+        logger.info(
+            f"📊 Recommendation request received | shop={request.shop_domain} | context={request.context} | user_id={request.user_id} | product_id={request.product_id} | limit={request.limit}"
+        )
+
         # Validate context
-        valid_contexts = ["product_page", "homepage", "cart", "profile", "checkout"]
+        valid_contexts = [
+            "product_page",
+            "homepage",
+            "cart",
+            "profile",
+            "checkout",
+            "order_history",
+            "order_status",
+        ]
         if request.context not in valid_contexts:
+            logger.warning(
+                f"❌ Invalid context '{request.context}' provided | valid_contexts={valid_contexts}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid context. Must be one of: {valid_contexts}",
             )
 
         # Validate shop exists
+        logger.debug(
+            f"🔍 Validating shop existence | shop_domain={request.shop_domain}"
+        )
         db = await get_database()
         shop = await db.shop.find_unique(where={"shopDomain": request.shop_domain})
         if not shop:
+            logger.error(f"❌ Shop not found | shop_domain={request.shop_domain}")
             raise HTTPException(
                 status_code=404, detail=f"Shop {request.shop_domain} not found"
             )
 
+        logger.info(
+            f"✅ Shop validated | shop_id={shop.id} | shop_domain={request.shop_domain}"
+        )
+
         # Auto-detect category if missing and product_id is provided
         category = request.category
         if not category and request.product_id:
-            logger.debug(f"Auto-detecting category for product {request.product_id}")
+            logger.debug(f"🔍 Auto-detecting category for product {request.product_id}")
             category = await category_service.get_product_category(
                 request.product_id, shop.id
             )
             if category:
                 logger.info(
-                    f"Auto-detected category '{category}' for product {request.product_id}"
+                    f"✅ Auto-detected category '{category}' for product {request.product_id}"
                 )
+            else:
+                logger.debug(f"⚠️ No category detected for product {request.product_id}")
 
         # Generate cache key
+        logger.debug(
+            f"🔑 Generating cache key | context={request.context} | product_id={request.product_id} | user_id={request.user_id}"
+        )
         cache_key = cache_service.generate_cache_key(
             shop_id=shop.id,
             context=request.context,
@@ -1230,36 +1521,43 @@ async def get_recommendations(request: RecommendationRequest):
         )
 
         # Check cache first (skip for checkout context)
+        logger.debug(
+            f"💾 Checking cache for recommendations | cache_key={cache_key[:20]}..."
+        )
         cached_result = await cache_service.get_cached_recommendations(
             cache_key, request.context
         )
         if cached_result:
+            # Extract recommendations from cached result
+            recommendations = cached_result.get("recommendations", [])
             logger.info(
-                f"Returning cached recommendations for context {request.context}"
+                f"🎯 Cache hit! Returning cached recommendations | context={request.context} | count={len(recommendations)}"
             )
             return RecommendationResponse(
                 success=True,
-                recommendations=cached_result["recommendations"],
-                count=len(cached_result["recommendations"]),
+                recommendations=recommendations,
+                count=len(recommendations),
                 source="cache",
                 context=request.context,
-                shop_id=shop.id,
-                user_id=request.user_id,
                 timestamp=datetime.now(),
             )
+
+        logger.debug(
+            f"💨 Cache miss, proceeding with fresh recommendations | context={request.context}"
+        )
 
         # Performance optimization for checkout context
         if request.context == "checkout":
             # Limit recommendations for speed
             request.limit = min(request.limit, 3)
-            logger.debug(
-                f"Optimized checkout context: limited to {request.limit} recommendations"
+            logger.info(
+                f"⚡ Checkout optimization: limited to {request.limit} recommendations"
             )
 
         # Try hybrid recommendations first (except for checkout which uses simple fallback)
         if request.context != "checkout":
-            logger.debug(
-                f"Attempting hybrid recommendations for context {request.context}"
+            logger.info(
+                f"🔄 Attempting hybrid recommendations | context={request.context} | limit={request.limit}"
             )
             result = await hybrid_service.blend_recommendations(
                 context=request.context,
@@ -1278,7 +1576,7 @@ async def get_recommendations(request: RecommendationRequest):
                 or len(result.get("items", [])) < request.limit // 2
             ):
                 logger.warning(
-                    f"Hybrid recommendations insufficient, falling back to simple chain"
+                    f"⚠️ Hybrid recommendations insufficient | success={result['success']} | items_count={len(result.get('items', []))} | falling back to simple chain"
                 )
                 result = await execute_fallback_chain(
                     context=request.context,
@@ -1290,8 +1588,15 @@ async def get_recommendations(request: RecommendationRequest):
                     limit=request.limit,
                     metadata=request.metadata,
                 )
+            else:
+                logger.info(
+                    f"✅ Hybrid recommendations successful | items_count={len(result.get('items', []))} | source={result.get('source', 'unknown')}"
+                )
         else:
             # For checkout, use simple fallback chain for speed
+            logger.info(
+                f"⚡ Using simple fallback chain for checkout | limit={request.limit}"
+            )
             result = await execute_fallback_chain(
                 context=request.context,
                 shop_id=shop.id,
@@ -1305,6 +1610,9 @@ async def get_recommendations(request: RecommendationRequest):
 
         if not result["success"] or not result["items"]:
             # Final fallback: return empty recommendations
+            logger.warning(
+                f"❌ No recommendations found | success={result['success']} | items_count={len(result.get('items', []))} | returning empty response"
+            )
             return RecommendationResponse(
                 success=True,
                 recommendations=[],
@@ -1317,9 +1625,16 @@ async def get_recommendations(request: RecommendationRequest):
             )
 
         # Enrich with Shopify product data
+        logger.info(
+            f"🎨 Enriching {len(result['items'])} items with Shopify data | source={result['source']}"
+        )
         item_ids = result["items"]
         enriched_items = await enrichment_service.enrich_items(
             shop.id, item_ids, request.context, result["source"]
+        )
+
+        logger.info(
+            f"✅ Enrichment complete | enriched_count={len(enriched_items)} | original_count={len(item_ids)}"
         )
 
         # Prepare response data
@@ -1335,6 +1650,9 @@ async def get_recommendations(request: RecommendationRequest):
         }
 
         # Cache the results (skip for checkout context)
+        logger.debug(
+            f"💾 Caching recommendations | context={request.context} | count={len(enriched_items)}"
+        )
         await cache_service.cache_recommendations(
             cache_key, response_data, request.context
         )
@@ -1352,21 +1670,24 @@ async def get_recommendations(request: RecommendationRequest):
             )
         )
 
+        logger.info(
+            f"🎉 Recommendation request completed successfully | shop={request.shop_domain} | context={request.context} | count={len(enriched_items)} | source={result['source']}"
+        )
         return RecommendationResponse(
             success=True,
             recommendations=enriched_items,
             count=len(enriched_items),
             source=result["source"],
             context=request.context,
-            shop_id=shop.id,
-            user_id=request.user_id,
             timestamp=datetime.now(),
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get recommendations: {str(e)}")
+        logger.error(
+            f"💥 Recommendation request failed | shop={request.shop_domain} | context={request.context} | error={str(e)}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Failed to get recommendations: {str(e)}"
         )
@@ -1378,14 +1699,19 @@ async def recommendations_health_check():
     Health check for the recommendations system including cache and category services
     """
     try:
+        logger.info("🏥 Starting recommendations health check")
+
         # Check Gorse health
+        logger.debug("🔍 Checking Gorse health")
         gorse_health = await gorse_client.health_check()
 
         # Check database connection
+        logger.debug("🔍 Checking database connection")
         db = await get_database()
         await db.shop.find_first()  # Simple query to test connection
 
         # Check Redis cache connection
+        logger.debug("🔍 Checking Redis cache connection")
         redis_client = await get_redis_client()
         await redis_client.ping()  # Test Redis connection
 
@@ -1395,6 +1721,7 @@ async def recommendations_health_check():
             for context, ttl in cache_service.CACHE_TTL.items()
         }
 
+        logger.info("✅ Recommendations health check passed | all services healthy")
         return {
             "success": True,
             "status": "healthy",
@@ -1415,7 +1742,7 @@ async def recommendations_health_check():
         }
 
     except Exception as e:
-        logger.error(f"Recommendations health check failed: {str(e)}")
+        logger.error(f"💥 Recommendations health check failed: {str(e)}")
         return {
             "success": False,
             "status": "unhealthy",

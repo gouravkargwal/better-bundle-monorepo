@@ -177,6 +177,8 @@ class UnifiedGorseService:
                 "sessions_synced": 0,
                 "product_pairs_synced": 0,
                 "search_products_synced": 0,
+                "collections_synced": 0,
+                "customer_behaviors_synced": 0,
                 "training_triggered": False,
                 "errors": [],
             }
@@ -257,6 +259,46 @@ class UnifiedGorseService:
                         f"Skipping search product features sync - no data found for shop {shop_id}"
                     )
                     results["search_products_synced"] = 0
+
+            if sync_type in ["all", "collections"]:
+                # Check if collection features exist before adding sync task
+                has_collection_data = await self._check_feature_table_has_data(
+                    "collectionfeatures", shop_id, since_time
+                )
+                if has_collection_data:
+                    sync_tasks.append(
+                        (
+                            "collections",
+                            self._sync_collection_features_to_gorse(
+                                shop_id, since_time
+                            ),
+                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping collection features sync - no data found for shop {shop_id}"
+                    )
+                    results["collections_synced"] = 0
+
+            if sync_type in ["all", "customer_behaviors"]:
+                # Check if customer behavior features exist before adding sync task
+                has_customer_behavior_data = await self._check_feature_table_has_data(
+                    "customerbehaviorfeatures", shop_id, since_time
+                )
+                if has_customer_behavior_data:
+                    sync_tasks.append(
+                        (
+                            "customer_behaviors",
+                            self._sync_customer_behavior_features_to_gorse(
+                                shop_id, since_time
+                            ),
+                        )
+                    )
+                else:
+                    logger.info(
+                        f"Skipping customer behavior features sync - no data found for shop {shop_id}"
+                    )
+                    results["customer_behaviors_synced"] = 0
 
             # Execute all sync tasks in parallel
             if sync_tasks:
@@ -532,6 +574,17 @@ class UnifiedGorseService:
                         feedback_batch.append(
                             {
                                 "feedbackType": "cart_add",
+                                "userId": f"shop_{shop_id}_{interaction.customerId}",
+                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "timestamp": interaction.lastComputedAt.isoformat(),
+                            }
+                        )
+
+                    # Add purchase feedback - this is the most important feedback type
+                    if interaction.purchaseCount > 0:
+                        feedback_batch.append(
+                            {
+                                "feedbackType": "purchase",
                                 "userId": f"shop_{shop_id}_{interaction.customerId}",
                                 "itemId": f"shop_{shop_id}_{interaction.productId}",
                                 "timestamp": interaction.lastComputedAt.isoformat(),
@@ -869,6 +922,134 @@ class UnifiedGorseService:
         except Exception as e:
             logger.error(
                 f"Failed to sync search product features for shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def _sync_collection_features_to_gorse(
+        self, shop_id: str, since_time: Optional[datetime] = None
+    ) -> int:
+        """Sync collection features to Gorse as collection-based items"""
+        try:
+            db = await self._get_database()
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Stream collection features in batches
+                if since_time:
+                    collections = await db.collectionfeatures.find_many(
+                        where={
+                            "shopId": shop_id,
+                            "lastComputedAt": {"gte": since_time},
+                        },
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+                else:
+                    collections = await db.collectionfeatures.find_many(
+                        where={"shopId": shop_id},
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+
+                if not collections:
+                    break
+
+                # Convert collection features to Gorse items using transformers
+                items_batch = []
+                for collection in collections:
+                    # Use transformer to convert collection features to Gorse item
+                    collection_item = (
+                        self.transformers.transform_collection_features_to_item(
+                            collection, shop_id
+                        )
+                    )
+                    if collection_item:
+                        items_batch.append(collection_item)
+
+                # Push items to Gorse API
+                if items_batch:
+                    await self.gorse_client.insert_items_batch(items_batch)
+                    total_synced += len(items_batch)
+
+                # Check if we got fewer records than batch size (end of data)
+                if len(collections) < self.batch_size:
+                    break
+
+                offset += self.batch_size
+
+            logger.info(f"Synced {total_synced} collection features to Gorse")
+            return total_synced
+
+        except Exception as e:
+            logger.error(
+                f"Failed to sync collection features for shop {shop_id}: {str(e)}"
+            )
+            return 0
+
+    async def _sync_customer_behavior_features_to_gorse(
+        self, shop_id: str, since_time: Optional[datetime] = None
+    ) -> int:
+        """Sync customer behavior features to Gorse as enhanced user features"""
+        try:
+            db = await self._get_database()
+            total_synced = 0
+            offset = 0
+
+            while True:
+                # Stream customer behavior features in batches
+                if since_time:
+                    behaviors = await db.customerbehaviorfeatures.find_many(
+                        where={
+                            "shopId": shop_id,
+                            "lastComputedAt": {"gte": since_time},
+                        },
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+                else:
+                    behaviors = await db.customerbehaviorfeatures.find_many(
+                        where={"shopId": shop_id},
+                        skip=offset,
+                        take=self.batch_size,
+                        order={"lastComputedAt": "asc"},
+                    )
+
+                if not behaviors:
+                    break
+
+                # Convert customer behavior features to enhanced user features using transformers
+                users_batch = []
+                for behavior in behaviors:
+                    # Use transformer to convert behavior features to enhanced user features
+                    enhanced_user = (
+                        self.transformers.transform_customer_behavior_to_user_features(
+                            behavior, shop_id
+                        )
+                    )
+                    if enhanced_user:
+                        users_batch.append(enhanced_user)
+
+                # Push enhanced users to Gorse API
+                if users_batch:
+                    await self.gorse_client.insert_users_batch(users_batch)
+                    total_synced += len(users_batch)
+
+                # Check if we got fewer records than batch size (end of data)
+                if len(behaviors) < self.batch_size:
+                    break
+
+                offset += self.batch_size
+
+            logger.info(f"Synced {total_synced} customer behavior features to Gorse")
+            return total_synced
+
+        except Exception as e:
+            logger.error(
+                f"Failed to sync customer behavior features for shop {shop_id}: {str(e)}"
             )
             return 0
 

@@ -6,36 +6,36 @@ import {
   useApi,
   Divider,
   useAuthenticatedAccountCustomer,
-  useShop,
 } from "@shopify/ui-extensions-react/customer-account";
 import { ProductRecommendations } from "./components/ProductRecommendations";
 
 export default reactExtension(
-  "customer-account.order-status.block.render",
-  () => <OrderStatusWithRecommendations />,
+  "customer-account.order-index.block.render",
+  () => <OrderIndexWithRecommendations />,
 );
 
-function OrderStatusWithRecommendations() {
-  const { i18n } = useApi();
+function OrderIndexWithRecommendations() {
+  const api = useApi();
   const { id: customerId } = useAuthenticatedAccountCustomer();
-  const { myshopifyDomain } = useShop();
+  const { i18n } = api;
 
   return (
     <BlockStack spacing="base">
+      {/* Promotional banner for order index */}
       <Banner>
         <BlockStack inlineAlignment="center">
-          <TextBlock>{i18n.translate("earnPoints")}</TextBlock>
+          <TextBlock>{i18n.translate("discoverMoreProducts")}</TextBlock>
         </BlockStack>
       </Banner>
 
       <Divider />
 
+      {/* Product recommendations optimized for order history context */}
       <ProductRecommendations
-        context="order_status"
-        title={i18n.translate("completeYourLook")}
-        limit={4}
-        category="complementary"
-        shopDomain={myshopifyDomain}
+        context="order_history"
+        title={i18n.translate("trendingInYourOrders")}
+        limit={6}
+        category="trending"
         customerId={customerId}
       />
     </BlockStack>
