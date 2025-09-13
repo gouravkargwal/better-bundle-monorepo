@@ -29,6 +29,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           shopDomain: session.shop,
           accessToken: "", // Will be updated by session storage
           isActive: true,
+          customDomain: null, // Will be updated when shop data is fetched
         },
       });
     }

@@ -139,6 +139,18 @@ class ProductEnrichment:
             )
             db = await self.get_database()
 
+            # Get shop details to determine the correct domain for product URLs
+            shop = await db.shop.find_unique(
+                where={"id": shop_id}, select={"shopDomain": True, "customDomain": True}
+            )
+
+            # Use custom domain if available, otherwise fall back to myshopify domain
+            product_domain = (
+                shop.customDomain
+                if shop and shop.customDomain
+                else (shop.shopDomain if shop else "unknown-shop.myshopify.com")
+            )
+
             # Strip prefixes from Gorse item IDs to match database format
             # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
             # Database uses: 7903465537675
@@ -210,6 +222,7 @@ class ProductEnrichment:
                             "id": product.productId,
                             "title": product.title,
                             "handle": product.handle,
+                            "url": f"https://{product_domain}/products/{product.handle}",
                             "price": {
                                 "amount": str(product.price),
                                 "currency_code": "USD",  # TODO: Get from shop settings
@@ -1117,87 +1130,6 @@ async def debug_check_missing_products(shop_id: str, product_ids: str):
         return {"error": str(e), "shop_id": shop_id}
 
 
-async def get_fallback_recommendations(
-    shop_id: str, n: int = 10, category: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """
-    Get fallback recommendations when Gorse is unavailable
-
-    Args:
-        shop_id: Shop ID
-        n: Number of recommendations
-        category: Optional category filter
-
-    Returns:
-        List of fallback recommendations
-    """
-    try:
-        logger.debug(
-            f"🔄 Getting fallback recommendations | shop_id={shop_id} | n={n} | category={category}"
-        )
-        db = await get_database()
-
-        # Build where clause
-        where_clause = {
-            "shopId": shop_id,
-            "isActive": True,
-            "totalInventory": {"gt": 0},
-        }
-
-        if category:
-            where_clause["productType"] = category
-
-        # Get popular products as fallback
-        products = await db.productdata.find_many(
-            where=where_clause,
-            take=n,
-            order_by={"totalInventory": "desc"},
-            select={
-                "productId": True,
-                "title": True,
-                "handle": True,
-                "price": True,
-                "compareAtPrice": True,
-                "imageUrl": True,
-                "imageAlt": True,
-                "totalInventory": True,
-                "status": True,
-                "productType": True,
-                "vendor": True,
-            },
-        )
-
-        logger.info(
-            f"📊 Fallback query complete | found_products={len(products)} | requested={n} | category={category}"
-        )
-
-        return [
-            {
-                "item_id": p["productId"],
-                "product_id": p["productId"],
-                "title": p["title"],
-                "handle": p["handle"],
-                "price": p["price"],
-                "compare_at_price": p["compareAtPrice"],
-                "image_url": p["imageUrl"],
-                "image_alt": p["imageAlt"],
-                "inventory": p["totalInventory"],
-                "status": p["status"],
-                "product_type": p["productType"],
-                "vendor": p["vendor"],
-                "available": (
-                    p["totalInventory"] > 0 if p["totalInventory"] is not None else True
-                ),
-                "source": "fallback",
-            }
-            for p in products
-        ]
-
-    except Exception as e:
-        logger.error(f"💥 Failed to get fallback recommendations: {str(e)}")
-        return []
-
-
 # Context-based routing logic
 FALLBACK_LEVELS = {
     "product_page": [
@@ -1407,16 +1339,11 @@ async def execute_fallback_chain(
             )
             continue
 
-    # All levels failed, use database fallback
+    # All levels failed, return empty results
     logger.warning(
-        f"❌ All fallback levels failed | context={context} | using database fallback"
+        f"❌ All recommendation levels failed | context={context} | returning empty results"
     )
-    fallback_items = await get_fallback_recommendations(shop_id, limit, category)
-    logger.info(
-        f"📊 Database fallback complete | items={len(fallback_items)} | context={context}"
-    )
-
-    return {"success": True, "items": fallback_items, "source": "database_fallback"}
+    return {"success": False, "items": [], "source": "all_failed"}
 
 
 @router.post("/", response_model=RecommendationResponse)
@@ -1611,18 +1538,16 @@ async def get_recommendations(request: RecommendationRequest):
             )
 
         if not result["success"] or not result["items"]:
-            # Final fallback: return empty recommendations
-            logger.warning(
-                f"❌ No recommendations found | success={result['success']} | items_count={len(result.get('items', []))} | returning empty response"
+            # No recommendations available - return empty results
+            logger.info(
+                f"ℹ️ No recommendations available | success={result['success']} | items_count={len(result.get('items', []))} | source={result.get('source', 'unknown')}"
             )
             return RecommendationResponse(
                 success=True,
                 recommendations=[],
                 count=0,
-                source="empty",
+                source=result.get("source", "no_recommendations"),
                 context=request.context,
-                shop_id=shop.id,
-                user_id=request.user_id,
                 timestamp=datetime.now(),
             )
 

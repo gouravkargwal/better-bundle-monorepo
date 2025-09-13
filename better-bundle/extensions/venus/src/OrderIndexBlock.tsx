@@ -26,6 +26,7 @@ export default reactExtension(
 interface Product {
   id: string;
   title: string;
+  handle: string;
   price: string;
   image: string;
   inStock: boolean;
@@ -56,6 +57,7 @@ function OrderIndexWithRecommendations() {
             (rec: ProductRecommendation) => ({
               id: rec.id,
               title: rec.title,
+              handle: rec.handle,
               price: `${rec.price.currency_code} ${rec.price.amount}`,
               image: rec.image?.url,
               inStock: rec.available ?? true,
@@ -216,7 +218,6 @@ function OrderIndexWithRecommendations() {
             "fill",
           ])
           .when({ viewportInlineSize: { min: "large" } }, [
-            "fill",
             "fill",
             "fill",
             "fill",

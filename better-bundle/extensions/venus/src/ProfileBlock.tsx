@@ -11,6 +11,8 @@ import {
   Card,
   BlockStack,
   useAuthenticatedAccountCustomer,
+  useNavigation,
+  Link,
 } from "@shopify/ui-extensions-react/customer-account";
 import { useState, useEffect } from "react";
 import {
@@ -25,6 +27,7 @@ export default reactExtension("customer-account.profile.block.render", () => (
 interface Product {
   id: string;
   title: string;
+  handle: string;
   price: string;
   image: string;
   inStock: boolean;
@@ -35,7 +38,7 @@ function ProfileBlock() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-
+  const { navigate } = useNavigation();
   // Fetch real product recommendations
   useEffect(() => {
     const fetchRecommendations = async () => {
@@ -55,6 +58,7 @@ function ProfileBlock() {
             (rec: ProductRecommendation) => ({
               id: rec.id,
               title: rec.title,
+              handle: rec.handle,
               price: `${rec.price.currency_code} ${rec.price.amount}`,
               image: rec.image?.url,
               inStock: rec.available ?? true,
@@ -74,7 +78,7 @@ function ProfileBlock() {
     };
 
     fetchRecommendations();
-  }, []);
+  }, [customerId]);
 
   // Loading skeleton component
   const SkeletonCard = () => (
@@ -295,8 +299,21 @@ function ProfileBlock() {
                 </TextBlock>
               </BlockStack>
               <Grid columns={["fill", "fill"]} spacing="tight">
-                <Button kind="primary">View Product</Button>
-                <Button kind="secondary">Add to Cart</Button>
+                <Link to={`/products/${product.handle}`}>View Product</Link>
+                <Button
+                  kind="secondary"
+                  onPress={() => {
+                    // Add to cart functionality
+                    console.log(
+                      "Add to cart:",
+                      product.id,
+                      "handle:",
+                      product.handle,
+                    );
+                  }}
+                >
+                  Add to Cart
+                </Button>
               </Grid>
             </Grid>
           </Card>

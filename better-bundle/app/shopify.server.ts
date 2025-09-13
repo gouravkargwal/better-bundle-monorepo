@@ -163,17 +163,61 @@ const shopify = shopifyApp({
 
       const myshopifyDomain = session.shop;
       try {
+        // Fetch shop details including custom domain from Shopify API
+        console.log("🔍 Fetching shop details from Shopify API");
+        const shopResponse = await admin.graphql(`
+          query {
+            shop {
+              id
+              name
+              myshopifyDomain
+              primaryDomain {
+                host
+                url
+              }
+              email
+              currencyCode
+              plan {
+                displayName
+              }
+            }
+          }
+        `);
+
+        const shopData = await shopResponse.json();
+        const shop = shopData.data?.shop;
+
+        if (!shop) {
+          throw new Error("Failed to fetch shop data from Shopify API");
+        }
+
+        // Extract custom domain (primary domain if different from myshopify domain)
+        const customDomain =
+          shop.primaryDomain?.host !== shop.myshopifyDomain
+            ? shop.primaryDomain?.host
+            : null;
+
         console.log("📝 Creating/updating shop record for:", myshopifyDomain);
+        console.log("🌐 Custom domain:", customDomain || "Not set");
+
         await prisma.shop.upsert({
           where: { shopDomain: myshopifyDomain },
           update: {
             isActive: true,
             accessToken: (session as any).accessToken ?? "",
+            customDomain: customDomain,
+            email: shop.email,
+            currencyCode: shop.currencyCode,
+            planType: shop.plan?.displayName || "Free",
           },
           create: {
             shopDomain: myshopifyDomain,
             accessToken: (session as any).accessToken ?? "",
             isActive: true,
+            customDomain: customDomain,
+            email: shop.email,
+            currencyCode: shop.currencyCode,
+            planType: shop.plan?.displayName || "Free",
           },
         });
 

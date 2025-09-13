@@ -724,6 +724,7 @@ model Session {
 model Shop {
   id                   String                   @id @default(cuid())
   shopDomain           String                   @unique @db.VarChar(255)
+  customDomain         String?                  @db.VarChar(255)
   accessToken          String                   @db.VarChar(1000)
   planType             String                   @default("Free") @db.VarChar(50)
   currencyCode         String?                  @db.VarChar(10)

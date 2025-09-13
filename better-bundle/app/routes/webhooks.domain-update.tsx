@@ -1,0 +1,76 @@
+import type { ActionFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin, session } = await authenticate.webhook(request);
+
+  if (!admin || !session) {
+    return json({ error: "Authentication failed" }, { status: 401 });
+  }
+
+  try {
+    const body = await request.json();
+    console.log("🔔 Domain update webhook received:", body);
+
+    // Fetch current shop details from Shopify API to get the latest domain info
+    const shopResponse = await admin.graphql(`
+      query {
+        shop {
+          id
+          myshopifyDomain
+          primaryDomain {
+            host
+            url
+          }
+        }
+      }
+    `);
+
+    const shopData = await shopResponse.json();
+    const shop = shopData.data?.shop;
+
+    if (!shop) {
+      throw new Error("Failed to fetch shop data from Shopify API");
+    }
+
+    // Extract custom domain (primary domain if different from myshopify domain)
+    const customDomain =
+      shop.primaryDomain?.host !== shop.myshopifyDomain
+        ? shop.primaryDomain?.host
+        : null;
+
+    // Update the shop record with the new custom domain
+    const updatedShop = await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: {
+        customDomain: customDomain,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(
+      "✅ Webhook updated custom domain for shop:",
+      session.shop,
+      "to:",
+      customDomain,
+    );
+
+    return json({
+      success: true,
+      shopDomain: session.shop,
+      customDomain: customDomain,
+    });
+  } catch (error) {
+    console.error("❌ Error processing domain update webhook:", error);
+    return json(
+      {
+        success: false,
+        error: "Failed to process domain update webhook",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    );
+  }
+};
