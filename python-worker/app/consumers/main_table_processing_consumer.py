@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.consumers.base_consumer import BaseConsumer
-from app.shared.constants.redis import DATA_JOB_STREAM, DATA_PROCESSOR_GROUP
+from app.shared.constants.redis import DATA_JOB_STREAM, MAIN_TABLE_PROCESSOR_GROUP
 from app.domains.shopify.services.main_table_storage import MainTableStorageService
 from app.core.logging import get_logger
 
@@ -22,7 +22,7 @@ class MainTableProcessingConsumer(BaseConsumer):
     def __init__(self):
         super().__init__(
             stream_name=DATA_JOB_STREAM,
-            consumer_group=DATA_PROCESSOR_GROUP,
+            consumer_group=MAIN_TABLE_PROCESSOR_GROUP,
             consumer_name="main-table-processing-consumer",
             batch_size=3,  # Process fewer jobs as main table processing is resource-intensive
             poll_timeout=2000,  # 2 second timeout

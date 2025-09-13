@@ -20,6 +20,7 @@ GORSE_SYNC_STREAM = "betterbundle:gorse-sync"
 
 # Consumer Group Names
 DATA_PROCESSOR_GROUP = "data-processors"
+MAIN_TABLE_PROCESSOR_GROUP = "main-table-processors"
 FEATURES_CONSUMER_GROUP = "data-processors"
 ML_TRAINING_GROUP = "ml-training-consumers"
 HEURISTIC_DECISION_GROUP = "heuristic-decision-processors"
@@ -54,6 +55,7 @@ __all__ = [
     "BEHAVIORAL_EVENTS_STREAM",
     "GORSE_SYNC_STREAM",
     "DATA_PROCESSOR_GROUP",
+    "MAIN_TABLE_PROCESSOR_GROUP",
     "FEATURES_CONSUMER_GROUP",
     "ML_TRAINING_GROUP",
     "HEURISTIC_DECISION_GROUP",

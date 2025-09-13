@@ -148,7 +148,7 @@ class ProductEnrichment:
             product_domain = (
                 shop.customDomain
                 if shop and shop.customDomain
-                else (shop.shopDomain if shop else "unknown-shop.myshopify.com")
+                else (shop.shopDomain if shop else None)
             )
 
             # Strip prefixes from Gorse item IDs to match database format
@@ -1370,15 +1370,19 @@ async def get_recommendations(request: RecommendationRequest):
             if shop_domain:
                 request.shop_domain = shop_domain
             else:
-                logger.warning(
-                    f"⚠️ Could not find shop_domain for customer {request.user_id}, using fallback"
+                logger.error(
+                    f"❌ Could not find shop_domain for customer {request.user_id}"
                 )
-                shop_domain = "demo-shop"
-                request.shop_domain = shop_domain
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not determine shop domain for customer {request.user_id}. Please provide shop_domain in request.",
+                )
         elif not shop_domain:
-            logger.warning("⚠️ No shop_domain or user_id provided, using fallback")
-            shop_domain = "demo-shop"
-            request.shop_domain = shop_domain
+            logger.error("❌ No shop_domain or user_id provided")
+            raise HTTPException(
+                status_code=400,
+                detail="Either shop_domain or user_id must be provided to determine the shop.",
+            )
 
         logger.info(
             f"📊 Recommendation request received | shop={request.shop_domain} | context={request.context} | user_id={request.user_id} | product_id={request.product_id} | limit={request.limit}"

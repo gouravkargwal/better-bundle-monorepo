@@ -35,6 +35,7 @@ from app.shared.constants.redis import (
     BEHAVIORAL_EVENTS_STREAM,
     GORSE_SYNC_STREAM,
     DATA_PROCESSOR_GROUP,
+    MAIN_TABLE_PROCESSOR_GROUP,
     FEATURES_CONSUMER_GROUP,
     ML_TRAINING_GROUP,
     HEURISTIC_DECISION_GROUP,
@@ -92,6 +93,9 @@ class RedisSettings(BaseSettings):
     # Consumer Group Names
     DATA_PROCESSOR_GROUP: str = Field(
         default=DATA_PROCESSOR_GROUP, env="DATA_PROCESSOR_GROUP"
+    )
+    MAIN_TABLE_PROCESSOR_GROUP: str = Field(
+        default=MAIN_TABLE_PROCESSOR_GROUP, env="MAIN_TABLE_PROCESSOR_GROUP"
     )
     FEATURES_CONSUMER_GROUP: str = Field(
         default=FEATURES_CONSUMER_GROUP, env="FEATURES_CONSUMER_GROUP"

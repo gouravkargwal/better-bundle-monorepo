@@ -742,7 +742,8 @@ class MainTableStorageService:
             self.logger.info(f"Concurrent storage completed in {duration_ms}ms")
 
             # Publish event to trigger feature computation if storage was successful
-            if total_errors == 0 and total_processed > 0:
+            # Trigger even if no new data was processed (incremental processing might have no new data)
+            if total_errors == 0:
                 await self._publish_feature_computation_event(
                     shop_id, total_processed, duration_ms
                 )
