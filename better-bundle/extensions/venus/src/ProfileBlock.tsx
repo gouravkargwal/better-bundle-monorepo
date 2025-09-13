@@ -11,7 +11,6 @@ import {
   Card,
   BlockStack,
   useAuthenticatedAccountCustomer,
-  useNavigation,
   Link,
 } from "@shopify/ui-extensions-react/customer-account";
 import { useState, useEffect } from "react";
@@ -31,6 +30,7 @@ interface Product {
   price: string;
   image: string;
   inStock: boolean;
+  url: string;
 }
 
 function ProfileBlock() {
@@ -38,7 +38,6 @@ function ProfileBlock() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const { navigate } = useNavigation();
   // Fetch real product recommendations
   useEffect(() => {
     const fetchRecommendations = async () => {
@@ -62,6 +61,7 @@ function ProfileBlock() {
               price: `${rec.price.currency_code} ${rec.price.amount}`,
               image: rec.image?.url,
               inStock: rec.available ?? true,
+              url: rec.url,
             }),
           );
 
@@ -196,8 +196,8 @@ function ProfileBlock() {
     );
   }
 
-  // Don't render anything if there's an error
-  if (error) {
+  // Don't render anything if there's an error or no products
+  if (error || products.length === 0) {
     return null;
   }
 
@@ -299,7 +299,7 @@ function ProfileBlock() {
                 </TextBlock>
               </BlockStack>
               <Grid columns={["fill", "fill"]} spacing="tight">
-                <Link to={`/products/${product.handle}`}>View Product</Link>
+                <Link to={product.url}>View Product</Link>
                 <Button
                   kind="secondary"
                   onPress={() => {

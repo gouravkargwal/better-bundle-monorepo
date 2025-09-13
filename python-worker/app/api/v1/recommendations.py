@@ -139,9 +139,10 @@ class ProductEnrichment:
             )
             db = await self.get_database()
 
-            # Get shop details to determine the correct domain for product URLs
+            # Get shop details to determine the correct domain for product URLs and currency
             shop = await db.shop.find_unique(
-                where={"id": shop_id}, select={"shopDomain": True, "customDomain": True}
+                where={"id": shop_id},
+                select={"shopDomain": True, "customDomain": True, "currencyCode": True},
             )
 
             # Use custom domain if available, otherwise fall back to myshopify domain
@@ -225,7 +226,11 @@ class ProductEnrichment:
                             "url": f"https://{product_domain}/products/{product.handle}",
                             "price": {
                                 "amount": str(product.price),
-                                "currency_code": "USD",  # TODO: Get from shop settings
+                                "currency_code": (
+                                    shop.currencyCode
+                                    if shop and shop.currencyCode
+                                    else "USD"
+                                ),
                             },
                             "image": (
                                 {
@@ -385,7 +390,7 @@ class RecommendationCacheService:
         "product_page": 1800,  # 30 minutes (product-specific)
         "homepage": 3600,  # 1 hour (general)
         "cart": 300,  # 5 minutes (dynamic)
-        "profile": 900,  # 15 minutes (user-specific)
+        "profile": 0,  # 15 minutes (user-specific)
         "checkout": 0,  # No cache (fast, fresh)
         "order_history": 0,  # Temporarily disable caching
         "order_status": 900,  # 15 minutes (order-specific)

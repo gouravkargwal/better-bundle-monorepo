@@ -458,16 +458,16 @@ class FeatureRepository(IFeatureRepository):
             latest_timestamp = None
             for table in feature_tables:
                 try:
-                    # Get the most recent record for this shop
+                    # Get the most recent record for this shop based on lastComputedAt
                     latest_record = await table.find_first(
-                        where={"shopId": shop_id}, order={"createdAt": "desc"}
+                        where={"shopId": shop_id}, order={"lastComputedAt": "desc"}
                     )
-                    if latest_record and latest_record.createdAt:
+                    if latest_record and latest_record.lastComputedAt:
                         if (
                             latest_timestamp is None
-                            or latest_record.createdAt > latest_timestamp
+                            or latest_record.lastComputedAt > latest_timestamp
                         ):
-                            latest_timestamp = latest_record.createdAt
+                            latest_timestamp = latest_record.lastComputedAt
                 except Exception as e:
                     logger.warning(f"Could not check feature table {table}: {str(e)}")
                     continue

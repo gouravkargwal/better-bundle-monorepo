@@ -40,6 +40,7 @@ export interface ProductRecommendation {
   tags?: string[];
   available?: boolean;
   score?: number;
+  url?: string;
 }
 
 export interface RecommendationResponse {

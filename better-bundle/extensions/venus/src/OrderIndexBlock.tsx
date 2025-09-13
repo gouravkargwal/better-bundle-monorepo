@@ -30,6 +30,7 @@ interface Product {
   price: string;
   image: string;
   inStock: boolean;
+  url: string;
 }
 
 function OrderIndexWithRecommendations() {
@@ -61,6 +62,7 @@ function OrderIndexWithRecommendations() {
               price: `${rec.price.currency_code} ${rec.price.amount}`,
               image: rec.image?.url,
               inStock: rec.available ?? true,
+              url: rec.url,
             }),
           );
 
