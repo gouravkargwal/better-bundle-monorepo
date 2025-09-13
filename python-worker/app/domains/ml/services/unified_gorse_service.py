@@ -115,13 +115,19 @@ class UnifiedGorseService:
             )
 
             if result and result[0] and result[0][0]:
-                return result[0][0]
+                last_sync = result[0][0]
+                # Handle case where result might be 0 or other non-datetime values
+                if last_sync and last_sync != 0:
+                    return last_sync
             return None
 
         except Exception as e:
-            logger.error(
-                f"Failed to get last sync timestamp for shop {shop_id}: {str(e)}"
-            )
+            # Only log error if it's not a simple "0" result (which is normal for new shops)
+            error_msg = str(e)
+            if error_msg != "0" and "0" not in error_msg:
+                logger.error(
+                    f"Failed to get last sync timestamp for shop {shop_id}: {error_msg}"
+                )
             return None
 
     async def sync_and_train(

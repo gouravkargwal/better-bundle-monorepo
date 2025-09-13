@@ -122,11 +122,27 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 if generator.__class__.__name__ == "ProductFeatureGenerator":
                     # Get product ID mapping from context if available
                     product_id_mapping = context.get("product_id_mapping")
+
+                    # Find the specific product data for this entity
+                    product_data = {}
+                    products_list = context.get("product_data", [])
+                    current_product_id = entity.get("productId", "")
+
+                    # Find the matching product in the products list
+                    for product in products_list:
+                        if product.get("productId") == current_product_id:
+                            product_data = product
+                            break
+
+                    # Create a new context with the specific product data
+                    product_context = context.copy()
+                    product_context["product_data"] = product_data
+
                     features = await self._compute_feature_safely(
                         generator,
                         context.get("shop", {}).get("id", ""),
                         entity.get("productId", ""),
-                        context,
+                        product_context,
                         entity_id=entity_id,
                         feature_type=feature_type,
                         product_id_mapping=product_id_mapping,
@@ -670,6 +686,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             product_context = self._build_base_context(
                 shop,
+                product_data=products or [],
                 orders=orders or [],
                 collections=collections or [],
                 behavioral_events=behavioral_events or [],
@@ -786,10 +803,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if isinstance(product, dict):
                                 product_id = product.get("id")
 
-                            # Product IDs are already normalized at data ingestion level
-                            # Only add if both IDs are valid
-                            if customer_id and product_id:
-                                interaction_pairs.add((customer_id, product_id))
+                        # Product IDs are already normalized at data ingestion level
+                        # Only add if both IDs are valid
+                        if customer_id and product_id:
+                            interaction_pairs.add((customer_id, product_id))
             # Generate features for each interaction pair
             interaction_features = {}
             for customer_id, product_id in interaction_pairs:

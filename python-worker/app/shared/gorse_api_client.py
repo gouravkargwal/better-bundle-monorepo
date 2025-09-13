@@ -74,7 +74,7 @@ class GorseApiClient:
                     labels_list = labels if isinstance(labels, list) else []
 
                 gorse_user = {
-                    "UserId": user["userId"],
+                    "UserId": user.get("userId", ""),
                     "Labels": labels_list,
                     "Subscribe": user.get("subscribe", []),
                     "Comment": user.get("comment", ""),
@@ -82,20 +82,6 @@ class GorseApiClient:
                 gorse_users.append(gorse_user)
 
             url = f"{self.base_url}/api/users"
-
-            # Log detailed payload information
-            logger.info(f"=== USERS PAYLOAD DEBUG ===")
-            logger.info(f"URL: {url}")
-            logger.info(f"Total users to send: {len(gorse_users)}")
-            logger.info(f"Headers: {self._get_headers()}")
-
-            # Log sample of first few users (truncated for readability)
-            for i, user in enumerate(gorse_users[:3]):  # Show first 3 users
-                logger.info(f"User {i+1} payload: {json.dumps(user, indent=2)}")
-
-            if len(gorse_users) > 3:
-                logger.info(f"... and {len(gorse_users) - 3} more users")
-            logger.info(f"=== END USERS PAYLOAD DEBUG ===")
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -170,7 +156,7 @@ class GorseApiClient:
                     labels_list = labels if isinstance(labels, list) else []
 
                 gorse_item = {
-                    "ItemId": item["itemId"],
+                    "ItemId": item.get("itemId", ""),
                     "Categories": item.get("categories", []),
                     "Labels": labels_list,
                     "IsHidden": item.get("isHidden", False),
@@ -180,20 +166,6 @@ class GorseApiClient:
                 gorse_items.append(gorse_item)
 
             url = f"{self.base_url}/api/items"
-
-            # Log detailed payload information
-            logger.info(f"=== ITEMS PAYLOAD DEBUG ===")
-            logger.info(f"URL: {url}")
-            logger.info(f"Total items to send: {len(gorse_items)}")
-            logger.info(f"Headers: {self._get_headers()}")
-
-            # Log sample of first few items (truncated for readability)
-            for i, item in enumerate(gorse_items[:3]):  # Show first 3 items
-                logger.info(f"Item {i+1} payload: {json.dumps(item, indent=2)}")
-
-            if len(gorse_items) > 3:
-                logger.info(f"... and {len(gorse_items) - 3} more items")
-            logger.info(f"=== END ITEMS PAYLOAD DEBUG ===")
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -260,13 +232,13 @@ class GorseApiClient:
             gorse_feedback = []
             for fb in feedback:
                 gorse_fb = {
-                    "FeedbackType": fb["feedbackType"],
-                    "UserId": fb["userId"],
-                    "ItemId": fb["itemId"],
+                    "FeedbackType": fb.get("feedbackType", ""),
+                    "UserId": fb.get("userId", ""),
+                    "ItemId": fb.get("itemId", ""),
                     "Timestamp": (
-                        fb["timestamp"].isoformat()
-                        if isinstance(fb["timestamp"], datetime)
-                        else fb["timestamp"]
+                        fb.get("timestamp", now_utc()).isoformat()
+                        if isinstance(fb.get("timestamp", now_utc()), datetime)
+                        else fb.get("timestamp", now_utc().isoformat())
                     ),
                     "Value": fb.get("value", 1.0),
                     "Comment": fb.get("comment", ""),
@@ -274,22 +246,6 @@ class GorseApiClient:
                 gorse_feedback.append(gorse_fb)
 
             url = f"{self.base_url}/api/feedback"
-
-            # Log detailed payload information
-            logger.info(f"=== FEEDBACK PAYLOAD DEBUG ===")
-            logger.info(f"URL: {url}")
-            logger.info(f"Total feedback records to send: {len(gorse_feedback)}")
-            logger.info(f"Headers: {self._get_headers()}")
-
-            # Log sample of first few feedback records (truncated for readability)
-            for i, feedback in enumerate(
-                gorse_feedback[:3]
-            ):  # Show first 3 feedback records
-                logger.info(f"Feedback {i+1} payload: {json.dumps(feedback, indent=2)}")
-
-            if len(gorse_feedback) > 3:
-                logger.info(f"... and {len(gorse_feedback) - 3} more feedback records")
-            logger.info(f"=== END FEEDBACK PAYLOAD DEBUG ===")
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
