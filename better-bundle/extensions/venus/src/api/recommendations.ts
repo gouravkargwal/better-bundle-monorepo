@@ -1,7 +1,7 @@
 // API client for recommendation endpoints
 
 export interface RecommendationRequest {
-  shop_domain: string;
+  shop_domain?: string;
   context:
     | "product_page"
     | "homepage"

@@ -12,5 +12,16 @@
   "noRecommendationsAvailable": "No recommendations available at the moment.",
   "errorLoadingRecommendations": "Unable to load recommendations. Please try again later.",
   "viewProduct": "View Product",
-  "outOfStock": "Out of Stock"
+  "outOfStock": "Out of Stock",
+  "inStock": "In Stock",
+  "continueShopping": "Continue Shopping",
+  "basedOnYourPurchaseHistory": "Based on your purchase history",
+  "discoverSimilarProducts": "Discover similar products",
+  "handpickedJustForYou": "Handpicked just for you",
+  "trendingNow": "Trending Now",
+  "popularAmongCustomers": "Popular among customers",
+  "welcomeBack": "Welcome Back",
+  "failedToLoadRecommendations": "Failed to load recommendations",
+  "tryAgain": "Try Again",
+  "refresh": "Refresh"
 }

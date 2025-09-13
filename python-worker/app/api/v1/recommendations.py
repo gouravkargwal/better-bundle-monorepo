@@ -1529,7 +1529,9 @@ async def get_recommendations(request: RecommendationRequest):
         )
         if cached_result:
             # Extract recommendations from cached result
-            recommendations = cached_result.get("recommendations", [])
+            # The cached result has structure: {"recommendations": {"recommendations": [...], ...}, ...}
+            cached_recommendations_data = cached_result.get("recommendations", {})
+            recommendations = cached_recommendations_data.get("recommendations", [])
             logger.info(
                 f"🎯 Cache hit! Returning cached recommendations | context={request.context} | count={len(recommendations)}"
             )

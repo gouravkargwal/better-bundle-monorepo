@@ -1,14 +1,11 @@
 import {
   BlockStack,
   reactExtension,
-  TextBlock,
-  Banner,
   useApi,
   Divider,
   useAuthenticatedAccountCustomer,
   useShop,
 } from "@shopify/ui-extensions-react/customer-account";
-import { ProductRecommendations } from "./components/ProductRecommendations";
 
 export default reactExtension(
   "customer-account.order-status.block.render",
@@ -22,22 +19,7 @@ function OrderStatusWithRecommendations() {
 
   return (
     <BlockStack spacing="base">
-      <Banner>
-        <BlockStack inlineAlignment="center">
-          <TextBlock>{i18n.translate("earnPoints")}</TextBlock>
-        </BlockStack>
-      </Banner>
-
       <Divider />
-
-      <ProductRecommendations
-        context="order_status"
-        title={i18n.translate("completeYourLook")}
-        limit={4}
-        category="complementary"
-        shopDomain={myshopifyDomain}
-        customerId={customerId}
-      />
     </BlockStack>
   );
 }

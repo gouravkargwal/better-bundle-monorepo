@@ -12,5 +12,16 @@
   "noRecommendationsAvailable": "Aucune recommandation disponible pour le moment.",
   "errorLoadingRecommendations": "Impossible de charger les recommandations. Veuillez réessayer plus tard.",
   "viewProduct": "Voir le produit",
-  "outOfStock": "Rupture de stock"
+  "outOfStock": "Rupture de stock",
+  "inStock": "En stock",
+  "continueShopping": "Continuer les achats",
+  "basedOnYourPurchaseHistory": "Basé sur votre historique d'achats",
+  "discoverSimilarProducts": "Découvrez des produits similaires",
+  "handpickedJustForYou": "Sélectionné spécialement pour vous",
+  "trendingNow": "Tendances actuelles",
+  "popularAmongCustomers": "Populaire parmi les clients",
+  "welcomeBack": "Bon retour",
+  "failedToLoadRecommendations": "Échec du chargement des recommandations",
+  "tryAgain": "Réessayer",
+  "refresh": "Actualiser"
 }
