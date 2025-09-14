@@ -3,6 +3,7 @@ import {
   reactExtension,
   TextBlock,
   useAuthenticatedAccountCustomer,
+  useNavigation,
   SkeletonText,
 } from "@shopify/ui-extensions-react/customer-account";
 import { ProductGrid } from "./components/ProductGrid";
@@ -16,6 +17,7 @@ export default reactExtension(
 
 function OrderIndexWithRecommendations() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
+  const { navigate } = useNavigation();
 
   const { loading, products, error, trackRecommendationClick, columnConfig } =
     useRecommendations({
@@ -29,6 +31,21 @@ function OrderIndexWithRecommendations() {
         large: 3, // 3 columns on large screens
       },
     });
+
+  // Override trackRecommendationClick to include navigation
+  const handleShopNow = (
+    productId: string,
+    position: number,
+    productUrl: string,
+  ) => {
+    const urlWithAttribution = trackRecommendationClick(
+      productId,
+      position,
+      productUrl,
+    );
+    // Navigate to product page with attribution parameters immediately
+    navigate(urlWithAttribution);
+  };
 
   if (loading) {
     return (
@@ -57,7 +74,7 @@ function OrderIndexWithRecommendations() {
       </BlockStack>
       <ProductGrid
         products={products}
-        onShopNow={trackRecommendationClick}
+        onShopNow={handleShopNow}
         columns={columnConfig}
       />
     </BlockStack>

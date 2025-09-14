@@ -198,6 +198,7 @@ class AttributionExtractor:
     ) -> None:
         """
         Link all attribution events for this customer to the completed order
+        and create RecommendationAttributions records for revenue tracking
 
         Args:
             shop_id: Shop ID
@@ -206,12 +207,25 @@ class AttributionExtractor:
             event_data: Full event data containing order information
         """
         try:
-            # Extract order ID from the checkout_completed event
+            # Extract order ID and revenue data from the checkout_completed event
             order_id = None
+            total_price = 0.0
+            currency_code = "USD"
+            line_items = []
+            
             if "data" in event_data and "checkout" in event_data["data"]:
                 checkout_data = event_data["data"]["checkout"]
                 if "order" in checkout_data and "id" in checkout_data["order"]:
                     order_id = checkout_data["order"]["id"]
+                
+                if "totalPrice" in checkout_data and "amount" in checkout_data["totalPrice"]:
+                    total_price = float(checkout_data["totalPrice"]["amount"])
+                
+                if "currencyCode" in checkout_data:
+                    currency_code = checkout_data["currencyCode"]
+                
+                if "lineItems" in checkout_data:
+                    line_items = checkout_data["lineItems"]
 
             if not order_id:
                 logger.warning("No order ID found in checkout_completed event")
@@ -241,8 +255,91 @@ class AttributionExtractor:
 
             logger.info(f"Linked {linked_count} attribution events to order {order_id}")
 
+            # Create RecommendationAttributions records for revenue tracking
+            await self._create_recommendation_attributions(
+                shop_id, order_id, attribution_events, line_items, total_price, currency_code
+            )
+
         except Exception as e:
             logger.error(f"Failed to link attribution to order: {e}")
+
+    async def _create_recommendation_attributions(
+        self,
+        shop_id: str,
+        order_id: str,
+        attribution_events: list,
+        line_items: list,
+        total_price: float,
+        currency_code: str,
+    ) -> None:
+        """
+        Create RecommendationAttributions records for revenue tracking
+
+        Args:
+            shop_id: Shop ID
+            order_id: Order ID
+            attribution_events: List of attribution events linked to this order
+            line_items: Order line items
+            total_price: Total order price
+            currency_code: Currency code
+        """
+        try:
+            if not attribution_events:
+                logger.warning(f"No attribution events found for order {order_id}")
+                return
+
+            # Create a map of product_id to revenue for this order
+            product_revenue_map = {}
+            for item in line_items:
+                if "variant" in item and "product" in item["variant"]:
+                    product_id = item["variant"]["product"]["id"]
+                    if "finalLinePrice" in item and "amount" in item["finalLinePrice"]:
+                        revenue = float(item["finalLinePrice"]["amount"])
+                        product_revenue_map[product_id] = revenue
+
+            # If no line item revenue found, distribute total price equally among attributed products
+            if not product_revenue_map and attribution_events:
+                revenue_per_product = total_price / len(attribution_events)
+                for event in attribution_events:
+                    product_revenue_map[event.productId] = revenue_per_product
+
+            # Create RecommendationAttributions for each attribution event
+            created_count = 0
+            for event in attribution_events:
+                # Get revenue for this product
+                product_revenue = product_revenue_map.get(event.productId, 0.0)
+                
+                if product_revenue > 0:
+                    try:
+                        # Create RecommendationAttribution record
+                        await self.db.recommendationattribution.create(
+                            data={
+                                "shopId": shop_id,
+                                "sessionId": event.sessionId,
+                                "productId": event.productId,
+                                "orderId": order_id,
+                                "extensionType": "venus",  # Default to venus extension
+                                "context": "profile",  # Default context, could be extracted from session
+                                "position": event.position,
+                                "revenue": product_revenue,
+                                "attributionSource": "customer_behavior",
+                                "confidenceScore": 1.0,
+                                "attributionDate": datetime.utcnow(),
+                                "status": "confirmed",
+                            }
+                        )
+                        created_count += 1
+                        logger.info(
+                            f"Created RecommendationAttribution: order {order_id}, "
+                            f"product {event.productId}, revenue {product_revenue} {currency_code}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to create RecommendationAttribution for product {event.productId}: {e}")
+
+            logger.info(f"Created {created_count} RecommendationAttributions for order {order_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to create recommendation attributions: {e}")
 
     async def _resolve_short_ref_to_session_id(
         self, short_ref: str, shop_id: str

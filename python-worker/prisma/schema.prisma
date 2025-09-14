@@ -1142,6 +1142,8 @@ model RecommendationSession {
   @@unique([shopId, sessionId, extensionType, context])
   @@index([shopId, extensionType])
   @@index([shopId, context])
+  @@index([shopId, createdAt])  // For dashboard date range queries
+  @@index([shopId, context, createdAt])  // For context performance with date ranges
   @@index([expiresAt])
   @@map("RecommendationSessions")
 }
@@ -1163,6 +1165,9 @@ model RecommendationInteraction {
   @@index([sessionId])
   @@index([productId])
   @@index([interactionType])
+  @@index([sessionId, interactionType])  // For session-based filtering
+  @@index([productId, interactionType])  // For product performance queries
+  @@index([timestamp])  // For time-based queries
   @@map("RecommendationInteractions")
 }
 
@@ -1183,8 +1188,10 @@ model AttributionEvent {
   shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   
   @@index([shopId, customerId])
+  @@index([shopId, createdAt])  // For date range queries
   @@index([sessionId])
   @@index([orderId])
+  @@index([eventType])  // For event type filtering
   @@map("AttributionEvents")
 }
 
@@ -1208,6 +1215,9 @@ model RecommendationAttribution {
   
   @@unique([orderId, productId]) // One attribution per product per order
   @@index([shopId, attributionDate])
+  @@index([shopId, status, attributionDate])  // For confirmed revenue queries
+  @@index([shopId, context, attributionDate])  // For context performance
+  @@index([shopId, productId, attributionDate])  // For product revenue queries
   @@index([sessionId])
   @@map("RecommendationAttributions")
 }

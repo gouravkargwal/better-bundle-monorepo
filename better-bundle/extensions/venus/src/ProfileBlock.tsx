@@ -32,14 +32,18 @@ function ProfileBlock() {
     });
 
   // Override trackRecommendationClick to include navigation
-  const handleShopNow = async (
+  const handleShopNow = (
     productId: string,
     position: number,
     productUrl: string,
   ) => {
-    await trackRecommendationClick(productId, position, productUrl);
-    // Navigate to product page (ProfileBlock specific)
-    navigate(productUrl);
+    const urlWithAttribution = trackRecommendationClick(
+      productId,
+      position,
+      productUrl,
+    );
+    // Navigate to product page with attribution parameters immediately
+    navigate(urlWithAttribution);
   };
 
   if (loading) {

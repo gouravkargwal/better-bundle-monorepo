@@ -54,13 +54,14 @@ export function useRecommendations({
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
 
-  const trackRecommendationClick = async (
+  const trackRecommendationClick = (
     productId: string,
     position: number,
     productUrl: string,
-  ) => {
-    try {
-      await analyticsApi.trackInteraction({
+  ): string => {
+    // Track interaction in background (non-blocking)
+    analyticsApi
+      .trackInteraction({
         session_id: sessionId,
         product_id: productId,
         interaction_type: "click",
@@ -68,32 +69,34 @@ export function useRecommendations({
         extension_type: "venus",
         context,
         metadata: { source: `${context}_recommendation` },
+      })
+      .catch((error) => {
+        console.error(`Failed to track ${context} click:`, error);
       });
 
-      // Add attribution parameters to track recommendation source
-      const shortRef = sessionId
-        .split("")
-        .reduce((hash, char) => {
-          return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
-        }, 0)
-        .toString(36)
-        .substring(0, 6);
+    // Add attribution parameters to track recommendation source
+    const shortRef = sessionId
+      .split("")
+      .reduce((hash, char) => {
+        return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
+      }, 0)
+      .toString(36)
+      .substring(0, 6);
 
-      const attributionParams = new URLSearchParams({
-        ref: shortRef,
-        src: productId,
-        pos: position.toString(),
-      });
+    const attributionParams = new URLSearchParams({
+      ref: shortRef,
+      src: productId,
+      pos: position.toString(),
+    });
 
-      // Navigate to product page with attribution
-      const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
-      console.log(
-        `${context} recommendation clicked:`,
-        productUrlWithAttribution,
-      );
-    } catch (error) {
-      console.error(`Failed to track ${context} click:`, error);
-    }
+    // Return product page URL with attribution immediately
+    const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
+    console.log(
+      `${context} recommendation clicked:`,
+      productUrlWithAttribution,
+    );
+
+    return productUrlWithAttribution;
   };
 
   // Fetch recommendations
