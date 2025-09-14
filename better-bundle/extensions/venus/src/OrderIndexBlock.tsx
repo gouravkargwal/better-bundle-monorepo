@@ -5,161 +5,30 @@ import {
   useAuthenticatedAccountCustomer,
   SkeletonText,
 } from "@shopify/ui-extensions-react/customer-account";
-import { useEffect, useState, useMemo } from "react";
-import {
-  recommendationApi,
-  type ProductRecommendation,
-} from "./api/recommendations";
-import { analyticsApi, type ViewedProduct } from "./api/analytics";
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
-
-// Attribution tracking interface
-interface AttributionData {
-  sessionId: string;
-  productId: string;
-  extensionType: string;
-  context: string;
-  position: number;
-  timestamp: string;
-}
+import { useRecommendations } from "./hooks/useRecommendations";
 
 export default reactExtension(
   "customer-account.order-index.block.render",
   () => <OrderIndexWithRecommendations />,
 );
 
-interface Product {
-  id: string;
-  title: string;
-  handle: string;
-  price: string;
-  image: string;
-  inStock: boolean;
-  url: string;
-}
-
 function OrderIndexWithRecommendations() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
-  const [loading, setLoading] = useState(true);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [sessionId] = useState(
-    () =>
-      `venus_order_index_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-  );
 
-  // Memoized column configuration for better performance
-  const columnConfig = useMemo(
-    () => ({
-      extraSmall: 1, // 1 column on very small screens
-      small: 2, // 2 columns on small screens
-      medium: 3, // 3 columns on medium screens
-      large: 3, // 3 columns on large screens
-    }),
-    [],
-  );
-
-  const trackRecommendationClick = async (
-    productId: string,
-    position: number,
-    productUrl: string,
-  ) => {
-    try {
-      await analyticsApi.trackInteraction({
-        session_id: sessionId,
-        product_id: productId,
-        interaction_type: "click",
-        position,
-        extension_type: "venus",
-        context: "order_index",
-        metadata: { source: "order_index_recommendation" },
-      });
-
-      // Add attribution parameters to track recommendation source
-      const shortRef = sessionId
-        .split("")
-        .reduce((hash, char) => {
-          return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
-        }, 0)
-        .toString(36)
-        .substring(0, 6);
-
-      const attributionParams = new URLSearchParams({
-        ref: shortRef,
-        src: productId,
-        pos: position.toString(),
-      });
-
-      // Navigate to product page with attribution
-      const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
-      console.log(
-        "Order index recommendation clicked:",
-        productUrlWithAttribution,
-      );
-    } catch (error) {
-      console.error("Failed to track order index click:", error);
-    }
-  };
-
-  // Fetch real product recommendations
-  useEffect(() => {
-    const fetchRecommendations = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response = await recommendationApi.getRecommendations({
-          context: "order_history",
-          limit: 6,
-          user_id: customerId,
-        });
-
-        if (response.success && response.recommendations) {
-          // Transform API response to component format
-          const transformedProducts: Product[] = response.recommendations.map(
-            (rec: ProductRecommendation) => ({
-              id: rec.id,
-              title: rec.title,
-              handle: rec.handle,
-              price: `${rec.price.currency_code} ${rec.price.amount}`,
-              image: rec.image?.url,
-              inStock: rec.available ?? true,
-              url: rec.url,
-            }),
-          );
-
-          setProducts(transformedProducts);
-
-          // Create recommendation session with viewed products
-          const viewedProducts: ViewedProduct[] = transformedProducts.map(
-            (product, index) => ({
-              product_id: product.id,
-              position: index + 1,
-            }),
-          );
-
-          await analyticsApi.createSession({
-            extension_type: "venus",
-            context: "order_index",
-            user_id: customerId,
-            session_id: sessionId,
-            viewed_products: viewedProducts,
-            metadata: { source: "order_index_page" },
-          });
-        } else {
-          throw new Error("Failed to fetch recommendations");
-        }
-      } catch (err) {
-        console.error("Error fetching recommendations:", err);
-        setError("Failed to load recommendations");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRecommendations();
-  }, [customerId]);
+  const { loading, products, error, trackRecommendationClick, columnConfig } =
+    useRecommendations({
+      context: "order_history",
+      limit: 6,
+      customerId,
+      columnConfig: {
+        extraSmall: 1, // 1 column on very small screens
+        small: 2, // 2 columns on small screens
+        medium: 3, // 3 columns on medium screens
+        large: 3, // 3 columns on large screens
+      },
+    });
 
   if (loading) {
     return (
