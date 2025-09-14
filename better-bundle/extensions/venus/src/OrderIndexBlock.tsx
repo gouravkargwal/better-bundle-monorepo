@@ -3,20 +3,16 @@ import {
   reactExtension,
   TextBlock,
   useAuthenticatedAccountCustomer,
-  Card,
-  Grid,
-  View,
-  Style,
   SkeletonText,
-  SkeletonImage,
-  Button,
-  Image,
 } from "@shopify/ui-extensions-react/customer-account";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   recommendationApi,
   type ProductRecommendation,
 } from "./api/recommendations";
+import { analyticsApi, type ViewedProduct } from "./api/analytics";
+import { ProductGrid } from "./components/ProductGrid";
+import { SkeletonGrid } from "./components/SkeletonGrid";
 
 // Attribution tracking interface
 interface AttributionData {
@@ -48,6 +44,63 @@ function OrderIndexWithRecommendations() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId] = useState(
+    () =>
+      `venus_order_index_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  );
+
+  // Memoized column configuration for better performance
+  const columnConfig = useMemo(
+    () => ({
+      extraSmall: 1, // 1 column on very small screens
+      small: 2, // 2 columns on small screens
+      medium: 3, // 3 columns on medium screens
+      large: 3, // 3 columns on large screens
+    }),
+    [],
+  );
+
+  const trackRecommendationClick = async (
+    productId: string,
+    position: number,
+    productUrl: string,
+  ) => {
+    try {
+      await analyticsApi.trackInteraction({
+        session_id: sessionId,
+        product_id: productId,
+        interaction_type: "click",
+        position,
+        extension_type: "venus",
+        context: "order_index",
+        metadata: { source: "order_index_recommendation" },
+      });
+
+      // Add attribution parameters to track recommendation source
+      const shortRef = sessionId
+        .split("")
+        .reduce((hash, char) => {
+          return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
+        }, 0)
+        .toString(36)
+        .substring(0, 6);
+
+      const attributionParams = new URLSearchParams({
+        ref: shortRef,
+        src: productId,
+        pos: position.toString(),
+      });
+
+      // Navigate to product page with attribution
+      const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
+      console.log(
+        "Order index recommendation clicked:",
+        productUrlWithAttribution,
+      );
+    } catch (error) {
+      console.error("Failed to track order index click:", error);
+    }
+  };
 
   // Fetch real product recommendations
   useEffect(() => {
@@ -77,6 +130,23 @@ function OrderIndexWithRecommendations() {
           );
 
           setProducts(transformedProducts);
+
+          // Create recommendation session with viewed products
+          const viewedProducts: ViewedProduct[] = transformedProducts.map(
+            (product, index) => ({
+              product_id: product.id,
+              position: index + 1,
+            }),
+          );
+
+          await analyticsApi.createSession({
+            extension_type: "venus",
+            context: "order_index",
+            user_id: customerId,
+            session_id: sessionId,
+            viewed_products: viewedProducts,
+            metadata: { source: "order_index_page" },
+          });
         } else {
           throw new Error("Failed to fetch recommendations");
         }
@@ -89,91 +159,7 @@ function OrderIndexWithRecommendations() {
     };
 
     fetchRecommendations();
-  }, []);
-
-  // Loading skeleton component
-  const SkeletonCard = () => (
-    <Card padding>
-      <Grid
-        columns={["fill"]}
-        rows={Style.default(["auto", "1fr", "auto"])
-          .when({ viewportInlineSize: { min: "extraSmall" } }, [
-            "auto",
-            "1.5fr",
-            "auto",
-          ])
-          .when({ viewportInlineSize: { min: "small" } }, [
-            "auto",
-            "2fr",
-            "1fr",
-          ])
-          .when({ viewportInlineSize: { min: "medium" } }, [
-            "auto",
-            "2.5fr",
-            "1fr",
-          ])
-          .when({ viewportInlineSize: { min: "large" } }, [
-            "auto",
-            "3fr",
-            "1fr",
-          ])}
-        spacing="base"
-      >
-        <View>
-          {/* Ultra Mobile: Very compact */}
-          <View
-            display={Style.default("auto").when(
-              { viewportInlineSize: { min: "extraSmall" } },
-              "none",
-            )}
-          >
-            <SkeletonImage aspectRatio={1.2} />
-          </View>
-
-          {/* Mobile: Compact aspect ratio */}
-          <View
-            display={Style.default("none")
-              .when({ viewportInlineSize: { min: "extraSmall" } }, "auto")
-              .when({ viewportInlineSize: { min: "small" } }, "none")}
-          >
-            <SkeletonImage aspectRatio={1.1} />
-          </View>
-
-          {/* Tablet: Slightly wider */}
-          <View
-            display={Style.default("none")
-              .when({ viewportInlineSize: { min: "small" } }, "auto")
-              .when({ viewportInlineSize: { min: "medium" } }, "none")}
-          >
-            <SkeletonImage aspectRatio={1.0} />
-          </View>
-
-          {/* Desktop: Moderate aspect ratio */}
-          <View
-            display={Style.default("none").when(
-              { viewportInlineSize: { min: "medium" } },
-              "auto",
-            )}
-          >
-            <SkeletonImage aspectRatio={0.9} />
-          </View>
-        </View>
-        <BlockStack spacing="tight">
-          <SkeletonText size="medium" />
-          <SkeletonText size="large" />
-          <SkeletonText size="small" />
-        </BlockStack>
-        <Grid columns={["fill", "fill"]} spacing="tight">
-          <View padding="none" border="base" cornerRadius="base">
-            <SkeletonText size="small" />
-          </View>
-          <View padding="none" border="base" cornerRadius="base">
-            <SkeletonText size="small" />
-          </View>
-        </Grid>
-      </Grid>
-    </Card>
-  );
+  }, [customerId]);
 
   if (loading) {
     return (
@@ -182,33 +168,13 @@ function OrderIndexWithRecommendations() {
           <SkeletonText size="large" />
           <SkeletonText size="medium" />
         </BlockStack>
-        <Grid
-          columns={Style.default(["fill"])
-            .when({ viewportInlineSize: { min: "extraSmall" } }, ["fill"])
-            .when({ viewportInlineSize: { min: "small" } }, ["fill", "fill"])
-            .when({ viewportInlineSize: { min: "medium" } }, [
-              "fill",
-              "fill",
-              "fill",
-            ])
-            .when({ viewportInlineSize: { min: "large" } }, [
-              "fill",
-              "fill",
-              "fill",
-              "fill",
-            ])}
-          spacing="base"
-        >
-          {Array.from({ length: 6 }).map((_, index) => (
-            <SkeletonCard key={index} />
-          ))}
-        </Grid>
+        <SkeletonGrid columns={columnConfig} count={6} />
       </BlockStack>
     );
   }
 
-  // Don't render anything if there's an error
-  if (error) {
+  // Don't render anything if there's an error or no products
+  if (error || products.length === 0) {
     return null;
   }
 
@@ -220,102 +186,11 @@ function OrderIndexWithRecommendations() {
         </TextBlock>
         <TextBlock appearance="subdued">Curated just for you</TextBlock>
       </BlockStack>
-      <Grid
-        columns={Style.default(["fill"])
-          .when({ viewportInlineSize: { min: "extraSmall" } }, ["fill"])
-          .when({ viewportInlineSize: { min: "small" } }, ["fill", "fill"])
-          .when({ viewportInlineSize: { min: "medium" } }, [
-            "fill",
-            "fill",
-            "fill",
-          ])
-          .when({ viewportInlineSize: { min: "large" } }, [
-            "fill",
-            "fill",
-            "fill",
-          ])}
-        spacing="base"
-      >
-        {products.map((product) => (
-          <Card key={product.id} padding>
-            <Grid
-              columns={["fill"]}
-              rows={Style.default(["auto", "2fr", "1fr"]) // extraSmall: smaller image and content
-                .when({ viewportInlineSize: { min: "small" } }, [
-                  "auto",
-                  "2fr",
-                  "1fr",
-                ])
-                .when({ viewportInlineSize: { min: "medium" } }, [
-                  "auto",
-                  "2.5fr",
-                  "1fr",
-                ])
-                .when({ viewportInlineSize: { min: "large" } }, [
-                  "auto",
-                  "2fr",
-                  "1fr",
-                ])}
-              spacing="base"
-            >
-              <View>
-                {/* Ultra Mobile: Very compact */}
-                <View
-                  display={Style.default("auto").when(
-                    { viewportInlineSize: { min: "extraSmall" } },
-                    "none",
-                  )}
-                >
-                  <Image source={product.image} fit="cover" aspectRatio={2} />
-                </View>
-
-                {/* Mobile: Compact aspect ratio */}
-                <View
-                  display={Style.default("none")
-                    .when({ viewportInlineSize: { min: "extraSmall" } }, "auto")
-                    .when({ viewportInlineSize: { min: "small" } }, "none")}
-                >
-                  <Image source={product.image} fit="cover" aspectRatio={2} />
-                </View>
-
-                {/* Tablet: Slightly wider */}
-                <View
-                  display={Style.default("none")
-                    .when({ viewportInlineSize: { min: "small" } }, "auto")
-                    .when({ viewportInlineSize: { min: "medium" } }, "none")}
-                >
-                  <Image source={product.image} fit="cover" aspectRatio={1.1} />
-                </View>
-
-                {/* Desktop: Moderate aspect ratio */}
-                <View
-                  display={Style.default("none").when(
-                    { viewportInlineSize: { min: "medium" } },
-                    "auto",
-                  )}
-                >
-                  <Image source={product.image} fit="cover" aspectRatio={1.2} />
-                </View>
-              </View>
-              <BlockStack spacing="tight">
-                <TextBlock size="medium" emphasis="bold">
-                  {product.title}
-                </TextBlock>
-                <TextBlock size="large" emphasis="bold">
-                  {product.price}
-                </TextBlock>
-                <TextBlock size="small" appearance="success">
-                  ✓ In Stock
-                </TextBlock>
-              </BlockStack>
-              <Grid columns={["fill", "fill"]} spacing="tight">
-                <Button kind="primary">View Product</Button>
-                <Button kind="secondary">Add to Cart</Button>
-              </Grid>
-            </Grid>
-          </Card>
-        ))}
-      </Grid>
+      <ProductGrid
+        products={products}
+        onShopNow={trackRecommendationClick}
+        columns={columnConfig}
+      />
     </BlockStack>
   );
 }
