@@ -71,7 +71,6 @@ register(({ analytics, settings, init, browser }) => {
           "recommendation_attribution",
           JSON.stringify(attributionData),
         );
-        console.log("📊 Stored attribution data:", attributionData);
       }
     } catch (error) {
       console.warn("Failed to extract attribution from URL:", error);
@@ -124,11 +123,6 @@ register(({ analytics, settings, init, browser }) => {
 
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
-    console.log(
-      "🔍 PAGE_VIEWED event received:",
-      JSON.stringify(event, null, 2),
-    );
-
     // Extract and store attribution from URL parameters
     await extractAndStoreAttribution(event);
 
@@ -136,28 +130,15 @@ register(({ analytics, settings, init, browser }) => {
     handleCustomerLinking(event);
 
     const enhancedEvent = await enhanceEventWithCustomerId(event);
-    console.log(
-      "📤 Enhanced event being sent:",
-      JSON.stringify(enhancedEvent, null, 2),
-    );
+
     await sendEvent(enhancedEvent, config);
   });
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_ADDED_TO_CART,
     async (event: any) => {
-      console.log(
-        "🛒 PRODUCT_ADDED_TO_CART event received:",
-        JSON.stringify(event, null, 2),
-      );
-
       // Handle customer linking detection (only on first event with clientId)
       handleCustomerLinking(event);
-
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      console.log(
-        "📤 Enhanced event being sent:",
-        JSON.stringify(enhancedEvent, null, 2),
-      );
       await sendEvent(enhancedEvent, config);
     },
   );
