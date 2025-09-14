@@ -6,7 +6,7 @@ Handles all recommendation requests from Shopify extension with context-based ro
 import asyncio
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, Header, Request
@@ -105,6 +105,9 @@ class RecommendationResponse(BaseModel):
     timestamp: datetime
 
 
+# Analytics moved to separate service: /api/v1/analytics.py
+
+
 class ProductEnrichment:
     """Service to enrich Gorse item IDs with Shopify product data"""
 
@@ -140,10 +143,7 @@ class ProductEnrichment:
             db = await self.get_database()
 
             # Get shop details to determine the correct domain for product URLs and currency
-            shop = await db.shop.find_unique(
-                where={"id": shop_id},
-                select={"shopDomain": True, "customDomain": True, "currencyCode": True},
-            )
+            shop = await db.shop.find_unique(where={"id": shop_id})
 
             # Use custom domain if available, otherwise fall back to myshopify domain
             product_domain = (
@@ -158,9 +158,16 @@ class ProductEnrichment:
             # Only include items from the current shop for multi-tenancy
             clean_item_ids = []
             for item_id in item_ids:
-                if item_id.startswith("shop_"):
+                # Handle both string item IDs and dictionary items
+                if isinstance(item_id, dict):
+                    # Extract the actual item ID from the dictionary
+                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
+                else:
+                    actual_item_id = item_id
+
+                if actual_item_id.startswith("shop_"):
                     # Extract shop ID and product ID
-                    parts = item_id.split("_")
+                    parts = actual_item_id.split("_")
                     if len(parts) >= 3:
                         gorse_shop_id = parts[
                             1
@@ -175,10 +182,12 @@ class ProductEnrichment:
                                 f"🚫 Skipping product from different shop | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
                             )
                     else:
-                        logger.warning(f"⚠️ Invalid Gorse item ID format: {item_id}")
+                        logger.warning(
+                            f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
+                        )
                 else:
                     # Assume it's already a clean product ID
-                    clean_item_ids.append(item_id)
+                    clean_item_ids.append(actual_item_id)
 
             logger.info(
                 f"🧹 Cleaned item IDs | original={item_ids[:3]} | cleaned={clean_item_ids[:3]}"
@@ -203,20 +212,40 @@ class ProductEnrichment:
             enriched_items = []
             missing_items = []
             for item_id in item_ids:
+                # Handle both string item IDs and dictionary items
+                if isinstance(item_id, dict):
+                    # Extract the actual item ID from the dictionary
+                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
+                else:
+                    actual_item_id = item_id
+
                 # Find the corresponding clean_id for this item_id
                 clean_id = None
-                if item_id.startswith("shop_"):
-                    parts = item_id.split("_")
+                if actual_item_id.startswith("shop_"):
+                    parts = actual_item_id.split("_")
                     if len(parts) >= 3:
                         gorse_shop_id = parts[1]
                         product_id = parts[2]
                         if gorse_shop_id == shop_id:
                             clean_id = product_id
                 else:
-                    clean_id = item_id
+                    clean_id = actual_item_id
 
                 if clean_id and clean_id in product_map:
                     product = product_map[clean_id]
+                    # Extract variant information for cart permalinks
+                    variants = product.variants if product.variants else []
+                    default_variant = None
+                    variant_id = None
+                    if variants and len(variants) > 0:
+                        # Get the first variant (usually the default)
+                        default_variant = (
+                            variants[0] if isinstance(variants, list) else None
+                        )
+                        if default_variant and isinstance(default_variant, dict):
+                            # Variant IDs are already cleaned in the database
+                            variant_id = default_variant.get("id", "")
+
                     # Format for frontend ProductRecommendation interface
                     enriched_items.append(
                         {
@@ -244,6 +273,8 @@ class ProductEnrichment:
                             "product_type": product.productType or "",
                             "available": product.status == "ACTIVE",
                             "score": 0.8,  # Default recommendation score
+                            "variant_id": variant_id,
+                            "variants": variants,  # Include all variants for flexibility
                         }
                     )
                 else:
@@ -613,10 +644,21 @@ class HybridRecommendationService:
                     if source_result["success"] and source_result["items"]:
                         # Add source information to each item
                         for item in source_result["items"]:
-                            item["_source"] = source
-                            item["_ratio"] = ratio
+                            # Handle both string items (item IDs) and dict items
+                            if isinstance(item, str):
+                                # Convert string item ID to dict format
+                                item_dict = {
+                                    "Id": item,
+                                    "_source": source,
+                                    "_ratio": ratio,
+                                }
+                            else:
+                                # Item is already a dict, add source info
+                                item["_source"] = source
+                                item["_ratio"] = ratio
+                                item_dict = item
 
-                        all_recommendations.extend(source_result["items"])
+                            all_recommendations.append(item_dict)
                         source_info[source] = {
                             "count": len(source_result["items"]),
                             "ratio": ratio,
@@ -694,16 +736,30 @@ class HybridRecommendationService:
         if source == "item_neighbors" and product_id:
             # Apply shop prefix for multi-tenancy
             prefixed_item_id = f"shop_{shop_id}_{product_id}"
-            return await self.gorse_client.get_item_neighbors(
+            result = await self.gorse_client.get_item_neighbors(
                 item_id=prefixed_item_id, n=limit, category=category
             )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["neighbors"],
+                    "source": "gorse_item_neighbors",
+                }
+            return result
 
         elif source == "user_recommendations" and user_id:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}"
-            return await self.gorse_client.get_recommendations(
+            result = await self.gorse_client.get_recommendations(
                 user_id=prefixed_user_id, n=limit, category=category
             )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["recommendations"],
+                    "source": "gorse_user_recommendations",
+                }
+            return result
 
         elif source == "session_recommendations" and session_id:
             # Apply shop prefix for multi-tenancy
@@ -711,18 +767,52 @@ class HybridRecommendationService:
             session_data = self._build_session_data(
                 session_id, prefixed_user_id, metadata
             )
-            return await self.gorse_client.get_session_recommendations(
+            result = await self.gorse_client.get_session_recommendations(
                 session_data=session_data, n=limit, category=category
             )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["recommendations"],
+                    "source": "gorse_session_recommendations",
+                }
+            return result
 
         elif source == "popular":
-            return await self.gorse_client.get_popular_items(n=limit, category=category)
+            result = await self.gorse_client.get_popular_items(
+                n=limit, category=category
+            )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_popular",
+                }
+            return result
 
         elif source == "latest":
-            return await self.gorse_client.get_latest_items(n=limit, category=category)
+            result = await self.gorse_client.get_latest_items(
+                n=limit, category=category
+            )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_latest",
+                }
+            return result
 
         elif source == "popular_category":
-            return await self.gorse_client.get_popular_items(n=limit, category=category)
+            result = await self.gorse_client.get_popular_items(
+                n=limit, category=category
+            )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_popular_category",
+                }
+            return result
 
         elif source == "user_neighbors" and user_id:
             # Use the UserNeighborsService for collaborative filtering
@@ -768,8 +858,8 @@ class HybridRecommendationService:
         return session_data
 
     def _deduplicate_and_blend(
-        self, all_recommendations: List[str], limit: int
-    ) -> List[str]:
+        self, all_recommendations: List[Dict[str, Any]], limit: int
+    ) -> List[Dict[str, Any]]:
         """
         Deduplicate and blend recommendations based on source ratios
 
@@ -781,16 +871,26 @@ class HybridRecommendationService:
             Deduplicated and blended recommendations
         """
         # Remove duplicates while preserving order
+        # Use item ID as the key for deduplication
         seen = set()
         deduplicated = []
 
         for item in all_recommendations:
-            if item not in seen:
-                seen.add(item)
+            # Handle both string items and dict items
+            if isinstance(item, str):
+                item_key = item
+            else:
+                # Use the item ID or the item itself as string for deduplication
+                item_key = item.get("Id", item.get("id", str(item)))
+
+            if item_key not in seen:
+                seen.add(item_key)
                 deduplicated.append(item)
 
         # Sort by source ratio (higher ratio items first)
-        deduplicated.sort(key=lambda x: x.get("_ratio", 0), reverse=True)
+        deduplicated.sort(
+            key=lambda x: x.get("_ratio", 0) if isinstance(x, dict) else 0, reverse=True
+        )
 
         # Return top items up to limit
         return deduplicated[:limit]
@@ -1627,6 +1727,9 @@ async def get_recommendations(request: RecommendationRequest):
         raise HTTPException(
             status_code=500, detail=f"Failed to get recommendations: {str(e)}"
         )
+
+
+# Analytics endpoints moved to separate service: /api/v1/analytics.py
 
 
 @router.get("/health")

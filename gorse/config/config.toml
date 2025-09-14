@@ -71,8 +71,8 @@ column = "user.Labels.preferred_category"  # From CustomerBehaviorFeatures
 enable_index = true
 index_recall = 0.8
 index_fit_epoch = 10
-model_fit_period = "60m"
-model_search_period = "360m"
+model_fit_period = "5m"  # Reduced from 60m to trigger more frequently
+model_search_period = "10m"  # Reduced from 360m to trigger more frequently
 model_search_epoch = 50
 model_search_trials = 20
 enable_model_size_search = true
@@ -85,8 +85,8 @@ learning_rate = 0.005  # Learning rate
 reg = 0.02  # Regularization to prevent overfitting
 enable_user_features = true  # Use GorseUsers.labels (e.g., engagementScore, topCategories)
 enable_item_features = true  # Use GorseItems.labels (e.g., popularityScore, trendingScore)
-fit_period = "60m"  # Update ranking model hourly
-search_period = "360m"  # Hyperparameter search every 6 hours
+fit_period = "5m"  # Update ranking model more frequently
+search_period = "10m"  # Hyperparameter search more frequently
 search_trials = 20  # Number of hyperparameter trials
 search_epoch = 20  # Epochs for hyperparameter search
 
@@ -111,11 +111,11 @@ fallback_recommend = ["item_based", "collaborative", "popular", "latest"]
 num_feedback_fallback_item_based = 10
 
 [tracing]
-enable_tracing = true
-exporter = "otlp"
-collector_endpoint = "http://localhost:4317"  # Update to actual OTLP endpoint
-sampler = "ratio"
-ratio = 0.1  # Sample 10% of traces for performance
+enable_tracing = false
+# exporter = "otlp"
+# collector_endpoint = "http://localhost:4317"  # Update to actual OTLP endpoint
+# sampler = "ratio"
+# ratio = 0.1  # Sample 10% of traces for performance
 
 [experimental]
 enable_deep_learning = false

@@ -18,6 +18,16 @@ import {
   type ProductRecommendation,
 } from "./api/recommendations";
 
+// Attribution tracking interface
+interface AttributionData {
+  sessionId: string;
+  productId: string;
+  extensionType: string;
+  context: string;
+  position: number;
+  timestamp: string;
+}
+
 export default reactExtension(
   "customer-account.order-index.block.render",
   () => <OrderIndexWithRecommendations />,

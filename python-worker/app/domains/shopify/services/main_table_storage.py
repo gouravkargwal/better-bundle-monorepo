@@ -19,6 +19,7 @@ from app.core.redis_client import streams_manager
 from app.core.config.settings import settings
 from app.domains.shopify.services.field_extractor import FieldExtractorService
 from app.domains.shopify.services.data_cleaning_service import DataCleaningService
+from app.domains.analytics.services.attribution_extractor import AttributionExtractor
 
 logger = get_logger(__name__)
 
@@ -205,6 +206,7 @@ class MainTableStorageService:
         self._db_client = None
         self.field_extractor = FieldExtractorService()
         self.data_cleaner = DataCleaningService()
+        self._attribution_extractor = None
         self.debug_mode = debug_mode  # Enable detailed per-item logging for debugging
 
     async def _get_database(self):
@@ -212,6 +214,13 @@ class MainTableStorageService:
         if self._db_client is None:
             self._db_client = await get_database()
         return self._db_client
+
+    async def _get_attribution_extractor(self):
+        """Get or initialize the attribution extractor"""
+        if self._attribution_extractor is None:
+            db = await self._get_database()
+            self._attribution_extractor = AttributionExtractor(db)
+        return self._attribution_extractor
 
     async def _validate_shop_exists(self, shop_id: str) -> bool:
         """Validate that the shop exists and is active before processing data"""
@@ -592,6 +601,10 @@ class MainTableStorageService:
             # Don't use skip_duplicates - we want to know about conflicts and handle them with upsert
             await getattr(db, table_name.lower()).create_many(data=create_data)
 
+            # Extract attribution for orders after successful storage
+            if data_type == "orders":
+                await self._extract_order_attributions(items)
+
         except Exception as e:
             # Fallback to individual upserts if batch insert fails
             import traceback
@@ -831,3 +844,18 @@ class MainTableStorageService:
             self.logger.error(
                 f"Failed to publish feature computation event for shop {shop_id}: {str(e)}"
             )
+
+    async def _extract_order_attributions(self, order_items: List[Dict[str, Any]]):
+        """Extract recommendation attributions from order data"""
+        try:
+            for order_item in order_items:
+                shop_id = order_item.get("shopId")
+                if shop_id:
+                    # Extract attribution for this order
+                    attribution_extractor = await self._get_attribution_extractor()
+                    await attribution_extractor.extract_order_attribution(
+                        order_item, shop_id
+                    )
+        except Exception as e:
+            # Don't fail the main storage operation if attribution extraction fails
+            self.logger.error(f"Failed to extract order attributions: {str(e)}")

@@ -610,10 +610,13 @@ class GorseApiClient:
             url = f"{self.base_url}/api/user/{user_id}/neighbors"
             params = {"n": n}
 
-            response = await self.client.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    url, params=params, headers=self._get_headers()
+                )
+                response.raise_for_status()
 
-            result = response.json()
+                result = response.json()
 
             # Gorse returns a list of user IDs with scores
             if isinstance(result, list):

@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 from app.core.redis_client import streams_manager
 from app.core.database.simple_db_client import get_database
 from app.shared.helpers import now_utc
+from app.domains.analytics.services.attribution_extractor import AttributionExtractor
 
 logger = get_logger(__name__)
 
@@ -287,7 +288,30 @@ class WebhookHandler:
             await self.repository.save_raw_behavioral_event(shop_db_id, payload)
             logger.info(f"Raw payload saved for shop {shop_domain}")
 
-            # Step 2: Attempt validation and structured data saving
+            # Step 2: Process attribution from raw event (before validation)
+            # This ensures attribution is captured even if validation fails
+            try:
+                db = await get_database()
+                attribution_extractor = AttributionExtractor(db)
+
+                # Extract attribution from the raw event
+                attribution_event = await attribution_extractor.process_behavioral_event_for_attribution(
+                    shop_id=shop_db_id,
+                    customer_id=payload.get("customerId"),
+                    event_data=payload,
+                    event_type=payload.get("name"),
+                )
+
+                if attribution_event:
+                    logger.info(f"Attribution event created: {attribution_event.id}")
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to process attribution for raw event {payload.get('id', 'unknown')}: {e}"
+                )
+                # Don't fail the main event processing if attribution fails
+
+            # Step 3: Attempt validation and structured data saving
             try:
                 # Use the pre-initialized TypeAdapter to correctly validate the Union type.
                 validated_event = self.event_adapter.validate_python(payload)

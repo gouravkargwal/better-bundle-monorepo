@@ -41,6 +41,8 @@ export interface ProductRecommendation {
   available?: boolean;
   score?: number;
   url?: string;
+  variant_id?: string;
+  variants?: any[];
 }
 
 export interface RecommendationResponse {
@@ -95,6 +97,8 @@ export class RecommendationApiClient {
       return false;
     }
   }
+
+  // Analytics methods moved to separate service: /api/analytics.ts
 }
 
 // Default instance

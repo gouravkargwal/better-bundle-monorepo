@@ -703,6 +703,11 @@ model Shop {
   // Behavioral events
   rawBehavioralEvents RawBehavioralEvents[]
   behavioralEvents    BehavioralEvents[]
+  
+  // Recommendation tracking
+  recommendationSessions    RecommendationSession[]
+  recommendationAttributions RecommendationAttribution[]
+  attributionEvents        AttributionEvent[]
 }
 
 // ============= USER/CUSTOMER FEATURES =============
@@ -1115,6 +1120,96 @@ model UserIdentityLink {
   @@index([shopId, clientId])
   @@index([shopId, customerId])
   @@map("UserIdentityLink")
+}
+
+// ============= RECOMMENDATION TRACKING =============
+
+model RecommendationSession {
+  id              String   @id @default(cuid())
+  shopId          String
+  extensionType   String   @db.VarChar(50) // venus, mercury, phoenix, atlas, apollo
+  context         String   @db.VarChar(50) // profile, checkout, product_page, cart, order_index
+  userId          String?  @db.VarChar(100)
+  sessionId       String   @db.VarChar(100) // Browser session ID
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+  isActive        Boolean  @default(true)
+  
+  // Relations
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  interactions    RecommendationInteraction[]
+  
+  @@unique([shopId, sessionId, extensionType, context])
+  @@index([shopId, extensionType])
+  @@index([shopId, context])
+  @@index([expiresAt])
+  @@map("RecommendationSessions")
+}
+
+model RecommendationInteraction {
+  id                String   @id @default(cuid())
+  sessionId         String
+  productId         String   @db.VarChar(100)
+  interactionType   String   @db.VarChar(50) // view, click, add_to_cart, purchase
+  position          Int?
+  extensionType     String   @db.VarChar(50)
+  context           String   @db.VarChar(50)
+  timestamp         DateTime @default(now())
+  metadata          Json?
+  
+  // Relations
+  session           RecommendationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  @@index([sessionId])
+  @@index([productId])
+  @@index([interactionType])
+  @@map("RecommendationInteractions")
+}
+
+model AttributionEvent {
+  id                String   @id @default(cuid())
+  shopId            String
+  customerId        String   @db.VarChar(100)
+  sessionId         String   @db.VarChar(100)
+  productId         String   @db.VarChar(100)
+  position          Int
+  eventType         String   @db.VarChar(50) // 'product_viewed', 'add_to_cart', 'checkout_started', etc.
+  eventData         Json?    // Additional event metadata
+  orderId           String?  @db.VarChar(100) // Set when order is completed
+  linkedAt          DateTime?
+  createdAt         DateTime @default(now())
+  
+  // Relations
+  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  
+  @@index([shopId, customerId])
+  @@index([sessionId])
+  @@index([orderId])
+  @@map("AttributionEvents")
+}
+
+model RecommendationAttribution {
+  id                String   @id @default(cuid())
+  shopId            String
+  sessionId         String?  @db.VarChar(100) // From cart attributes
+  productId         String   @db.VarChar(100)
+  orderId           String   @db.VarChar(100)
+  extensionType     String   @db.VarChar(50)
+  context           String   @db.VarChar(50)
+  position          Int?
+  revenue           Float
+  attributionSource String   @db.VarChar(50) // 'cart_attributes', 'customer_behavior', etc.
+  confidenceScore   Float    @default(1.0)
+  attributionDate   DateTime @default(now())
+  status            String   @db.VarChar(50) @default("confirmed")
+  
+  // Relations
+  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  
+  @@unique([orderId, productId]) // One attribution per product per order
+  @@index([shopId, attributionDate])
+  @@index([sessionId])
+  @@map("RecommendationAttributions")
 }
 
 

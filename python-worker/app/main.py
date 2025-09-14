@@ -57,6 +57,7 @@ from typing import Optional
 from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
+from app.api.v1.analytics import router as analytics_router
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -93,6 +94,7 @@ app = FastAPI(
 app.include_router(unified_gorse_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
+app.include_router(analytics_router, prefix="/api/v1")
 
 # Add CORS middleware
 app.add_middleware(
