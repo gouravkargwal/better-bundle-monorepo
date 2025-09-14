@@ -455,62 +455,105 @@ class FieldExtractorService:
             ):
                 return None
 
-            # Extract collection ID
-            collection_id = self._extract_shopify_id(collection_data.get("id", ""))
+            # Extract collection ID - handle both GraphQL GID and REST API numeric ID
+            raw_id = collection_data.get("id", "")
+            if isinstance(raw_id, str) and raw_id.startswith("gid://"):
+                # GraphQL format: gid://shopify/Collection/305064607883
+                collection_id = self._extract_shopify_id(raw_id)
+            else:
+                # REST API format: 305064607883
+                collection_id = str(raw_id)
+            
             if not collection_id:
                 return None
 
-            # Extract image information
-            image = collection_data.get("image")
-            image_url = image.get("url") if image and isinstance(image, dict) else None
-            image_alt = (
-                image.get("altText") if image and isinstance(image, dict) else None
-            )
+            # Initialize variables for both formats
+            title = ""
+            handle = ""
+            description = ""
+            template_suffix = None
+            updated_at = None
+            published_at = None
+            image_url = None
+            image_alt = None
+            seo_title = None
+            seo_description = None
+            metafields = []
+            product_count = 0
+            is_automated = False
 
-            # Extract SEO information
-            seo = collection_data.get("seo", {})
+            # Handle different field names between GraphQL and REST API formats
+            if data_format == "webhook" and "admin_graphql_api_id" in collection_data:
+                # REST API webhook format
+                title = collection_data.get("title", "").strip()
+                handle = collection_data.get("handle", "").strip()
+                description = collection_data.get("body_html", "")
+                template_suffix = collection_data.get("template_suffix")
+                updated_at = collection_data.get("updated_at")
+                published_at = collection_data.get("published_at")
+                
+                # REST API doesn't have image, seo, or metafields in the same structure
+                # Variables already initialized above
+                
+            else:
+                # GraphQL format
+                title = collection_data.get("title", "").strip()
+                handle = collection_data.get("handle", "").strip()
+                description = collection_data.get("description", "")
+                template_suffix = collection_data.get("templateSuffix")
+                updated_at = collection_data.get("updatedAt")
+                
+                # Extract image information
+                image = collection_data.get("image")
+                image_url = image.get("url") if image and isinstance(image, dict) else None
+                image_alt = (
+                    image.get("altText") if image and isinstance(image, dict) else None
+                )
 
-            # Extract GraphQL edge data using generic method
-            metafields = self._extract_graphql_edges(
-                collection_data.get("metafields", {})
-            )
+                # Extract SEO information
+                seo = collection_data.get("seo", {})
+                seo_title = seo.get("title")
+                seo_description = seo.get("description")
 
-            # Ensure required fields have proper values
-            title = collection_data.get("title", "").strip()
-            handle = collection_data.get("handle", "").strip()
+                # Extract GraphQL edge data using generic method
+                metafields = self._extract_graphql_edges(
+                    collection_data.get("metafields", {})
+                )
+
+                # Get product count from products.edges if available
+                products = collection_data.get("products", {})
+                if isinstance(products, dict) and "edges" in products:
+                    product_count = len(products.get("edges", []))
+                elif isinstance(products, list):
+                    product_count = len(products)
+
+                # Check if collection is automated
+                is_automated = (
+                    collection_data.get("ruleSet", {}).get("rules", []) != []
+                    if collection_data.get("ruleSet")
+                    and isinstance(collection_data.get("ruleSet"), dict)
+                    else False
+                )
 
             # Skip collections with missing required fields
             if not title or not handle:
                 return None
-
-            # Get product count from products.edges if available
-            product_count = 0
-            products = collection_data.get("products", {})
-            if isinstance(products, dict) and "edges" in products:
-                product_count = len(products.get("edges", []))
-            elif isinstance(products, list):
-                product_count = len(products)
 
             return {
                 "shopId": shop_id,
                 "collectionId": collection_id,
                 "title": title,
                 "handle": handle,
-                "description": collection_data.get("description"),
-                "templateSuffix": collection_data.get("templateSuffix"),
-                "seoTitle": seo.get("title"),
-                "seoDescription": seo.get("description"),
+                "description": description,
+                "templateSuffix": template_suffix,
+                "seoTitle": seo_title,
+                "seoDescription": seo_description,
                 "imageUrl": image_url,
                 "imageAlt": image_alt,
                 "productCount": product_count,
-                "isAutomated": (
-                    collection_data.get("ruleSet", {}).get("rules", []) != []
-                    if collection_data.get("ruleSet")
-                    and isinstance(collection_data.get("ruleSet"), dict)
-                    else False
-                ),
-                "createdAt": collection_data.get("createdAt") or collection_data.get("updatedAt"),
-                "updatedAt": collection_data.get("updatedAt"),
+                "isAutomated": is_automated,
+                "createdAt": published_at or updated_at,
+                "updatedAt": updated_at,
                 "metafields": metafields,
             }
 
