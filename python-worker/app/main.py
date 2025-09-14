@@ -26,20 +26,15 @@ from app.domains.shopify.services import (
 from app.domains.ml.services import (
     FeatureEngineeringService,
 )
-from app.domains.analytics.services import (
-    BusinessMetricsService,
-    PerformanceAnalyticsService,
-    CustomerAnalyticsService,
-    ProductAnalyticsService,
-    RevenueAnalyticsService,
-    HeuristicService,
-)
+
+# All analytics services removed - they were causing async_timing decorator errors
 
 # Consumer imports
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
-from app.consumers.analytics_consumer import AnalyticsConsumer
+
+# AnalyticsConsumer removed - was using deleted analytics services
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 
 # Webhook imports
@@ -138,6 +133,13 @@ async def initialize_services():
         # Initialize behavioral events consumer
         services["behavioral_events_consumer"] = BehavioralEventsConsumer()
 
+        # Initialize Shopify events consumer
+        from app.consumers.shopify_events_consumer import (
+            ShopifyEventsConsumer,
+        )
+
+        services["shopify_events_consumer"] = ShopifyEventsConsumer()
+
         # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 
         # Initialize webhook services
@@ -155,6 +157,11 @@ async def initialize_services():
 
         # Start consumer manager
         await consumer_manager.start()
+
+        # Start real-time processing consumer in background
+        import asyncio
+
+        asyncio.create_task(services["shopify_events_consumer"].start())
 
         logger.info("Essential services initialized successfully")
 
@@ -175,37 +182,8 @@ async def get_service(service_name: str):
             if "feature_engineering" not in services:
                 await get_service("feature_engineering")
             # Note: gorse_ml service removed - using unified_gorse_service.py instead
-        elif service_name == "business_metrics":
-            services["business_metrics"] = BusinessMetricsService()
-        elif service_name == "performance_analytics":
-            services["performance_analytics"] = PerformanceAnalyticsService()
-        elif service_name == "customer_analytics":
-            services["customer_analytics"] = CustomerAnalyticsService()
-        elif service_name == "product_analytics":
-            services["product_analytics"] = ProductAnalyticsService()
-        elif service_name == "revenue_analytics":
-            services["revenue_analytics"] = RevenueAnalyticsService()
-        elif service_name == "heuristic":
-            services["heuristic"] = HeuristicService()
-        elif service_name == "analytics_consumer":
-            # Load all analytics services
-            for analytics_service in [
-                "business_metrics",
-                "performance_analytics",
-                "customer_analytics",
-                "product_analytics",
-                "revenue_analytics",
-            ]:
-                if analytics_service not in services:
-                    await get_service(analytics_service)
-
-            services["analytics_consumer"] = AnalyticsConsumer(
-                business_metrics_service=services["business_metrics"],
-                performance_analytics_service=services["performance_analytics"],
-                customer_analytics_service=services["customer_analytics"],
-                product_analytics_service=services["product_analytics"],
-                revenue_analytics_service=services["revenue_analytics"],
-            )
+        # All analytics services removed - they were causing async_timing decorator errors
+        # Analytics consumer removed - was using deleted analytics services
         elif service_name == "feature_computation_consumer":
             services["feature_computation_consumer"] = FeatureComputationConsumer()
 
@@ -237,12 +215,25 @@ async def cleanup_services():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {
+    health_status = {
         "status": "healthy",
         "timestamp": now_utc().isoformat(),
         "version": "1.0.0",
         "services": list(services.keys()),
     }
+
+    # Add Shopify events consumer health status
+    if "shopify_events_consumer" in services:
+        try:
+            consumer_health = services["shopify_events_consumer"].get_metrics()
+            health_status["shopify_events_consumer"] = consumer_health
+        except Exception as e:
+            health_status["shopify_events_consumer"] = {
+                "status": "error",
+                "error": str(e),
+            }
+
+    return health_status
 
 
 # Shopify data endpoints
@@ -522,41 +513,6 @@ async def get_feature_computation_status(shop_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/features/architecture/status")
-async def get_feature_architecture_status():
-    """Get current feature engineering architecture status"""
-    try:
-        return {
-            "architecture": "refactored",
-            "use_refactored": True,
-            "components": {
-                "generators": [
-                    "ProductFeatureGenerator",
-                    "CustomerFeatureGenerator",
-                    "OrderFeatureGenerator",
-                    "CollectionFeatureGenerator",
-                    "ShopFeatureGenerator",
-                ],
-                "repository": "FeatureRepository",
-                "pipeline": "FeatureEngineeringService",
-            },
-            "benefits": [
-                "Single Responsibility Principle",
-                "Separation of Concerns",
-                "Improved Testability",
-                "Better Maintainability",
-                "SQL Injection Security Fixes",
-                "Configurable Parameters",
-                "Modular Architecture",
-                "Independent Component Testing",
-            ],
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get architecture status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ML pipeline endpoints
 @app.post("/api/ml/pipeline/run")
 async def run_ml_pipeline(
@@ -586,178 +542,6 @@ async def run_ml_pipeline(
 
     except Exception as e:
         logger.error(f"Failed to start ML pipeline: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/ml/pipeline/status/{shop_id}")
-async def get_pipeline_status(shop_id: str, pipeline_id: Optional[str] = None):
-    """Get ML pipeline status"""
-    try:
-        # Lazy load ML pipeline service
-        ml_pipeline_service = await get_service("ml_pipeline")
-
-        status = await ml_pipeline_service.get_pipeline_status(shop_id, pipeline_id)
-        return status
-
-    except Exception as e:
-        logger.error(f"Failed to get pipeline status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Analytics endpoints
-@app.get("/api/analytics/business-metrics/{shop_id}")
-async def get_business_metrics(
-    shop_id: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-):
-    """Get business metrics for a shop"""
-    try:
-        # Lazy load business metrics service
-        business_metrics_service = await get_service("business_metrics")
-
-        # Parse dates
-        from datetime import datetime
-
-        start = datetime.fromisoformat(start_date) if start_date else datetime.now()
-        end = datetime.fromisoformat(end_date) if end_date else datetime.now()
-
-        metrics = await business_metrics_service.compute_overall_metrics(
-            shop_id, start, end
-        )
-        return metrics
-
-    except Exception as e:
-        logger.error(f"Failed to get business metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/kpi-dashboard/{shop_id}")
-async def get_kpi_dashboard(shop_id: str):
-    """Get KPI dashboard data for a shop"""
-    try:
-        if "business_metrics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Business metrics service not available"
-            )
-
-        dashboard = await services["business_metrics"].get_kpi_dashboard(shop_id)
-        return dashboard
-
-    except Exception as e:
-        logger.error(f"Failed to get KPI dashboard: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/customer-insights/{shop_id}")
-async def get_customer_insights(shop_id: str):
-    """Get customer insights for a shop"""
-    try:
-        if "customer_analytics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Customer analytics service not available"
-            )
-
-        insights = await services["customer_analytics"].get_customer_insights(shop_id)
-        return insights
-
-    except Exception as e:
-        logger.error(f"Failed to get customer insights: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/product-insights/{shop_id}")
-async def get_product_insights(
-    shop_id: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-):
-    """Get product insights for a shop"""
-    try:
-        if "product_analytics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Product analytics service not available"
-            )
-
-        # Parse dates
-        from datetime import datetime
-
-        start = datetime.fromisoformat(start_date) if start_date else datetime.now()
-        end = datetime.fromisoformat(end_date) if end_date else datetime.now()
-
-        insights = await services["product_analytics"].analyze_product_performance(
-            shop_id, start, end
-        )
-        return insights
-
-    except Exception as e:
-        logger.error(f"Failed to get product insights: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/revenue-insights/{shop_id}")
-async def get_revenue_insights(shop_id: str):
-    """Get revenue insights for a shop"""
-    try:
-        if "revenue_analytics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Revenue analytics service not available"
-            )
-
-        insights = await services["revenue_analytics"].get_revenue_insights(shop_id)
-        return insights
-
-    except Exception as e:
-        logger.error(f"Failed to get revenue insights: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Performance analytics endpoints
-@app.get("/api/analytics/performance/{shop_id}")
-async def get_performance_analytics(
-    shop_id: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-):
-    """Get performance analytics for a shop"""
-    try:
-        if "performance_analytics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Performance analytics service not available"
-            )
-
-        # Parse dates
-        from datetime import datetime
-
-        start = datetime.fromisoformat(start_date) if start_date else datetime.now()
-        end = datetime.fromisoformat(end_date) if end_date else datetime.now()
-
-        performance = await services["performance_analytics"].analyze_shop_performance(
-            shop_id, start, end
-        )
-        return performance
-
-    except Exception as e:
-        logger.error(f"Failed to get performance analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/performance/recommendations/{shop_id}")
-async def get_performance_recommendations(shop_id: str):
-    """Get performance optimization recommendations"""
-    try:
-        if "performance_analytics" not in services:
-            raise HTTPException(
-                status_code=500, detail="Performance analytics service not available"
-            )
-
-        recommendations = await services[
-            "performance_analytics"
-        ].generate_optimization_recommendations(shop_id)
-        return {"recommendations": recommendations}
-
-    except Exception as e:
-        logger.error(f"Failed to get performance recommendations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1478,26 +1262,6 @@ async def clear_permission_cache(shop_domain: Optional[str] = None):
             return {"message": "All permission cache cleared"}
     except Exception as e:
         logger.error(f"Failed to clear permission cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Note: Gorse training monitoring endpoints moved to unified_gorse.py
-
-
-# Heuristic service endpoints
-@app.post("/api/heuristic/evaluate/{shop_id}")
-async def evaluate_analysis_need(shop_id: str):
-    """Evaluate if analysis should be run for a shop"""
-    try:
-        if "heuristic" not in services:
-            raise HTTPException(
-                status_code=500, detail="Heuristic service not available"
-            )
-
-        decision = await services["heuristic"].evaluate_analysis_need(shop_id)
-        return decision
-    except Exception as e:
-        logger.error(f"Failed to evaluate analysis need: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

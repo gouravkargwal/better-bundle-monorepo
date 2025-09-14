@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 from app.consumers.base_consumer import BaseConsumer
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
-from app.consumers.analytics_consumer import AnalyticsConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
 from app.core.logging import get_logger
@@ -45,7 +44,6 @@ class ConsumerManager:
         self,
         data_collection_consumer: Optional[DataCollectionConsumer] = None,
         main_table_processing_consumer: Optional[MainTableProcessingConsumer] = None,
-        analytics_consumer: Optional[AnalyticsConsumer] = None,
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         behavioral_events_consumer: Optional[BehavioralEventsConsumer] = None,
     ):
@@ -54,8 +52,6 @@ class ConsumerManager:
             self.consumers["data_collection"] = data_collection_consumer
         if main_table_processing_consumer:
             self.consumers["main_table_processing"] = main_table_processing_consumer
-        if analytics_consumer:
-            self.consumers["analytics"] = analytics_consumer
         if feature_computation_consumer:
             self.consumers["feature_computation"] = feature_computation_consumer
         if behavioral_events_consumer:

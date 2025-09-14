@@ -2,34 +2,7 @@
 Analytics domain for BetterBundle Python Worker
 """
 
-from .interfaces import (
-    IBusinessMetricsService,
-    IPerformanceAnalyticsService,
-    ICustomerAnalyticsService,
-    IProductAnalyticsService,
-    IRevenueAnalyticsService,
-)
+# All analytics services and interfaces removed - they were causing async_timing decorator errors
+# and were not being used by the frontend
 
-from .services import (
-    BusinessMetricsService,
-    PerformanceAnalyticsService,
-    CustomerAnalyticsService,
-    ProductAnalyticsService,
-    RevenueAnalyticsService,
-)
-
-__all__ = [
-    # Interfaces
-    "IBusinessMetricsService",
-    "IPerformanceAnalyticsService", 
-    "ICustomerAnalyticsService",
-    "IProductAnalyticsService",
-    "IRevenueAnalyticsService",
-    
-    # Services
-    "BusinessMetricsService",
-    "PerformanceAnalyticsService",
-    "CustomerAnalyticsService", 
-    "ProductAnalyticsService",
-    "RevenueAnalyticsService",
-]
+__all__ = []

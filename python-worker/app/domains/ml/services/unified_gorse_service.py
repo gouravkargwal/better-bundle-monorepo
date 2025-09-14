@@ -114,8 +114,8 @@ class UnifiedGorseService:
                 shop_id,
             )
 
-            if result and result[0] and result[0][0]:
-                last_sync = result[0][0]
+            if result and result[0] and result[0].get("last_sync"):
+                last_sync = result[0]["last_sync"]
                 # Handle case where result might be 0 or other non-datetime values
                 if last_sync and last_sync != 0:
                     return last_sync

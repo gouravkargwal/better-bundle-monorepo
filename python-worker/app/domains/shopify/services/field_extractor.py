@@ -22,19 +22,44 @@ class FieldExtractorService:
         # Simple cache for GID normalization to avoid repeated processing
         self._gid_cache = {}
 
+    def _detect_data_format(self, payload: Dict[str, Any]) -> str:
+        """Detect if the payload is in webhook (REST) or GraphQL format"""
+        # Check for webhook format indicators
+        if "admin_graphql_api_id" in payload:
+            return "webhook"
+
+        # Check for GraphQL format indicators
+        if "data" in payload and "edges" in payload.get("data", {}).get("orders", {}):
+            return "graphql"
+
+        # Check for direct GraphQL node structure
+        if "edges" in payload:
+            return "graphql"
+
+        # Check for webhook direct structure (simple ID as number)
+        if "id" in payload and isinstance(payload["id"], (int, float)):
+            return "webhook"
+
+        # Default to webhook format for raw data
+        return "webhook"
+
     def extract_fields_generic(
         self, data_type: str, payload: Dict[str, Any], shop_id: str
     ) -> Optional[Dict[str, Any]]:
         """Generic field extraction method that delegates to specific extraction methods"""
         try:
+            # Detect data format and log it
+            data_format = self._detect_data_format(payload)
+            self.logger.info(f"Detected {data_format} format for {data_type} data")
+
             if data_type == "orders":
-                return self.extract_order_fields(payload, shop_id)
+                return self.extract_order_fields(payload, shop_id, data_format)
             elif data_type == "products":
-                return self.extract_product_fields(payload, shop_id)
+                return self.extract_product_fields(payload, shop_id, data_format)
             elif data_type == "customers":
-                return self.extract_customer_fields(payload, shop_id)
+                return self.extract_customer_fields(payload, shop_id, data_format)
             elif data_type == "collections":
-                return self.extract_collection_fields(payload, shop_id)
+                return self.extract_collection_fields(payload, shop_id, data_format)
             else:
                 self.logger.error(f"Unknown data type for extraction: {data_type}")
                 return None
@@ -43,7 +68,7 @@ class FieldExtractorService:
             return None
 
     def extract_order_fields(
-        self, payload: Dict[str, Any], shop_id: str
+        self, payload: Dict[str, Any], shop_id: str, data_format: str = "graphql"
     ) -> Optional[Dict[str, Any]]:
         """Extract key order fields from nested JSON payload"""
         try:
@@ -164,12 +189,20 @@ class FieldExtractorService:
             return None
 
     def extract_product_fields(
-        self, payload: Dict[str, Any], shop_id: str
+        self, payload: Dict[str, Any], shop_id: str, data_format: str = "graphql"
     ) -> Optional[Dict[str, Any]]:
         """Extract key product fields from nested JSON payload"""
         try:
-            # Extract product data using generic method
-            product_data = self._extract_payload_data(payload, "product")
+            # Handle different data formats
+            if data_format == "webhook":
+                # If payload is a list, take the first item (should be the product data)
+                if isinstance(payload, list) and payload:
+                    product_data = payload[0]
+                else:
+                    product_data = payload  # Webhook data is already the product data
+            else:
+                # Extract product data using generic method for GraphQL
+                product_data = self._extract_payload_data(payload, "product")
 
             if (
                 not product_data
@@ -178,34 +211,81 @@ class FieldExtractorService:
             ):
                 return None
 
-            # Extract product ID
-            product_id = self._extract_shopify_id(product_data.get("id", ""))
+            # Extract product ID based on format
+            if data_format == "webhook":
+                # Webhook format: ID is a simple number
+                product_id = str(product_data.get("id", ""))
+            else:
+                # GraphQL format: ID is a GID
+                product_id = self._extract_shopify_id(product_data.get("id", ""))
+
             if not product_id:
                 return None
 
-            # Extract GraphQL edge data using generic method
-            variants = self._extract_graphql_edges(product_data.get("variants", {}))
-            images = self._extract_graphql_edges(product_data.get("images", {}))
-            collections = self._extract_graphql_edges(
-                product_data.get("collections", {})
-            )
-            metafields = self._extract_graphql_edges(product_data.get("metafields", {}))
-
-            # Extract simple fields
-            options = product_data.get("options", [])
+            # Extract data based on format
+            if data_format == "webhook":
+                # Webhook format: direct arrays
+                variants = product_data.get("variants", [])
+                images = product_data.get("images", [])
+                collections = product_data.get("collections", [])
+                metafields = product_data.get("metafields", [])
+                options = product_data.get("options", [])
+            else:
+                # GraphQL format: edge structure
+                variants = self._extract_graphql_edges(product_data.get("variants", {}))
+                images = self._extract_graphql_edges(product_data.get("images", {}))
+                collections = self._extract_graphql_edges(
+                    product_data.get("collections", {})
+                )
+                metafields = self._extract_graphql_edges(
+                    product_data.get("metafields", {})
+                )
+                options = product_data.get("options", [])
 
             # Get main image URL for fast access
             main_image_url = None
             if images:
                 main_image = images[0]
-                main_image_url = main_image.get("url")
+                # Handle both dict and list formats
+                if isinstance(main_image, dict):
+                    main_image_url = main_image.get("url")
+                elif isinstance(main_image, list) and main_image:
+                    # If main_image is a list, take the first item
+                    main_image_url = (
+                        main_image[0].get("url")
+                        if isinstance(main_image[0], dict)
+                        else None
+                    )
 
             # Process tags using generic method
             tags = self._process_tags(product_data.get("tags", []))
 
-            # Ensure required fields have proper values
-            title = product_data.get("title", "").strip()
-            handle = product_data.get("handle", "").strip()
+            # Extract fields based on format
+            if data_format == "webhook":
+                # Webhook format field mapping
+                title = product_data.get("title", "").strip()
+                handle = product_data.get("handle", "").strip()
+                description = product_data.get("body_html", "")
+                description_html = product_data.get("body_html", "")
+                product_type = product_data.get("product_type", "")
+                vendor = product_data.get("vendor", "")
+                status = product_data.get(
+                    "status", "active"
+                ).upper()  # Convert to uppercase
+                created_at = product_data.get("created_at")
+                updated_at = product_data.get("updated_at")
+            else:
+                # GraphQL format field mapping
+                title = product_data.get("title", "").strip()
+                handle = product_data.get("handle", "").strip()
+                description = product_data.get("description", "")
+                description_html = product_data.get("bodyHtml", "")
+                product_type = product_data.get("productType", "")
+                vendor = product_data.get("vendor", "")
+                status = product_data.get("status", "ACTIVE")
+                created_at = product_data.get("createdAt")
+                updated_at = product_data.get("updatedAt")
+
             price = self._get_product_price(variants)
 
             # Skip products with missing required fields
@@ -223,21 +303,25 @@ class FieldExtractorService:
                 "productId": product_id,
                 "title": title,
                 "handle": handle,
-                "description": product_data.get("description"),
-                "descriptionHtml": product_data.get("bodyHtml"),
-                "productType": product_data.get("productType"),
-                "vendor": product_data.get("vendor"),
+                "description": description,
+                "descriptionHtml": description_html,
+                "productType": product_type,
+                "vendor": vendor,
                 "tags": tags,
-                "status": product_data.get("status", "ACTIVE"),
+                "status": status,
                 "totalInventory": product_data.get("totalInventory")
                 or calculated_inventory,  # Use calculated as fallback
                 "price": price,
                 "compareAtPrice": self._get_product_compare_price(variants),
                 "inventory": calculated_inventory,
                 "imageUrl": main_image_url,
-                "imageAlt": images[0].get("altText") if images else None,
-                "productCreatedAt": self._parse_datetime(product_data.get("createdAt")),
-                "productUpdatedAt": self._parse_datetime(product_data.get("updatedAt")),
+                "imageAlt": (
+                    images[0].get("altText")
+                    if images and isinstance(images[0], dict)
+                    else None
+                ),
+                "productCreatedAt": self._parse_datetime(created_at),
+                "productUpdatedAt": self._parse_datetime(updated_at),
                 "onlineStoreUrl": product_data.get("onlineStoreUrl"),
                 "onlineStorePreviewUrl": product_data.get("onlineStorePreviewUrl"),
                 "seoTitle": (
@@ -253,21 +337,30 @@ class FieldExtractorService:
                 "templateSuffix": product_data.get("templateSuffix"),
                 "variants": variants,
                 "images": images,
+                # Debug: Log media extraction details
+                # "media_debug": f"data_format={data_format}, media_type={type(product_data.get('media'))}, media_value={product_data.get('media')}",
                 "media": self._normalize_gid_in_dict(
-                    product_data.get("media", {}).get("edges", [])
+                    product_data.get("media", [])
+                    if data_format == "webhook"
+                    else product_data.get("media", {}).get("edges", [])
                 ),
                 "options": options,
                 "collections": collections,
                 "metafields": metafields,
-                "isActive": product_data.get("status", "active") == "active",
+                "isActive": status.lower() == "active",
             }
 
         except Exception as e:
+            import traceback
+
             self.logger.error(f"Failed to extract product fields: {str(e)}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.logger.error(f"Payload that caused error: {payload}")
+            self.logger.error(f"Shop ID: {shop_id}")
             return None
 
     def extract_customer_fields(
-        self, payload: Dict[str, Any], shop_id: str
+        self, payload: Dict[str, Any], shop_id: str, data_format: str = "graphql"
     ) -> Optional[Dict[str, Any]]:
         """Extract key customer fields from nested JSON payload"""
         try:
@@ -339,15 +432,21 @@ class FieldExtractorService:
             return None
 
     def extract_collection_fields(
-        self, payload: Dict[str, Any], shop_id: str
+        self, payload: Dict[str, Any], shop_id: str, data_format: str = "graphql"
     ) -> Optional[Dict[str, Any]]:
         """Extract key collection fields from nested JSON payload"""
         try:
             if payload is None:
                 return None
 
-            # Extract collection data using generic method
-            collection_data = self._extract_payload_data(payload, "collection")
+            # For webhook format, collection data is directly in payload
+            # For GraphQL format, it might be nested under "collection" key
+            if data_format == "webhook":
+                collection_data = payload
+            else:
+                collection_data = self._extract_payload_data(payload, "collection")
+                if not collection_data:
+                    collection_data = payload  # Fallback to direct payload
 
             if (
                 not collection_data
@@ -384,6 +483,14 @@ class FieldExtractorService:
             if not title or not handle:
                 return None
 
+            # Get product count from products.edges if available
+            product_count = 0
+            products = collection_data.get("products", {})
+            if isinstance(products, dict) and "edges" in products:
+                product_count = len(products.get("edges", []))
+            elif isinstance(products, list):
+                product_count = len(products)
+
             return {
                 "shopId": shop_id,
                 "collectionId": collection_id,
@@ -395,14 +502,14 @@ class FieldExtractorService:
                 "seoDescription": seo.get("description"),
                 "imageUrl": image_url,
                 "imageAlt": image_alt,
-                "productCount": int(collection_data.get("productsCount", 0)),
+                "productCount": product_count,
                 "isAutomated": (
                     collection_data.get("ruleSet", {}).get("rules", []) != []
                     if collection_data.get("ruleSet")
                     and isinstance(collection_data.get("ruleSet"), dict)
                     else False
                 ),
-                "createdAt": collection_data.get("createdAt"),
+                "createdAt": collection_data.get("createdAt") or collection_data.get("updatedAt"),
                 "updatedAt": collection_data.get("updatedAt"),
                 "metafields": metafields,
             }
