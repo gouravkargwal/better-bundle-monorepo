@@ -31,7 +31,7 @@
     color: {{ block.settings.heading_color | default: '#1e293b' }};
   }
   .swiper {
-    height: 360px;
+    height: 420px;
   }
   .swiper-button-next,
   .swiper-button-prev {
@@ -156,6 +156,68 @@
   .product-card__btn:active {
     transform: scale(0.98);
   }
+  .product-card__options {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .product-card__variants {
+    flex: 1;
+  }
+  .variant-selector {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #ffffff;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+  }
+  .variant-selector:focus {
+    outline: none;
+    border-color: #000;
+  }
+  .product-card__quantity {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .qty-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    color: #374151;
+    transition: all 0.2s ease;
+  }
+  .qty-btn:hover {
+    border-color: #000;
+    background: #f9fafb;
+  }
+  .qty-input {
+    width: 50px;
+    height: 32px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 14px;
+    color: #374151;
+    background: #ffffff;
+  }
+  .qty-input:focus {
+    outline: none;
+    border-color: #000;
+  }
 </style>
 
 <script>
@@ -173,7 +235,8 @@
           {% if block.settings.enable_autoplay %}
           autoplay: {
             delay: {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }},
-            disableOnInteraction: false,
+            disableOnInteraction: true,
+            pauseOnMouseEnter: true,
           },
           {% endif %}
           loop: {% if block.settings.enable_autoplay %}true{% else %}false{% endif %},
@@ -222,6 +285,20 @@
           <div class="product-card__body">
             <h4 class="product-card__title">Dummy Product 1</h4>
             <p class="product-card__price">$24.99</p>
+            <div class="product-card__options">
+              <div class="product-card__variants">
+                <select class="variant-selector">
+                  <option value="small">Size: Small</option>
+                  <option value="medium" selected>Size: Medium</option>
+                  <option value="large">Size: Large</option>
+                </select>
+              </div>
+              <div class="product-card__quantity">
+                <button class="qty-btn qty-minus" type="button">-</button>
+                <input type="number" value="1" min="1" class="qty-input">
+                <button class="qty-btn qty-plus" type="button">+</button>
+              </div>
+            </div>
             <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
@@ -237,6 +314,21 @@
           <div class="product-card__body">
             <h4 class="product-card__title">Dummy Product 2</h4>
             <p class="product-card__price">$29.99</p>
+            <div class="product-card__options">
+              <div class="product-card__variants">
+                <select class="variant-selector">
+                  <option value="red">Color: Red</option>
+                  <option value="blue" selected>Color: Blue</option>
+                  <option value="green">Color: Green</option>
+                  <option value="black">Color: Black</option>
+                </select>
+              </div>
+              <div class="product-card__quantity">
+                <button class="qty-btn qty-minus" type="button">-</button>
+                <input type="number" value="2" min="1" class="qty-input">
+                <button class="qty-btn qty-plus" type="button">+</button>
+              </div>
+            </div>
             <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
@@ -252,6 +344,22 @@
           <div class="product-card__body">
             <h4 class="product-card__title">Dummy Product 3</h4>
             <p class="product-card__price">$34.99</p>
+            <div class="product-card__options">
+              <div class="product-card__variants">
+                <select class="variant-selector">
+                  <option value="xs">Size: XS</option>
+                  <option value="s">Size: S</option>
+                  <option value="m" selected>Size: M</option>
+                  <option value="l">Size: L</option>
+                  <option value="xl">Size: XL</option>
+                </select>
+              </div>
+              <div class="product-card__quantity">
+                <button class="qty-btn qty-minus" type="button">-</button>
+                <input type="number" value="1" min="1" class="qty-input">
+                <button class="qty-btn qty-plus" type="button">+</button>
+              </div>
+            </div>
             <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
@@ -267,6 +375,20 @@
           <div class="product-card__body">
             <h4 class="product-card__title">Dummy Product 4</h4>
             <p class="product-card__price">$39.99</p>
+            <div class="product-card__options">
+              <div class="product-card__variants">
+                <select class="variant-selector">
+                  <option value="material-cotton">Material: Cotton</option>
+                  <option value="material-wool" selected>Material: Wool</option>
+                  <option value="material-silk">Material: Silk</option>
+                </select>
+              </div>
+              <div class="product-card__quantity">
+                <button class="qty-btn qty-minus" type="button">-</button>
+                <input type="number" value="3" min="1" class="qty-input">
+                <button class="qty-btn qty-plus" type="button">+</button>
+              </div>
+            </div>
             <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
