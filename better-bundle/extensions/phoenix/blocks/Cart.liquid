@@ -35,13 +35,49 @@
   }
   .swiper-button-next,
   .swiper-button-prev {
-    color: #333;
+    width: 32px;
+    height: 32px;
+    margin-top: -16px;
+    color: rgba(0, 0, 0, 0.4);
+    background: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    z-index: 10;
+    opacity: 0.7;
+  }
+  .swiper-button-next:hover,
+  .swiper-button-prev:hover {
+    color: rgba(0, 0, 0, 0.7);
+    background: rgba(255, 255, 255, 0.8);
+    border-color: rgba(0, 0, 0, 0.2);
+    opacity: 1;
+  }
+  .swiper-button-next:after,
+  .swiper-button-prev:after {
+    font-size: 10px;
+    font-weight: 400;
+    padding: 6px;
+  }
+  .swiper-button-next {
+    right: 15px;
+  }
+  .swiper-button-prev {
+    left: 15px;
+  }
+  .swiper-pagination {
+    bottom: 10px;
   }
   .swiper-pagination-bullet {
-    background: #333;
+    width: 8px;
+    height: 8px;
+    background: {{ block.settings.pagination_color | default: '#000000' | color_modify: 'alpha', 0.3 }};
+    opacity: 1;
+    transition: all 0.2s ease;
   }
   .swiper-pagination-bullet-active {
-    background: #007cba;
+    background: {{ block.settings.pagination_color | default: '#000000' }};
+    transform: scale(1.2);
   }
   /* Modern Clean Product Card Styles */
   .product-card {
@@ -134,7 +170,13 @@
             990: { slidesPerView: 3, spaceBetween: 30 },
             1200: { slidesPerView: 4, spaceBetween: 30 },
           },
-          loop: false,
+          {% if block.settings.enable_autoplay %}
+          autoplay: {
+            delay: {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }},
+            disableOnInteraction: false,
+          },
+          {% endif %}
+          loop: {% if block.settings.enable_autoplay %}true{% else %}false{% endif %},
           spaceBetween: 30,
           freeMode: false,
           grabCursor: true,
@@ -302,7 +344,19 @@
 
     { "type": "header", "content": "Controls" },
     { "type": "checkbox", "id": "show_arrows", "label": "Show Arrows", "default": true },
-    { "type": "checkbox", "id": "show_pagination", "label": "Show Pagination", "default": true }
+    { "type": "checkbox", "id": "show_pagination", "label": "Show Pagination", "default": true },
+    { "type": "color", "id": "pagination_color", "label": "Pagination Color", "default": "#000000" },
+    { "type": "checkbox", "id": "enable_autoplay", "label": "Enable Autoplay", "default": true },
+    {
+      "type": "range",
+      "id": "autoplay_delay",
+      "label": "Autoplay Delay (seconds)",
+      "min": 1,
+      "max": 10,
+      "step": 0.5,
+      "default": 2.5,
+      "unit": "s"
+    }
   ]
 }
 {% endschema %}
