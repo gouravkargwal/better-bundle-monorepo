@@ -133,6 +133,8 @@ class ProductEnrichment:
         Args:
             shop_id: Shop ID
             item_ids: List of Gorse item IDs (which are Shopify product IDs)
+            context: Recommendation context
+            source: Recommendation source
 
         Returns:
             List of enriched product data
@@ -593,6 +595,7 @@ class HybridRecommendationService:
         category: Optional[str] = None,
         limit: int = 6,
         metadata: Optional[Dict[str, Any]] = None,
+        exclude_items: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Blend multiple recommendation sources based on context
@@ -644,6 +647,7 @@ class HybridRecommendationService:
                         category=category,
                         limit=source_limit,
                         metadata=metadata,
+                        exclude_items=exclude_items,
                     )
 
                     if source_result["success"] and source_result["items"]:
@@ -735,6 +739,7 @@ class HybridRecommendationService:
         category: Optional[str] = None,
         limit: int = 6,
         metadata: Optional[Dict[str, Any]] = None,
+        exclude_items: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Get recommendations from a specific source"""
 
@@ -748,10 +753,18 @@ class HybridRecommendationService:
             ]:  # Limit to 5 products to avoid too many API calls
                 try:
                     prefixed_item_id = f"shop_{shop_id}_{pid}"
+                    # Convert exclude_items to Gorse format (with shop prefix)
+                    gorse_exclude_items = None
+                    if exclude_items:
+                        gorse_exclude_items = [
+                            f"shop_{shop_id}_{item_id}" for item_id in exclude_items
+                        ]
+
                     result = await self.gorse_client.get_item_neighbors(
                         item_id=prefixed_item_id,
                         n=limit // len(product_ids) + 2,
                         category=category,
+                        exclude_items=gorse_exclude_items,
                     )
                     if result["success"] and result.get("neighbors"):
                         all_neighbors.extend(result["neighbors"])
@@ -782,8 +795,18 @@ class HybridRecommendationService:
         elif source == "user_recommendations" and user_id:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}"
+            # Convert exclude_items to Gorse format (with shop prefix)
+            gorse_exclude_items = None
+            if exclude_items:
+                gorse_exclude_items = [
+                    f"shop_{shop_id}_{item_id}" for item_id in exclude_items
+                ]
+
             result = await self.gorse_client.get_recommendations(
-                user_id=prefixed_user_id, n=limit, category=category
+                user_id=prefixed_user_id,
+                n=limit,
+                category=category,
+                exclude_items=gorse_exclude_items,
             )
             if result["success"]:
                 return {
@@ -1311,6 +1334,7 @@ async def execute_recommendation_level(
     category: Optional[str] = None,
     limit: int = 6,
     metadata: Optional[Dict[str, Any]] = None,
+    exclude_items: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute a specific recommendation level
@@ -1332,8 +1356,18 @@ async def execute_recommendation_level(
         if level == "item_neighbors" and product_ids and len(product_ids) > 0:
             # Apply shop prefix for multi-tenancy - use first product for single item neighbors
             prefixed_item_id = f"shop_{shop_id}_{product_ids[0]}"
+            # Convert exclude_items to Gorse format (with shop prefix)
+            gorse_exclude_items = None
+            if exclude_items:
+                gorse_exclude_items = [
+                    f"shop_{shop_id}_{item_id}" for item_id in exclude_items
+                ]
+
             result = await gorse_client.get_item_neighbors(
-                item_id=prefixed_item_id, n=limit, category=category
+                item_id=prefixed_item_id,
+                n=limit,
+                category=category,
+                exclude_items=gorse_exclude_items,
             )
             if result["success"]:
                 return {
@@ -1345,8 +1379,18 @@ async def execute_recommendation_level(
         elif level == "user_recommendations" and user_id:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}"
+            # Convert exclude_items to Gorse format (with shop prefix)
+            gorse_exclude_items = None
+            if exclude_items:
+                gorse_exclude_items = [
+                    f"shop_{shop_id}_{item_id}" for item_id in exclude_items
+                ]
+
             result = await gorse_client.get_recommendations(
-                user_id=prefixed_user_id, n=limit, category=category
+                user_id=prefixed_user_id,
+                n=limit,
+                category=category,
+                exclude_items=gorse_exclude_items,
             )
             if result["success"]:
                 return {
@@ -1422,6 +1466,7 @@ async def execute_fallback_chain(
     category: Optional[str] = None,
     limit: int = 6,
     metadata: Optional[Dict[str, Any]] = None,
+    exclude_items: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute the fallback chain for a given context
@@ -1458,6 +1503,7 @@ async def execute_fallback_chain(
                 category,
                 limit,
                 metadata,
+                exclude_items,
             )
 
             if result["success"] and result["items"]:
@@ -1626,6 +1672,15 @@ async def get_recommendations(request: RecommendationRequest):
                 f"⚡ Checkout optimization: limited to {request.limit} recommendations"
             )
 
+        # Determine products to exclude from recommendations
+        exclude_items = None
+        if request.context == "product_page" and request.product_ids:
+            # When showing recommendations for products (like in cart), exclude those products
+            exclude_items = request.product_ids
+            logger.debug(
+                f"🚫 Excluding products from recommendations | context={request.context} | exclude_ids={exclude_items}"
+            )
+
         # Try hybrid recommendations first (except for checkout which uses simple fallback)
         if request.context != "checkout":
             logger.info(
@@ -1640,6 +1695,7 @@ async def get_recommendations(request: RecommendationRequest):
                 category=category,  # Use auto-detected category
                 limit=request.limit,
                 metadata=request.metadata,
+                exclude_items=exclude_items,
             )
 
             # If hybrid recommendations fail or return insufficient results, fall back to simple chain
@@ -1659,6 +1715,7 @@ async def get_recommendations(request: RecommendationRequest):
                     category=category,
                     limit=request.limit,
                     metadata=request.metadata,
+                    exclude_items=exclude_items,
                 )
             else:
                 logger.info(
@@ -1678,6 +1735,7 @@ async def get_recommendations(request: RecommendationRequest):
                 category=category,
                 limit=request.limit,
                 metadata=request.metadata,
+                exclude_items=exclude_items,
             )
 
         if not result["success"] or not result["items"]:

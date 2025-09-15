@@ -41,10 +41,11 @@
     margin: 0;
     color: {{ block.settings.heading_color | default: '#1e293b' }};
   }
-  .swiper {
-    height: 420px;
-    --swiper-pagination-bottom: 0px; /* Override Swiper's default 8px */
-  }
+    .swiper {
+      height: auto; /* Auto height to adapt to any theme */
+      min-height: 500px; /* Minimum height for proper display */
+      --swiper-pagination-bottom: 20px; /* Position pagination properly */
+    }
   .swiper-button-next,
   .swiper-button-prev {
     width: 28px;
@@ -92,13 +93,21 @@
     background: {{ block.settings.pagination_color | default: '#000000' }};
     transform: scale(1.2);
   }
+
+  /* Ensure pagination is always visible */
+  .swiper-pagination {
+    position: relative !important;
+    margin-top: 20px !important;
+    text-align: center !important;
+    bottom: auto !important;
+  }
   /* Modern Clean Product Card Styles */
   .product-card {
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 300px;
-    min-height: 400px; /* Optimized height for better fit */
+    max-width: 100%; /* Full width to adapt to any theme container */
+    min-height: 450px; /* Consistent height across themes */
     background: {{ block.settings.card_bg | default: '#ffffff' }};
     border-radius: {{ block.settings.card_border_radius | default: 8 }}px;
     overflow: hidden;
@@ -107,6 +116,7 @@
     margin: 0 auto;
     transition: all 0.2s ease;
     position: relative;
+    box-sizing: border-box; /* Include padding/border in width calculation */
   }
   .product-card:hover {
     transform: translateY(-2px);

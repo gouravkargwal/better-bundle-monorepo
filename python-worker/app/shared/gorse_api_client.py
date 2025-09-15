@@ -292,7 +292,11 @@ class GorseApiClient:
             return {"success": False, "error": error_msg, "count": 0}
 
     async def get_recommendations(
-        self, user_id: str, n: int = 10, category: Optional[str] = None
+        self,
+        user_id: str,
+        n: int = 10,
+        category: Optional[str] = None,
+        exclude_items: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Get recommendations for a user from Gorse
@@ -301,6 +305,7 @@ class GorseApiClient:
             user_id: User ID to get recommendations for
             n: Number of recommendations to return
             category: Optional category filter
+            exclude_items: Optional list of item IDs to exclude from recommendations
 
         Returns:
             Recommendations response
@@ -309,6 +314,9 @@ class GorseApiClient:
             params = {"n": n}
             if category:
                 params["category"] = category
+            if exclude_items:
+                # Gorse supports filtering by excluding items
+                params["filter"] = f"not item_id in ({','.join(exclude_items)})"
 
             url = f"{self.base_url}/api/recommend/{user_id}"
 
@@ -365,7 +373,11 @@ class GorseApiClient:
             return {"success": False, "status": "unhealthy", "error": str(e)}
 
     async def get_item_neighbors(
-        self, item_id: str, n: int = 10, category: Optional[str] = None
+        self,
+        item_id: str,
+        n: int = 10,
+        category: Optional[str] = None,
+        exclude_items: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Get similar items (neighbors) for a given item
@@ -374,6 +386,7 @@ class GorseApiClient:
             item_id: Item ID to get neighbors for
             n: Number of neighbors to return
             category: Optional category filter
+            exclude_items: Optional list of item IDs to exclude from neighbors
 
         Returns:
             Item neighbors response
@@ -382,6 +395,9 @@ class GorseApiClient:
             params = {"n": n}
             if category:
                 params["category"] = category
+            if exclude_items:
+                # Gorse supports filtering by excluding items
+                params["filter"] = f"not item_id in ({','.join(exclude_items)})"
 
             url = f"{self.base_url}/api/item/{item_id}/neighbors"
 
