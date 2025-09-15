@@ -116,8 +116,12 @@ model OrderData {
   presentmentCurrencyCode String?   @default("USD") @db.VarChar(10)
   confirmed               Boolean   @default(false)
   test                    Boolean   @default(false)
+  financialStatus         String?   @db.VarChar(50) // paid, pending, partially_paid, refunded, voided
+  fulfillmentStatus       String?   @db.VarChar(50) // fulfilled, partial, restocked, null
+  orderStatus             String?   @db.VarChar(50) // open, closed, cancelled, any
   tags                    Json?     @default("[]")
   note                    String?   @default("") @db.Text
+  noteAttributes          Json?     @default("[]")
   lineItems               Json      @default("[]")
   shippingAddress         Json?     @default("{}")
   billingAddress          Json?     @default("{}")
@@ -135,6 +139,9 @@ model OrderData {
   @@index([shopId, customerEmail])
   @@index([shopId, currencyCode])
   @@index([shopId, customerState])
+  @@index([shopId, financialStatus])
+  @@index([shopId, fulfillmentStatus])
+  @@index([shopId, orderStatus])
   @@map("OrderData")
 }
 

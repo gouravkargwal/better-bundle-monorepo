@@ -215,7 +215,7 @@ async function getOverviewMetrics(
                   lte: endDate,
                 },
               },
-              interactionType: "click",
+              interactionType: { in: ["click", "add_to_cart"] },
             },
           }),
           prisma.recommendationAttribution.aggregate({
@@ -260,7 +260,7 @@ async function getOverviewMetrics(
                   lte: previousEndDate,
                 },
               },
-              interactionType: "click",
+              interactionType: { in: ["click", "add_to_cart"] },
             },
           }),
           prisma.recommendationAttribution.aggregate({
@@ -392,7 +392,7 @@ async function getContextPerformance(
                 shopId,
                 createdAt: { gte: startDate, lte: endDate },
               },
-              interactionType: "click",
+              interactionType: { in: ["click", "add_to_cart"] },
               context: { in: contexts },
             },
             _count: { _all: true },
@@ -463,7 +463,7 @@ async function getTopProducts(
           lte: endDate,
         },
       },
-      interactionType: "click",
+      interactionType: { in: ["click", "add_to_cart"] },
     },
     _count: true,
     orderBy: {
@@ -606,7 +606,7 @@ async function getRecentActivity(
             shopId,
             createdAt: { gte: today, lte: endDate },
           },
-          interactionType: "click",
+          interactionType: { in: ["click", "add_to_cart"] },
         },
       }),
       prisma.recommendationInteraction.count({
@@ -615,7 +615,7 @@ async function getRecentActivity(
             shopId,
             createdAt: { gte: yesterday, lt: today },
           },
-          interactionType: "click",
+          interactionType: { in: ["click", "add_to_cart"] },
         },
       }),
       prisma.recommendationInteraction.count({
@@ -624,7 +624,7 @@ async function getRecentActivity(
             shopId,
             createdAt: { gte: thisWeekStart, lte: endDate },
           },
-          interactionType: "click",
+          interactionType: { in: ["click", "add_to_cart"] },
         },
       }),
     ]),

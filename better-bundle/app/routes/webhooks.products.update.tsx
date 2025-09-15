@@ -8,9 +8,32 @@ import { getRedisStreamService } from "../services/redis-stream.service";
 const recentWebhooks = new Map<string, number>();
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
+  console.log("🚀 Webhook request received - products/update");
+  console.log("📋 Request method:", request.method);
+  console.log("📋 Request URL:", request.url);
+  console.log(
+    "📋 Request headers:",
+    Object.fromEntries(request.headers.entries()),
+  );
+
+  let payload, session, topic, shop;
+
+  try {
+    const authResult = await authenticate.webhook(request);
+    payload = authResult.payload;
+    session = authResult.session;
+    topic = authResult.topic;
+    shop = authResult.shop;
+    console.log("✅ Authentication successful");
+    console.log("📋 Topic:", topic);
+    console.log("📋 Shop:", shop);
+  } catch (authError) {
+    console.log("❌ Authentication failed:", authError);
+    return json({ error: "Authentication failed" }, { status: 401 });
+  }
 
   if (!session || !shop) {
+    console.log(`❌ Session or shop missing for ${topic} webhook`);
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 

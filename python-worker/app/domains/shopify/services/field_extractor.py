@@ -167,8 +167,12 @@ class FieldExtractorService:
                 "presentmentCurrencyCode": order_data.get("presentmentCurrencyCode"),
                 "confirmed": order_data.get("confirmed", False),
                 "test": order_data.get("test", False),
+                "financialStatus": order_data.get("financial_status"),
+                "fulfillmentStatus": order_data.get("fulfillment_status"),
+                "orderStatus": order_data.get("order_status"),
                 "tags": tags,
                 "note": order_data.get("note"),
+                "noteAttributes": order_data.get("note_attributes", []),
                 "lineItems": line_items,
                 "shippingAddress": self._normalize_gid_in_dict(shipping_address),
                 "billingAddress": self._normalize_gid_in_dict(billing_address),
@@ -463,7 +467,7 @@ class FieldExtractorService:
             else:
                 # REST API format: 305064607883
                 collection_id = str(raw_id)
-            
+
             if not collection_id:
                 return None
 
@@ -491,10 +495,10 @@ class FieldExtractorService:
                 template_suffix = collection_data.get("template_suffix")
                 updated_at = collection_data.get("updated_at")
                 published_at = collection_data.get("published_at")
-                
+
                 # REST API doesn't have image, seo, or metafields in the same structure
                 # Variables already initialized above
-                
+
             else:
                 # GraphQL format
                 title = collection_data.get("title", "").strip()
@@ -502,10 +506,12 @@ class FieldExtractorService:
                 description = collection_data.get("description", "")
                 template_suffix = collection_data.get("templateSuffix")
                 updated_at = collection_data.get("updatedAt")
-                
+
                 # Extract image information
                 image = collection_data.get("image")
-                image_url = image.get("url") if image and isinstance(image, dict) else None
+                image_url = (
+                    image.get("url") if image and isinstance(image, dict) else None
+                )
                 image_alt = (
                     image.get("altText") if image and isinstance(image, dict) else None
                 )

@@ -5,14 +5,46 @@ import prisma from "../db.server";
 import { getRedisStreamService } from "../services/redis-stream.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
+  console.log("🚀 Webhook request received - orders/paid");
+  console.log("📋 Request method:", request.method);
+  console.log("📋 Request URL:", request.url);
+  console.log(
+    "📋 Request headers:",
+    Object.fromEntries(request.headers.entries()),
+  );
+
+  let payload, session, topic, shop;
+
+  try {
+    const authResult = await authenticate.webhook(request);
+    payload = authResult.payload;
+    session = authResult.session;
+    topic = authResult.topic;
+    shop = authResult.shop;
+    console.log("✅ Authentication successful");
+    console.log("📋 Topic:", topic);
+    console.log("📋 Shop:", shop);
+  } catch (authError) {
+    console.log("❌ Authentication failed:", authError);
+    return json({ error: "Authentication failed" }, { status: 401 });
+  }
 
   if (!session || !shop) {
+    console.log(`❌ Session or shop missing for ${topic} webhook`);
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
+    console.log(`🔔 ${topic} webhook received for ${shop}`);
+    console.log(`📦 Order ID: ${payload.id}`);
+    console.log(`💰 Total: ${payload.total_price}`);
+    console.log(`📧 Customer: ${payload.email || "Guest"}`);
+    console.log(`📅 Created: ${payload.created_at}`);
+    console.log(`🔄 Financial Status: ${payload.financial_status}`);
+    console.log(`📋 Fulfillment Status: ${payload.fulfillment_status}`);
+    console.log(`🏷️ Tags: ${payload.tags}`);
+    console.log(`📝 Note: ${payload.note || "No note"}`);
+    console.log(`🔗 Note Attributes:`, payload.note_attributes || []);
 
     // Extract order data from payload
     const order = payload;
