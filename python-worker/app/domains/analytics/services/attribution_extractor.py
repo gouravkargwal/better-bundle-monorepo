@@ -182,12 +182,204 @@ class AttributionExtractor:
             shop_id: Shop ID
         """
         try:
-            # This is a placeholder for order-level attribution extraction
-            # You can implement order-specific attribution logic here
             logger.info(f"Processing order attribution for shop {shop_id}")
+
+            # Extract note_attributes from the order
+            note_attributes = order_item.get("noteAttributes", [])
+            if not note_attributes:
+                logger.info(
+                    f"No note_attributes found in order {order_item.get('orderId')}"
+                )
+                return
+
+            logger.info(f"Found {len(note_attributes)} note_attributes in order")
+
+            # Extract recommendation attribution data
+            attribution_data = {}
+            for attr in note_attributes:
+                if isinstance(attr, dict):
+                    name = attr.get("name", "")
+                    value = attr.get("value", "")
+
+                    if name == "bb_recommendation_session_id":
+                        attribution_data["session_id"] = value
+                    elif name == "bb_recommendation_product_id":
+                        attribution_data["product_id"] = value
+                    elif name == "bb_recommendation_extension":
+                        attribution_data["extension_type"] = value
+                    elif name == "bb_recommendation_context":
+                        attribution_data["context"] = value
+                    elif name == "bb_recommendation_position":
+                        attribution_data["position"] = value
+
+            # Check if we have enough attribution data
+            if not attribution_data.get("session_id"):
+                logger.info(
+                    f"No recommendation session ID found in order {order_item.get('orderId')}"
+                )
+                return
+
+            logger.info(f"Extracted attribution data: {attribution_data}")
+
+            # Create AttributionEvent record
+            attribution_event = await self._create_order_attribution_event(
+                shop_id=shop_id,
+                order_item=order_item,
+                attribution_data=attribution_data,
+            )
+
+            if attribution_event:
+                logger.info(
+                    f"Created attribution event {attribution_event.id} for order {order_item.get('orderId')}"
+                )
+
+                # Create RecommendationAttribution record for billing
+                recommendation_attribution = (
+                    await self._create_recommendation_attribution(
+                        shop_id=shop_id,
+                        order_item=order_item,
+                        attribution_data=attribution_data,
+                    )
+                )
+
+                if recommendation_attribution:
+                    logger.info(
+                        f"Created recommendation attribution {recommendation_attribution.id} for billing"
+                    )
 
         except Exception as e:
             logger.error(f"Failed to extract order attribution: {e}")
+
+    async def _create_order_attribution_event(
+        self, shop_id: str, order_item: Dict[str, Any], attribution_data: Dict[str, Any]
+    ) -> Optional[AttributionEvent]:
+        """
+        Create an AttributionEvent record from order attribution data
+
+        Args:
+            shop_id: Shop ID
+            order_item: Order item data
+            attribution_data: Extracted attribution data
+
+        Returns:
+            Created AttributionEvent or None
+        """
+        try:
+            # Extract order and customer information
+            order_id = order_item.get("orderId")
+            customer_id = order_item.get("customerId")
+            customer_email = order_item.get("customerEmail")
+            total_amount = order_item.get("totalAmount", 0.0)
+            currency_code = order_item.get("currencyCode", "USD")
+
+            # Create attribution event data
+            attribution_event_data = {
+                "shopId": shop_id,
+                "customerId": customer_id,
+                "customerEmail": customer_email,
+                "sessionId": attribution_data.get("session_id"),
+                "productId": attribution_data.get("product_id"),
+                "extensionType": attribution_data.get("extension_type", "unknown"),
+                "context": attribution_data.get("context", "order"),
+                "position": (
+                    int(attribution_data.get("position", 0))
+                    if attribution_data.get("position")
+                    else 0
+                ),
+                "eventType": "order_completed",
+                "revenue": total_amount,
+                "currency": currency_code,
+                "orderId": order_id,
+                "metadata": {
+                    "source": "order_attribution",
+                    "order_name": order_item.get("orderName"),
+                    "order_date": (
+                        order_item.get("orderDate").isoformat()
+                        if order_item.get("orderDate")
+                        else None
+                    ),
+                    "financial_status": order_item.get("financialStatus"),
+                    "fulfillment_status": order_item.get("fulfillmentStatus"),
+                },
+            }
+
+            logger.info(
+                f"Creating attribution event with data: {attribution_event_data}"
+            )
+
+            # Create the attribution event
+            attribution_event = await self.db.attributionevent.create(
+                data=attribution_event_data
+            )
+
+            logger.info(
+                f"Successfully created attribution event {attribution_event.id}"
+            )
+            return attribution_event
+
+        except Exception as e:
+            logger.error(f"Failed to create order attribution event: {e}")
+            return None
+
+    async def _create_recommendation_attribution(
+        self, shop_id: str, order_item: Dict[str, Any], attribution_data: Dict[str, Any]
+    ) -> Optional[Any]:
+        """
+        Create a RecommendationAttribution record for billing revenue tracking
+
+        Args:
+            shop_id: Shop ID
+            order_item: Order item data
+            attribution_data: Extracted attribution data
+
+        Returns:
+            Created RecommendationAttribution or None
+        """
+        try:
+            # Extract order and revenue information
+            order_id = order_item.get("orderId")
+            product_id = attribution_data.get("product_id")
+            total_amount = order_item.get("totalAmount", 0.0)
+            currency_code = order_item.get("currencyCode", "USD")
+
+            # Create recommendation attribution data for billing
+            recommendation_attribution_data = {
+                "shopId": shop_id,
+                "sessionId": attribution_data.get("session_id"),
+                "productId": product_id,
+                "orderId": order_id,
+                "extensionType": attribution_data.get("extension_type", "unknown"),
+                "context": attribution_data.get("context", "order"),
+                "position": (
+                    int(attribution_data.get("position", 0))
+                    if attribution_data.get("position")
+                    else 0
+                ),
+                "revenue": total_amount,
+                "attributionSource": "cart_attributes",
+                "confidenceScore": 1.0,  # High confidence since it's from cart attributes
+                "status": "confirmed",
+            }
+
+            logger.info(
+                f"Creating recommendation attribution for billing: {recommendation_attribution_data}"
+            )
+
+            # Create the recommendation attribution record
+            recommendation_attribution = await self.db.recommendationattribution.create(
+                data=recommendation_attribution_data
+            )
+
+            logger.info(
+                f"Successfully created recommendation attribution {recommendation_attribution.id} for billing"
+            )
+            return recommendation_attribution
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create recommendation attribution for billing: {e}"
+            )
+            return None
 
     async def _link_attribution_to_order(
         self,
@@ -212,18 +404,21 @@ class AttributionExtractor:
             total_price = 0.0
             currency_code = "USD"
             line_items = []
-            
+
             if "data" in event_data and "checkout" in event_data["data"]:
                 checkout_data = event_data["data"]["checkout"]
                 if "order" in checkout_data and "id" in checkout_data["order"]:
                     order_id = checkout_data["order"]["id"]
-                
-                if "totalPrice" in checkout_data and "amount" in checkout_data["totalPrice"]:
+
+                if (
+                    "totalPrice" in checkout_data
+                    and "amount" in checkout_data["totalPrice"]
+                ):
                     total_price = float(checkout_data["totalPrice"]["amount"])
-                
+
                 if "currencyCode" in checkout_data:
                     currency_code = checkout_data["currencyCode"]
-                
+
                 if "lineItems" in checkout_data:
                     line_items = checkout_data["lineItems"]
 
@@ -257,7 +452,12 @@ class AttributionExtractor:
 
             # Create RecommendationAttributions records for revenue tracking
             await self._create_recommendation_attributions(
-                shop_id, order_id, attribution_events, line_items, total_price, currency_code
+                shop_id,
+                order_id,
+                attribution_events,
+                line_items,
+                total_price,
+                currency_code,
             )
 
         except Exception as e:
@@ -308,7 +508,7 @@ class AttributionExtractor:
             for event in attribution_events:
                 # Get revenue for this product
                 product_revenue = product_revenue_map.get(event.productId, 0.0)
-                
+
                 if product_revenue > 0:
                     try:
                         # Create RecommendationAttribution record
@@ -334,9 +534,13 @@ class AttributionExtractor:
                             f"product {event.productId}, revenue {product_revenue} {currency_code}"
                         )
                     except Exception as e:
-                        logger.error(f"Failed to create RecommendationAttribution for product {event.productId}: {e}")
+                        logger.error(
+                            f"Failed to create RecommendationAttribution for product {event.productId}: {e}"
+                        )
 
-            logger.info(f"Created {created_count} RecommendationAttributions for order {order_id}")
+            logger.info(
+                f"Created {created_count} RecommendationAttributions for order {order_id}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to create recommendation attributions: {e}")
