@@ -237,11 +237,19 @@ class ProductCardManager {
   // Initialize Swiper
   initializeSwiper() {
     if (typeof Swiper !== 'undefined') {
+      // Destroy existing Swiper instance if it exists
+      if (window.swiper) {
+        window.swiper.destroy(true, true);
+        window.swiper = null;
+      }
+
       // Check number of slides to determine if loop should be enabled
       const slides = document.querySelectorAll('.swiper-slide');
       const shouldLoop = slides.length > 3; // Only loop if more than 3 slides
 
-      new Swiper('.swiper', {
+      console.log(`🔄 Initializing Swiper with ${slides.length} slides, loop: ${shouldLoop}`);
+
+      window.swiper = new Swiper('.swiper', {
         breakpoints: {
           320: { slidesPerView: 1, spaceBetween: 20 },
           750: { slidesPerView: 2, spaceBetween: 25 },
@@ -263,11 +271,13 @@ class ProductCardManager {
         } : false,
         pagination: window.swiperConfig?.show_pagination ? {
           el: '.swiper-pagination',
-          clickable: true
+          clickable: true,
+          dynamicBullets: false,
+          dynamicMainBullets: 1
         } : false,
         on: {
           init: function () {
-            console.log('Swiper initialized with recommendations!');
+            console.log('✅ Swiper initialized with recommendations!');
           },
         },
       });
@@ -439,13 +449,28 @@ class ProductCardManager {
 
         // Update Swiper with remaining slides
         if (window.swiper) {
+          // Check remaining slides count
+          const remainingSlides = document.querySelectorAll('.swiper-slide');
+          console.log(`🗑️ Remaining slides after removal: ${remainingSlides.length}`);
+
+          // Update Swiper
           window.swiper.update();
 
+          // Reinitialize if needed (for loop mode changes)
+          if (remainingSlides.length <= 3 && window.swiper.loopedSlides) {
+            console.log('🔄 Reinitializing Swiper due to slide count change');
+            this.initializeSwiper();
+          }
+
           // Disable pagination if only 1 slide left
-          const remainingSlides = document.querySelectorAll('.swiper-slide');
           if (remainingSlides.length <= 1) {
-            window.swiper.pagination.destroy();
-            document.querySelector('.swiper-pagination').style.display = 'none';
+            if (window.swiper.pagination) {
+              window.swiper.pagination.destroy();
+            }
+            const paginationEl = document.querySelector('.swiper-pagination');
+            if (paginationEl) {
+              paginationEl.style.display = 'none';
+            }
           }
         }
       }, 300);
