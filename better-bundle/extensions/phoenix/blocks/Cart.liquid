@@ -264,6 +264,20 @@
     background-size: 200% 100%;
     animation: loading 1.5s infinite;
     border-radius: 4px;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  /* Fade out skeleton when real content loads */
+  .loading-skeleton.fade-out {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  /* Fade in real content */
+  .product-card.real-content {
+    opacity: 0;
+    transform: scale(1.05);
+    animation: fadeInUp 0.4s ease forwards;
   }
 
   .loading-placeholder .product-card__image.loading-skeleton {
@@ -284,15 +298,30 @@
     margin-bottom: 16px;
   }
 
-  .loading-placeholder .product-card__variants .loading-skeleton {
+  .loading-placeholder .product-card__variants .variant-selector.loading-skeleton {
     height: 36px;
     width: 100%;
     margin-bottom: 8px;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: none;
   }
 
-  .loading-placeholder .product-card__quantity .loading-skeleton {
+  .loading-placeholder .product-card__quantity .qty-btn.loading-skeleton {
     height: 32px;
-    width: 100px;
+    width: 32px;
+    border-radius: 6px;
+    display: inline-block;
+    margin: 0 4px;
+  }
+
+  .loading-placeholder .product-card__quantity .qty-input.loading-skeleton {
+    height: 32px;
+    width: 50px;
+    border-radius: 6px;
+    display: inline-block;
+    margin: 0 4px;
   }
 
   .loading-placeholder .product-card__btn.loading-skeleton {
@@ -307,6 +336,17 @@
     }
     100% {
       background-position: -200% 0;
+    }
+  }
+
+  @keyframes fadeInUp {
+    0% {
+      opacity: 0;
+      transform: translateY(20px) scale(1.05);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
   }
 
@@ -332,165 +372,85 @@
     <div class="swiper-wrapper">
       {% if request.design_mode %}
         <!-- Dummy data for design mode only -->
-        <div class="swiper-slide">
-          <div class="product-card">
-            <img
-              class="product-card__image"
-              src="https://via.placeholder.com/600x400/cccccc/666666?text=Product+1"
-              alt="Dummy Product 1"
-              width="600"
-              height="400"
-              loading="lazy"
-            >
-            <div class="product-card__body">
-              <h4 class="product-card__title">Dummy Product 1</h4>
-              <p class="product-card__price">$24.99</p>
-              <div class="product-card__options">
-                <div class="product-card__variants">
-                  <select class="variant-selector">
-                    <option value="small">Size: Small</option>
-                    <option value="medium" selected>Size: Medium</option>
-                    <option value="large">Size: Large</option>
-                  </select>
+        {% assign dummy_products = 'Product 1,Product 2,Product 3,Product 4' | split: ',' %}
+        {% assign dummy_prices = '24.99,29.99,34.99,39.99' | split: ',' %}
+        {% assign dummy_colors = 'cccccc,e0e0e0,d5d5d5,c7c7c7' | split: ',' %}
+        {% assign dummy_variants = 'Size: Small|Size: Medium|Size: Large,Color: Red|Color: Blue|Color: Green|Color: Black,Size: XS|Size: S|Size: M|Size: L|Size: XL,Material: Cotton|Material: Wool|Material: Silk'
+          | split: ','
+        %}
+        {% assign dummy_quantities = '1,2,1,3' | split: ',' %}
+
+        {% for product in dummy_products %}
+          {% assign product_index = forloop.index0 %}
+          <div class="swiper-slide">
+            <div class="product-card">
+              <img
+                class="product-card__image"
+                src="https://via.placeholder.com/600x400/{{ dummy_colors[product_index] }}/666666?text={{ product | replace: ' ', '+' }}"
+                alt="{{ product }}"
+                width="600"
+                height="400"
+                loading="lazy"
+              >
+              <div class="product-card__body">
+                <h4 class="product-card__title">{{ product }}</h4>
+                <p class="product-card__price">${{ dummy_prices[product_index] }}</p>
+                <div class="product-card__options">
+                  <div class="product-card__variants">
+                    <select class="variant-selector">
+                      {% assign variant_options = dummy_variants[product_index] | split: '|' %}
+                      {% for option in variant_options %}
+                        <option
+                          value="{{ option | downcase | replace: ' ', '-' | replace: ':', '' }}"
+                          {% if forloop.index == 2 %}
+                            selected
+                          {% endif %}
+                        >
+                          {{ option }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="product-card__quantity">
+                    <button class="qty-btn qty-minus" type="button">-</button>
+                    <input type="number" value="{{ dummy_quantities[product_index] }}" min="1" class="qty-input">
+                    <button class="qty-btn qty-plus" type="button">+</button>
+                  </div>
                 </div>
-                <div class="product-card__quantity">
-                  <button class="qty-btn qty-minus" type="button">-</button>
-                  <input type="number" value="1" min="1" class="qty-input">
-                  <button class="qty-btn qty-plus" type="button">+</button>
-                </div>
+                <button class="product-card__btn" type="button">Add to cart</button>
               </div>
-              <button class="product-card__btn" type="button">Add to cart</button>
             </div>
           </div>
-        </div>
-        <div class="swiper-slide">
-          <div class="product-card">
-            <img
-              class="product-card__image"
-              src="https://via.placeholder.com/600x400/e0e0e0/666666?text=Product+2"
-              alt="Dummy Product 2"
-              width="600"
-              height="400"
-              loading="lazy"
-            >
-            <div class="product-card__body">
-              <h4 class="product-card__title">Dummy Product 2</h4>
-              <p class="product-card__price">$29.99</p>
-              <div class="product-card__options">
-                <div class="product-card__variants">
-                  <select class="variant-selector">
-                    <option value="red">Color: Red</option>
-                    <option value="blue" selected>Color: Blue</option>
-                    <option value="green">Color: Green</option>
-                    <option value="black">Color: Black</option>
-                  </select>
-                </div>
-                <div class="product-card__quantity">
-                  <button class="qty-btn qty-minus" type="button">-</button>
-                  <input type="number" value="2" min="1" class="qty-input">
-                  <button class="qty-btn qty-plus" type="button">+</button>
-                </div>
-              </div>
-              <button class="product-card__btn" type="button">Add to cart</button>
-            </div>
-          </div>
-        </div>
-        <div class="swiper-slide">
-          <div class="product-card">
-            <img
-              class="product-card__image"
-              src="https://via.placeholder.com/600x400/d5d5d5/666666?text=Product+3"
-              alt="Dummy Product 3"
-              width="600"
-              height="400"
-              loading="lazy"
-            >
-            <div class="product-card__body">
-              <h4 class="product-card__title">Dummy Product 3</h4>
-              <p class="product-card__price">$34.99</p>
-              <div class="product-card__options">
-                <div class="product-card__variants">
-                  <select class="variant-selector">
-                    <option value="xs">Size: XS</option>
-                    <option value="s">Size: S</option>
-                    <option value="m" selected>Size: M</option>
-                    <option value="l">Size: L</option>
-                    <option value="xl">Size: XL</option>
-                  </select>
-                </div>
-                <div class="product-card__quantity">
-                  <button class="qty-btn qty-minus" type="button">-</button>
-                  <input type="number" value="1" min="1" class="qty-input">
-                  <button class="qty-btn qty-plus" type="button">+</button>
-                </div>
-              </div>
-              <button class="product-card__btn" type="button">Add to cart</button>
-            </div>
-          </div>
-        </div>
-        <div class="swiper-slide">
-          <div class="product-card">
-            <img
-              class="product-card__image"
-              src="https://via.placeholder.com/600x400/c7c7c7/666666?text=Product+4"
-              alt="Dummy Product 4"
-              width="600"
-              height="400"
-              loading="lazy"
-            >
-            <div class="product-card__body">
-              <h4 class="product-card__title">Dummy Product 4</h4>
-              <p class="product-card__price">$39.99</p>
-              <div class="product-card__options">
-                <div class="product-card__variants">
-                  <select class="variant-selector">
-                    <option value="material-cotton">Material: Cotton</option>
-                    <option value="material-wool" selected>Material: Wool</option>
-                    <option value="material-silk">Material: Silk</option>
-                  </select>
-                </div>
-                <div class="product-card__quantity">
-                  <button class="qty-btn qty-minus" type="button">-</button>
-                  <input type="number" value="3" min="1" class="qty-input">
-                  <button class="qty-btn qty-plus" type="button">+</button>
-                </div>
-              </div>
-              <button class="product-card__btn" type="button">Add to cart</button>
-            </div>
-          </div>
-        </div>
+        {% endfor %}
       {% else %}
         <!-- Empty container for live mode - will be populated by JavaScript -->
-        {% for i in (1..4) %}
+        {% assign dummy_products = 'Product 1,Product 2,Product 3,Product 4' | split: ',' %}
+        {% assign dummy_prices = '24.99,29.99,34.99,39.99' | split: ',' %}
+        {% assign dummy_colors = 'cccccc,e0e0e0,d5d5d5,c7c7c7' | split: ',' %}
+        {% assign dummy_variants = 'Size: Small|Size: Medium|Size: Large,Color: Red|Color: Blue|Color: Green|Color: Black,Size: XS|Size: S|Size: M|Size: L|Size: XL,Material: Cotton|Material: Wool|Material: Silk'
+          | split: ','
+        %}
+        {% assign dummy_quantities = '1,2,1,3' | split: ',' %}
+
+        {% for product in dummy_products %}
+          {% assign product_index = forloop.index0 %}
           <div class="swiper-slide loading-placeholder">
-            <div class="product-card" style="min-height: 450px;">
+            <div class="product-card">
               <div class="product-card__image loading-skeleton"></div>
               <div class="product-card__body">
                 <h4 class="product-card__title loading-skeleton"></h4>
                 <p class="product-card__price loading-skeleton"></p>
                 <div class="product-card__options">
                   <div class="product-card__variants">
-                    <div class="loading-skeleton" style="height: 36px; width: 100%;"></div>
+                    <select class="variant-selector loading-skeleton"></select>
                   </div>
                   <div class="product-card__quantity">
-                    <div
-                      class="loading-skeleton"
-                      style="height: 32px; width: 32px; border-radius: 6px; display: inline-block; margin-right: 4px;"
-                    ></div>
-                    <div
-                      class="loading-skeleton"
-                      style="height: 32px; width: 50px; border-radius: 6px; display: inline-block; margin: 0 4px;"
-                    ></div>
-                    <div
-                      class="loading-skeleton"
-                      style="height: 32px; width: 32px; border-radius: 6px; display: inline-block; margin-left: 4px;"
-                    ></div>
+                    <button class="qty-btn loading-skeleton"></button>
+                    <input type="number" class="qty-input loading-skeleton">
+                    <button class="qty-btn loading-skeleton"></button>
                   </div>
                 </div>
-                <button
-                  class="product-card__btn loading-skeleton"
-                  style="height: 40px; width: 100%; border-radius: 6px;"
-                ></button>
+                <button class="product-card__btn loading-skeleton"></button>
               </div>
             </div>
           </div>

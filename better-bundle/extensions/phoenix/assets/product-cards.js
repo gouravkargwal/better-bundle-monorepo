@@ -99,28 +99,47 @@ class ProductCardManager {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
     if (!swiperWrapper) return;
 
-    // Clear existing slides
-    swiperWrapper.innerHTML = "";
-
-    // Store product data for variant price updates
-    recommendations.forEach((product) => {
-      this.productDataStore[product.id] = product;
+    // Add fade-out transition to existing skeleton slides
+    const existingSlides = swiperWrapper.querySelectorAll('.swiper-slide');
+    existingSlides.forEach(slide => {
+      const skeletons = slide.querySelectorAll('.loading-skeleton');
+      skeletons.forEach(skeleton => {
+        skeleton.classList.add('fade-out');
+      });
     });
 
-    // Create new slides from recommendations
-    recommendations.forEach((product, index) => {
-      const slide = this.createProductSlide(
-        product,
-        index,
-        analyticsApi,
-        sessionId,
-        context,
-      );
-      swiperWrapper.appendChild(slide);
-    });
+    // Wait for fade-out transition, then replace content
+    setTimeout(() => {
+      // Clear existing slides
+      swiperWrapper.innerHTML = "";
 
-    // Reinitialize Swiper with new content
-    this.initializeSwiper();
+      // Store product data for variant price updates
+      recommendations.forEach((product) => {
+        this.productDataStore[product.id] = product;
+      });
+
+      // Create new slides from recommendations
+      recommendations.forEach((product, index) => {
+        const slide = this.createProductSlide(
+          product,
+          index,
+          analyticsApi,
+          sessionId,
+          context,
+        );
+
+        // Add real-content class for fade-in animation
+        const productCard = slide.querySelector('.product-card');
+        if (productCard) {
+          productCard.classList.add('real-content');
+        }
+
+        swiperWrapper.appendChild(slide);
+      });
+
+      // Reinitialize Swiper with new content
+      this.initializeSwiper();
+    }, 300); // Match the CSS transition duration
   }
 
   // Create product slide from recommendation data

@@ -150,6 +150,51 @@ document.addEventListener('DOMContentLoaded', function () {
 
     window.swiper = swiper;
   } else {
+    // Initialize Swiper for skeleton loading in live mode
+    console.log('Live mode detected - initializing Swiper for skeleton loading');
+    window.swiperConfig = {
+      enable_autoplay: window.enableAutoplay,
+      autoplay_delay: window.autoplayDelay,
+      show_arrows: window.showArrows,
+      show_pagination: window.showPagination
+    };
+
+    // Initialize Swiper for skeleton loading
+    const swiper = new Swiper('.swiper', {
+      slidesPerView: 1,
+      spaceBetween: 20,
+      loop: true,
+      autoplay: window.enableAutoplay ? {
+        delay: window.autoplayDelay,
+        disableOnInteraction: true,
+        pauseOnMouseEnter: true,
+      } : false,
+      navigation: {
+        nextEl: '.swiper-button-next',
+        prevEl: '.swiper-button-prev',
+      },
+      pagination: {
+        el: '.swiper-pagination',
+        clickable: true,
+      },
+      breakpoints: {
+        640: {
+          slidesPerView: 2,
+          spaceBetween: 20,
+        },
+        768: {
+          slidesPerView: 3,
+          spaceBetween: 20,
+        },
+        1024: {
+          slidesPerView: 4,
+          spaceBetween: 20,
+        },
+      },
+    });
+
+    window.swiper = swiper;
+
     // Initialize the carousel for live mode
     const carousel = new RecommendationCarousel();
     window.recommendationCarousel = carousel;
