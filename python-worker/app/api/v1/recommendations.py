@@ -1648,8 +1648,31 @@ async def get_recommendations(request: RecommendationRequest):
             # The cached result has structure: {"recommendations": {"recommendations": [...], ...}, ...}
             cached_recommendations_data = cached_result.get("recommendations", {})
             recommendations = cached_recommendations_data.get("recommendations", [])
+
+            # Apply exclusions to cached results
+            if exclude_items:
+                logger.debug(
+                    f"🚫 Filtering cached recommendations | exclude_items={exclude_items} | before_count={len(recommendations)}"
+                )
+                # Filter out items that are already in cart
+                filtered_recommendations = [
+                    rec for rec in recommendations if rec.get("id") not in exclude_items
+                ]
+                recommendations = filtered_recommendations
+                logger.debug(
+                    f"✅ Cached recommendations filtered | after_count={len(recommendations)}"
+                )
+
+            # Filter out unavailable products
+            available_recommendations = [
+                rec
+                for rec in recommendations
+                if rec.get("available", True)  # Default to True if not specified
+            ]
+            recommendations = available_recommendations
+
             logger.info(
-                f"🎯 Cache hit! Returning cached recommendations | context={request.context} | count={len(recommendations)}"
+                f"🎯 Cache hit! Returning filtered cached recommendations | context={request.context} | count={len(recommendations)}"
             )
             return RecommendationResponse(
                 success=True,
@@ -1761,9 +1784,19 @@ async def get_recommendations(request: RecommendationRequest):
             shop.id, item_ids, request.context, result["source"]
         )
 
+        # Filter out unavailable products
+        available_items = [
+            item
+            for item in enriched_items
+            if item.get("available", True)  # Default to True if not specified
+        ]
+
         logger.info(
-            f"✅ Enrichment complete | enriched_count={len(enriched_items)} | original_count={len(item_ids)}"
+            f"✅ Enrichment complete | enriched_count={len(enriched_items)} | available_count={len(available_items)} | original_count={len(item_ids)}"
         )
+
+        # Use available items for the rest of the processing
+        enriched_items = available_items
 
         # Prepare response data
         response_data = {
