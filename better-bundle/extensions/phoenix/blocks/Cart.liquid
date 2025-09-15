@@ -1,12 +1,23 @@
-{% comment %} Simple Swiper.js Test Block {% endcomment %}
-{% assign is_design_mode = false %}
-{% if request.design_mode %}
-  {% assign is_design_mode = true %}
-{% endif %}
-
-<!-- Load Swiper assets regardless of design mode for testing -->
 {{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
 <script src="{{ 'swiper-bundle.min.js' | asset_url }}" defer></script>
+
+<script>
+  window.enableAutoplay = {{ block.settings.enable_autoplay | default: true }};
+  window.autoplayDelay = {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }};
+  window.showArrows = {{ block.settings.show_arrows | default: true }};
+  window.showPagination = {{ block.settings.show_pagination | default: true }};
+  window.recommendationLimit = 4;
+  window.designMode = {{ request.design_mode | json }};
+  window.shopDomain = {{ shop.permanent_domain | json }};
+  window.customerId = {{ customer.id | json }};
+  window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
+</script>
+
+<!-- Load our custom JavaScript files -->
+<script src="{{ 'analytics.js' | asset_url }}" defer></script>
+<script src="{{ 'api.js' | asset_url }}" defer></script>
+<script src="{{ 'product-cards.js' | asset_url }}" defer></script>
+<script src="{{ 'main.js' | asset_url }}" defer></script>
 
 <style>
   .shopify-app-block {
@@ -89,6 +100,7 @@
     flex-direction: column;
     width: 100%;
     max-width: 300px;
+    min-height: 400px; /* Optimized height for better fit */
     background: {{ block.settings.card_bg | default: '#ffffff' }};
     border-radius: {{ block.settings.card_border_radius | default: 8 }}px;
     overflow: hidden;
@@ -105,11 +117,13 @@
   }
   .product-card__image {
     width: 100%;
-    height: 180px;
+    height: 200px;
     background: #f8fafc;
     display: block;
-    object-fit: cover;
+    object-fit: cover; /* Fill container completely */
+    object-position: center top; /* Align to top to avoid bottom space */
     transition: opacity 0.2s ease;
+    border-radius: 4px 4px 0 0;
   }
   .product-card:hover .product-card__image {
     opacity: 0.95;
@@ -126,8 +140,15 @@
     font-weight: 500;
     margin: 0;
     color: {{ block.settings.title_color | default: '#1e293b' }};
-    line-height: 1.5;
+    line-height: 1.4;
     letter-spacing: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 44px; /* Ensure consistent height for 2 lines */
+    max-height: 44px;
   }
   .product-card__price {
     font-size: 18px;
@@ -228,51 +249,68 @@
     outline: none;
     border-color: #000;
   }
-</style>
 
-<script>
-  window.addEventListener('load', function () {
-    if (typeof Swiper !== 'undefined') {
-      const swiperContainer = document.querySelector('.swiper');
-      if (swiperContainer) {
-        const swiper = new Swiper('.swiper', {
-          breakpoints: {
-            320: { slidesPerView: 1, spaceBetween: 20 },
-            750: { slidesPerView: 2, spaceBetween: 25 },
-            990: { slidesPerView: 3, spaceBetween: 30 },
-            1200: { slidesPerView: 4, spaceBetween: 30 },
-          },
-          {% if block.settings.enable_autoplay %}
-          autoplay: {
-            delay: {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }},
-            disableOnInteraction: true,
-            pauseOnMouseEnter: true,
-          },
-          {% endif %}
-          loop: {% if block.settings.enable_autoplay %}true{% else %}false{% endif %},
-          spaceBetween: 30,
-          freeMode: false,
-          grabCursor: true,
-          navigation: {% if block.settings.show_arrows %}{ nextEl: '.swiper-button-next', prevEl: '.swiper-button-prev' }{% else %}false{% endif %},
-          pagination: {% if block.settings.show_pagination %}{ el: '.swiper-pagination', clickable: true }{% else %}false{% endif %},
-          on: {
-            init: function () {
-              console.log('Swiper initialized successfully!');
-            },
-            resize: function () {
-              this.update(); // Update Swiper on resize
-              console.log('Swiper updated on resize');
-            },
-          },
-        });
-      } else {
-        console.log('Swiper container not found!');
-      }
-    } else {
-      console.log('Swiper is not available!');
+  /* Loading skeleton styles */
+  .loading-skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+    border-radius: 4px;
+  }
+
+  .loading-placeholder .product-card__image.loading-skeleton {
+    height: 200px;
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+  }
+
+  .loading-placeholder .product-card__title.loading-skeleton {
+    height: 20px;
+    width: 80%;
+    margin-bottom: 8px;
+  }
+
+  .loading-placeholder .product-card__price.loading-skeleton {
+    height: 18px;
+    width: 60%;
+    margin-bottom: 16px;
+  }
+
+  .loading-placeholder .product-card__variants .loading-skeleton {
+    height: 36px;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  .loading-placeholder .product-card__quantity .loading-skeleton {
+    height: 32px;
+    width: 100px;
+  }
+
+  .loading-placeholder .product-card__btn.loading-skeleton {
+    height: 40px;
+    width: 100%;
+    margin-top: 16px;
+  }
+
+  @keyframes loading {
+    0% {
+      background-position: 200% 0;
     }
-  });
-</script>
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+</style>
 
 <div class="container">
   {% if block.settings.show_heading and block.settings.heading != blank %}
@@ -284,125 +322,160 @@
   {% endif %}
   <div class="swiper">
     <div class="swiper-wrapper">
-      <div class="swiper-slide">
-        <div class="product-card">
-          <img
-            class="product-card__image"
-            src="https://via.placeholder.com/600x400/cccccc/666666?text=Product+1"
-            alt="Dummy Product 1"
-            loading="lazy"
-          >
-          <div class="product-card__body">
-            <h4 class="product-card__title">Dummy Product 1</h4>
-            <p class="product-card__price">$24.99</p>
-            <div class="product-card__options">
-              <div class="product-card__variants">
-                <select class="variant-selector">
-                  <option value="small">Size: Small</option>
-                  <option value="medium" selected>Size: Medium</option>
-                  <option value="large">Size: Large</option>
-                </select>
+      {% if request.design_mode %}
+        <!-- Dummy data for design mode only -->
+        <div class="swiper-slide">
+          <div class="product-card">
+            <img
+              class="product-card__image"
+              src="https://via.placeholder.com/600x400/cccccc/666666?text=Product+1"
+              alt="Dummy Product 1"
+              width="600"
+              height="400"
+              loading="lazy"
+            >
+            <div class="product-card__body">
+              <h4 class="product-card__title">Dummy Product 1</h4>
+              <p class="product-card__price">$24.99</p>
+              <div class="product-card__options">
+                <div class="product-card__variants">
+                  <select class="variant-selector">
+                    <option value="small">Size: Small</option>
+                    <option value="medium" selected>Size: Medium</option>
+                    <option value="large">Size: Large</option>
+                  </select>
+                </div>
+                <div class="product-card__quantity">
+                  <button class="qty-btn qty-minus" type="button">-</button>
+                  <input type="number" value="1" min="1" class="qty-input">
+                  <button class="qty-btn qty-plus" type="button">+</button>
+                </div>
               </div>
-              <div class="product-card__quantity">
-                <button class="qty-btn qty-minus" type="button">-</button>
-                <input type="number" value="1" min="1" class="qty-input">
-                <button class="qty-btn qty-plus" type="button">+</button>
-              </div>
+              <button class="product-card__btn" type="button">Add to cart</button>
             </div>
-            <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
-      </div>
-      <div class="swiper-slide">
-        <div class="product-card">
-          <img
-            class="product-card__image"
-            src="https://via.placeholder.com/600x400/e0e0e0/666666?text=Product+2"
-            alt="Dummy Product 2"
-            loading="lazy"
-          >
-          <div class="product-card__body">
-            <h4 class="product-card__title">Dummy Product 2</h4>
-            <p class="product-card__price">$29.99</p>
-            <div class="product-card__options">
-              <div class="product-card__variants">
-                <select class="variant-selector">
-                  <option value="red">Color: Red</option>
-                  <option value="blue" selected>Color: Blue</option>
-                  <option value="green">Color: Green</option>
-                  <option value="black">Color: Black</option>
-                </select>
+        <div class="swiper-slide">
+          <div class="product-card">
+            <img
+              class="product-card__image"
+              src="https://via.placeholder.com/600x400/e0e0e0/666666?text=Product+2"
+              alt="Dummy Product 2"
+              width="600"
+              height="400"
+              loading="lazy"
+            >
+            <div class="product-card__body">
+              <h4 class="product-card__title">Dummy Product 2</h4>
+              <p class="product-card__price">$29.99</p>
+              <div class="product-card__options">
+                <div class="product-card__variants">
+                  <select class="variant-selector">
+                    <option value="red">Color: Red</option>
+                    <option value="blue" selected>Color: Blue</option>
+                    <option value="green">Color: Green</option>
+                    <option value="black">Color: Black</option>
+                  </select>
+                </div>
+                <div class="product-card__quantity">
+                  <button class="qty-btn qty-minus" type="button">-</button>
+                  <input type="number" value="2" min="1" class="qty-input">
+                  <button class="qty-btn qty-plus" type="button">+</button>
+                </div>
               </div>
-              <div class="product-card__quantity">
-                <button class="qty-btn qty-minus" type="button">-</button>
-                <input type="number" value="2" min="1" class="qty-input">
-                <button class="qty-btn qty-plus" type="button">+</button>
-              </div>
+              <button class="product-card__btn" type="button">Add to cart</button>
             </div>
-            <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
-      </div>
-      <div class="swiper-slide">
-        <div class="product-card">
-          <img
-            class="product-card__image"
-            src="https://via.placeholder.com/600x400/d5d5d5/666666?text=Product+3"
-            alt="Dummy Product 3"
-            loading="lazy"
-          >
-          <div class="product-card__body">
-            <h4 class="product-card__title">Dummy Product 3</h4>
-            <p class="product-card__price">$34.99</p>
-            <div class="product-card__options">
-              <div class="product-card__variants">
-                <select class="variant-selector">
-                  <option value="xs">Size: XS</option>
-                  <option value="s">Size: S</option>
-                  <option value="m" selected>Size: M</option>
-                  <option value="l">Size: L</option>
-                  <option value="xl">Size: XL</option>
-                </select>
+        <div class="swiper-slide">
+          <div class="product-card">
+            <img
+              class="product-card__image"
+              src="https://via.placeholder.com/600x400/d5d5d5/666666?text=Product+3"
+              alt="Dummy Product 3"
+              width="600"
+              height="400"
+              loading="lazy"
+            >
+            <div class="product-card__body">
+              <h4 class="product-card__title">Dummy Product 3</h4>
+              <p class="product-card__price">$34.99</p>
+              <div class="product-card__options">
+                <div class="product-card__variants">
+                  <select class="variant-selector">
+                    <option value="xs">Size: XS</option>
+                    <option value="s">Size: S</option>
+                    <option value="m" selected>Size: M</option>
+                    <option value="l">Size: L</option>
+                    <option value="xl">Size: XL</option>
+                  </select>
+                </div>
+                <div class="product-card__quantity">
+                  <button class="qty-btn qty-minus" type="button">-</button>
+                  <input type="number" value="1" min="1" class="qty-input">
+                  <button class="qty-btn qty-plus" type="button">+</button>
+                </div>
               </div>
-              <div class="product-card__quantity">
-                <button class="qty-btn qty-minus" type="button">-</button>
-                <input type="number" value="1" min="1" class="qty-input">
-                <button class="qty-btn qty-plus" type="button">+</button>
-              </div>
+              <button class="product-card__btn" type="button">Add to cart</button>
             </div>
-            <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
-      </div>
-      <div class="swiper-slide">
-        <div class="product-card">
-          <img
-            class="product-card__image"
-            src="https://via.placeholder.com/600x400/c7c7c7/666666?text=Product+4"
-            alt="Dummy Product 4"
-            loading="lazy"
-          >
-          <div class="product-card__body">
-            <h4 class="product-card__title">Dummy Product 4</h4>
-            <p class="product-card__price">$39.99</p>
-            <div class="product-card__options">
-              <div class="product-card__variants">
-                <select class="variant-selector">
-                  <option value="material-cotton">Material: Cotton</option>
-                  <option value="material-wool" selected>Material: Wool</option>
-                  <option value="material-silk">Material: Silk</option>
-                </select>
+        <div class="swiper-slide">
+          <div class="product-card">
+            <img
+              class="product-card__image"
+              src="https://via.placeholder.com/600x400/c7c7c7/666666?text=Product+4"
+              alt="Dummy Product 4"
+              width="600"
+              height="400"
+              loading="lazy"
+            >
+            <div class="product-card__body">
+              <h4 class="product-card__title">Dummy Product 4</h4>
+              <p class="product-card__price">$39.99</p>
+              <div class="product-card__options">
+                <div class="product-card__variants">
+                  <select class="variant-selector">
+                    <option value="material-cotton">Material: Cotton</option>
+                    <option value="material-wool" selected>Material: Wool</option>
+                    <option value="material-silk">Material: Silk</option>
+                  </select>
+                </div>
+                <div class="product-card__quantity">
+                  <button class="qty-btn qty-minus" type="button">-</button>
+                  <input type="number" value="3" min="1" class="qty-input">
+                  <button class="qty-btn qty-plus" type="button">+</button>
+                </div>
               </div>
-              <div class="product-card__quantity">
-                <button class="qty-btn qty-minus" type="button">-</button>
-                <input type="number" value="3" min="1" class="qty-input">
-                <button class="qty-btn qty-plus" type="button">+</button>
-              </div>
+              <button class="product-card__btn" type="button">Add to cart</button>
             </div>
-            <button class="product-card__btn" type="button">Add to cart</button>
           </div>
         </div>
-      </div>
+      {% else %}
+        <!-- Empty container for live mode - will be populated by JavaScript -->
+        <div class="swiper-slide loading-placeholder">
+          <div class="product-card" style="min-height: 400px;">
+            <div class="product-card__image loading-skeleton"></div>
+            <div class="product-card__body">
+              <div class="product-card__title loading-skeleton"></div>
+              <div class="product-card__price loading-skeleton"></div>
+              <div
+                class="product-card__compare-price loading-skeleton"
+                style="height: 16px; width: 50%; margin-bottom: 8px;"
+              ></div>
+              <div class="product-card__options">
+                <div class="product-card__variants">
+                  <div class="loading-skeleton"></div>
+                </div>
+                <div class="product-card__quantity">
+                  <div class="loading-skeleton"></div>
+                </div>
+              </div>
+              <div class="product-card__btn loading-skeleton"></div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
     </div>
     <div class="swiper-button-next"></div>
     <div class="swiper-button-prev"></div>

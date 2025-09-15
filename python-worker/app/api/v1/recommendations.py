@@ -78,8 +78,9 @@ class RecommendationRequest(BaseModel):
         ...,
         description="Context: product_page, homepage, cart, profile, checkout, order_history, order_status",
     )
-    product_id: Optional[str] = Field(
-        None, description="Product ID for product-specific recommendations"
+    product_ids: Optional[List[str]] = Field(
+        None,
+        description="Product IDs for recommendations (single or multiple products)",
     )
     user_id: Optional[str] = Field(
         None, description="User ID for personalized recommendations"
@@ -375,22 +376,25 @@ class CategoryDetectionService:
 
             # Query database
             db = await self.get_database()
-            product = await db.productdata.find_unique(
-                where={"shopId": shop_id, "productId": product_id},
-                select={"productType": True, "collections": True},
+            product = await db.productdata.find_first(
+                where={"shopId": shop_id, "productId": product_id}
             )
 
             category = None
             if product:
                 # Prioritize productType over collections
-                if product["productType"]:
-                    category = product["productType"]
-                elif product["collections"] and len(product["collections"]) > 0:
+                if hasattr(product, "productType") and product.productType:
+                    category = product.productType
+                elif (
+                    hasattr(product, "collections")
+                    and product.collections
+                    and len(product.collections) > 0
+                ):
                     # Use first collection as category
                     category = (
-                        product["collections"][0].get("title")
-                        if isinstance(product["collections"][0], dict)
-                        else str(product["collections"][0])
+                        product.collections[0].get("title")
+                        if isinstance(product.collections[0], dict)
+                        else str(product.collections[0])
                     )
 
             # Cache for 1 hour (3600 seconds)
@@ -420,7 +424,7 @@ class RecommendationCacheService:
     CACHE_TTL = {
         "product_page": 1800,  # 30 minutes (product-specific)
         "homepage": 3600,  # 1 hour (general)
-        "cart": 300,  # 5 minutes (dynamic)
+        "cart": 0,  # 5 minutes (dynamic)
         "profile": 0,  # 15 minutes (user-specific)
         "checkout": 0,  # No cache (fast, fresh)
         "order_history": 0,  # Temporarily disable caching
@@ -431,7 +435,7 @@ class RecommendationCacheService:
         self,
         shop_id: str,
         context: str,
-        product_id: Optional[str] = None,
+        product_ids: Optional[List[str]] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         category: Optional[str] = None,
@@ -453,11 +457,12 @@ class RecommendationCacheService:
             Cache key string
         """
         # Create a deterministic key based on all parameters
+        product_ids_str = ",".join(sorted(product_ids)) if product_ids else ""
         key_parts = [
             "recommendations",
             shop_id,
             context,
-            str(product_id or ""),
+            product_ids_str,
             str(user_id or ""),
             str(session_id or ""),
             str(category or ""),
@@ -582,7 +587,7 @@ class HybridRecommendationService:
         self,
         context: str,
         shop_id: str,
-        product_id: Optional[str] = None,
+        product_ids: Optional[List[str]] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         category: Optional[str] = None,
@@ -633,7 +638,7 @@ class HybridRecommendationService:
                     source_result = await self._get_source_recommendations(
                         source=source,
                         shop_id=shop_id,
-                        product_id=product_id,
+                        product_ids=product_ids,
                         user_id=user_id,
                         session_id=session_id,
                         category=category,
@@ -724,7 +729,7 @@ class HybridRecommendationService:
         self,
         source: str,
         shop_id: str,
-        product_id: Optional[str] = None,
+        product_ids: Optional[List[str]] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         category: Optional[str] = None,
@@ -733,19 +738,46 @@ class HybridRecommendationService:
     ) -> Dict[str, Any]:
         """Get recommendations from a specific source"""
 
-        if source == "item_neighbors" and product_id:
-            # Apply shop prefix for multi-tenancy
-            prefixed_item_id = f"shop_{shop_id}_{product_id}"
-            result = await self.gorse_client.get_item_neighbors(
-                item_id=prefixed_item_id, n=limit, category=category
-            )
-            if result["success"]:
+        if source == "item_neighbors" and product_ids:
+            # Handle product IDs (single or multiple) - get neighbors for each and blend
+            logger.info(f"🔄 Getting item neighbors for products: {product_ids[:3]}...")
+            all_neighbors = []
+
+            for pid in product_ids[
+                :5
+            ]:  # Limit to 5 products to avoid too many API calls
+                try:
+                    prefixed_item_id = f"shop_{shop_id}_{pid}"
+                    result = await self.gorse_client.get_item_neighbors(
+                        item_id=prefixed_item_id,
+                        n=limit // len(product_ids) + 2,
+                        category=category,
+                    )
+                    if result["success"] and result.get("neighbors"):
+                        all_neighbors.extend(result["neighbors"])
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get neighbors for product {pid}: {e}")
+                    continue
+
+            if all_neighbors:
+                # Deduplicate and limit results
+                seen_ids = set()
+                unique_neighbors = []
+                for neighbor in all_neighbors:
+                    neighbor_id = neighbor.get("Id", neighbor.get("id", str(neighbor)))
+                    if neighbor_id not in seen_ids:
+                        seen_ids.add(neighbor_id)
+                        unique_neighbors.append(neighbor)
+                        if len(unique_neighbors) >= limit:
+                            break
+
                 return {
                     "success": True,
-                    "items": result["neighbors"],
+                    "items": unique_neighbors,
                     "source": "gorse_item_neighbors",
                 }
-            return result
+
+            return {"success": False, "items": [], "source": "no_neighbors_found"}
 
         elif source == "user_recommendations" and user_id:
             # Apply shop prefix for multi-tenancy
@@ -1109,7 +1141,7 @@ class RecommendationAnalytics:
         source: str,
         count: int,
         user_id: Optional[str] = None,
-        product_id: Optional[str] = None,
+        product_ids: Optional[List[str]] = None,
         category: Optional[str] = None,
     ) -> None:
         """
@@ -1121,7 +1153,7 @@ class RecommendationAnalytics:
             source: Recommendation source (gorse, cache, fallback, etc.)
             count: Number of recommendations returned
             user_id: User ID (if available)
-            product_id: Product ID (if available)
+            product_ids: Product IDs (if available)
             category: Category (if available)
         """
         try:
@@ -1135,7 +1167,7 @@ class RecommendationAnalytics:
                 "source": source,
                 "count": count,
                 "user_id": user_id,
-                "product_id": product_id,
+                "product_ids": product_ids,
                 "category": category,
             }
 
@@ -1273,7 +1305,7 @@ FALLBACK_LEVELS = {
 async def execute_recommendation_level(
     level: str,
     shop_id: str,
-    product_id: Optional[str] = None,
+    product_ids: Optional[List[str]] = None,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     category: Optional[str] = None,
@@ -1297,9 +1329,9 @@ async def execute_recommendation_level(
         Recommendation result
     """
     try:
-        if level == "item_neighbors" and product_id:
-            # Apply shop prefix for multi-tenancy
-            prefixed_item_id = f"shop_{shop_id}_{product_id}"
+        if level == "item_neighbors" and product_ids and len(product_ids) > 0:
+            # Apply shop prefix for multi-tenancy - use first product for single item neighbors
+            prefixed_item_id = f"shop_{shop_id}_{product_ids[0]}"
             result = await gorse_client.get_item_neighbors(
                 item_id=prefixed_item_id, n=limit, category=category
             )
@@ -1384,7 +1416,7 @@ async def execute_recommendation_level(
 async def execute_fallback_chain(
     context: str,
     shop_id: str,
-    product_id: Optional[str] = None,
+    product_ids: Optional[List[str]] = None,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     category: Optional[str] = None,
@@ -1420,7 +1452,7 @@ async def execute_fallback_chain(
             result = await execute_recommendation_level(
                 level,
                 shop_id,
-                product_id,
+                product_ids,
                 user_id,
                 session_id,
                 category,
@@ -1490,7 +1522,7 @@ async def get_recommendations(request: RecommendationRequest):
             )
 
         logger.info(
-            f"📊 Recommendation request received | shop={request.shop_domain} | context={request.context} | user_id={request.user_id} | product_id={request.product_id} | limit={request.limit}"
+            f"📊 Recommendation request received | shop={request.shop_domain} | context={request.context} | user_id={request.user_id} | product_ids={request.product_ids} | limit={request.limit}"
         )
 
         # Validate context
@@ -1528,28 +1560,30 @@ async def get_recommendations(request: RecommendationRequest):
             f"✅ Shop validated | shop_id={shop.id} | shop_domain={request.shop_domain}"
         )
 
-        # Auto-detect category if missing and product_id is provided
+        # Auto-detect category if missing and product_ids are provided
         category = request.category
-        if not category and request.product_id:
-            logger.debug(f"🔍 Auto-detecting category for product {request.product_id}")
+        if not category and request.product_ids and len(request.product_ids) > 0:
+            # Use first product for category detection
+            first_product_id = request.product_ids[0]
+            logger.debug(f"🔍 Auto-detecting category for product {first_product_id}")
             category = await category_service.get_product_category(
-                request.product_id, shop.id
+                first_product_id, shop.id
             )
             if category:
                 logger.info(
-                    f"✅ Auto-detected category '{category}' for product {request.product_id}"
+                    f"✅ Auto-detected category '{category}' for product {first_product_id}"
                 )
             else:
-                logger.debug(f"⚠️ No category detected for product {request.product_id}")
+                logger.debug(f"⚠️ No category detected for product {first_product_id}")
 
         # Generate cache key
         logger.debug(
-            f"🔑 Generating cache key | context={request.context} | product_id={request.product_id} | user_id={request.user_id}"
+            f"🔑 Generating cache key | context={request.context} | product_ids={request.product_ids} | user_id={request.user_id}"
         )
         cache_key = cache_service.generate_cache_key(
             shop_id=shop.id,
             context=request.context,
-            product_id=request.product_id,
+            product_ids=request.product_ids,
             user_id=request.user_id,
             session_id=request.session_id,
             category=category,
@@ -1600,7 +1634,7 @@ async def get_recommendations(request: RecommendationRequest):
             result = await hybrid_service.blend_recommendations(
                 context=request.context,
                 shop_id=shop.id,
-                product_id=request.product_id,
+                product_ids=request.product_ids,
                 user_id=request.user_id,
                 session_id=request.session_id,
                 category=category,  # Use auto-detected category
@@ -1619,7 +1653,7 @@ async def get_recommendations(request: RecommendationRequest):
                 result = await execute_fallback_chain(
                     context=request.context,
                     shop_id=shop.id,
-                    product_id=request.product_id,
+                    product_ids=request.product_ids,
                     user_id=request.user_id,
                     session_id=request.session_id,
                     category=category,
@@ -1638,7 +1672,7 @@ async def get_recommendations(request: RecommendationRequest):
             result = await execute_fallback_chain(
                 context=request.context,
                 shop_id=shop.id,
-                product_id=request.product_id,
+                product_ids=request.product_ids,
                 user_id=request.user_id,
                 session_id=request.session_id,
                 category=category,
@@ -1701,7 +1735,7 @@ async def get_recommendations(request: RecommendationRequest):
                 source=result["source"],
                 count=len(enriched_items),
                 user_id=request.user_id,
-                product_id=request.product_id,
+                product_ids=request.product_ids,
                 category=category,
             )
         )

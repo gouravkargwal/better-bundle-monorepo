@@ -1,7 +1,7 @@
 import type { AtlasConfig } from "../types";
 
 export const sendEvent = async (event: any, config: AtlasConfig) => {
-  const url = `https://c28c503b2040.ngrok-free.app/collect/behavioral-events`;
+  const url = `https://d242bda5e5c7.ngrok-free.app/collect/behavioral-events`;
 
   try {
     const payload = {

@@ -1,83 +1,20 @@
 /**
- * Analytics API Client for BetterBundle Venus Extension
- *
- * This client handles all analytics and attribution tracking separately from recommendations.
- * Follows proper separation of concerns and single responsibility principle.
+ * Analytics API Client for BetterBundle Phoenix Extension
+ * 
+ * This client handles all analytics and attribution tracking for the Phoenix extension.
+ * Follows the same pattern as Venus extension for consistency.
  */
 
-export interface AttributionData {
-  session_id: string;
-  product_id: string;
-  extension_type: string;
-  context: string;
-  position: number;
-  timestamp: string;
-}
-
-export interface ViewedProduct {
-  product_id: string;
-  position: number;
-}
-
-export interface SessionData {
-  shop_id?: string;
-  extension_type: string;
-  context: string;
-  user_id?: string;
-  session_id: string;
-  viewed_products?: ViewedProduct[];
-  metadata?: Record<string, any>;
-}
-
-export interface InteractionData {
-  session_id: string;
-  product_id: string;
-  interaction_type:
-    | "view"
-    | "click"
-    | "add_to_cart"
-    | "buy_now"
-    | "shop_now"
-    | "purchase";
-  position?: number;
-  extension_type: string;
-  context: string;
-  metadata?: Record<string, any>;
-}
-
-export interface AttributionResponse {
-  success: boolean;
-  message: string;
-  data?: Record<string, any>;
-}
-
-export interface MetricsResponse {
-  success: boolean;
-  metrics?: {
-    total_revenue: number;
-    total_attributions: number;
-    average_confidence: number;
-    extension_breakdown: Record<string, { count: number; revenue: number }>;
-    date_range: {
-      start: string;
-      end: string;
-    };
-  };
-  error?: string;
-}
-
 class AnalyticsApiClient {
-  private baseUrl: string;
-
   constructor() {
-    // Use the analytics service URL
+    // Use the same analytics service URL as Venus
     this.baseUrl = "https://d242bda5e5c7.ngrok-free.app/api/v1/analytics";
   }
 
   /**
    * Create a new recommendation session for tracking
    */
-  async createSession(sessionData: SessionData): Promise<boolean> {
+  async createSession(sessionData) {
     try {
       const response = await fetch(`${this.baseUrl}/session`, {
         method: "POST",
@@ -91,7 +28,7 @@ class AnalyticsApiClient {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result: AttributionResponse = await response.json();
+      const result = await response.json();
       return result.success;
     } catch (error) {
       console.error("Failed to create analytics session:", error);
@@ -102,7 +39,7 @@ class AnalyticsApiClient {
   /**
    * Track a recommendation interaction
    */
-  async trackInteraction(interactionData: InteractionData): Promise<boolean> {
+  async trackInteraction(interactionData) {
     try {
       const response = await fetch(`${this.baseUrl}/interaction`, {
         method: "POST",
@@ -116,7 +53,7 @@ class AnalyticsApiClient {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result: AttributionResponse = await response.json();
+      const result = await response.json();
       return result.success;
     } catch (error) {
       console.error("Failed to track interaction:", error);
@@ -127,12 +64,7 @@ class AnalyticsApiClient {
   /**
    * Get attribution metrics for a shop
    */
-  async getMetrics(
-    shopId: string,
-    startDate?: string,
-    endDate?: string,
-    extensionType?: string,
-  ): Promise<MetricsResponse> {
+  async getMetrics(shopId, startDate, endDate, extensionType) {
     try {
       const params = new URLSearchParams();
       if (startDate) params.append("start_date", startDate);
@@ -163,7 +95,7 @@ class AnalyticsApiClient {
   /**
    * Health check for analytics service
    */
-  async healthCheck(): Promise<boolean> {
+  async healthCheck() {
     try {
       const response = await fetch(`${this.baseUrl}/health`);
       return response.ok;
@@ -176,9 +108,7 @@ class AnalyticsApiClient {
   /**
    * Store attribution data in cart attributes for order processing
    */
-  async storeCartAttribution(
-    attributionData: AttributionData,
-  ): Promise<boolean> {
+  async storeCartAttribution(attributionData) {
     try {
       const response = await fetch("/cart/update.js", {
         method: "POST",
@@ -202,7 +132,34 @@ class AnalyticsApiClient {
       return false;
     }
   }
+
+  /**
+   * Generate a short reference ID for attribution URLs
+   */
+  generateShortRef(sessionId) {
+    return sessionId
+      .split("")
+      .reduce((hash, char) => {
+        return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
+      }, 0)
+      .toString(36)
+      .substring(0, 6);
+  }
+
+  /**
+   * Add attribution parameters to product URL
+   */
+  addAttributionToUrl(productUrl, productId, position, sessionId) {
+    const shortRef = this.generateShortRef(sessionId);
+    const attributionParams = new URLSearchParams({
+      ref: shortRef,
+      src: productId,
+      pos: position.toString(),
+    });
+
+    return `${productUrl}?${attributionParams.toString()}`;
+  }
 }
 
-// Default instance
-export const analyticsApi = new AnalyticsApiClient();
+// Create global instance
+window.analyticsApi = new AnalyticsApiClient();
