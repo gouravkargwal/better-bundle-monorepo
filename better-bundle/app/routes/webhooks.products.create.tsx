@@ -109,8 +109,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    await prisma.rawProduct.create({
-      data: rawProductData,
+    const created = await prisma.rawProduct.create({
+      data: ({
+        ...rawProductData,
+        source: "webhook",
+        format: "rest",
+        receivedAt: new Date(),
+      }) as any,
     });
 
     console.log(`✅ Product ${productId} stored in raw table for shop ${shop}`);
@@ -134,6 +139,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopId: streamData.shop_id,
         shopifyId: streamData.shopify_id,
       });
+
+      // Also publish a normalize job for canonical staging
+      const normalizeJob = {
+        event_type: "normalize_entity",
+        data_type: "products",
+        format: "rest",
+        shop_id: shopRecord.id,
+        raw_id: created.id,
+        shopify_id: productId,
+        timestamp: new Date().toISOString(),
+      } as const;
+      await streamService.publishShopifyEvent(normalizeJob);
     } catch (streamError) {
       console.error(`❌ Error publishing to Redis Stream:`, streamError);
       // Don't fail the webhook if stream publishing fails

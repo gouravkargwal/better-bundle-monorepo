@@ -32,7 +32,7 @@ from app.domains.ml.services import (
 # Consumer imports
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
-from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
+from app.consumers.normalization_consumer import NormalizationConsumer
 
 # AnalyticsConsumer removed - was using deleted analytics services
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
@@ -124,8 +124,8 @@ async def initialize_services():
             shopify_service=services["shopify"]
         )
 
-        # Initialize main table processing consumer
-        services["main_table_processing_consumer"] = MainTableProcessingConsumer()
+        # Initialize normalization consumer
+        services["normalization_consumer"] = NormalizationConsumer()
 
         # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
@@ -133,12 +133,7 @@ async def initialize_services():
         # Initialize behavioral events consumer
         services["behavioral_events_consumer"] = BehavioralEventsConsumer()
 
-        # Initialize Shopify events consumer
-        from app.consumers.shopify_events_consumer import (
-            ShopifyEventsConsumer,
-        )
-
-        services["shopify_events_consumer"] = ShopifyEventsConsumer()
+        # ShopifyEventsConsumer removed - replaced by NormalizationConsumer
 
         # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 
@@ -149,11 +144,11 @@ async def initialize_services():
         # Register and start consumers
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
-            main_table_processing_consumer=services["main_table_processing_consumer"],
+            normalization_consumer=services["normalization_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
-            shopify_events_consumer=services["shopify_events_consumer"],
             # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
+            # Note: ShopifyEventsConsumer removed - replaced by NormalizationConsumer
         )
 
         # Start consumer manager (this will start all registered consumers)
@@ -218,16 +213,7 @@ async def health_check():
         "services": list(services.keys()),
     }
 
-    # Add Shopify events consumer health status
-    if "shopify_events_consumer" in services:
-        try:
-            consumer_health = services["shopify_events_consumer"].get_metrics()
-            health_status["shopify_events_consumer"] = consumer_health
-        except Exception as e:
-            health_status["shopify_events_consumer"] = {
-                "status": "error",
-                "error": str(e),
-            }
+    # ShopifyEventsConsumer health check removed - consumer was replaced by NormalizationConsumer
 
     return health_status
 
@@ -898,196 +884,6 @@ async def debug_raw_payload_structure(
             "shop_id": shop_id,
             "data_type": data_type,
             "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/field-extraction-test/{shop_id}")
-async def test_field_extraction(
-    shop_id: str, data_type: str = "products", limit: int = 2
-):
-    """Test field extraction on actual raw data to identify extraction issues"""
-    try:
-        from app.core.database.simple_db_client import get_database
-        from app.domains.shopify.services.field_extractor import FieldExtractorService
-        from app.domains.shopify.services.data_cleaning_service import (
-            DataCleaningService,
-        )
-        import json
-
-        db = await get_database()
-        field_extractor = FieldExtractorService()
-        data_cleaner = DataCleaningService()
-
-        # Map data types to table names
-        table_map = {
-            "products": "RawProduct",
-            "orders": "RawOrder",
-            "customers": "RawCustomer",
-            "collections": "RawCollection",
-        }
-
-        table_name = table_map.get(data_type, "RawProduct")
-
-        # Get sample raw payloads
-        raw_samples = await db.query_raw(
-            f'SELECT "shopifyId", "payload" FROM "{table_name}" WHERE "shopId" = $1 LIMIT $2',
-            shop_id,
-            limit,
-        )
-
-        test_results = []
-        for sample in raw_samples:
-            shopify_id = sample["shopifyId"]
-            payload = sample["payload"]
-
-            # Parse payload if string
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except Exception as parse_error:
-                    test_results.append(
-                        {
-                            "shopifyId": shopify_id,
-                            "step": "payload_parsing",
-                            "success": False,
-                            "error": str(parse_error),
-                        }
-                    )
-                    continue
-
-            # Test field extraction
-            try:
-                extracted_data = field_extractor.extract_fields_generic(
-                    data_type, payload, shop_id
-                )
-                extraction_success = extracted_data is not None
-                extraction_keys = list(extracted_data.keys()) if extracted_data else []
-            except Exception as extract_error:
-                test_results.append(
-                    {
-                        "shopifyId": shopify_id,
-                        "step": "field_extraction",
-                        "success": False,
-                        "error": str(extract_error),
-                    }
-                )
-                continue
-
-            # Test data cleaning if extraction succeeded
-            cleaning_success = False
-            cleaning_keys = []
-            cleaning_error = None
-
-            if extraction_success:
-                try:
-                    cleaned_data = data_cleaner.clean_data_generic(
-                        extracted_data, data_type
-                    )
-                    cleaning_success = cleaned_data is not None
-                    cleaning_keys = list(cleaned_data.keys()) if cleaned_data else []
-                except Exception as clean_error:
-                    cleaning_error = str(clean_error)
-
-            # Check for required ID field
-            id_field_config = {
-                "products": "productId",
-                "orders": "orderId",
-                "customers": "customerId",
-                "collections": "collectionId",
-            }
-
-            required_id_field = id_field_config.get(data_type, "id")
-            has_required_id = False
-
-            if cleaning_success:
-                has_required_id = bool(cleaned_data.get(required_id_field))
-
-            test_results.append(
-                {
-                    "shopifyId": shopify_id,
-                    "extraction_success": extraction_success,
-                    "extraction_keys_count": len(extraction_keys),
-                    "cleaning_success": cleaning_success,
-                    "cleaning_keys_count": len(cleaning_keys),
-                    "has_required_id_field": has_required_id,
-                    "required_id_field": required_id_field,
-                    "cleaning_error": cleaning_error,
-                    "final_status": (
-                        "SUCCESS"
-                        if extraction_success and cleaning_success and has_required_id
-                        else "FAILED"
-                    ),
-                }
-            )
-
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "table_name": table_name,
-            "sample_count": len(test_results),
-            "success_count": len(
-                [r for r in test_results if r.get("final_status") == "SUCCESS"]
-            ),
-            "test_results": test_results,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Field extraction test failed: {e}")
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.post("/api/debug/test-main-table-processing/{shop_id}")
-async def test_main_table_processing(
-    shop_id: str, data_type: str = "products", limit: int = 5
-):
-    """Test main table processing with actual data to verify upsert fixes"""
-    try:
-        from app.domains.shopify.services.main_table_storage import (
-            MainTableStorageService,
-        )
-
-        storage_service = MainTableStorageService()
-
-        # Test the main table processing for the specified data type
-        result = await storage_service._store_data_generic(
-            data_type, shop_id, incremental=True
-        )
-
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "test_result": {
-                "success": result.success,
-                "processed_count": result.processed_count,
-                "error_count": result.error_count,
-                "errors": result.errors,
-                "duration_ms": result.duration_ms,
-            },
-            "message": (
-                "SUCCESS"
-                if result.success and result.processed_count > 0
-                else "FAILED - Check errors"
-            ),
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        import traceback
-
-        logger.error(f"Main table processing test failed: {e}")
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "test_result": "FAILED",
-            "error": str(e),
-            "traceback": traceback.format_exc(),
             "timestamp": now_utc().isoformat(),
         }
 

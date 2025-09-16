@@ -8,10 +8,11 @@ from typing import Dict, List, Optional
 
 from app.consumers.base_consumer import BaseConsumer
 from app.consumers.data_collection_consumer import DataCollectionConsumer
-from app.consumers.main_table_processing_consumer import MainTableProcessingConsumer
+from app.consumers.normalization_consumer import NormalizationConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
-from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
+
+# ShopifyEventsConsumer removed - replaced by NormalizationConsumer
 from app.core.logging import get_logger
 
 
@@ -44,22 +45,20 @@ class ConsumerManager:
     def register_consumers(
         self,
         data_collection_consumer: Optional[DataCollectionConsumer] = None,
-        main_table_processing_consumer: Optional[MainTableProcessingConsumer] = None,
+        normalization_consumer: Optional[NormalizationConsumer] = None,
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         behavioral_events_consumer: Optional[BehavioralEventsConsumer] = None,
-        shopify_events_consumer: Optional[ShopifyEventsConsumer] = None,
     ):
         """Register consumers with the manager (all parameters are optional)"""
         if data_collection_consumer:
             self.consumers["data_collection"] = data_collection_consumer
-        if main_table_processing_consumer:
-            self.consumers["main_table_processing"] = main_table_processing_consumer
+        if normalization_consumer:
+            self.consumers["normalization"] = normalization_consumer
         if feature_computation_consumer:
             self.consumers["feature_computation"] = feature_computation_consumer
         if behavioral_events_consumer:
             self.consumers["behavioral_events"] = behavioral_events_consumer
-        if shopify_events_consumer:
-            self.consumers["shopify_events"] = shopify_events_consumer
+        # shopify_events_consumer removed - replaced by normalization_consumer
 
     async def start_all_consumers(self):
         """Start all registered consumers"""

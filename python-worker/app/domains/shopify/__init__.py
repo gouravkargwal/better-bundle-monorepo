@@ -8,18 +8,10 @@ This domain handles all Shopify-related operations including:
 - Permission handling and rate limiting
 """
 
-from .models import *
 from .services import *
 from .interfaces import *
 
 __all__ = [
-    # Models
-    "ShopifyShop",
-    "ShopifyProduct",
-    "ShopifyOrder",
-    "ShopifyCustomer",
-    "ShopifyCollection",
-    "ShopifyCustomerEvent",
     # Services
     "ShopifyDataCollectionService",
     "ShopifyAPIClient",

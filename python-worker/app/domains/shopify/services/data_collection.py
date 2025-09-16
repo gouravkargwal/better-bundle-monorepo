@@ -161,7 +161,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
 
             # Step 4: Store raw data
-            await self._store_raw_data(raw_data_results, internal_shop_id)
+            storage_result = await self._store_raw_data(
+                raw_data_results, internal_shop_id
+            )
+
+            # Step 4.5: Trigger normalization scans for processed data types
+            await self._trigger_normalization_scans(
+                internal_shop_id, storage_result.get("data_types_processed", [])
+            )
 
             # Step 5: Fire event for main table processing
             main_table_event_result = await self._trigger_main_table_processing(
@@ -303,8 +310,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
     async def _store_raw_data(
         self, raw_data_results: Dict[str, Any], internal_shop_id: str
-    ) -> None:
+    ) -> Dict[str, Any]:
         """Store collected raw data using the storage service."""
+        data_types_processed = []
+
         for data_type, result in raw_data_results.items():
             if result and len(result) > 0 and internal_shop_id:
                 try:
@@ -323,6 +332,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         logger.info(
                             f"Successfully stored {data_type} data: {storage_result['new']} new, {storage_result['updated']} updated"
                         )
+
+                        # Track data types that were processed for normalization
+                        if (
+                            storage_result.get("new", 0) > 0
+                            or storage_result.get("updated", 0) > 0
+                        ):
+                            data_types_processed.append(data_type)
+
                 except Exception as storage_error:
                     logger.error(
                         f"Failed to store {data_type} data",
@@ -337,6 +354,42 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 )
             elif not result or len(result) == 0:
                 logger.info(f"No {data_type} data to store (empty result)")
+
+        # Return the data types that were processed so caller can trigger normalization
+        return {"data_types_processed": data_types_processed}
+
+    async def _trigger_normalization_scans(
+        self, internal_shop_id: str, data_types_processed: List[str]
+    ) -> None:
+        """Trigger normalization scans for processed data types."""
+        if not data_types_processed:
+            return
+
+        try:
+            from app.core.redis_client import streams_manager
+
+            for data_type in data_types_processed:
+                await streams_manager.publish_shopify_event(
+                    {
+                        "event_type": "normalize_scan",
+                        "shop_id": internal_shop_id,
+                        "data_type": data_type,
+                        "page_size": 100,  # Configure as needed
+                        "timestamp": now_utc().isoformat(),
+                    }
+                )
+                logger.info(
+                    f"Published normalize_scan event for {data_type}",
+                    shop_id=internal_shop_id,
+                )
+
+        except Exception as scan_error:
+            logger.error(
+                f"Failed to publish normalization scans",
+                shop_id=internal_shop_id,
+                data_types=data_types_processed,
+                error=str(scan_error),
+            )
 
     async def _trigger_main_table_processing(
         self, internal_shop_id: str, shop_domain: str

@@ -726,6 +726,10 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                 }
                             }
                         }
+                        customAttributes {
+                            key
+                            value
+                        }
                     }
                 }
             }

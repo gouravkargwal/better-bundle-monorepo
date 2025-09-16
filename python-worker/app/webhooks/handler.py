@@ -12,7 +12,8 @@ from app.core.logging import get_logger
 from app.core.redis_client import streams_manager
 from app.core.database.simple_db_client import get_database
 from app.shared.helpers import now_utc
-from app.domains.analytics.services.attribution_extractor import AttributionExtractor
+
+# AttributionExtractor removed - attribution now handled via order webhooks with noteAttributes
 
 logger = get_logger(__name__)
 
@@ -270,25 +271,10 @@ class WebhookHandler:
             # Step 1: Save raw payload immediately (no validation)
             await self.repository.save_raw_behavioral_event(shop_db_id, payload)
 
-            # Step 2: Process attribution from raw event (before validation)
-            # This ensures attribution is captured even if validation fails
-            try:
-                db = await get_database()
-                attribution_extractor = AttributionExtractor(db)
-
-                # Extract attribution from the raw event
-                attribution_event = await attribution_extractor.process_behavioral_event_for_attribution(
-                    shop_id=shop_db_id,
-                    customer_id=payload.get("customerId"),
-                    event_data=payload,
-                    event_type=payload.get("name"),
-                )
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to process attribution for raw event {payload.get('id', 'unknown')}: {e}"
-                )
-                # Don't fail the main event processing if attribution fails
+            # Step 2: Attribution processing removed from behavioral events
+            # Attribution is now handled via order webhooks with noteAttributes
+            # This simplifies the behavioral events flow and ensures attribution
+            # data comes from the authoritative source (completed orders)
 
             # Step 3: Attempt validation and structured data saving
             try:

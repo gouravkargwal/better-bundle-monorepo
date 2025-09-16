@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Ingestion metadata enums
+enum RawSourceType {
+  webhook
+  backfill
+}
+
+enum RawDataFormat {
+  rest
+  graphql
+}
+
 model RawOrder {
   id               String    @id @default(cuid())
   shopId           String
@@ -15,6 +26,10 @@ model RawOrder {
   shopifyId        String?   @db.VarChar(100) // Shopify order ID for efficient lookups
   shopifyCreatedAt DateTime? // Shopify creation timestamp
   shopifyUpdatedAt DateTime? // Shopify update timestamp
+  // New ingestion metadata
+  source           RawSourceType? @default(webhook)
+  format           RawDataFormat? @default(rest)
+  receivedAt       DateTime?       @default(now())
 
   @@unique([shopId, shopifyId], name: "shopId_shopifyId")
   @@index([shopId])
@@ -32,6 +47,10 @@ model RawProduct {
   shopifyId        String?   @db.VarChar(100) // Shopify product ID for efficient lookups
   shopifyCreatedAt DateTime? // Shopify creation timestamp
   shopifyUpdatedAt DateTime? // Shopify update timestamp
+  // New ingestion metadata
+  source           RawSourceType? @default(webhook)
+  format           RawDataFormat? @default(rest)
+  receivedAt       DateTime?       @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -48,6 +67,10 @@ model RawCustomer {
   shopifyId        String?   @db.VarChar(100) // Shopify customer ID for efficient lookups
   shopifyCreatedAt DateTime? // Shopify creation timestamp
   shopifyUpdatedAt DateTime? // Shopify update timestamp
+  // New ingestion metadata
+  source           RawSourceType? @default(webhook)
+  format           RawDataFormat? @default(rest)
+  receivedAt       DateTime?       @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -64,6 +87,10 @@ model RawCollection {
   shopifyId        String?   @db.VarChar(100) // Shopify collection ID for efficient lookups
   shopifyCreatedAt DateTime? // Shopify creation timestamp
   shopifyUpdatedAt DateTime? // Shopify update timestamp
+  // New ingestion metadata
+  source           RawSourceType? @default(webhook)
+  format           RawDataFormat? @default(rest)
+  receivedAt       DateTime?       @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -83,6 +110,24 @@ model RawBehavioralEvents {
   @@index([shopId])
   @@index([shopId, receivedAt])
   @@map("RawBehavioralEvents")
+}
+
+// ===================== STAGING LAYER =====================
+
+// Staging tables removed - data flows directly from Raw to Main tables
+// Raw → NormalizationConsumer → Main (canonical format)
+
+model NormalizationWatermark {
+  id               String   @id @default(cuid())
+  shopId           String
+  dataType         String   @db.VarChar(50) // orders, products, customers, collections
+  lastNormalizedAt DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopId, dataType])
+  @@index([shopId])
+  @@map("NormalizationWatermark")
 }
 
 model OrderData {
@@ -127,6 +172,7 @@ model OrderData {
   metafields              Json?     @default("[]")
   fulfillments            Json?     @default("[]")
   transactions            Json?     @default("[]")
+  extras                  Json?     @default("{}")  // Preserve unknown fields from raw payloads
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
   shop                    Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -174,6 +220,7 @@ model ProductData {
   options               Json?          @default("[]")
   collections           Json?          @default("[]")
   metafields            Json?          @default("[]")
+  extras                Json?          @default("{}")  // Preserve unknown fields from raw payloads
   isActive              Boolean        @default(true)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
@@ -211,6 +258,7 @@ model CustomerData {
   addresses        Json?     @default("[]")
   currencyCode     String?   @default("USD") @db.VarChar(10)
   customerLocale   String?   @default("en") @db.VarChar(10)
+  extras           Json?     @default("{}")  // Preserve unknown fields from raw payloads
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -239,6 +287,7 @@ model CollectionData {
   productCount   Int      @default(0)
   isAutomated    Boolean  @default(false)
   metafields     Json?    @default("[]")
+  extras         Json?    @default("{}")  // Preserve unknown fields from raw payloads
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

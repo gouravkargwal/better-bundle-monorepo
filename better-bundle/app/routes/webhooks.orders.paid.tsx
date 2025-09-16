@@ -73,18 +73,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       select: { id: true },
     });
 
+    let rawRecordId: string | null = null;
     if (existing) {
-      await prisma.rawOrder.update({
+      const updated = await prisma.rawOrder.update({
         where: { id: existing.id },
         data: {
           payload: order,
           shopifyUpdatedAt: order.updated_at
             ? new Date(order.updated_at)
             : new Date(),
-        },
+          source: "webhook" as any,
+          format: "rest" as any,
+          receivedAt: new Date() as any,
+        } as any,
       });
+      rawRecordId = updated.id;
     } else {
-      await prisma.rawOrder.create({
+      const created = await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,
           payload: order,
@@ -95,8 +100,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shopifyUpdatedAt: order.updated_at
             ? new Date(order.updated_at)
             : new Date(),
-        },
+          source: "webhook" as any,
+          format: "rest" as any,
+          receivedAt: new Date() as any,
+        } as any,
       });
+      rawRecordId = created.id;
     }
 
     console.log(
@@ -124,6 +133,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopifyId: streamData.shopify_id,
         orderStatus: streamData.order_status,
       });
+
+      // Also publish a normalize job for canonical staging
+      if (rawRecordId) {
+        const normalizeJob = {
+          event_type: "normalize_entity",
+          data_type: "orders",
+          format: "rest",
+          shop_id: shopRecord.id,
+          raw_id: rawRecordId,
+          shopify_id: orderId,
+          timestamp: new Date().toISOString(),
+        } as const;
+        await streamService.publishShopifyEvent(normalizeJob);
+      }
     } catch (streamError) {
       console.error(`❌ Error publishing to Redis Stream:`, streamError);
       // Don't fail the webhook if stream publishing fails
