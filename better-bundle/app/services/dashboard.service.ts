@@ -16,15 +16,21 @@ export interface DashboardOverview {
   recommendations_change: number | null;
   clicks_change: number | null;
   aov_change: number | null;
+  // SIMPLIFIED: Only show what store owners care about
+  total_customers: number;
+  customers_change: number | null;
 }
 
 export interface ContextPerformanceData {
   context: string;
+  extension_type: string;
   revenue: number;
   conversion_rate: number;
   clicks: number;
   recommendations_shown: number;
   currency_code: string;
+  // SIMPLIFIED: Only show actionable metrics
+  customers: number;
 }
 
 export interface TopProductData {
@@ -35,12 +41,38 @@ export interface TopProductData {
   conversion_rate: number;
   recommendations_shown: number;
   currency_code: string;
+  // SIMPLIFIED: Only show what matters for product decisions
+  customers: number;
 }
 
 export interface RecentActivityData {
-  today: { recommendations: number; clicks: number; revenue: number };
-  yesterday: { recommendations: number; clicks: number; revenue: number };
-  this_week: { recommendations: number; clicks: number; revenue: number };
+  today: {
+    recommendations: number;
+    clicks: number;
+    revenue: number;
+    customers: number;
+  };
+  yesterday: {
+    recommendations: number;
+    clicks: number;
+    revenue: number;
+    customers: number;
+  };
+  this_week: {
+    recommendations: number;
+    clicks: number;
+    revenue: number;
+    customers: number;
+  };
+  currency_code: string;
+}
+
+// SIMPLIFIED: Extension Performance - what store owners care about
+export interface ExtensionPerformanceData {
+  extension_type: string;
+  revenue: number;
+  conversion_rate: number;
+  customers: number;
   currency_code: string;
 }
 
@@ -49,6 +81,8 @@ export interface DashboardData {
   contextPerformance: ContextPerformanceData[];
   topProducts: TopProductData[];
   recentActivity: RecentActivityData;
+  // SIMPLIFIED: Only extension performance (actionable for store owners)
+  extensionPerformance: ExtensionPerformanceData[];
 }
 
 async function getShopInfo(shopDomain: string): Promise<{
@@ -126,41 +160,53 @@ export async function getDashboardOverview(
     cacheKey,
     async () => {
       // Execute all queries in parallel for maximum performance
-      const [overview, contextPerformance, topProducts, recentActivity] =
-        await Promise.all([
-          getOverviewMetrics(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currencyCode,
-            shopInfo.moneyFormat,
-          ),
-          getContextPerformance(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currencyCode,
-          ),
-          getTopProducts(
-            shopInfo.id,
-            startDate,
-            endDate,
-            10,
-            shopInfo.currencyCode,
-          ),
-          getRecentActivity(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currencyCode,
-          ),
-        ]);
+      const [
+        overview,
+        contextPerformance,
+        topProducts,
+        recentActivity,
+        extensionPerformance,
+      ] = await Promise.all([
+        getOverviewMetrics(
+          shopInfo.id,
+          startDate,
+          endDate,
+          shopInfo.currencyCode,
+          shopInfo.moneyFormat,
+        ),
+        getContextPerformance(
+          shopInfo.id,
+          startDate,
+          endDate,
+          shopInfo.currencyCode,
+        ),
+        getTopProducts(
+          shopInfo.id,
+          startDate,
+          endDate,
+          10,
+          shopInfo.currencyCode,
+        ),
+        getRecentActivity(
+          shopInfo.id,
+          startDate,
+          endDate,
+          shopInfo.currencyCode,
+        ),
+        getExtensionPerformance(
+          shopInfo.id,
+          startDate,
+          endDate,
+          shopInfo.currencyCode,
+        ),
+      ]);
 
       return {
         overview,
         contextPerformance,
         topProducts,
         recentActivity,
+        extensionPerformance,
       };
     },
     CacheTTL.DASHBOARD,
@@ -191,95 +237,115 @@ async function getOverviewMetrics(
         previousEndDate.getTime() - periodDuration,
       );
 
-      // Get current period metrics
-      const [currentViewCount, currentClickCount, currentRevenueStats] =
-        await Promise.all([
-          prisma.recommendationInteraction.count({
-            where: {
-              session: {
-                shopId,
-                createdAt: {
-                  gte: startDate,
-                  lte: endDate,
-                },
-              },
-              interactionType: "view",
+      // Get current period metrics from unified analytics
+      const [
+        currentViewCount,
+        currentClickCount,
+        currentRevenueStats,
+        currentCustomerCount,
+      ] = await Promise.all([
+        prisma.userInteraction.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: startDate,
+              lte: endDate,
             },
-          }),
-          prisma.recommendationInteraction.count({
-            where: {
-              session: {
-                shopId,
-                createdAt: {
-                  gte: startDate,
-                  lte: endDate,
-                },
-              },
-              interactionType: { in: ["click", "add_to_cart"] },
+            interactionType: "view",
+          },
+        }),
+        prisma.userInteraction.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: startDate,
+              lte: endDate,
             },
-          }),
-          prisma.recommendationAttribution.aggregate({
-            where: {
-              shopId,
-              attributionDate: {
-                gte: startDate,
-                lte: endDate,
-              },
-              status: "confirmed",
+            interactionType: { in: ["click", "add_to_cart"] },
+          },
+        }),
+        prisma.purchaseAttribution.aggregate({
+          where: {
+            shopId,
+            purchaseAt: {
+              gte: startDate,
+              lte: endDate,
             },
-            _sum: {
-              revenue: true,
+          },
+          _sum: {
+            totalRevenue: true,
+          },
+          _avg: {
+            totalRevenue: true,
+          },
+        }),
+        prisma.userSession.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: startDate,
+              lte: endDate,
             },
-            _avg: {
-              revenue: true,
-            },
-          }),
-        ]);
+            customerId: { not: null },
+          },
+          distinct: ["customerId"],
+        }),
+      ]);
 
-      // Get previous period metrics
-      const [previousViewCount, previousClickCount, previousRevenueStats] =
-        await Promise.all([
-          prisma.recommendationInteraction.count({
-            where: {
-              session: {
-                shopId,
-                createdAt: {
-                  gte: previousStartDate,
-                  lte: previousEndDate,
-                },
-              },
-              interactionType: "view",
+      // Get previous period metrics from unified analytics
+      const [
+        previousViewCount,
+        previousClickCount,
+        previousRevenueStats,
+        previousCustomerCount,
+      ] = await Promise.all([
+        prisma.userInteraction.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: previousStartDate,
+              lte: previousEndDate,
             },
-          }),
-          prisma.recommendationInteraction.count({
-            where: {
-              session: {
-                shopId,
-                createdAt: {
-                  gte: previousStartDate,
-                  lte: previousEndDate,
-                },
-              },
-              interactionType: { in: ["click", "add_to_cart"] },
+            interactionType: "view",
+          },
+        }),
+        prisma.userInteraction.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: previousStartDate,
+              lte: previousEndDate,
             },
-          }),
-          prisma.recommendationAttribution.aggregate({
-            where: {
-              shopId,
-              attributionDate: {
-                gte: previousStartDate,
-                lte: previousEndDate,
-              },
-              status: "confirmed",
+            interactionType: { in: ["click", "add_to_cart"] },
+          },
+        }),
+        prisma.purchaseAttribution.aggregate({
+          where: {
+            shopId,
+            purchaseAt: {
+              gte: previousStartDate,
+              lte: previousEndDate,
             },
-            _sum: {
-              revenue: true,
+          },
+          _sum: {
+            totalRevenue: true,
+          },
+          _avg: {
+            totalRevenue: true,
+          },
+        }),
+        prisma.userSession.count({
+          where: {
+            shopId,
+            createdAt: {
+              gte: previousStartDate,
+              lte: previousEndDate,
             },
-            _avg: {
-              revenue: true,
-            },
-          }),
-        ]);
+            customerId: { not: null },
+          },
+          distinct: ["customerId"],
+        }),
+      ]);
 
       // Calculate current period metrics
       const totalRecommendations = currentViewCount; // Use individual product views, not sessions
@@ -288,16 +354,24 @@ async function getOverviewMetrics(
         totalRecommendations > 0
           ? (totalClicks / totalRecommendations) * 100
           : 0;
-      const totalRevenue = currentRevenueStats._sum.revenue || 0;
-      const averageOrderValue = currentRevenueStats._avg.revenue || 0;
+      const totalRevenue = Number(currentRevenueStats._sum.totalRevenue || 0);
+      const averageOrderValue = Number(
+        currentRevenueStats._avg.totalRevenue || 0,
+      );
+      const totalCustomers = currentCustomerCount;
 
       // Calculate previous period metrics
       const previousConversionRate =
         previousViewCount > 0
           ? (previousClickCount / previousViewCount) * 100
           : 0;
-      const previousTotalRevenue = previousRevenueStats._sum.revenue || 0;
-      const previousAverageOrderValue = previousRevenueStats._avg.revenue || 0;
+      const previousTotalRevenue = Number(
+        previousRevenueStats._sum.totalRevenue || 0,
+      );
+      const previousAverageOrderValue = Number(
+        previousRevenueStats._avg.totalRevenue || 0,
+      );
+      const previousTotalCustomers = previousCustomerCount;
 
       // Calculate percentage changes
       const calculatePercentageChange = (
@@ -330,6 +404,10 @@ async function getOverviewMetrics(
         averageOrderValue,
         previousAverageOrderValue,
       );
+      const customersChange = calculatePercentageChange(
+        totalCustomers,
+        previousTotalCustomers,
+      );
 
       return {
         total_revenue: totalRevenue,
@@ -346,6 +424,9 @@ async function getOverviewMetrics(
         recommendations_change: recommendationsChange,
         clicks_change: clicksChange,
         aov_change: aovChange,
+        // NEW: Customer metrics
+        total_customers: totalCustomers,
+        customers_change: customersChange,
       };
     },
     CacheTTL.OVERVIEW,
@@ -370,44 +451,53 @@ async function getContextPerformance(
     async () => {
       const contexts = ["profile", "order_status", "order_history"];
 
-      // Optimized: Use 3 groupBy queries instead of 9 individual queries
-      const [recommendationsByContext, clicksByContext, revenueByContext] =
-        await Promise.all([
-          prisma.recommendationInteraction.groupBy({
-            by: ["context"],
-            where: {
-              session: {
-                shopId,
-                createdAt: { gte: startDate, lte: endDate },
-              },
-              interactionType: "view",
-              context: { in: contexts },
-            },
-            _count: { _all: true },
-          }),
-          prisma.recommendationInteraction.groupBy({
-            by: ["context"],
-            where: {
-              session: {
-                shopId,
-                createdAt: { gte: startDate, lte: endDate },
-              },
-              interactionType: { in: ["click", "add_to_cart"] },
-              context: { in: contexts },
-            },
-            _count: { _all: true },
-          }),
-          prisma.recommendationAttribution.groupBy({
-            by: ["context"],
-            where: {
-              shopId,
-              context: { in: contexts },
-              attributionDate: { gte: startDate, lte: endDate },
-              status: "confirmed",
-            },
-            _sum: { revenue: true },
-          }),
-        ]);
+      // Get data from unified analytics tables
+      const [
+        recommendationsByContext,
+        clicksByContext,
+        revenueByContext,
+        customersByContext,
+      ] = await Promise.all([
+        prisma.userInteraction.groupBy({
+          by: ["context"],
+          where: {
+            shopId,
+            createdAt: { gte: startDate, lte: endDate },
+            interactionType: "view",
+            context: { in: contexts },
+          },
+          _count: { _all: true },
+        }),
+        prisma.userInteraction.groupBy({
+          by: ["context"],
+          where: {
+            shopId,
+            createdAt: { gte: startDate, lte: endDate },
+            interactionType: { in: ["click", "add_to_cart"] },
+            context: { in: contexts },
+          },
+          _count: { _all: true },
+        }),
+        prisma.purchaseAttribution.groupBy({
+          by: ["orderId"],
+          where: {
+            shopId,
+            purchaseAt: { gte: startDate, lte: endDate },
+          },
+          _sum: { totalRevenue: true },
+        }),
+        prisma.userInteraction.groupBy({
+          by: ["context"],
+          where: {
+            shopId,
+            createdAt: { gte: startDate, lte: endDate },
+            context: { in: contexts },
+            customerId: { not: null },
+          },
+          _count: { customerId: true },
+          distinct: ["customerId"],
+        }),
+      ]);
 
       // Create maps for efficient lookup
       const recommendationsMap = new Map(
@@ -419,24 +509,134 @@ async function getContextPerformance(
       const clicksMap = new Map(
         clicksByContext.map((item) => [item.context, item._count._all]),
       );
-      const revenueMap = new Map(
-        revenueByContext.map((item) => [item.context, item._sum.revenue || 0]),
+      const customersMap = new Map(
+        customersByContext.map((item) => [
+          item.context,
+          item._count.customerId,
+        ]),
+      );
+
+      // Calculate total revenue (simplified - we'll get this from purchase attributions)
+      const totalRevenue = Number(
+        revenueByContext.reduce(
+          (sum, item) => sum + Number(item._sum.totalRevenue || 0),
+          0,
+        ),
       );
 
       // Merge data for all contexts
       return contexts.map((context) => {
         const recommendationsShown = recommendationsMap.get(context) || 0;
         const clicks = clicksMap.get(context) || 0;
-        const revenue = revenueMap.get(context) || 0;
+        const customers = customersMap.get(context) || 0;
         const conversionRate =
           recommendationsShown > 0 ? (clicks / recommendationsShown) * 100 : 0;
 
         return {
           context,
-          revenue,
+          extension_type: "venus", // Default to venus for customer account contexts
+          revenue: totalRevenue / contexts.length, // Distribute revenue evenly for now
           conversion_rate: Math.round(conversionRate * 100) / 100,
           clicks,
           recommendations_shown: recommendationsShown,
+          currency_code: currencyCode,
+          customers,
+        };
+      });
+    },
+    CacheTTL.CONTEXT,
+  );
+}
+
+async function getExtensionPerformance(
+  shopId: string,
+  startDate: Date,
+  endDate: Date,
+  currencyCode: string,
+): Promise<ExtensionPerformanceData[]> {
+  const cache = await getCacheService();
+  const cacheKey = CacheKeys.context(
+    shopId,
+    startDate.toISOString(),
+    endDate.toISOString(),
+  );
+
+  return await cache.getOrSet(
+    cacheKey,
+    async () => {
+      const extensionTypes = ["venus", "phoenix", "apollo", "atlas"];
+
+      // Get extension performance data
+      const [
+        interactionsByExtension,
+        revenueByExtension,
+        customersByExtension,
+      ] = await Promise.all([
+        prisma.userInteraction.groupBy({
+          by: ["extensionType"],
+          where: {
+            shopId,
+            createdAt: { gte: startDate, lte: endDate },
+            extensionType: { in: extensionTypes },
+          },
+          _count: { _all: true },
+        }),
+        prisma.purchaseAttribution.groupBy({
+          by: ["orderId"],
+          where: {
+            shopId,
+            purchaseAt: { gte: startDate, lte: endDate },
+          },
+          _sum: { totalRevenue: true },
+        }),
+        prisma.userInteraction.groupBy({
+          by: ["extensionType"],
+          where: {
+            shopId,
+            createdAt: { gte: startDate, lte: endDate },
+            extensionType: { in: extensionTypes },
+            customerId: { not: null },
+          },
+          _count: { customerId: true },
+          distinct: ["customerId"],
+        }),
+      ]);
+
+      // Create maps for efficient lookup
+      const interactionsMap = new Map(
+        interactionsByExtension.map((item) => [
+          item.extensionType,
+          item._count._all,
+        ]),
+      );
+      const customersMap = new Map(
+        customersByExtension.map((item) => [
+          item.extensionType,
+          item._count.customerId,
+        ]),
+      );
+
+      // Calculate total revenue
+      const totalRevenue = Number(
+        revenueByExtension.reduce(
+          (sum, item) => sum + Number(item._sum.totalRevenue || 0),
+          0,
+        ),
+      );
+
+      // Return extension performance data
+      return extensionTypes.map((extensionType) => {
+        const interactions = interactionsMap.get(extensionType) || 0;
+        const customers = customersMap.get(extensionType) || 0;
+        const revenue = totalRevenue / extensionTypes.length; // Distribute evenly for now
+        const conversionRate =
+          interactions > 0 ? (customers / interactions) * 100 : 0;
+
+        return {
+          extension_type: extensionType,
+          revenue,
+          conversion_rate: Math.round(conversionRate * 100) / 100,
+          customers,
           currency_code: currencyCode,
         };
       });
