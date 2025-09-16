@@ -44,6 +44,9 @@ class ShopifyEventsConsumer(BaseConsumer):
         self.processed_count = 0
         self.error_count = 0
 
+        # Deduplication tracking
+        self.processed_orders: Dict[str, str] = {}  # order_id -> last_event_type
+
     async def _process_single_message(self, message: Dict[str, Any]):
         """Process a single Shopify event message (override from BaseConsumer)"""
         try:
@@ -75,6 +78,30 @@ class ShopifyEventsConsumer(BaseConsumer):
                 )
                 return
 
+            # Create unique order key for deduplication
+            order_key = f"{shop_id}_{shopify_id}"
+
+            # Check for duplicate processing
+            if event_type in [
+                "order_created",
+                "order_updated",
+                "order_paid",
+                "order_cancelled",
+            ]:
+                if order_key in self.processed_orders:
+                    last_event = self.processed_orders[order_key]
+                    # Skip if we already processed a more important event
+                    if (last_event == "order_paid" and event_type != "order_paid") or (
+                        last_event == "order_updated" and event_type == "order_created"
+                    ):
+                        self.logger.info(
+                            f"⏭️ Skipping duplicate order event: {event_type} for {order_key} (already processed {last_event})"
+                        )
+                        return
+
+                # Update tracking
+                self.processed_orders[order_key] = event_type
+
             self.logger.info(
                 f"Processing {event_type} event for shop {shop_id}, Shopify ID: {shopify_id}"
             )
@@ -82,7 +109,12 @@ class ShopifyEventsConsumer(BaseConsumer):
             # Route to appropriate handler based on event type
             if event_type == "product_created" or event_type == "product_updated":
                 await self._process_product_event(shop_id, shopify_id)
-            elif event_type in ["order_created", "order_updated", "order_paid", "order_cancelled"]:
+            elif event_type in [
+                "order_created",
+                "order_updated",
+                "order_paid",
+                "order_cancelled",
+            ]:
                 await self._process_order_event(shop_id, shopify_id)
             elif event_type == "customer_created" or event_type == "customer_updated":
                 await self._process_customer_event(shop_id, shopify_id)
@@ -191,9 +223,11 @@ class ShopifyEventsConsumer(BaseConsumer):
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""
         return {
-            "status": "running" if self.is_running else "stopped",
-            "processed_count": self.processed_count,
-            "error_count": self.error_count,
+            "status": self.status.value,
+            "metrics": {
+                "messages_processed": self.processed_count,
+                "messages_failed": self.error_count,
+            },
             "stream_name": self.stream_name,
             "consumer_group": self.consumer_group,
             "consumer_name": self.consumer_name,

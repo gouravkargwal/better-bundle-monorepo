@@ -49,6 +49,7 @@ FIELD_MAPPINGS = {
             "fulfillments",
             "transactions",
             "customerDefaultAddress",
+            "noteAttributes",
         ],
         "optional_fields": [
             "orderName",
@@ -75,6 +76,9 @@ FIELD_MAPPINGS = {
             "confirmed",
             "test",
             "note",
+            "financialStatus",
+            "fulfillmentStatus",
+            "orderStatus",
         ],
         "where_clause": "shopId_orderId",
     },

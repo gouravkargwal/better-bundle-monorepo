@@ -4,8 +4,6 @@ Handles all recommendation requests from Shopify extension with context-based ro
 """
 
 import asyncio
-import json
-import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -17,6 +15,13 @@ from app.shared.gorse_api_client import GorseApiClient
 from app.core.database.simple_db_client import get_database
 from app.core.config.settings import settings
 from app.core.redis_client import get_redis_client
+from app.recommandations.models import RecommendationRequest, RecommendationResponse
+from app.recommandations.category_detection import CategoryDetectionService
+from app.recommandations.cache import RecommendationCacheService
+from app.recommandations.hybrid import HybridRecommendationService
+from app.recommandations.analytics import RecommendationAnalytics
+from app.recommandations.user_neighbors import UserNeighborsService
+from app.recommandations.enrichment import ProductEnrichment
 
 logger = get_logger(__name__)
 
@@ -66,1147 +71,259 @@ async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
         return None
 
 
-# Pydantic models for request/response
-class RecommendationRequest(BaseModel):
-    """Request model for recommendations"""
+async def extract_session_data_from_behavioral_events(
+    user_id: str, shop_id: str
+) -> Dict[str, Any]:
+    """Extract recent cart and browsing data from behavioral events for session recommendations"""
+    try:
+        db = await get_database()
 
-    shop_domain: Optional[str] = Field(
-        None,
-        description="Shop domain (optional - will be looked up from user_id if not provided)",
-    )
-    context: str = Field(
-        ...,
-        description="Context: product_page, homepage, cart, profile, checkout, order_history, order_status",
-    )
-    product_ids: Optional[List[str]] = Field(
-        None,
-        description="Product IDs for recommendations (single or multiple products)",
-    )
-    user_id: Optional[str] = Field(
-        None, description="User ID for personalized recommendations"
-    )
-    session_id: Optional[str] = Field(
-        None, description="Session ID for session-based recommendations"
-    )
-    category: Optional[str] = Field(None, description="Category filter")
-    limit: int = Field(default=6, ge=1, le=20, description="Number of recommendations")
-    metadata: Optional[Dict[str, Any]] = Field(
-        default=None, description="Additional metadata"
-    )
+        # Get recent cart_viewed events (last 30 minutes)
+        from datetime import timezone
+
+        now = datetime.now(timezone.utc)
+        recent_cart_events = await db.behavioralevents.find_many(
+            where={
+                "customerId": user_id,
+                "shopId": shop_id,
+                "eventType": "cart_viewed",
+                "timestamp": {"gte": now - timedelta(minutes=30)},
+            },
+            take=5,
+            order={"timestamp": "desc"},
+        )
+
+        # Get recent product_viewed events (last 2 hours)
+        recent_view_events = await db.behavioralevents.find_many(
+            where={
+                "customerId": user_id,
+                "shopId": shop_id,
+                "eventType": "product_viewed",
+                "timestamp": {"gte": now - timedelta(hours=2)},
+            },
+            take=20,
+            order={"timestamp": "desc"},
+        )
+
+        # Get recent add_to_cart events (last 1 hour)
+        recent_add_events = await db.behavioralevents.find_many(
+            where={
+                "customerId": user_id,
+                "shopId": shop_id,
+                "eventType": "product_added_to_cart",
+                "timestamp": {"gte": now - timedelta(hours=1)},
+            },
+            take=10,
+            order={"timestamp": "desc"},
+        )
+
+        # Extract cart contents from cart_viewed events
+        cart_contents = []
+        cart_data = None
+        for event in recent_cart_events:
+            if event.eventData and event.eventData.get("cart", {}).get("lines"):
+                cart_data = event.eventData["cart"]
+                for line in event.eventData["cart"]["lines"]:
+                    if line.get("merchandise", {}).get("product", {}).get("id"):
+                        product_id = line["merchandise"]["product"]["id"]
+                        if product_id not in cart_contents:
+                            cart_contents.append(product_id)
+
+        # Extract recent views
+        recent_views = []
+        product_types = set()
+        for event in recent_view_events:
+            if event.eventData and event.eventData.get("product", {}).get("id"):
+                product_id = event.eventData["product"]["id"]
+                if product_id not in recent_views:
+                    recent_views.append(product_id)
+
+                # Extract product type
+                product_type = event.eventData["product"].get("type")
+                if product_type:
+                    product_types.add(product_type)
+
+        # Extract recent adds to cart
+        recent_adds = []
+        for event in recent_add_events:
+            if event.eventData and event.eventData.get("product", {}).get("id"):
+                product_id = event.eventData["product"]["id"]
+                if product_id not in recent_adds:
+                    recent_adds.append(product_id)
+
+        # Build session metadata
+        session_metadata = {
+            "cart_contents": cart_contents,
+            "recent_views": recent_views,
+            "recent_adds": recent_adds,
+            "product_types": list(product_types),
+            "cart_data": cart_data,  # Full cart data for detailed analysis
+            "session_context": {
+                "total_cart_items": len(cart_contents),
+                "total_views": len(recent_views),
+                "total_adds": len(recent_adds),
+                "categories": list(product_types),
+                "last_activity": (
+                    recent_cart_events[0].timestamp.isoformat()
+                    if recent_cart_events
+                    else None
+                ),
+            },
+        }
+
+        logger.info(
+            f"🔍 Extracted session data | user_id={user_id} | cart_items={len(cart_contents)} | views={len(recent_views)} | adds={len(recent_adds)}"
+        )
+
+        return session_metadata
+
+    except Exception as e:
+        logger.error(
+            f"💥 Failed to extract session data from behavioral events: {str(e)}"
+        )
+        return {
+            "cart_contents": [],
+            "recent_views": [],
+            "recent_adds": [],
+            "product_types": [],
+            "cart_data": None,
+            "session_context": {},
+        }
 
 
-class RecommendationResponse(BaseModel):
-    """Response model for recommendations"""
+def _apply_time_decay_filtering(
+    cart_interactions: List[Any], user_id: str
+) -> List[str]:
+    """
+    Apply time decay logic to determine which products to exclude from recommendations
 
-    success: bool
-    recommendations: List[Dict[str, Any]]
-    count: int
-    source: str  # "gorse", "fallback", "database"
-    context: str
-    timestamp: datetime
+    Time Decay Rules:
+    - Last 2 hours: Always exclude (weight = 1.0)
+    - Last 6 hours: Usually exclude (weight = 0.8)
+    - Last 24 hours: Maybe exclude (weight = 0.5)
+    - Last 48 hours: Rarely exclude (weight = 0.2)
 
+    Args:
+        cart_interactions: List of cart interactions from database
+        user_id: User ID for logging
 
-# Analytics moved to separate service: /api/v1/analytics.py
+    Returns:
+        List of product IDs to exclude from recommendations
+    """
+    try:
+        from datetime import timezone
 
+        now = datetime.now(timezone.utc)
+        product_interactions = {}  # product_id -> list of interactions
 
-class ProductEnrichment:
-    """Service to enrich Gorse item IDs with Shopify product data"""
+        # Group interactions by product ID
+        for interaction in cart_interactions:
+            if not interaction.productId:
+                continue
 
-    def __init__(self):
-        self.db = None
+            product_id = interaction.productId
+            if product_id not in product_interactions:
+                product_interactions[product_id] = []
 
-    async def get_database(self):
-        if self.db is None:
-            self.db = await get_database()
-        return self.db
+            # Ensure timestamp is timezone-aware
+            timestamp = interaction.timestamp
+            if timestamp.tzinfo is None:
+                # If timestamp is naive, assume it's UTC
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            elif timestamp.tzinfo != timezone.utc:
+                # Convert to UTC if it's in a different timezone
+                timestamp = timestamp.astimezone(timezone.utc)
 
-    async def enrich_items(
-        self,
-        shop_id: str,
-        item_ids: List[str],
-        context: str = "product_page",
-        source: str = "unknown",
-    ) -> List[Dict[str, Any]]:
-        """
-        Enrich Gorse item IDs with Shopify product data
-
-        Args:
-            shop_id: Shop ID
-            item_ids: List of Gorse item IDs (which are Shopify product IDs)
-            context: Recommendation context
-            source: Recommendation source
-
-        Returns:
-            List of enriched product data
-        """
-        try:
-            logger.debug(
-                f"🎨 Starting enrichment | shop_id={shop_id} | item_count={len(item_ids)} | context={context} | source={source}"
-            )
-            db = await self.get_database()
-
-            # Get shop details to determine the correct domain for product URLs and currency
-            shop = await db.shop.find_unique(where={"id": shop_id})
-
-            # Use custom domain if available, otherwise fall back to myshopify domain
-            product_domain = (
-                shop.customDomain
-                if shop and shop.customDomain
-                else (shop.shopDomain if shop else None)
-            )
-
-            # Strip prefixes from Gorse item IDs to match database format
-            # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-            # Database uses: 7903465537675
-            # Only include items from the current shop for multi-tenancy
-            clean_item_ids = []
-            for item_id in item_ids:
-                # Handle both string item IDs and dictionary items
-                if isinstance(item_id, dict):
-                    # Extract the actual item ID from the dictionary
-                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
-                else:
-                    actual_item_id = item_id
-
-                if actual_item_id.startswith("shop_"):
-                    # Extract shop ID and product ID
-                    parts = actual_item_id.split("_")
-                    if len(parts) >= 3:
-                        gorse_shop_id = parts[
-                            1
-                        ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-                        product_id = parts[2]  # 7903465537675
-
-                        # Only include if it's from the current shop
-                        if gorse_shop_id == shop_id:
-                            clean_item_ids.append(product_id)
-                        else:
-                            logger.debug(
-                                f"🚫 Skipping product from different shop | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
-                            )
-                    else:
-                        logger.warning(
-                            f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
-                        )
-                else:
-                    # Assume it's already a clean product ID
-                    clean_item_ids.append(actual_item_id)
-
-            logger.info(
-                f"🧹 Cleaned item IDs | original={item_ids[:3]} | cleaned={clean_item_ids[:3]}"
-            )
-
-            # Fetch products from database using cleaned IDs
-            products = await db.productdata.find_many(
-                where={
-                    "shopId": shop_id,
-                    "productId": {"in": clean_item_ids},
+            product_interactions[product_id].append(
+                {
+                    "timestamp": timestamp,
+                    "session_id": interaction.sessionId,
                 }
             )
 
-            logger.debug(
-                f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
-            )
+        logger.debug(
+            f"🔍 Time decay analysis for {len(product_interactions)} unique products"
+        )
 
-            # Create a mapping for quick lookup using cleaned IDs
-            product_map = {p.productId: p for p in products}
+        excluded_products = []
 
-            # Enrich items in the same order as requested
-            enriched_items = []
-            missing_items = []
-            for item_id in item_ids:
-                # Handle both string item IDs and dictionary items
-                if isinstance(item_id, dict):
-                    # Extract the actual item ID from the dictionary
-                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
+        for product_id, interactions in product_interactions.items():
+            # Get the most recent interaction for this product
+            most_recent = max(interactions, key=lambda x: x["timestamp"])
+            hours_ago = (now - most_recent["timestamp"]).total_seconds() / 3600
+
+            # Count total interactions for this product
+            interaction_count = len(interactions)
+
+            # Apply time decay logic
+            should_exclude = False
+            reason = ""
+
+            if hours_ago < 2:
+                # Very recent (last 2 hours) - always exclude
+                should_exclude = True
+                reason = f"very_recent_{hours_ago:.1f}h"
+            elif hours_ago < 6:
+                # Recent (last 6 hours) - usually exclude
+                should_exclude = True
+                reason = f"recent_{hours_ago:.1f}h"
+            elif hours_ago < 24:
+                # Yesterday - exclude if multiple interactions
+                if interaction_count >= 2:
+                    should_exclude = True
+                    reason = f"yesterday_multiple_{interaction_count}times"
                 else:
-                    actual_item_id = item_id
-
-                # Find the corresponding clean_id for this item_id
-                clean_id = None
-                if actual_item_id.startswith("shop_"):
-                    parts = actual_item_id.split("_")
-                    if len(parts) >= 3:
-                        gorse_shop_id = parts[1]
-                        product_id = parts[2]
-                        if gorse_shop_id == shop_id:
-                            clean_id = product_id
+                    reason = f"yesterday_single_{hours_ago:.1f}h"
+            elif hours_ago < 48:
+                # Day before - exclude only if many interactions
+                if interaction_count >= 3:
+                    should_exclude = True
+                    reason = f"day_before_many_{interaction_count}times"
                 else:
-                    clean_id = actual_item_id
+                    reason = f"day_before_few_{hours_ago:.1f}h"
+            else:
+                # Too old - don't exclude
+                reason = f"too_old_{hours_ago:.1f}h"
 
-                if clean_id and clean_id in product_map:
-                    product = product_map[clean_id]
-                    # Extract variant information for cart permalinks
-                    variants = product.variants if product.variants else []
-                    default_variant = None
-                    variant_id = None
-                    if variants and len(variants) > 0:
-                        # Get the first variant (usually the default)
-                        default_variant = (
-                            variants[0] if isinstance(variants, list) else None
-                        )
-                        if default_variant and isinstance(default_variant, dict):
-                            # Variant IDs are already cleaned in the database
-                            variant_id = default_variant.get("id", "")
-
-                    # Format for frontend ProductRecommendation interface
-                    enriched_items.append(
-                        {
-                            "id": product.productId,
-                            "title": product.title,
-                            "handle": product.handle,
-                            "url": f"https://{product_domain}/products/{product.handle}",
-                            "price": {
-                                "amount": str(product.price),
-                                "currency_code": (
-                                    shop.currencyCode
-                                    if shop and shop.currencyCode
-                                    else "USD"
-                                ),
-                            },
-                            "image": (
-                                {
-                                    "url": product.imageUrl or "",
-                                    "alt_text": product.imageAlt or product.title,
-                                }
-                                if product.imageUrl
-                                else None
-                            ),
-                            "vendor": product.vendor or "",
-                            "product_type": product.productType or "",
-                            "available": product.status == "ACTIVE",
-                            "score": 0.8,  # Default recommendation score
-                            "variant_id": variant_id,
-                            "variants": variants,  # Include all variants for flexibility
-                        }
-                    )
-                else:
-                    # Item not found in database, skip it
-                    if clean_id:
-                        missing_items.append(clean_id)
-
-            if missing_items:
-                logger.warning(
-                    f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
+            if should_exclude:
+                excluded_products.append(product_id)
+                logger.debug(
+                    f"🚫 Excluding product {product_id} | reason={reason} | interactions={interaction_count} | hours_ago={hours_ago:.1f}"
+                )
+            else:
+                logger.debug(
+                    f"✅ Including product {product_id} | reason={reason} | interactions={interaction_count} | hours_ago={hours_ago:.1f}"
                 )
 
-            logger.info(
-                f"✅ Enrichment complete | enriched={len(enriched_items)} | missing={len(missing_items)} | success_rate={len(enriched_items)/len(item_ids)*100:.1f}%"
-            )
-            return enriched_items
+        logger.info(
+            f"⏰ Time decay filtering complete | user_id={user_id} | total_products={len(product_interactions)} | excluded={len(excluded_products)} | included={len(product_interactions) - len(excluded_products)}"
+        )
 
-        except Exception as e:
-            logger.error(f"💥 Failed to enrich items: {str(e)}")
-            return []
+        return excluded_products
 
-    def _get_recommendation_reason(self, context: str, source: str) -> str:
-        """Get contextual recommendation reason based on context and source"""
+    except Exception as e:
+        logger.error(f"💥 Time decay filtering failed: {str(e)}")
+        # Fallback: exclude all products from last 24 hours
+        fallback_exclusions = []
+        from datetime import timezone
 
-        # More specific reasons based on ML source
-        if "item_neighbors" in source:
-            return "Similar products"
-        elif "user_recommendations" in source:
-            return "Recommended for you"
-        elif "session_recommendations" in source:
-            return "Based on your browsing"
-        elif "popular" in source:
-            return "Popular choice"
-        elif "latest" in source:
-            return "New arrival"
-        elif "fallback" in source:
-            return "Trending now"
-        else:
-            # Context-based fallback reasons
-            context_reasons = {
-                "product_page": "Customers also bought",
-                "homepage": "Featured product",
-                "cart": "Perfect addition",
-                "profile": "Just for you",
-                "checkout": "Don't miss out",
-            }
-            return context_reasons.get(context, "Recommended for you")
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        for interaction in cart_interactions:
+            if interaction.productId:
+                # Ensure timestamp is timezone-aware for comparison
+                timestamp = interaction.timestamp
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                elif timestamp.tzinfo != timezone.utc:
+                    timestamp = timestamp.astimezone(timezone.utc)
+
+                if timestamp >= cutoff_time:
+                    fallback_exclusions.append(interaction.productId)
+        return list(set(fallback_exclusions))
 
 
 # Initialize enrichment service
 enrichment_service = ProductEnrichment()
-
-
-class CategoryDetectionService:
-    """Service to auto-detect product categories with caching"""
-
-    def __init__(self):
-        self.db = None
-        self.redis_client = None
-
-    async def get_database(self):
-        if self.db is None:
-            self.db = await get_database()
-        return self.db
-
-    async def get_redis_client(self):
-        if self.redis_client is None:
-            self.redis_client = await get_redis_client()
-        return self.redis_client
-
-    async def get_product_category(
-        self, product_id: str, shop_id: str
-    ) -> Optional[str]:
-        """
-        Get product category with Redis caching
-
-        Args:
-            product_id: Product ID
-            shop_id: Shop ID
-
-        Returns:
-            Product category (productType or first collection) or None
-        """
-        try:
-            # Create cache key
-            cache_key = f"product_category:{shop_id}:{product_id}"
-
-            # Check cache first
-            redis_client = await self.get_redis_client()
-            cached_category = await redis_client.get(cache_key)
-            if cached_category:
-                logger.debug(f"Category cache hit for product {product_id}")
-                return (
-                    cached_category.decode("utf-8")
-                    if isinstance(cached_category, bytes)
-                    else cached_category
-                )
-
-            # Query database
-            db = await self.get_database()
-            product = await db.productdata.find_first(
-                where={"shopId": shop_id, "productId": product_id}
-            )
-
-            category = None
-            if product:
-                # Prioritize productType over collections
-                if hasattr(product, "productType") and product.productType:
-                    category = product.productType
-                elif (
-                    hasattr(product, "collections")
-                    and product.collections
-                    and len(product.collections) > 0
-                ):
-                    # Use first collection as category
-                    category = (
-                        product.collections[0].get("title")
-                        if isinstance(product.collections[0], dict)
-                        else str(product.collections[0])
-                    )
-
-            # Cache for 1 hour (3600 seconds)
-            if category:
-                await redis_client.setex(cache_key, 3600, category)
-                logger.debug(f"Cached category '{category}' for product {product_id}")
-
-            return category
-
-        except Exception as e:
-            logger.error(f"Failed to get product category: {str(e)}")
-            return None
-
-
-class RecommendationCacheService:
-    """Service to handle recommendation caching with context-specific TTL"""
-
-    def __init__(self):
-        self.redis_client = None
-
-    async def get_redis_client(self):
-        if self.redis_client is None:
-            self.redis_client = await get_redis_client()
-        return self.redis_client
-
-    # Context-specific TTL configuration
-    CACHE_TTL = {
-        "product_page": 1800,  # 30 minutes (product-specific)
-        "homepage": 3600,  # 1 hour (general)
-        "cart": 0,  # 5 minutes (dynamic)
-        "profile": 0,  # 15 minutes (user-specific)
-        "checkout": 0,  # No cache (fast, fresh)
-        "order_history": 0,  # Temporarily disable caching
-        "order_status": 900,  # 15 minutes (order-specific)
-    }
-
-    def generate_cache_key(
-        self,
-        shop_id: str,
-        context: str,
-        product_ids: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        limit: int = 6,
-    ) -> str:
-        """
-        Generate a unique cache key for recommendations
-
-        Args:
-            shop_id: Shop ID
-            context: Recommendation context
-            product_id: Product ID
-            user_id: User ID
-            session_id: Session ID
-            category: Category filter
-            limit: Number of recommendations
-
-        Returns:
-            Cache key string
-        """
-        # Create a deterministic key based on all parameters
-        product_ids_str = ",".join(sorted(product_ids)) if product_ids else ""
-        key_parts = [
-            "recommendations",
-            shop_id,
-            context,
-            product_ids_str,
-            str(user_id or ""),
-            str(session_id or ""),
-            str(category or ""),
-            str(limit),
-        ]
-
-        # Join and hash to create a consistent key
-        key_string = ":".join(key_parts)
-        return f"rec:{hashlib.md5(key_string.encode()).hexdigest()}"
-
-    async def get_cached_recommendations(
-        self, cache_key: str, context: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get cached recommendations if available
-
-        Args:
-            cache_key: Cache key
-            context: Recommendation context
-
-        Returns:
-            Cached recommendations or None
-        """
-        try:
-            # Skip caching for checkout context
-            if self.CACHE_TTL[context] == 0:
-                return None
-
-            redis_client = await self.get_redis_client()
-            cached_data = await redis_client.get(cache_key)
-
-            if cached_data:
-                logger.debug(f"Recommendation cache hit for context {context}")
-                return json.loads(
-                    cached_data.decode("utf-8")
-                    if isinstance(cached_data, bytes)
-                    else cached_data
-                )
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Failed to get cached recommendations: {str(e)}")
-            return None
-
-    async def cache_recommendations(
-        self, cache_key: str, recommendations: Dict[str, Any], context: str
-    ) -> None:
-        """
-        Cache recommendations with context-specific TTL
-
-        Args:
-            cache_key: Cache key
-            recommendations: Recommendations data to cache
-            context: Recommendation context
-        """
-        try:
-            # Skip caching for checkout context
-            if self.CACHE_TTL[context] == 0:
-                return
-
-            redis_client = await self.get_redis_client()
-            ttl = self.CACHE_TTL[context]
-
-            # Add metadata to cached data
-            cached_data = {
-                "recommendations": recommendations,
-                "cached_at": datetime.now().isoformat(),
-                "context": context,
-                "ttl": ttl,
-            }
-
-            await redis_client.setex(cache_key, ttl, json.dumps(cached_data))
-            logger.debug(
-                f"Cached recommendations for context {context} with TTL {ttl}s"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to cache recommendations: {str(e)}")
-
-
-class HybridRecommendationService:
-    """Service to blend multiple recommendation sources for richer results"""
-
-    def __init__(self):
-        self.gorse_client = gorse_client
-
-    # Context-specific blending ratios
-    BLENDING_RATIOS = {
-        "product_page": {
-            "item_neighbors": 0.7,  # 70% similar products
-            "user_recommendations": 0.3,  # 30% personalized (if user_id available)
-        },
-        "homepage": {
-            "user_recommendations": 0.6,  # 60% personalized
-            "popular": 0.4,  # 40% popular items
-        },
-        "cart": {
-            "session_recommendations": 0.5,  # 50% session-based
-            "user_recommendations": 0.3,  # 30% personalized
-            "popular": 0.2,  # 20% popular items
-        },
-        "profile": {
-            "user_recommendations": 0.5,  # 50% personalized
-            "user_neighbors": 0.3,  # 30% "People like you bought..."
-            "popular": 0.2,  # 20% popular items
-        },
-        "checkout": {"popular": 1.0},  # 100% popular (fast, reliable)
-        "order_history": {
-            "user_recommendations": 0.6,  # 60% personalized based on order history
-            "popular_category": 0.3,  # 30% popular in order history categories
-            "popular": 0.1,  # 10% general popular items
-        },
-        "order_status": {
-            "item_neighbors": 0.5,  # 50% similar to ordered products
-            "user_recommendations": 0.3,  # 30% personalized
-            "popular_category": 0.2,  # 20% popular in same category
-        },
-    }
-
-    async def blend_recommendations(
-        self,
-        context: str,
-        shop_id: str,
-        product_ids: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        limit: int = 6,
-        metadata: Optional[Dict[str, Any]] = None,
-        exclude_items: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Blend multiple recommendation sources based on context
-
-        Args:
-            context: Recommendation context
-            shop_id: Shop ID
-            product_id: Product ID
-            user_id: User ID
-            session_id: Session ID
-            category: Category filter
-            limit: Number of recommendations
-            metadata: Additional metadata
-
-        Returns:
-            Blended recommendations result
-        """
-        try:
-            logger.debug(
-                f"🔄 Starting hybrid blend | context={context} | shop_id={shop_id} | limit={limit}"
-            )
-            # Get blending ratios for context
-            ratios = self.BLENDING_RATIOS.get(context, {"popular": 1.0})
-            logger.debug(f"📊 Blending ratios | context={context} | ratios={ratios}")
-
-            # Collect recommendations from different sources
-            all_recommendations = []
-            source_info = {}
-
-            # Execute each recommendation source based on ratios
-            for source, ratio in ratios.items():
-                if ratio <= 0:
-                    continue
-
-                # Calculate how many items to get from this source
-                source_limit = max(1, int(limit * ratio))
-                logger.debug(
-                    f"🎯 Getting {source} recommendations | ratio={ratio} | source_limit={source_limit}"
-                )
-
-                try:
-                    # Get recommendations from this source
-                    source_result = await self._get_source_recommendations(
-                        source=source,
-                        shop_id=shop_id,
-                        product_ids=product_ids,
-                        user_id=user_id,
-                        session_id=session_id,
-                        category=category,
-                        limit=source_limit,
-                        metadata=metadata,
-                        exclude_items=exclude_items,
-                    )
-
-                    if source_result["success"] and source_result["items"]:
-                        # Add source information to each item
-                        for item in source_result["items"]:
-                            # Handle both string items (item IDs) and dict items
-                            if isinstance(item, str):
-                                # Convert string item ID to dict format
-                                item_dict = {
-                                    "Id": item,
-                                    "_source": source,
-                                    "_ratio": ratio,
-                                }
-                            else:
-                                # Item is already a dict, add source info
-                                item["_source"] = source
-                                item["_ratio"] = ratio
-                                item_dict = item
-
-                            all_recommendations.append(item_dict)
-                        source_info[source] = {
-                            "count": len(source_result["items"]),
-                            "ratio": ratio,
-                            "success": True,
-                        }
-                        logger.debug(
-                            f"✅ {source} source successful | items={len(source_result['items'])}"
-                        )
-                    else:
-                        source_info[source] = {
-                            "count": 0,
-                            "ratio": ratio,
-                            "success": False,
-                            "error": source_result.get("error", "No items returned"),
-                        }
-                        logger.warning(
-                            f"⚠️ {source} source failed | error={source_result.get('error', 'No items returned')}"
-                        )
-
-                except Exception as e:
-                    logger.warning(
-                        f"💥 Failed to get {source} recommendations: {str(e)}"
-                    )
-                    source_info[source] = {
-                        "count": 0,
-                        "ratio": ratio,
-                        "success": False,
-                        "error": str(e),
-                    }
-
-            # Deduplicate and blend results
-            logger.debug(
-                f"🔄 Deduplicating and blending | total_collected={len(all_recommendations)} | target_limit={limit}"
-            )
-            blended_items = self._deduplicate_and_blend(all_recommendations, limit)
-            logger.info(
-                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len([s for s in source_info.values() if s['success']])}"
-            )
-
-            return {
-                "success": True,
-                "items": blended_items,
-                "source": "hybrid",
-                "blending_info": {
-                    "context": context,
-                    "ratios": ratios,
-                    "sources": source_info,
-                    "total_collected": len(all_recommendations),
-                    "final_count": len(blended_items),
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"💥 Failed to blend recommendations: {str(e)}")
-            return {
-                "success": False,
-                "items": [],
-                "source": "hybrid_error",
-                "error": str(e),
-            }
-
-    async def _get_source_recommendations(
-        self,
-        source: str,
-        shop_id: str,
-        product_ids: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        category: Optional[str] = None,
-        limit: int = 6,
-        metadata: Optional[Dict[str, Any]] = None,
-        exclude_items: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """Get recommendations from a specific source"""
-
-        if source == "item_neighbors" and product_ids:
-            # Handle product IDs (single or multiple) - get neighbors for each and blend
-            logger.info(f"🔄 Getting item neighbors for products: {product_ids[:3]}...")
-            all_neighbors = []
-
-            for pid in product_ids[
-                :5
-            ]:  # Limit to 5 products to avoid too many API calls
-                try:
-                    prefixed_item_id = f"shop_{shop_id}_{pid}"
-                    # Convert exclude_items to Gorse format (with shop prefix)
-                    gorse_exclude_items = None
-                    if exclude_items:
-                        gorse_exclude_items = [
-                            f"shop_{shop_id}_{item_id}" for item_id in exclude_items
-                        ]
-
-                    result = await self.gorse_client.get_item_neighbors(
-                        item_id=prefixed_item_id,
-                        n=limit // len(product_ids) + 2,
-                        category=category,
-                        exclude_items=gorse_exclude_items,
-                    )
-                    if result["success"] and result.get("neighbors"):
-                        all_neighbors.extend(result["neighbors"])
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to get neighbors for product {pid}: {e}")
-                    continue
-
-            if all_neighbors:
-                # Deduplicate and limit results
-                seen_ids = set()
-                unique_neighbors = []
-                for neighbor in all_neighbors:
-                    neighbor_id = neighbor.get("Id", neighbor.get("id", str(neighbor)))
-                    if neighbor_id not in seen_ids:
-                        seen_ids.add(neighbor_id)
-                        unique_neighbors.append(neighbor)
-                        if len(unique_neighbors) >= limit:
-                            break
-
-                return {
-                    "success": True,
-                    "items": unique_neighbors,
-                    "source": "gorse_item_neighbors",
-                }
-
-            return {"success": False, "items": [], "source": "no_neighbors_found"}
-
-        elif source == "user_recommendations" and user_id:
-            # Apply shop prefix for multi-tenancy
-            prefixed_user_id = f"shop_{shop_id}_{user_id}"
-            # Convert exclude_items to Gorse format (with shop prefix)
-            gorse_exclude_items = None
-            if exclude_items:
-                gorse_exclude_items = [
-                    f"shop_{shop_id}_{item_id}" for item_id in exclude_items
-                ]
-
-            result = await self.gorse_client.get_recommendations(
-                user_id=prefixed_user_id,
-                n=limit,
-                category=category,
-                exclude_items=gorse_exclude_items,
-            )
-            if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_user_recommendations",
-                }
-            return result
-
-        elif source == "session_recommendations" and session_id:
-            # Apply shop prefix for multi-tenancy
-            prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
-            session_data = self._build_session_data(
-                session_id, prefixed_user_id, metadata
-            )
-            result = await self.gorse_client.get_session_recommendations(
-                session_data=session_data, n=limit, category=category
-            )
-            if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_session_recommendations",
-                }
-            return result
-
-        elif source == "popular":
-            result = await self.gorse_client.get_popular_items(
-                n=limit, category=category
-            )
-            if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular",
-                }
-            return result
-
-        elif source == "latest":
-            result = await self.gorse_client.get_latest_items(
-                n=limit, category=category
-            )
-            if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_latest",
-                }
-            return result
-
-        elif source == "popular_category":
-            result = await self.gorse_client.get_popular_items(
-                n=limit, category=category
-            )
-            if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular_category",
-                }
-            return result
-
-        elif source == "user_neighbors" and user_id:
-            # Use the UserNeighborsService for collaborative filtering
-            from app.api.v1.recommendations import user_neighbors_service
-
-            return await user_neighbors_service.get_neighbor_recommendations(
-                user_id=user_id, shop_id=shop_id, limit=limit, category=category
-            )
-
-        else:
-            return {"success": False, "items": [], "error": f"Invalid source: {source}"}
-
-    def _build_session_data(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Build session data for Gorse session recommendations"""
-        session_data = {
-            "SessionId": session_id,
-            "UserId": user_id,
-            "Timestamp": datetime.now().isoformat(),
-        }
-
-        if metadata:
-            # Add cart contents for upsells
-            if metadata.get("cart_contents"):
-                session_data["Items"] = metadata["cart_contents"]
-
-            # Add recent views for browsing history
-            if metadata.get("recent_views"):
-                session_data["RecentViews"] = metadata["recent_views"][:10]  # Last 10
-
-            # Add device type for mobile optimization
-            if metadata.get("device_type"):
-                session_data["DeviceType"] = metadata["device_type"]
-
-            # Add custom metadata
-            if metadata.get("custom_data"):
-                session_data["CustomData"] = metadata["custom_data"]
-
-        return session_data
-
-    def _deduplicate_and_blend(
-        self, all_recommendations: List[Dict[str, Any]], limit: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Deduplicate and blend recommendations based on source ratios
-
-        Args:
-            all_recommendations: List of recommendation items with source info
-            limit: Maximum number of recommendations to return
-
-        Returns:
-            Deduplicated and blended recommendations
-        """
-        # Remove duplicates while preserving order
-        # Use item ID as the key for deduplication
-        seen = set()
-        deduplicated = []
-
-        for item in all_recommendations:
-            # Handle both string items and dict items
-            if isinstance(item, str):
-                item_key = item
-            else:
-                # Use the item ID or the item itself as string for deduplication
-                item_key = item.get("Id", item.get("id", str(item)))
-
-            if item_key not in seen:
-                seen.add(item_key)
-                deduplicated.append(item)
-
-        # Sort by source ratio (higher ratio items first)
-        deduplicated.sort(
-            key=lambda x: x.get("_ratio", 0) if isinstance(x, dict) else 0, reverse=True
-        )
-
-        # Return top items up to limit
-        return deduplicated[:limit]
-
-
-class UserNeighborsService:
-    """Service to handle user neighbors and their purchase data for collaborative filtering"""
-
-    def __init__(self):
-        self.gorse_client = gorse_client
-        self.db = None
-        self.redis_client = None
-
-    async def get_database(self):
-        if self.db is None:
-            self.db = await get_database()
-        return self.db
-
-    async def get_redis_client(self):
-        if self.redis_client is None:
-            self.redis_client = await get_redis_client()
-        return self.redis_client
-
-    async def get_neighbor_recommendations(
-        self, user_id: str, shop_id: str, limit: int = 6, category: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Get recommendations based on similar users' purchases
-
-        Args:
-            user_id: User ID to find neighbors for
-            shop_id: Shop ID
-            limit: Number of recommendations to return
-            category: Category filter
-
-        Returns:
-            Dict with neighbor-based recommendations
-        """
-        try:
-            # Get user neighbors from Gorse
-            neighbors_result = await self.gorse_client.get_user_neighbors(user_id, n=10)
-
-            if not neighbors_result["success"] or not neighbors_result["neighbors"]:
-                logger.warning(f"No user neighbors found for user {user_id}")
-                return {
-                    "success": False,
-                    "items": [],
-                    "source": "user_neighbors_empty",
-                    "error": "No user neighbors found",
-                }
-
-            # Extract neighbor user IDs
-            neighbor_user_ids = [
-                neighbor.get("Id", neighbor)
-                for neighbor in neighbors_result["neighbors"]
-            ]
-            logger.debug(f"Found {len(neighbor_user_ids)} neighbors for user {user_id}")
-
-            # Get recent purchases from neighbor users
-            neighbor_items = await self._get_neighbor_purchases(
-                neighbor_user_ids, shop_id, category, limit * 2  # Get more to filter
-            )
-
-            if not neighbor_items:
-                logger.warning(f"No neighbor purchases found for user {user_id}")
-                return {
-                    "success": False,
-                    "items": [],
-                    "source": "user_neighbors_no_purchases",
-                    "error": "No neighbor purchases found",
-                }
-
-            # Remove duplicates and limit results
-            unique_items = list(
-                dict.fromkeys(neighbor_items)
-            )  # Preserve order, remove duplicates
-            final_items = unique_items[:limit]
-
-            logger.info(
-                f"Generated {len(final_items)} neighbor-based recommendations for user {user_id}"
-            )
-
-            return {
-                "success": True,
-                "items": final_items,
-                "source": "user_neighbors",
-                "neighbor_count": len(neighbor_user_ids),
-                "purchase_count": len(neighbor_items),
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to get neighbor recommendations: {str(e)}")
-            return {
-                "success": False,
-                "items": [],
-                "source": "user_neighbors_error",
-                "error": str(e),
-            }
-
-    async def _get_neighbor_purchases(
-        self,
-        neighbor_user_ids: List[str],
-        shop_id: str,
-        category: Optional[str] = None,
-        limit: int = 20,
-    ) -> List[str]:
-        """
-        Get recent purchases from neighbor users
-
-        Args:
-            neighbor_user_ids: List of neighbor user IDs
-            shop_id: Shop ID
-            category: Category filter
-            limit: Maximum number of items to return
-
-        Returns:
-            List of product IDs from neighbor purchases
-        """
-        try:
-            db = await self.get_database()
-
-            # Query recent orders from neighbor users
-            # We'll look at orders from the last 90 days to get recent purchases
-            from datetime import datetime, timedelta
-
-            cutoff_date = datetime.now() - timedelta(days=90)
-
-            # Get orders from neighbor users
-            orders = await db.orderdata.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": {"in": neighbor_user_ids},
-                    "createdAt": {"gte": cutoff_date},
-                },
-                select={"lineItems": True},
-                take=limit * 2,  # Get more orders to ensure we have enough items
-                order_by={"createdAt": "desc"},
-            )
-
-            # Extract product IDs from order line items
-            product_ids = []
-            for order in orders:
-                if order.get("lineItems"):
-                    for line_item in order["lineItems"]:
-                        if isinstance(line_item, dict) and line_item.get("productId"):
-                            product_ids.append(line_item["productId"])
-                        elif isinstance(line_item, str):
-                            # Handle case where lineItems might be stored differently
-                            product_ids.append(line_item)
-
-            # If we have category filter, filter products by category
-            if category and product_ids:
-                filtered_products = await self._filter_products_by_category(
-                    product_ids, shop_id, category
-                )
-                return filtered_products[:limit]
-
-            return product_ids[:limit]
-
-        except Exception as e:
-            logger.error(f"Failed to get neighbor purchases: {str(e)}")
-            return []
-
-    async def _filter_products_by_category(
-        self, product_ids: List[str], shop_id: str, category: str
-    ) -> List[str]:
-        """
-        Filter products by category
-
-        Args:
-            product_ids: List of product IDs to filter
-            shop_id: Shop ID
-            category: Category to filter by
-
-        Returns:
-            List of product IDs matching the category
-        """
-        try:
-            db = await self.get_database()
-
-            # Get products and filter by category
-            products = await db.productdata.find_many(
-                where={
-                    "shopId": shop_id,
-                    "productId": {"in": product_ids},
-                    "OR": [
-                        {"productType": {"contains": category, "mode": "insensitive"}},
-                        {"collections": {"has": category}},
-                    ],
-                },
-                select={"productId": True},
-            )
-
-            return [product["productId"] for product in products]
-
-        except Exception as e:
-            logger.error(f"Failed to filter products by category: {str(e)}")
-            return product_ids  # Return original list if filtering fails
-
-
-class RecommendationAnalytics:
-    """Service to track recommendation performance and analytics"""
-
-    def __init__(self):
-        self.redis_client = None
-
-    async def get_redis_client(self):
-        if self.redis_client is None:
-            self.redis_client = await get_redis_client()
-        return self.redis_client
-
-    async def log_recommendation_request(
-        self,
-        shop_id: str,
-        context: str,
-        source: str,
-        count: int,
-        user_id: Optional[str] = None,
-        product_ids: Optional[List[str]] = None,
-        category: Optional[str] = None,
-    ) -> None:
-        """
-        Log recommendation request for analytics
-
-        Args:
-            shop_id: Shop ID
-            context: Recommendation context
-            source: Recommendation source (gorse, cache, fallback, etc.)
-            count: Number of recommendations returned
-            user_id: User ID (if available)
-            product_ids: Product IDs (if available)
-            category: Category (if available)
-        """
-        try:
-            redis_client = await self.get_redis_client()
-
-            # Create analytics data
-            analytics_data = {
-                "timestamp": datetime.now().isoformat(),
-                "shop_id": shop_id,
-                "context": context,
-                "source": source,
-                "count": count,
-                "user_id": user_id,
-                "product_ids": product_ids,
-                "category": category,
-            }
-
-            # Store in Redis with TTL (keep for 30 days)
-            analytics_key = (
-                f"analytics:recommendations:{datetime.now().strftime('%Y-%m-%d')}"
-            )
-            await redis_client.lpush(analytics_key, json.dumps(analytics_data))
-            await redis_client.expire(analytics_key, 30 * 24 * 3600)  # 30 days
-
-            logger.debug(
-                f"Logged recommendation analytics: {context} -> {source} ({count} items)"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to log recommendation analytics: {str(e)}")
 
 
 # Initialize services
@@ -1306,6 +423,7 @@ FALLBACK_LEVELS = {
         "session_recommendations",  # Level 1: Session-based
         "user_recommendations",  # Level 2: Personalized
         "popular",  # Level 3: Popular items
+        "user_neighbors",  # Level 4: Neighbor-based
     ],
     "profile": [
         "user_recommendations",  # Level 1: Personalized
@@ -1402,18 +520,32 @@ async def execute_recommendation_level(
         elif level == "session_recommendations" and session_id:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
-            session_data = {
-                "SessionId": session_id,
-                "UserId": prefixed_user_id,
+
+            # Build session data as array of feedback objects
+            feedback_objects = []
+            base_feedback = {
+                "Comment": f"session_{session_id}",
+                "FeedbackType": "view",
+                "ItemId": "",
                 "Timestamp": datetime.now().isoformat(),
+                "UserId": prefixed_user_id or "",
             }
 
             # Add cart contents if available
             if metadata and metadata.get("cart_contents"):
-                session_data["Items"] = metadata["cart_contents"]
+                for item_id in metadata["cart_contents"]:
+                    cart_feedback = base_feedback.copy()
+                    cart_feedback["ItemId"] = item_id
+                    cart_feedback["FeedbackType"] = "add_to_cart"
+                    cart_feedback["Comment"] = f"cart_item_{item_id}"
+                    feedback_objects.append(cart_feedback)
+
+            # If no specific items, create a general session feedback
+            if not feedback_objects:
+                feedback_objects.append(base_feedback)
 
             result = await gorse_client.get_session_recommendations(
-                session_data=session_data, n=limit, category=category
+                session_data=feedback_objects, n=limit, category=category
             )
             if result["success"]:
                 return {
@@ -1506,14 +638,17 @@ async def execute_fallback_chain(
                 exclude_items,
             )
 
-            if result["success"] and result["items"]:
+            if result["success"] and result.get("items"):
+                items = result["items"]
                 logger.info(
-                    f"✅ Level {level} succeeded | context={context} | items={len(result['items'])} | source={result.get('source', 'unknown')}"
+                    f"✅ Level {level} succeeded | context={context} | items={len(items)} | source={result.get('source', 'unknown')}"
                 )
                 return result
             else:
+                items = result.get("items", [])
+                items_count = len(items) if items is not None else 0
                 logger.warning(
-                    f"⚠️ Level {level} returned no items | context={context} | success={result['success']} | items_count={len(result.get('items', []))}"
+                    f"⚠️ Level {level} returned no items | context={context} | success={result['success']} | items_count={items_count}"
                 )
 
         except Exception as e:
@@ -1622,9 +757,71 @@ async def get_recommendations(request: RecommendationRequest):
             else:
                 logger.debug(f"⚠️ No category detected for product {first_product_id}")
 
-        # Generate cache key
+        # Determine products to exclude from recommendations
+        exclude_items = []
+
+        # Always exclude products that are already in the context (cart, product page, etc.)
+        if request.product_ids:
+            exclude_items.extend(request.product_ids)
+            logger.debug(
+                f"🚫 Excluding context products from recommendations | context={request.context} | exclude_ids={request.product_ids}"
+            )
+
+        # Also exclude products that are already in the user's cart (with time decay)
+        if request.user_id:
+            try:
+                # Get cart interactions from the last 48 hours for time decay analysis
+                cart_interactions = await db.recommendationinteraction.find_many(
+                    where={
+                        "session": {
+                            "shopId": shop.id,
+                            "userId": request.user_id,
+                        },
+                        "interactionType": "add_to_cart",
+                        "timestamp": {
+                            "gte": datetime.utcnow()
+                            - timedelta(hours=48)  # Extended to 48 hours for time decay
+                        },
+                    },
+                    order={"timestamp": "desc"},
+                    take=100,  # Get more interactions for better time decay analysis
+                )
+
+                logger.info(
+                    f"🔍 Found {len(cart_interactions)} cart interactions for user {request.user_id} in last 48 hours"
+                )
+
+                # Apply time decay logic to determine which products to exclude
+                time_decay_exclusions = _apply_time_decay_filtering(
+                    cart_interactions, request.user_id
+                )
+
+                if time_decay_exclusions:
+                    exclude_items.extend(time_decay_exclusions)
+                    logger.info(
+                        f"🚫 Time decay exclusions | user_id={request.user_id} | excluded_products={len(time_decay_exclusions)} | products={time_decay_exclusions[:5]}{'...' if len(time_decay_exclusions) > 5 else ''}"
+                    )
+                else:
+                    logger.info(
+                        f"🔍 No time decay exclusions for user {request.user_id}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Failed to get cart contents for user {request.user_id}: {e}"
+                )
+
+        # Remove duplicates and convert to set for efficient lookup
+        exclude_items = list(set(exclude_items)) if exclude_items else None
+
+        if exclude_items:
+            logger.info(
+                f"🚫 Total products to exclude: {len(exclude_items)} | exclude_ids={exclude_items[:5]}{'...' if len(exclude_items) > 5 else ''}"
+            )
+
+        # Generate cache key (include exclude_items to ensure cart filtering is respected)
         logger.debug(
-            f"🔑 Generating cache key | context={request.context} | product_ids={request.product_ids} | user_id={request.user_id}"
+            f"🔑 Generating cache key | context={request.context} | product_ids={request.product_ids} | user_id={request.user_id} | exclude_items={exclude_items}"
         )
         cache_key = cache_service.generate_cache_key(
             shop_id=shop.id,
@@ -1634,6 +831,7 @@ async def get_recommendations(request: RecommendationRequest):
             session_id=request.session_id,
             category=category,
             limit=request.limit,
+            exclude_items=exclude_items,  # Include cart contents in cache key
         )
 
         # Check cache first (skip for checkout context)
@@ -1695,20 +893,24 @@ async def get_recommendations(request: RecommendationRequest):
                 f"⚡ Checkout optimization: limited to {request.limit} recommendations"
             )
 
-        # Determine products to exclude from recommendations
-        exclude_items = None
-        if request.context == "product_page" and request.product_ids:
-            # When showing recommendations for products (like in cart), exclude those products
-            exclude_items = request.product_ids
-            logger.debug(
-                f"🚫 Excluding products from recommendations | context={request.context} | exclude_ids={exclude_items}"
-            )
-
         # Try hybrid recommendations first (except for checkout which uses simple fallback)
         if request.context != "checkout":
             logger.info(
                 f"🔄 Attempting hybrid recommendations | context={request.context} | limit={request.limit}"
             )
+
+            # Extract session data from behavioral events to enhance metadata
+            enhanced_metadata = request.metadata or {}
+            if request.user_id:
+                session_data = await extract_session_data_from_behavioral_events(
+                    request.user_id, shop.id
+                )
+                # Merge session data with existing metadata
+                enhanced_metadata.update(session_data)
+                logger.info(
+                    f"📊 Enhanced metadata with session data | cart_items={len(session_data.get('cart_contents', []))} | views={len(session_data.get('recent_views', []))}"
+                )
+
             result = await hybrid_service.blend_recommendations(
                 context=request.context,
                 shop_id=shop.id,
@@ -1717,7 +919,7 @@ async def get_recommendations(request: RecommendationRequest):
                 session_id=request.session_id,
                 category=category,  # Use auto-detected category
                 limit=request.limit,
-                metadata=request.metadata,
+                metadata=enhanced_metadata,
                 exclude_items=exclude_items,
             )
 
@@ -1790,6 +992,19 @@ async def get_recommendations(request: RecommendationRequest):
             for item in enriched_items
             if item.get("available", True)  # Default to True if not specified
         ]
+
+        # Filter out excluded items (products already in cart/context)
+        if exclude_items:
+            logger.debug(
+                f"🚫 Filtering out excluded items | exclude_items={exclude_items} | before_count={len(available_items)}"
+            )
+            filtered_items = [
+                item for item in available_items if item.get("id") not in exclude_items
+            ]
+            available_items = filtered_items
+            logger.debug(
+                f"✅ Excluded items filtered | after_count={len(available_items)}"
+            )
 
         logger.info(
             f"✅ Enrichment complete | enriched_count={len(enriched_items)} | available_count={len(available_items)} | original_count={len(item_ids)}"

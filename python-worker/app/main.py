@@ -152,16 +152,12 @@ async def initialize_services():
             main_table_processing_consumer=services["main_table_processing_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
+            shopify_events_consumer=services["shopify_events_consumer"],
             # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
         )
 
-        # Start consumer manager
+        # Start consumer manager (this will start all registered consumers)
         await consumer_manager.start()
-
-        # Start real-time processing consumer in background
-        import asyncio
-
-        asyncio.create_task(services["shopify_events_consumer"].start())
 
         logger.info("Essential services initialized successfully")
 

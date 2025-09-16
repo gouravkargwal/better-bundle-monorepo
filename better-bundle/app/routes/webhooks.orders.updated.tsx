@@ -66,9 +66,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Store raw order update data immediately
-    await prisma.rawOrder.create({
-      data: {
+    // Store raw order update data immediately (upsert to prevent duplicates)
+    await prisma.rawOrder.upsert({
+      where: {
+        shopId_shopifyId: {
+          shopId: shopRecord.id,
+          shopifyId: orderId,
+        },
+      },
+      update: {
+        payload: order,
+        shopifyUpdatedAt: order.updated_at
+          ? new Date(order.updated_at)
+          : new Date(),
+      },
+      create: {
         shopId: shopRecord.id,
         payload: order,
         shopifyId: orderId,
@@ -83,25 +95,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`✅ Order ${orderId} updated in raw table for shop ${shop}`);
 
-    // Publish to Redis Stream for real-time processing
+    // Publish to Redis Stream for real-time processing (only for significant updates)
     try {
       const streamService = await getRedisStreamService();
 
-      const streamData = {
-        event_type: "order_updated",
-        shop_id: shopRecord.id,
-        shopify_id: orderId,
-        timestamp: new Date().toISOString(),
-      };
+      // Only publish if this is a significant status change
+      const currentStatus = payload.financial_status;
+      const shouldPublish =
+        currentStatus === "paid" ||
+        currentStatus === "partially_paid" ||
+        currentStatus === "refunded";
 
-      const messageId = await streamService.publishShopifyEvent(streamData);
+      if (shouldPublish) {
+        const streamData = {
+          event_type: "order_updated",
+          shop_id: shopRecord.id,
+          shopify_id: orderId,
+          timestamp: new Date().toISOString(),
+          order_status: currentStatus,
+        };
 
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-      });
+        const messageId = await streamService.publishShopifyEvent(streamData);
+
+        console.log(`📡 Published to Redis Stream:`, {
+          messageId,
+          eventType: streamData.event_type,
+          shopId: streamData.shop_id,
+          shopifyId: streamData.shopify_id,
+          orderStatus: streamData.order_status,
+        });
+      } else {
+        console.log(
+          `⏭️ Skipping Redis Stream publish for minor update: ${currentStatus}`,
+        );
+      }
     } catch (streamError) {
       console.error(`❌ Error publishing to Redis Stream:`, streamError);
       // Don't fail the webhook if stream publishing fails

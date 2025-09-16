@@ -11,6 +11,16 @@
   window.shopDomain = {{ shop.permanent_domain | json }};
   window.customerId = {{ customer.id | json }};
   window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
+
+  // Extract session ID from cart attributes
+  {% assign session_id = null %}
+  {% for attribute in cart.attributes %}
+    {% if attribute.first == 'bb_recommendation_session_id' %}
+      {% assign session_id = attribute.last %}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+  window.sessionId = {{ session_id | json }};
 </script>
 
 <!-- Load our custom JavaScript files -->

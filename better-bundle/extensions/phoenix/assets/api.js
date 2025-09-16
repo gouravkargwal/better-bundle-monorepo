@@ -11,7 +11,7 @@ class RecommendationAPI {
   // Fetch recommendations from your API
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
-      const context = 'product_page';
+      const context = 'cart';
       const shopDomain = window.shopDomain || '';
 
       // Debug logging
@@ -37,6 +37,7 @@ class RecommendationAPI {
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings
       if (customerId) requestBody.user_id = String(customerId); // Convert to string as backend expects string
+      if (window.sessionId) requestBody.session_id = String(window.sessionId); // Add session ID for session-based recommendations
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
       console.log('🌐 Fetching recommendations from:', apiUrl);

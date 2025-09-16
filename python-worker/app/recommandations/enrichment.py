@@ -1,0 +1,239 @@
+from typing import Dict, Any, List
+
+from app.core.logging import get_logger
+from app.core.database.simple_db_client import get_database
+
+
+logger = get_logger(__name__)
+
+
+class ProductEnrichment:
+    """Service to enrich Gorse item IDs with Shopify product data"""
+
+    def __init__(self):
+        self.db = None
+
+    async def get_database(self):
+        if self.db is None:
+            self.db = await get_database()
+        return self.db
+
+    async def enrich_items(
+        self,
+        shop_id: str,
+        item_ids: List[str],
+        context: str = "product_page",
+        source: str = "unknown",
+    ) -> List[Dict[str, Any]]:
+        """
+        Enrich Gorse item IDs with Shopify product data
+
+        Args:
+            shop_id: Shop ID
+            item_ids: List of Gorse item IDs (which are Shopify product IDs)
+            context: Recommendation context
+            source: Recommendation source
+
+        Returns:
+            List of enriched product data
+        """
+        try:
+            logger.debug(
+                f"🎨 Starting enrichment | shop_id={shop_id} | item_count={len(item_ids)} | context={context} | source={source}"
+            )
+            db = await self.get_database()
+
+            # Get shop details to determine the correct domain for product URLs and currency
+            shop = await db.shop.find_unique(where={"id": shop_id})
+
+            # Use custom domain if available, otherwise fall back to myshopify domain
+            product_domain = (
+                shop.customDomain
+                if shop and shop.customDomain
+                else (shop.shopDomain if shop else None)
+            )
+
+            # Strip prefixes from Gorse item IDs to match database format
+            # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+            # Database uses: 7903465537675
+            # Only include items from the current shop for multi-tenancy
+            clean_item_ids = []
+            for item_id in item_ids:
+                # Handle both string item IDs and dictionary items
+                if isinstance(item_id, dict):
+                    # Extract the actual item ID from the dictionary
+                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
+                else:
+                    actual_item_id = item_id
+
+                # Skip empty or invalid item IDs
+                if not actual_item_id or actual_item_id.strip() == "":
+                    logger.debug(f"🚫 Skipping empty item ID: {item_id}")
+                    continue
+
+                if actual_item_id.startswith("shop_"):
+                    # Extract shop ID and product ID
+                    parts = actual_item_id.split("_")
+                    if len(parts) >= 3:
+                        gorse_shop_id = parts[
+                            1
+                        ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+                        product_id = parts[2]  # 7903465537675
+
+                        # Only include if it's from the current shop and product_id is not empty
+                        if (
+                            gorse_shop_id == shop_id
+                            and product_id
+                            and product_id.strip()
+                        ):
+                            clean_item_ids.append(product_id)
+                        else:
+                            logger.debug(
+                                f"🚫 Skipping product from different shop or empty product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
+                            )
+                    else:
+                        logger.warning(
+                            f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
+                        )
+                else:
+                    # Assume it's already a clean product ID, but check it's not empty
+                    if actual_item_id.strip():
+                        clean_item_ids.append(actual_item_id)
+                    else:
+                        logger.debug(
+                            f"🚫 Skipping empty clean product ID: {actual_item_id}"
+                        )
+
+            logger.info(
+                f"🧹 Cleaned item IDs | original={item_ids[:3]} | cleaned={clean_item_ids[:3]}"
+            )
+
+            # Fetch products from database using cleaned IDs
+            products = await db.productdata.find_many(
+                where={
+                    "shopId": shop_id,
+                    "productId": {"in": clean_item_ids},
+                }
+            )
+
+            logger.debug(
+                f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
+            )
+
+            # Create a mapping for quick lookup using cleaned IDs
+            product_map = {p.productId: p for p in products}
+
+            # Enrich items in the same order as requested
+            enriched_items = []
+            missing_items = []
+            for item_id in item_ids:
+                # Handle both string item IDs and dictionary items
+                if isinstance(item_id, dict):
+                    # Extract the actual item ID from the dictionary
+                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
+                else:
+                    actual_item_id = item_id
+
+                # Find the corresponding clean_id for this item_id
+                clean_id = None
+                if actual_item_id.startswith("shop_"):
+                    parts = actual_item_id.split("_")
+                    if len(parts) >= 3:
+                        gorse_shop_id = parts[1]
+                        product_id = parts[2]
+                        if gorse_shop_id == shop_id:
+                            clean_id = product_id
+                else:
+                    clean_id = actual_item_id
+
+                if clean_id and clean_id in product_map:
+                    product = product_map[clean_id]
+                    # Extract variant information for cart permalinks
+                    variants = product.variants if product.variants else []
+                    default_variant = None
+                    variant_id = None
+                    if variants and len(variants) > 0:
+                        # Get the first variant (usually the default)
+                        default_variant = (
+                            variants[0] if isinstance(variants, list) else None
+                        )
+                        if default_variant and isinstance(default_variant, dict):
+                            # Variant IDs are already cleaned in the database
+                            variant_id = default_variant.get("id", "")
+
+                    # Format for frontend ProductRecommendation interface
+                    enriched_items.append(
+                        {
+                            "id": product.productId,
+                            "title": product.title,
+                            "handle": product.handle,
+                            "url": f"https://{product_domain}/products/{product.handle}",
+                            "price": {
+                                "amount": str(product.price),
+                                "currency_code": (
+                                    shop.currencyCode
+                                    if shop and shop.currencyCode
+                                    else "USD"
+                                ),
+                            },
+                            "image": (
+                                {
+                                    "url": product.imageUrl or "",
+                                    "alt_text": product.imageAlt or product.title,
+                                }
+                                if product.imageUrl
+                                else None
+                            ),
+                            "vendor": product.vendor or "",
+                            "product_type": product.productType or "",
+                            "available": product.status == "ACTIVE",
+                            "score": 0.8,  # Default recommendation score
+                            "variant_id": variant_id,
+                            "variants": variants,  # Include all variants for flexibility
+                        }
+                    )
+                else:
+                    # Item not found in database, skip it
+                    if clean_id:
+                        missing_items.append(clean_id)
+
+            if missing_items:
+                logger.warning(
+                    f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
+                )
+
+            logger.info(
+                f"✅ Enrichment complete | enriched={len(enriched_items)} | missing={len(missing_items)} | success_rate={len(enriched_items)/len(item_ids)*100:.1f}%"
+            )
+            return enriched_items
+
+        except Exception as e:
+            logger.error(f"💥 Failed to enrich items: {str(e)}")
+            return []
+
+    def _get_recommendation_reason(self, context: str, source: str) -> str:
+        """Get contextual recommendation reason based on context and source"""
+
+        # More specific reasons based on ML source
+        if "item_neighbors" in source:
+            return "Similar products"
+        elif "user_recommendations" in source:
+            return "Recommended for you"
+        elif "session_recommendations" in source:
+            return "Based on your browsing"
+        elif "popular" in source:
+            return "Popular choice"
+        elif "latest" in source:
+            return "New arrival"
+        elif "fallback" in source:
+            return "Trending now"
+        else:
+            # Context-based fallback reasons
+            context_reasons = {
+                "product_page": "Customers also bought",
+                "homepage": "Featured product",
+                "cart": "Perfect addition",
+                "profile": "Just for you",
+                "checkout": "Don't miss out",
+            }
+            return context_reasons.get(context, "Recommended for you")

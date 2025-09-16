@@ -16,6 +16,7 @@ model RawOrder {
   shopifyCreatedAt DateTime? // Shopify creation timestamp
   shopifyUpdatedAt DateTime? // Shopify update timestamp
 
+  @@unique([shopId, shopifyId], name: "shopId_shopifyId")
   @@index([shopId])
   @@index([shopId, shopifyId])
   @@index([shopId, shopifyUpdatedAt])
@@ -1293,6 +1294,39 @@ model RecommendationAttribution {
   @@index([shopId, productId, attributionDate])  // For product revenue queries
   @@index([sessionId])
   @@map("RecommendationAttributions")
+}
+
+// ============= GORSE TABLES =============
+
+model GorseFeedback {
+  feedbackType String   @map("feedback_type") @db.VarChar(256)
+  userId       String   @map("user_id") @db.VarChar(256)
+  itemId       String   @map("item_id") @db.VarChar(256)
+  timeStamp    DateTime @map("time_stamp") @db.Timestamptz
+  comment      String   @default("") @db.Text
+
+  @@id([feedbackType, userId, itemId])
+  @@map("feedback")
+}
+
+model GorseItems {
+  itemId     String   @map("item_id") @id @db.VarChar(256)
+  isHidden   Boolean  @map("is_hidden") @default(false)
+  categories Json     @default("[]")
+  timeStamp  DateTime @map("time_stamp") @db.Timestamptz
+  labels     Json     @default("[]")
+  comment    String   @default("") @db.Text
+
+  @@map("items")
+}
+
+model GorseUsers {
+  userId    String @map("user_id") @id @db.VarChar(256)
+  labels    Json   @default("[]")
+  subscribe Json   @default("[]")
+  comment   String @default("") @db.Text
+
+  @@map("users")
 }
 
 

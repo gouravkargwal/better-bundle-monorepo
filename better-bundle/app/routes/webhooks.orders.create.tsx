@@ -66,9 +66,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Store raw order data immediately
-    await prisma.rawOrder.create({
-      data: {
+    // Store raw order data immediately (upsert to prevent duplicates)
+    await prisma.rawOrder.upsert({
+      where: {
+        shopId_shopifyId: {
+          shopId: shopRecord.id,
+          shopifyId: orderId,
+        },
+      },
+      update: {
+        payload: order,
+        shopifyUpdatedAt: order.updated_at
+          ? new Date(order.updated_at)
+          : new Date(),
+      },
+      create: {
         shopId: shopRecord.id,
         payload: order,
         shopifyId: orderId,
@@ -83,7 +95,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`✅ Order ${orderId} stored in raw table for shop ${shop}`);
 
-    // Publish to Redis Stream for real-time processing
+    // Publish to Redis Stream for real-time processing (only for new orders)
     try {
       const streamService = await getRedisStreamService();
 
@@ -92,6 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shop_id: shopRecord.id,
         shopify_id: orderId,
         timestamp: new Date().toISOString(),
+        order_status: payload.financial_status || "pending",
       };
 
       const messageId = await streamService.publishShopifyEvent(streamData);
@@ -101,6 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         eventType: streamData.event_type,
         shopId: streamData.shop_id,
         shopifyId: streamData.shopify_id,
+        orderStatus: streamData.order_status,
       });
     } catch (streamError) {
       console.error(`❌ Error publishing to Redis Stream:`, streamError);

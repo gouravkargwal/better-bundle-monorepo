@@ -72,8 +72,13 @@ class FieldExtractorService:
     ) -> Optional[Dict[str, Any]]:
         """Extract key order fields from nested JSON payload"""
         try:
-            # Extract order data using generic method
-            order_data = self._extract_payload_data(payload, "order")
+            # Handle different data formats
+            if data_format == "webhook":
+                # For webhook format, order data is directly in payload
+                order_data = payload
+            else:
+                # Extract order data using generic method for GraphQL
+                order_data = self._extract_payload_data(payload, "order")
 
             if (
                 not order_data
@@ -82,8 +87,13 @@ class FieldExtractorService:
             ):
                 return None
 
-            # Extract order ID
-            order_id = self._extract_shopify_id(order_data.get("id", ""))
+            # Extract order ID based on format
+            if data_format == "webhook":
+                # Webhook format: ID is a simple number
+                order_id = str(order_data.get("id", ""))
+            else:
+                # GraphQL format: ID is a GID
+                order_id = self._extract_shopify_id(order_data.get("id", ""))
 
             if not order_id:
                 return None
@@ -91,18 +101,35 @@ class FieldExtractorService:
             # Extract customer information
             customer = order_data.get("customer", {})
 
-            # Extract GraphQL edge data using generic method
-            line_items = self._extract_graphql_edges(order_data.get("lineItems", {}))
-            discount_applications = self._extract_graphql_edges(
-                order_data.get("discountApplications", {})
-            )
-            metafields = self._extract_graphql_edges(order_data.get("metafields", {}))
-            fulfillments = order_data.get("fulfillments", [])
-            transactions = order_data.get("transactions", [])
+            # Extract data based on format
+            if data_format == "webhook":
+                # Webhook format: data is directly in the order object
+                line_items = order_data.get("line_items", [])
+                discount_applications = order_data.get("discount_applications", [])
+                metafields = order_data.get("metafields", [])
+                fulfillments = order_data.get("fulfillments", [])
+                transactions = order_data.get("transactions", [])
+            else:
+                # GraphQL format: extract edge data using generic method
+                line_items = self._extract_graphql_edges(
+                    order_data.get("lineItems", {})
+                )
+                discount_applications = self._extract_graphql_edges(
+                    order_data.get("discountApplications", {})
+                )
+                metafields = self._extract_graphql_edges(
+                    order_data.get("metafields", {})
+                )
+                fulfillments = order_data.get("fulfillments", [])
+                transactions = order_data.get("transactions", [])
 
-            # Extract simple fields
-            shipping_address = order_data.get("shippingAddress")
-            billing_address = order_data.get("billingAddress")
+            # Extract simple fields based on format
+            if data_format == "webhook":
+                shipping_address = order_data.get("shipping_address")
+                billing_address = order_data.get("billing_address")
+            else:
+                shipping_address = order_data.get("shippingAddress")
+                billing_address = order_data.get("billingAddress")
 
             # Process tags using generic method
             tags = self._process_tags(order_data.get("tags", []))
@@ -112,9 +139,13 @@ class FieldExtractorService:
                 "orderId": order_id,
                 "orderName": order_data.get("name"),
                 "customerId": (
-                    self._extract_shopify_id(customer.get("id", ""))
-                    if customer
-                    else None
+                    str(customer.get("id", ""))
+                    if data_format == "webhook" and customer
+                    else (
+                        self._extract_shopify_id(customer.get("id", ""))
+                        if customer
+                        else None
+                    )
                 ),
                 "customerEmail": order_data.get("email")
                 or (customer.get("email") if customer else None),
