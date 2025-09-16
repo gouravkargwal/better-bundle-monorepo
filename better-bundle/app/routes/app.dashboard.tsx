@@ -16,6 +16,7 @@ import { KPICards } from "../components/dashboard/KPICards";
 import { ContextPerformance } from "../components/dashboard/ContextPerformance";
 import { TopProductsTable } from "../components/dashboard/TopProductsTable";
 import { RecentActivity } from "../components/dashboard/RecentActivity";
+import { ExtensionPerformance } from "../components/dashboard/ExtensionPerformance";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -79,6 +80,11 @@ export default function Dashboard() {
           {/* KPI Cards */}
           <Layout.Section>
             <KPICards data={dashboardData.overview} />
+          </Layout.Section>
+
+          {/* Extension Performance */}
+          <Layout.Section>
+            <ExtensionPerformance data={dashboardData.extensionPerformance} />
           </Layout.Section>
 
           {/* Context Performance */}

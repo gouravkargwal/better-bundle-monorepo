@@ -40,6 +40,7 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
     formatPercentage(product.conversion_rate),
     product.clicks.toLocaleString(),
     product.recommendations_shown.toLocaleString(),
+    product.customers.toLocaleString(),
     getPerformanceBadge(product.conversion_rate),
   ]);
 
@@ -68,6 +69,7 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
             "text",
             "text",
             "text",
+            "text",
           ]}
           headings={[
             "Rank",
@@ -76,6 +78,7 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
             "Conv. Rate",
             "Clicks",
             "Shown",
+            "Customers",
             "Performance",
           ]}
           rows={rows}

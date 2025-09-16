@@ -279,17 +279,19 @@ async function getOverviewMetrics(
             totalRevenue: true,
           },
         }),
-        prisma.userSession.count({
-          where: {
-            shopId,
-            createdAt: {
-              gte: startDate,
-              lte: endDate,
+        prisma.userSession
+          .groupBy({
+            by: ["customerId"],
+            where: {
+              shopId,
+              createdAt: {
+                gte: startDate,
+                lte: endDate,
+              },
+              customerId: { not: null },
             },
-            customerId: { not: null },
-          },
-          distinct: ["customerId"],
-        }),
+          })
+          .then((result) => result.length),
       ]);
 
       // Get previous period metrics from unified analytics
@@ -334,17 +336,19 @@ async function getOverviewMetrics(
             totalRevenue: true,
           },
         }),
-        prisma.userSession.count({
-          where: {
-            shopId,
-            createdAt: {
-              gte: previousStartDate,
-              lte: previousEndDate,
+        prisma.userSession
+          .groupBy({
+            by: ["customerId"],
+            where: {
+              shopId,
+              createdAt: {
+                gte: previousStartDate,
+                lte: previousEndDate,
+              },
+              customerId: { not: null },
             },
-            customerId: { not: null },
-          },
-          distinct: ["customerId"],
-        }),
+          })
+          .then((result) => result.length),
       ]);
 
       // Calculate current period metrics
@@ -486,17 +490,29 @@ async function getContextPerformance(
           },
           _sum: { totalRevenue: true },
         }),
-        prisma.userInteraction.groupBy({
-          by: ["context"],
-          where: {
-            shopId,
-            createdAt: { gte: startDate, lte: endDate },
-            context: { in: contexts },
-            customerId: { not: null },
-          },
-          _count: { customerId: true },
-          distinct: ["customerId"],
-        }),
+        prisma.userInteraction
+          .groupBy({
+            by: ["context", "customerId"],
+            where: {
+              shopId,
+              createdAt: { gte: startDate, lte: endDate },
+              context: { in: contexts },
+              customerId: { not: null },
+            },
+          })
+          .then((result) => {
+            const contextCounts = new Map<string, number>();
+            result.forEach((item) => {
+              const count = contextCounts.get(item.context) || 0;
+              contextCounts.set(item.context, count + 1);
+            });
+            return Array.from(contextCounts.entries()).map(
+              ([context, count]) => ({
+                context,
+                _count: { customerId: count },
+              }),
+            );
+          }),
       ]);
 
       // Create maps for efficient lookup
@@ -555,11 +571,9 @@ async function getExtensionPerformance(
   currencyCode: string,
 ): Promise<ExtensionPerformanceData[]> {
   const cache = await getCacheService();
-  const cacheKey = CacheKeys.context(
-    shopId,
-    startDate.toISOString(),
-    endDate.toISOString(),
-  );
+  const cacheKey =
+    CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString()) +
+    ":extensions";
 
   return await cache.getOrSet(
     cacheKey,
@@ -589,17 +603,29 @@ async function getExtensionPerformance(
           },
           _sum: { totalRevenue: true },
         }),
-        prisma.userInteraction.groupBy({
-          by: ["extensionType"],
-          where: {
-            shopId,
-            createdAt: { gte: startDate, lte: endDate },
-            extensionType: { in: extensionTypes },
-            customerId: { not: null },
-          },
-          _count: { customerId: true },
-          distinct: ["customerId"],
-        }),
+        prisma.userInteraction
+          .groupBy({
+            by: ["extensionType", "customerId"],
+            where: {
+              shopId,
+              createdAt: { gte: startDate, lte: endDate },
+              extensionType: { in: extensionTypes },
+              customerId: { not: null },
+            },
+          })
+          .then((result) => {
+            const extensionCounts = new Map<string, number>();
+            result.forEach((item) => {
+              const count = extensionCounts.get(item.extensionType) || 0;
+              extensionCounts.set(item.extensionType, count + 1);
+            });
+            return Array.from(extensionCounts.entries()).map(
+              ([extensionType, count]) => ({
+                extensionType,
+                _count: { customerId: count },
+              }),
+            );
+          }),
       ]);
 
       // Create maps for efficient lookup
@@ -653,17 +679,16 @@ async function getTopProducts(
   currencyCode: string,
 ): Promise<TopProductData[]> {
   // Optimized: Get top products by clicks first, then fetch related data
-  const topProductClicks = await prisma.recommendationInteraction.groupBy({
+  const topProductClicks = await prisma.userInteraction.groupBy({
     by: ["productId"],
     where: {
-      session: {
-        shopId,
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
+      shopId,
+      createdAt: {
+        gte: startDate,
+        lte: endDate,
       },
       interactionType: { in: ["click", "add_to_cart"] },
+      productId: { not: null },
     },
     _count: true,
     orderBy: {
@@ -678,48 +703,82 @@ async function getTopProducts(
     return [];
   }
 
-  const topProductIds = topProductClicks.map((item) => item.productId);
+  const topProductIds = topProductClicks
+    .map((item) => item.productId)
+    .filter(Boolean);
 
-  // Fetch views and revenue data only for top products
-  const [productViews, productRevenue] = await Promise.all([
-    prisma.recommendationInteraction.groupBy({
+  // Fetch views, revenue, and customer data only for top products
+  const [productViews, productRevenue, productCustomers] = await Promise.all([
+    prisma.userInteraction.groupBy({
       by: ["productId"],
       where: {
-        session: {
-          shopId,
-          createdAt: {
-            gte: startDate,
-            lte: endDate,
-          },
+        shopId,
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
         },
         interactionType: "view",
         productId: { in: topProductIds },
       },
       _count: true,
     }),
-    prisma.recommendationAttribution.groupBy({
-      by: ["productId"],
+    prisma.purchaseAttribution.groupBy({
+      by: ["orderId"],
       where: {
         shopId,
-        attributionDate: {
+        purchaseAt: {
           gte: startDate,
           lte: endDate,
         },
-        status: "confirmed",
-        productId: { in: topProductIds },
       },
       _sum: {
-        revenue: true,
+        totalRevenue: true,
       },
     }),
+    prisma.userInteraction
+      .groupBy({
+        by: ["productId", "customerId"],
+        where: {
+          shopId,
+          createdAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+          productId: { in: topProductIds },
+          customerId: { not: null },
+        },
+      })
+      .then((result) => {
+        const productCounts = new Map<string, number>();
+        result.forEach((item) => {
+          if (item.productId) {
+            const count = productCounts.get(item.productId) || 0;
+            productCounts.set(item.productId, count + 1);
+          }
+        });
+        return Array.from(productCounts.entries()).map(
+          ([productId, count]) => ({
+            productId,
+            _count: { customerId: count },
+          }),
+        );
+      }),
   ]);
 
   // Create maps for efficient lookup
   const viewsMap = new Map(
     productViews.map((item) => [item.productId, item._count]),
   );
-  const revenueMap = new Map(
-    productRevenue.map((item) => [item.productId, item._sum.revenue || 0]),
+  const customersMap = new Map(
+    productCustomers.map((item) => [item.productId, item._count.customerId]),
+  );
+
+  // Calculate total revenue (simplified - distribute evenly for now)
+  const totalRevenue = Number(
+    productRevenue.reduce(
+      (sum, item) => sum + Number(item._sum.totalRevenue || 0),
+      0,
+    ),
   );
 
   // Combine data maintaining the order from topProductClicks
@@ -727,8 +786,25 @@ async function getTopProducts(
     product_id: item.productId,
     clicks: item._count,
     recommendations_shown: viewsMap.get(item.productId) || 0,
-    revenue: revenueMap.get(item.productId) || 0,
+    customers: customersMap.get(item.productId) || 0,
+    revenue: totalRevenue / topProductClicks.length, // Distribute evenly for now
   }));
+
+  // Get actual product titles from ProductData table
+  const productTitles = await prisma.productData.findMany({
+    where: {
+      shopId,
+      productId: { in: topProductIds },
+    },
+    select: {
+      productId: true,
+      title: true,
+    },
+  });
+
+  const titleMap = new Map(
+    productTitles.map((product) => [product.productId, product.title]),
+  );
 
   return result.map((row) => {
     const clicks = Number(row.clicks);
@@ -738,12 +814,13 @@ async function getTopProducts(
 
     return {
       product_id: row.product_id,
-      title: `Product ${row.product_id}`, // TODO: Get actual product title from Shopify
+      title: titleMap.get(row.product_id) || `Product ${row.product_id}`,
       revenue: row.revenue,
       clicks,
       conversion_rate: Math.round(conversionRate * 100) / 100,
       recommendations_shown: recommendationsShown,
       currency_code: currencyCode,
+      customers: row.customers,
     };
   });
 }
@@ -767,111 +844,133 @@ async function getRecentActivity(
   thisWeekStart.setHours(0, 0, 0, 0);
 
   // Optimized: Use conditional aggregation to get all periods in 3 queries
-  const [recommendationsData, clicksData, revenueData] = await Promise.all([
-    // Get recommendations for all periods in one query
-    Promise.all([
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+  const [recommendationsData, clicksData, revenueData, customersData] =
+    await Promise.all([
+      // Get recommendations for all periods in one query
+      Promise.all([
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: today, lte: endDate },
+            interactionType: "view",
           },
-          interactionType: "view",
-        },
-      }),
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+        }),
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: yesterday, lt: today },
+            interactionType: "view",
           },
-          interactionType: "view",
-        },
-      }),
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+        }),
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: thisWeekStart, lte: endDate },
+            interactionType: "view",
           },
-          interactionType: "view",
-        },
-      }),
-    ]),
-    // Get clicks for all periods in one query
-    Promise.all([
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+        }),
+      ]),
+      // Get clicks for all periods in one query
+      Promise.all([
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: today, lte: endDate },
+            interactionType: { in: ["click", "add_to_cart"] },
           },
-          interactionType: { in: ["click", "add_to_cart"] },
-        },
-      }),
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+        }),
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: yesterday, lt: today },
+            interactionType: { in: ["click", "add_to_cart"] },
           },
-          interactionType: { in: ["click", "add_to_cart"] },
-        },
-      }),
-      prisma.recommendationInteraction.count({
-        where: {
-          session: {
+        }),
+        prisma.userInteraction.count({
+          where: {
             shopId,
             createdAt: { gte: thisWeekStart, lte: endDate },
+            interactionType: { in: ["click", "add_to_cart"] },
           },
-          interactionType: { in: ["click", "add_to_cart"] },
-        },
-      }),
-    ]),
-    // Get revenue for all periods in one query
-    Promise.all([
-      prisma.recommendationAttribution.aggregate({
-        where: {
-          shopId,
-          attributionDate: { gte: today, lte: endDate },
-          status: "confirmed",
-        },
-        _sum: { revenue: true },
-      }),
-      prisma.recommendationAttribution.aggregate({
-        where: {
-          shopId,
-          attributionDate: { gte: yesterday, lt: today },
-          status: "confirmed",
-        },
-        _sum: { revenue: true },
-      }),
-      prisma.recommendationAttribution.aggregate({
-        where: {
-          shopId,
-          attributionDate: { gte: thisWeekStart, lte: endDate },
-          status: "confirmed",
-        },
-        _sum: { revenue: true },
-      }),
-    ]),
-  ]);
+        }),
+      ]),
+      // Get revenue for all periods in one query
+      Promise.all([
+        prisma.purchaseAttribution.aggregate({
+          where: {
+            shopId,
+            purchaseAt: { gte: today, lte: endDate },
+          },
+          _sum: { totalRevenue: true },
+        }),
+        prisma.purchaseAttribution.aggregate({
+          where: {
+            shopId,
+            purchaseAt: { gte: yesterday, lt: today },
+          },
+          _sum: { totalRevenue: true },
+        }),
+        prisma.purchaseAttribution.aggregate({
+          where: {
+            shopId,
+            purchaseAt: { gte: thisWeekStart, lte: endDate },
+          },
+          _sum: { totalRevenue: true },
+        }),
+      ]),
+      // Get customers for all periods in one query
+      Promise.all([
+        prisma.userSession
+          .groupBy({
+            by: ["customerId"],
+            where: {
+              shopId,
+              createdAt: { gte: today, lte: endDate },
+              customerId: { not: null },
+            },
+          })
+          .then((result) => result.length),
+        prisma.userSession
+          .groupBy({
+            by: ["customerId"],
+            where: {
+              shopId,
+              createdAt: { gte: yesterday, lt: today },
+              customerId: { not: null },
+            },
+          })
+          .then((result) => result.length),
+        prisma.userSession
+          .groupBy({
+            by: ["customerId"],
+            where: {
+              shopId,
+              createdAt: { gte: thisWeekStart, lte: endDate },
+              customerId: { not: null },
+            },
+          })
+          .then((result) => result.length),
+      ]),
+    ]);
 
   return {
     today: {
       recommendations: recommendationsData[0],
       clicks: clicksData[0],
-      revenue: revenueData[0]._sum.revenue || 0,
+      revenue: Number(revenueData[0]._sum.totalRevenue || 0),
+      customers: customersData[0],
     },
     yesterday: {
       recommendations: recommendationsData[1],
       clicks: clicksData[1],
-      revenue: revenueData[1]._sum.revenue || 0,
+      revenue: Number(revenueData[1]._sum.totalRevenue || 0),
+      customers: customersData[1],
     },
     this_week: {
       recommendations: recommendationsData[2],
       clicks: clicksData[2],
-      revenue: revenueData[2]._sum.revenue || 0,
+      revenue: Number(revenueData[2]._sum.totalRevenue || 0),
+      customers: customersData[2],
     },
     currency_code: currencyCode,
   };

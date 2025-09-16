@@ -18,6 +18,7 @@ interface ActivityItemProps {
   recommendations: number;
   clicks: number;
   revenue: number;
+  customers: number;
   currencyCode: string;
   isHighlighted?: boolean;
 }
@@ -27,6 +28,7 @@ function ActivityItem({
   recommendations,
   clicks,
   revenue,
+  customers,
   currencyCode,
   isHighlighted,
 }: ActivityItemProps) {
@@ -76,6 +78,14 @@ function ActivityItem({
         </BlockStack>
         <BlockStack gap="100">
           <Text as="span" variant="bodySm" tone="subdued">
+            Customers
+          </Text>
+          <Text as="span" variant="bodyMd" fontWeight="bold">
+            {customers.toLocaleString()}
+          </Text>
+        </BlockStack>
+        <BlockStack gap="100">
+          <Text as="span" variant="bodySm" tone="subdued">
             Conv. Rate
           </Text>
           <Text as="span" variant="bodyMd" fontWeight="bold">
@@ -104,6 +114,7 @@ export function RecentActivity({ data }: RecentActivityProps) {
             recommendations={data.today.recommendations}
             clicks={data.today.clicks}
             revenue={data.today.revenue}
+            customers={data.today.customers}
             currencyCode={data.currency_code}
             isHighlighted={true}
           />
@@ -115,6 +126,7 @@ export function RecentActivity({ data }: RecentActivityProps) {
             recommendations={data.yesterday.recommendations}
             clicks={data.yesterday.clicks}
             revenue={data.yesterday.revenue}
+            customers={data.yesterday.customers}
             currencyCode={data.currency_code}
           />
 
@@ -125,6 +137,7 @@ export function RecentActivity({ data }: RecentActivityProps) {
             recommendations={data.this_week.recommendations}
             clicks={data.this_week.clicks}
             revenue={data.this_week.revenue}
+            customers={data.this_week.customers}
             currencyCode={data.currency_code}
           />
         </BlockStack>

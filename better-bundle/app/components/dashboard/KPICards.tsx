@@ -141,6 +141,18 @@ export function KPICards({ data }: KPICardsProps) {
               : "neutral"
           }
         />
+        <KPICard
+          title="Total Customers"
+          value={data.total_customers.toLocaleString()}
+          change={data.customers_change}
+          trend={
+            data.customers_change !== null
+              ? data.customers_change >= 0
+                ? "up"
+                : "down"
+              : "neutral"
+          }
+        />
       </div>
     </BlockStack>
   );
