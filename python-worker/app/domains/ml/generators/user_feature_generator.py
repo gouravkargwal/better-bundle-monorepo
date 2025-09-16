@@ -79,6 +79,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "totalSpent": purchase_metrics["total_spent"],
                 "avgOrderValue": purchase_metrics["avg_order_value"],
                 "lifetimeValue": purchase_metrics["lifetime_value"],
+                # Refund Metrics (NEW)
+                "refundedOrders": purchase_metrics["refunded_orders"],
+                "refundRate": purchase_metrics["refund_rate"],
+                "totalRefundedAmount": purchase_metrics["total_refunded_amount"],
+                "netLifetimeValue": purchase_metrics["net_lifetime_value"],
                 # Time-based Metrics
                 "daysSinceFirstOrder": temporal_metrics["days_since_first_order"],
                 "daysSinceLastOrder": temporal_metrics["days_since_last_order"],
@@ -127,33 +132,54 @@ class UserFeatureGenerator(BaseFeatureGenerator):
     def _compute_purchase_metrics(
         self, customer_orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Compute purchase-related metrics"""
+        """Compute purchase-related metrics including refund analysis"""
         if not customer_orders:
             return {
                 "total_purchases": 0,
                 "total_spent": 0.0,
                 "avg_order_value": 0.0,
                 "lifetime_value": 0.0,
+                "refunded_orders": 0,
+                "refund_rate": 0.0,
+                "total_refunded_amount": 0.0,
+                "net_lifetime_value": 0.0,
             }
 
         total_purchases = len(customer_orders)
 
-        # Calculate total spent
-        total_spent = sum(
-            float(order.get("totalAmount", 0.0)) for order in customer_orders
-        )
+        # Calculate total spent and refund metrics
+        total_spent = 0.0
+        total_refunded_amount = 0.0
+        refunded_orders = 0
 
-        # Average order value
+        for order in customer_orders:
+            order_amount = float(order.get("totalAmount", 0.0))
+            total_spent += order_amount
+
+            # Check financial status for refunds
+            financial_status = order.get("financialStatus")
+            if financial_status == "refunded":
+                refunded_orders += 1
+                # Use totalRefundedAmount if available, otherwise use totalAmount
+                refunded_amount = float(order.get("totalRefundedAmount", order_amount))
+                total_refunded_amount += refunded_amount
+
+        # Calculate metrics
         avg_order_value = total_spent / total_purchases if total_purchases > 0 else 0.0
+        refund_rate = refunded_orders / total_purchases if total_purchases > 0 else 0.0
 
-        # Lifetime value (for now, same as total_spent, but could add predictive component)
-        lifetime_value = total_spent
+        # Net lifetime value (total spent minus refunds)
+        net_lifetime_value = total_spent - total_refunded_amount
 
         return {
             "total_purchases": total_purchases,
             "total_spent": round(total_spent, 2),
             "avg_order_value": round(avg_order_value, 2),
-            "lifetime_value": round(lifetime_value, 2),
+            "lifetime_value": round(total_spent, 2),  # Gross lifetime value
+            "refunded_orders": refunded_orders,
+            "refund_rate": round(refund_rate, 3),
+            "total_refunded_amount": round(total_refunded_amount, 2),
+            "net_lifetime_value": round(net_lifetime_value, 2),
         }
 
     def _compute_temporal_metrics(
@@ -432,6 +458,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             "totalSpent": 0.0,
             "avgOrderValue": 0.0,
             "lifetimeValue": 0.0,
+            # Refund Metrics (NEW)
+            "refundedOrders": 0,
+            "refundRate": 0.0,
+            "totalRefundedAmount": 0.0,
+            "netLifetimeValue": 0.0,
             "daysSinceFirstOrder": None,
             "daysSinceLastOrder": None,
             "avgDaysBetweenOrders": None,
@@ -505,7 +536,7 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                         f"{province}, {country}" if province else country
                     )
 
-            # Calculate customer health score (0-100)
+            # Calculate customer health score (0-100) including refund metrics
             customer_health_score = 0
             if customer_state == "ENABLED":
                 customer_health_score += 40
@@ -520,6 +551,24 @@ class UserFeatureGenerator(BaseFeatureGenerator):
 
             if customer_age and customer_age > 30:  # Customer for more than 30 days
                 customer_health_score += 10
+
+            # Apply refund penalty to health score
+            total_orders = len(customer_orders)
+            if total_orders > 0:
+                refunded_orders = sum(
+                    1
+                    for order in customer_orders
+                    if order.get("financialStatus") == "refunded"
+                )
+                refund_rate = refunded_orders / total_orders
+
+                # Penalize high refund rates (reduce health score)
+                if refund_rate > 0.5:  # More than 50% refund rate
+                    customer_health_score -= 30
+                elif refund_rate > 0.25:  # More than 25% refund rate
+                    customer_health_score -= 15
+                elif refund_rate > 0.1:  # More than 10% refund rate
+                    customer_health_score -= 5
 
             return {
                 "customer_state": customer_state,

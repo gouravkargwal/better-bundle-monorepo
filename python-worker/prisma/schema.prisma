@@ -762,12 +762,20 @@ model UserFeatures {
   currencyPreference   String? @db.VarChar(10)  // Preferred currency
   customerHealthScore  Int     @default(0)      // 0-100 customer health score
 
+  // Refund Metrics (NEW)
+  refundedOrders       Int     @default(0)      // Number of refunded orders
+  refundRate           Float   @default(0.0)    // Percentage of orders refunded
+  totalRefundedAmount  Float   @default(0.0)    // Total amount refunded
+  netLifetimeValue     Float   @default(0.0)    // Lifetime value minus refunds
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId])
   @@index([shopId, totalSpent])
   @@index([shopId, daysSinceLastOrder])
+  @@index([shopId, refundRate])
+  @@index([shopId, netLifetimeValue])
   @@map("UserFeatures")
 }
 
@@ -836,6 +844,13 @@ model ProductFeatures {
   popularityScore Float @default(0) // Normalized 0-1
   trendingScore   Float @default(0) // Velocity change
 
+  // Refund Metrics (NEW)
+  refundedOrders      Int   @default(0)   // Number of refunded orders for this product
+  refundRate          Float @default(0.0) // Percentage of orders refunded
+  totalRefundedAmount Float @default(0.0) // Total amount refunded for this product
+  netRevenue          Float @default(0.0) // Revenue minus refunds
+  refundRiskScore     Float @default(0.0) // Risk score based on refund rate (0-100)
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -844,6 +859,9 @@ model ProductFeatures {
   @@index([shopId, trendingScore])
   @@index([shopId, viewCount30d])
   @@index([shopId, purchaseCount30d])
+  @@index([shopId, refundRate])
+  @@index([shopId, refundRiskScore])
+  @@index([shopId, netRevenue])
   @@map("ProductFeatures")
 }
 
@@ -990,6 +1008,13 @@ model InteractionFeatures {
   interactionScore Float  @default(0) // Weighted: views*1 + cart*3 + purchase*7
   affinityScore    Float? // Normalized 0-1
 
+  // Refund Metrics (NEW)
+  refundedPurchases   Int   @default(0)   // Number of refunded purchases for this interaction
+  refundRate          Float @default(0.0) // Percentage of purchases refunded
+  totalRefundedAmount Float @default(0.0) // Total amount refunded for this interaction
+  netPurchaseValue    Float @default(0.0) // Purchase value minus refunds
+  refundRiskScore     Float @default(0.0) // Risk score based on refund rate (0-100)
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -997,6 +1022,9 @@ model InteractionFeatures {
   @@index([shopId, customerId])
   @@index([shopId, productId])
   @@index([shopId, interactionScore])
+  @@index([shopId, refundRate])
+  @@index([shopId, refundRiskScore])
+  @@index([shopId, netPurchaseValue])
   @@map("InteractionFeatures")
 }
 

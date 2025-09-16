@@ -74,6 +74,11 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 metrics_30d, temporal_metrics
             )
 
+            # Compute refund metrics (NEW)
+            refund_metrics = self._compute_refund_metrics(
+                product_id, orders, product_id_mapping
+            )
+
             # Compute enhanced features from new data
             enhanced_metadata_scores = self._compute_enhanced_metadata_scores(
                 product_data
@@ -136,6 +141,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 # Computed scores
                 "popularityScore": popularity_trending["popularity_score"],
                 "trendingScore": popularity_trending["trending_score"],
+                # Refund metrics (NEW)
+                "refundedOrders": refund_metrics["refunded_orders"],
+                "refundRate": refund_metrics["refund_rate"],
+                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
+                "netRevenue": refund_metrics["net_revenue"],
+                "refundRiskScore": refund_metrics["refund_risk_score"],
                 "lastComputedAt": now_utc(),
             }
 
@@ -620,6 +631,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "hasCustomTemplate": False,
             "popularityScore": 0.0,
             "trendingScore": 0.0,
+            # Refund metrics (NEW)
+            "refundedOrders": 0,
+            "refundRate": 0.0,
+            "totalRefundedAmount": 0.0,
+            "netRevenue": 0.0,
+            "refundRiskScore": 0.0,
             "lastComputedAt": now_utc(),
         }
 
@@ -743,4 +760,101 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "has_online_store_url": False,
                 "has_preview_url": False,
                 "has_custom_template": False,
+            }
+
+    def _compute_refund_metrics(
+        self,
+        product_id: str,
+        orders: List[Dict[str, Any]],
+        product_id_mapping: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Compute refund-related metrics for a product"""
+        try:
+            if not orders:
+                return {
+                    "refunded_orders": 0,
+                    "refund_rate": 0.0,
+                    "total_refunded_amount": 0.0,
+                    "net_revenue": 0.0,
+                    "refund_risk_score": 0.0,
+                }
+
+            # Find orders containing this product
+            product_orders = []
+            total_revenue = 0.0
+            total_refunded_amount = 0.0
+            refunded_orders = 0
+
+            for order in orders:
+                line_items = order.get("lineItems", [])
+                order_contains_product = False
+                order_revenue = 0.0
+
+                for item in line_items:
+                    # Extract product ID from line item
+                    item_product_id = self._extract_product_id_from_line_item(item)
+
+                    # Check if this item belongs to our target product
+                    if product_id_mapping and item_product_id:
+                        mapped_product_id = product_id_mapping.get(item_product_id)
+                        if mapped_product_id == product_id:
+                            order_contains_product = True
+                            quantity = int(item.get("quantity", 1))
+                            price = float(item.get("price", 0.0))
+                            order_revenue += price * quantity
+                    elif item_product_id == product_id:
+                        order_contains_product = True
+                        quantity = int(item.get("quantity", 1))
+                        price = float(item.get("price", 0.0))
+                        order_revenue += price * quantity
+
+                if order_contains_product:
+                    product_orders.append(order)
+                    total_revenue += order_revenue
+
+                    # Check if this order was refunded
+                    financial_status = order.get("financialStatus")
+                    if financial_status == "refunded":
+                        refunded_orders += 1
+                        # Use totalRefundedAmount if available, otherwise use order_revenue
+                        refunded_amount = float(
+                            order.get("totalRefundedAmount", order_revenue)
+                        )
+                        total_refunded_amount += refunded_amount
+
+            # Calculate metrics
+            total_orders = len(product_orders)
+            refund_rate = refunded_orders / total_orders if total_orders > 0 else 0.0
+            net_revenue = total_revenue - total_refunded_amount
+
+            # Calculate refund risk score (0-100, higher = more risky)
+            refund_risk_score = 0.0
+            if total_orders > 0:
+                if refund_rate > 0.5:  # More than 50% refund rate
+                    refund_risk_score = 90
+                elif refund_rate > 0.25:  # More than 25% refund rate
+                    refund_risk_score = 70
+                elif refund_rate > 0.1:  # More than 10% refund rate
+                    refund_risk_score = 50
+                elif refund_rate > 0.05:  # More than 5% refund rate
+                    refund_risk_score = 30
+                elif refund_rate > 0:  # Any refunds
+                    refund_risk_score = 10
+
+            return {
+                "refunded_orders": refunded_orders,
+                "refund_rate": round(refund_rate, 3),
+                "total_refunded_amount": round(total_refunded_amount, 2),
+                "net_revenue": round(net_revenue, 2),
+                "refund_risk_score": refund_risk_score,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to compute refund metrics: {str(e)}")
+            return {
+                "refunded_orders": 0,
+                "refund_rate": 0.0,
+                "total_refunded_amount": 0.0,
+                "net_revenue": 0.0,
+                "refund_risk_score": 0.0,
             }

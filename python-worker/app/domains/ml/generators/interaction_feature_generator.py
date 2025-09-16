@@ -84,6 +84,9 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 view_count, cart_add_count, purchase_count, temporal_features
             )
 
+            # Refund metrics (NEW)
+            refund_metrics = self._compute_refund_metrics(product_purchases, orders)
+
             features = {
                 "shopId": shop_id,
                 "customerId": customer_id,
@@ -101,6 +104,12 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                 "interactionSpanDays": temporal_features.get("interaction_span_days"),
                 "interactionScore": interaction_score,
                 "affinityScore": affinity_score,
+                # Refund metrics (NEW)
+                "refundedPurchases": refund_metrics["refunded_purchases"],
+                "refundRate": refund_metrics["refund_rate"],
+                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
+                "netPurchaseValue": refund_metrics["net_purchase_value"],
+                "refundRiskScore": refund_metrics["refund_risk_score"],
                 "lastComputedAt": now_utc(),
             }
 
@@ -427,5 +436,89 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             "interactionSpanDays": None,
             "interactionScore": 0.0,
             "affinityScore": 0.0,
+            # Refund metrics (NEW)
+            "refundedPurchases": 0,
+            "refundRate": 0.0,
+            "totalRefundedAmount": 0.0,
+            "netPurchaseValue": 0.0,
+            "refundRiskScore": 0.0,
             "lastComputedAt": now_utc(),
         }
+
+    def _compute_refund_metrics(
+        self, product_purchases: List[Dict[str, Any]], orders: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute refund-related metrics for customer-product interactions"""
+        try:
+            if not product_purchases:
+                return {
+                    "refunded_purchases": 0,
+                    "refund_rate": 0.0,
+                    "total_refunded_amount": 0.0,
+                    "net_purchase_value": 0.0,
+                    "refund_risk_score": 0.0,
+                }
+
+            # Create a mapping of order IDs to orders for quick lookup
+            order_lookup = {order.get("orderId"): order for order in orders}
+
+            total_purchase_value = 0.0
+            total_refunded_amount = 0.0
+            refunded_purchases = 0
+
+            for purchase in product_purchases:
+                order_id = purchase.get("order_id")
+                line_total = float(purchase.get("line_total", 0.0))
+                total_purchase_value += line_total
+
+                # Check if the order was refunded
+                if order_id in order_lookup:
+                    order = order_lookup[order_id]
+                    financial_status = order.get("financialStatus")
+
+                    if financial_status == "refunded":
+                        refunded_purchases += 1
+                        # Use totalRefundedAmount if available, otherwise use line_total
+                        refunded_amount = float(
+                            order.get("totalRefundedAmount", line_total)
+                        )
+                        total_refunded_amount += refunded_amount
+
+            # Calculate metrics
+            total_purchases = len(product_purchases)
+            refund_rate = (
+                refunded_purchases / total_purchases if total_purchases > 0 else 0.0
+            )
+            net_purchase_value = total_purchase_value - total_refunded_amount
+
+            # Calculate refund risk score (0-100, higher = more risky)
+            refund_risk_score = 0.0
+            if total_purchases > 0:
+                if refund_rate > 0.5:  # More than 50% refund rate
+                    refund_risk_score = 90
+                elif refund_rate > 0.25:  # More than 25% refund rate
+                    refund_risk_score = 70
+                elif refund_rate > 0.1:  # More than 10% refund rate
+                    refund_risk_score = 50
+                elif refund_rate > 0.05:  # More than 5% refund rate
+                    refund_risk_score = 30
+                elif refund_rate > 0:  # Any refunds
+                    refund_risk_score = 10
+
+            return {
+                "refunded_purchases": refunded_purchases,
+                "refund_rate": round(refund_rate, 3),
+                "total_refunded_amount": round(total_refunded_amount, 2),
+                "net_purchase_value": round(net_purchase_value, 2),
+                "refund_risk_score": refund_risk_score,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to compute refund metrics: {str(e)}")
+            return {
+                "refunded_purchases": 0,
+                "refund_rate": 0.0,
+                "total_refunded_amount": 0.0,
+                "net_purchase_value": 0.0,
+                "refund_risk_score": 0.0,
+            }

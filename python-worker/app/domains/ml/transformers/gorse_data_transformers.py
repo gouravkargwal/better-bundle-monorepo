@@ -132,6 +132,16 @@ class GorseDataTransformers:
                 "geographic_region": user.get("geographicRegion", "unknown"),
                 "currency_preference": user.get("currencyPreference", "USD"),
                 "customer_health_score": int(user.get("customerHealthScore", 0)),
+                # NEW: Refund Metrics
+                "refunded_orders": int(user.get("refundedOrders", 0)),
+                "refund_rate": float(user.get("refundRate", 0.0)),
+                "total_refunded_amount": float(user.get("totalRefundedAmount", 0.0)),
+                "net_lifetime_value": float(user.get("netLifetimeValue", 0.0)),
+                "is_high_risk_customer": int(float(user.get("refundRate", 0.0)) > 0.25),
+                "is_low_risk_customer": int(float(user.get("refundRate", 0.0)) < 0.05),
+                "refund_risk_tier": self._calculate_refund_risk_tier(
+                    user.get("refundRate")
+                ),
             }
 
             # Remove None values
@@ -297,6 +307,19 @@ class GorseDataTransformers:
             "has_online_store_url": int(product.get("hasOnlineStoreUrl", False)),
             "has_preview_url": int(product.get("hasPreviewUrl", False)),
             "has_custom_template": int(product.get("hasCustomTemplate", False)),
+            # NEW: Refund Metrics
+            "refunded_orders": int(product.get("refundedOrders", 0)),
+            "refund_rate": float(product.get("refundRate", 0.0)),
+            "total_refunded_amount": float(product.get("totalRefundedAmount", 0.0)),
+            "net_revenue": float(product.get("netRevenue", 0.0)),
+            "refund_risk_score": float(product.get("refundRiskScore", 0.0)),
+            "is_high_risk_product": int(
+                float(product.get("refundRiskScore", 0.0)) > 70
+            ),
+            "is_low_risk_product": int(float(product.get("refundRiskScore", 0.0)) < 30),
+            "refund_risk_tier": self._calculate_product_refund_risk_tier(
+                product.get("refundRiskScore")
+            ),
         }
 
         # Add tags if available
@@ -689,6 +712,8 @@ class GorseDataTransformers:
             customer_id = order_dict.get("customerId", "")
             order_date = order_dict.get("orderDate", now_utc())
             line_items = order_dict.get("lineItems", [])
+            financial_status = order_dict.get("financialStatus", "")
+            total_refunded_amount = float(order_dict.get("totalRefundedAmount", 0.0))
 
             # Skip if missing customer ID
             if not customer_id:
@@ -699,25 +724,51 @@ class GorseDataTransformers:
                 if isinstance(item, dict):
                     product_id = item.get("productId", "")
                     quantity = item.get("quantity", 1)
+                    line_total = float(item.get("lineTotal", 0.0))
                 else:
                     # Handle object attributes
                     product_id = getattr(item, "productId", "")
                     quantity = getattr(item, "quantity", 1)
+                    line_total = float(getattr(item, "lineTotal", 0.0))
 
                 if not product_id:
                     continue
 
-                # Create purchase feedback
-                feedback = {
-                    "feedbackType": "purchase",
-                    "userId": f"shop_{shop_id}_{customer_id}",
-                    "itemId": f"shop_{shop_id}_{product_id}",
-                    "timestamp": (
-                        order_date.isoformat()
-                        if hasattr(order_date, "isoformat")
-                        else str(order_date)
-                    ),
-                }
+                # Determine feedback type based on financial status
+                if financial_status == "refunded" and total_refunded_amount > 0:
+                    # Create negative refund feedback
+                    feedback = {
+                        "feedbackType": "refund",
+                        "userId": f"shop_{shop_id}_{customer_id}",
+                        "itemId": f"shop_{shop_id}_{product_id}",
+                        "timestamp": (
+                            order_date.isoformat()
+                            if hasattr(order_date, "isoformat")
+                            else str(order_date)
+                        ),
+                        "labels": {
+                            "weight": -5.0,  # Negative weight for refunds
+                            "refund_amount": line_total,
+                            "refund_reason": "order_refunded",
+                        },
+                    }
+                else:
+                    # Create positive purchase feedback
+                    feedback = {
+                        "feedbackType": "purchase",
+                        "userId": f"shop_{shop_id}_{customer_id}",
+                        "itemId": f"shop_{shop_id}_{product_id}",
+                        "timestamp": (
+                            order_date.isoformat()
+                            if hasattr(order_date, "isoformat")
+                            else str(order_date)
+                        ),
+                        "labels": {
+                            "weight": 1.0,  # Positive weight for purchases
+                            "purchase_amount": line_total,
+                            "quantity": quantity,
+                        },
+                    }
 
                 feedback_list.append(feedback)
 
@@ -1019,3 +1070,41 @@ class GorseDataTransformers:
         except Exception as e:
             logger.error(f"Failed to transform customer behavior features: {str(e)}")
             return None
+
+    def _calculate_refund_risk_tier(self, refund_rate: Optional[float]) -> str:
+        """Calculate refund risk tier for customers"""
+        if refund_rate is None:
+            return "unknown"
+
+        if refund_rate > 0.5:
+            return "very_high"
+        elif refund_rate > 0.25:
+            return "high"
+        elif refund_rate > 0.1:
+            return "medium"
+        elif refund_rate > 0.05:
+            return "low"
+        elif refund_rate > 0:
+            return "very_low"
+        else:
+            return "none"
+
+    def _calculate_product_refund_risk_tier(
+        self, refund_risk_score: Optional[float]
+    ) -> str:
+        """Calculate refund risk tier for products"""
+        if refund_risk_score is None:
+            return "unknown"
+
+        if refund_risk_score > 80:
+            return "very_high"
+        elif refund_risk_score > 60:
+            return "high"
+        elif refund_risk_score > 40:
+            return "medium"
+        elif refund_risk_score > 20:
+            return "low"
+        elif refund_risk_score > 0:
+            return "very_low"
+        else:
+            return "none"
