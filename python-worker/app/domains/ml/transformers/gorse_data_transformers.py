@@ -127,6 +127,45 @@ class GorseDataTransformers:
                 # Enhanced Customer Features (from Order API)
                 "customer_state": user.get("customerState", "unknown"),
                 "is_verified_email": int(user.get("isVerifiedEmail", False)),
+                # NEW: Enhanced features from unified analytics
+                # Cross-session features
+                "total_unified_sessions": int(user.get("totalUnifiedSessions", 0)),
+                "cross_session_span_days": int(user.get("crossSessionSpanDays", 0)),
+                "session_frequency_score": float(user.get("sessionFrequencyScore", 0)),
+                "device_diversity": int(user.get("deviceDiversity", 0)),
+                "avg_session_duration_unified": float(
+                    user.get("avgSessionDuration", 0) or 0
+                ),
+                # Extension-specific features
+                "phoenix_interaction_count": int(
+                    user.get("phoenixInteractionCount", 0)
+                ),
+                "apollo_interaction_count": int(user.get("apolloInteractionCount", 0)),
+                "venus_interaction_count": int(user.get("venusInteractionCount", 0)),
+                "atlas_interaction_count": int(user.get("atlasInteractionCount", 0)),
+                "extension_engagement_score": float(
+                    user.get("extensionEngagementScore", 0)
+                ),
+                "recommendation_click_rate": float(
+                    user.get("recommendationClickRate", 0)
+                ),
+                "upsell_interaction_count": int(user.get("upsellInteractionCount", 0)),
+                # Enhanced session metrics
+                "total_interactions_in_sessions": int(
+                    user.get("totalInteractionsInSessions", 0)
+                ),
+                "avg_interactions_per_session": float(
+                    user.get("avgInteractionsPerSession", 0)
+                ),
+                "session_engagement_score": float(
+                    user.get("sessionEngagementScore", 0)
+                ),
+                # Attribution features
+                "multi_touch_attribution_score": float(
+                    user.get("multiTouchAttributionScore", 0)
+                ),
+                "attribution_revenue": float(user.get("attributionRevenue", 0)),
+                "conversion_path_length": int(user.get("conversionPathLength", 0)),
                 "customer_age": user.get("customerAge"),
                 "has_default_address": int(user.get("hasDefaultAddress", False)),
                 "geographic_region": user.get("geographicRegion", "unknown"),
@@ -1061,6 +1100,29 @@ class GorseDataTransformers:
                     f"recency_score:{behavior_dict.get('recencyScore', 0)}",
                     f"diversity_score:{behavior_dict.get('diversityScore', 0)}",
                     f"behavioral_score:{behavior_dict.get('behavioralScore', 0)}",
+                    # NEW: Enhanced features from unified analytics
+                    # Cross-session features
+                    f"total_unified_sessions:{behavior_dict.get('totalUnifiedSessions', 0)}",
+                    f"cross_session_span_days:{behavior_dict.get('crossSessionSpanDays', 0)}",
+                    f"session_frequency_score:{behavior_dict.get('sessionFrequencyScore', 0)}",
+                    f"device_diversity:{behavior_dict.get('deviceDiversity', 0)}",
+                    f"avg_session_duration_unified:{behavior_dict.get('avgSessionDuration', 0)}",
+                    # Extension-specific features
+                    f"phoenix_interaction_count:{behavior_dict.get('phoenixInteractionCount', 0)}",
+                    f"apollo_interaction_count:{behavior_dict.get('apolloInteractionCount', 0)}",
+                    f"venus_interaction_count:{behavior_dict.get('venusInteractionCount', 0)}",
+                    f"atlas_interaction_count:{behavior_dict.get('atlasInteractionCount', 0)}",
+                    f"extension_engagement_score:{behavior_dict.get('extensionEngagementScore', 0)}",
+                    f"recommendation_click_rate:{behavior_dict.get('recommendationClickRate', 0)}",
+                    f"upsell_interaction_count:{behavior_dict.get('upsellInteractionCount', 0)}",
+                    # Enhanced session metrics
+                    f"total_interactions_in_sessions:{behavior_dict.get('totalInteractionsInSessions', 0)}",
+                    f"avg_interactions_per_session:{behavior_dict.get('avgInteractionsPerSession', 0)}",
+                    f"session_engagement_score:{behavior_dict.get('sessionEngagementScore', 0)}",
+                    # Attribution features
+                    f"multi_touch_attribution_score:{behavior_dict.get('multiTouchAttributionScore', 0)}",
+                    f"attribution_revenue:{behavior_dict.get('attributionRevenue', 0)}",
+                    f"conversion_path_length:{behavior_dict.get('conversionPathLength', 0)}",
                 ],
                 "Subscribe": [],
                 "Comment": f"Enhanced behavior features for customer {customer_id}",

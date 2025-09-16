@@ -91,6 +91,21 @@ app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
 app.include_router(analytics_router, prefix="/api/v1")
 
+# Include unified analytics routers
+from app.domains.analytics.api import (
+    venus_router,
+    atlas_router,
+    phoenix_router,
+    apollo_router,
+    customer_identity_router,
+)
+
+app.include_router(venus_router)
+app.include_router(atlas_router)
+app.include_router(phoenix_router)
+app.include_router(apollo_router)
+app.include_router(customer_identity_router)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,

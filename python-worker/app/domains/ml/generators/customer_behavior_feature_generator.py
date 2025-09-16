@@ -23,12 +23,16 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """
         Generate behavioral features for a customer to match CustomerBehaviorFeatures schema
+        Now enhanced to use both BehavioralEvents and unified analytics data
 
         Args:
             customer: Customer data (from CustomerData table)
             context: Additional context data:
                 - shop: Shop data
                 - behavioral_events: List of BehavioralEvents for this customer
+                - user_interactions: List of UserInteraction for this customer (NEW)
+                - user_sessions: List of UserSession for this customer (NEW)
+                - purchase_attributions: List of PurchaseAttribution for this customer (NEW)
 
         Returns:
             Dictionary of generated features matching CustomerBehaviorFeatures schema
@@ -36,36 +40,73 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         try:
             customer_id = customer.get("customerId", "")
             logger.debug(
-                f"Computing customer behavior features for customer: {customer_id}"
+                f"Computing enhanced customer behavior features for customer: {customer_id}"
             )
 
             features = {}
             shop = context.get("shop", {})
             behavioral_events = context.get("behavioral_events", [])
 
-            if not behavioral_events:
+            # NEW: Get unified analytics data
+            user_interactions = context.get("user_interactions", [])
+            user_sessions = context.get("user_sessions", [])
+            purchase_attributions = context.get("purchase_attributions", [])
+
+            # If no data at all, return empty features
+            if not behavioral_events and not user_interactions:
                 return self._get_empty_behavior_features(customer, shop)
 
             # Basic customer features
             features.update(self._compute_basic_features(customer, shop))
 
-            # Session metrics (aggregate across all sessions)
-            features.update(self._compute_session_metrics(behavioral_events))
+            # Standard features from BehavioralEvents (unchanged)
+            if behavioral_events:
+                # Session metrics (aggregate across all sessions)
+                features.update(self._compute_session_metrics(behavioral_events))
 
-            # Event counts (aggregate all event types)
-            features.update(self._compute_event_counts(behavioral_events))
+                # Event counts (aggregate all event types)
+                features.update(self._compute_event_counts(behavioral_events))
 
-            # Temporal patterns
-            features.update(self._compute_temporal_patterns(behavioral_events))
+                # Temporal patterns
+                features.update(self._compute_temporal_patterns(behavioral_events))
 
-            # Behavior patterns (unique items, search terms, etc.)
-            features.update(self._compute_behavior_patterns(behavioral_events))
+                # Behavior patterns (unique items, search terms, etc.)
+                features.update(self._compute_behavior_patterns(behavioral_events))
 
-            # Conversion metrics (rates between event types)
+            # NEW: Enhanced features from unified analytics
+            if user_interactions or user_sessions:
+                # Cross-session features
+                features.update(
+                    self._compute_cross_session_features(user_sessions, customer_id)
+                )
+
+                # Extension-specific features
+                features.update(
+                    self._compute_extension_features(user_interactions, customer_id)
+                )
+
+                # Enhanced session metrics
+                features.update(
+                    self._compute_enhanced_session_metrics(user_sessions, customer_id)
+                )
+
+            # NEW: Attribution features
+            if purchase_attributions:
+                features.update(
+                    self._compute_attribution_features(
+                        purchase_attributions, customer_id
+                    )
+                )
+
+            # Conversion metrics (rates between event types) - enhanced with unified data
             features.update(self._compute_conversion_metrics(features))
 
-            # Computed scores (engagement, recency, diversity, behavioral)
-            features.update(self._compute_computed_scores(features, behavioral_events))
+            # Computed scores (engagement, recency, diversity, behavioral) - enhanced
+            features.update(
+                self._compute_computed_scores(
+                    features, behavioral_events, user_interactions
+                )
+            )
 
             # Validate and clean features
             features = self.validate_features(features)
@@ -367,7 +408,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_computed_scores(
-        self, features: Dict[str, Any], events: List[Dict[str, Any]]
+        self,
+        features: Dict[str, Any],
+        events: List[Dict[str, Any]],
+        user_interactions: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compute normalized behavioral scores (0-1)"""
 
@@ -539,3 +583,350 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             return "tablet"
         else:
             return "desktop"
+
+    # NEW: Enhanced feature computation methods for unified analytics data
+
+    def _compute_cross_session_features(
+        self, user_sessions: List[Dict[str, Any]], customer_id: str
+    ) -> Dict[str, Any]:
+        """Compute cross-session features from unified analytics"""
+        try:
+            if not user_sessions:
+                return {
+                    "totalUnifiedSessions": 0,
+                    "crossSessionSpanDays": 0,
+                    "sessionFrequencyScore": 0.0,
+                    "deviceDiversity": 0,
+                    "avgSessionDuration": None,
+                }
+
+            # Filter sessions for this customer
+            customer_sessions = [
+                s for s in user_sessions if s.get("customerId") == customer_id
+            ]
+
+            if not customer_sessions:
+                return {
+                    "totalUnifiedSessions": 0,
+                    "crossSessionSpanDays": 0,
+                    "sessionFrequencyScore": 0.0,
+                    "deviceDiversity": 0,
+                    "avgSessionDuration": None,
+                }
+
+            # Basic session metrics
+            total_sessions = len(customer_sessions)
+
+            # Calculate session span
+            session_dates = []
+            session_durations = []
+            user_agents = set()
+
+            for session in customer_sessions:
+                created_at = session.get("createdAt")
+                if created_at:
+                    try:
+                        if isinstance(created_at, str):
+                            session_date = datetime.fromisoformat(
+                                created_at.replace("Z", "+00:00")
+                            )
+                        else:
+                            session_date = created_at
+                        session_dates.append(session_date)
+                    except:
+                        pass
+
+                # Calculate session duration
+                start_time = session.get("createdAt")
+                last_active = session.get("lastActive")
+                if start_time and last_active:
+                    try:
+                        if isinstance(start_time, str):
+                            start_dt = datetime.fromisoformat(
+                                start_time.replace("Z", "+00:00")
+                            )
+                        else:
+                            start_dt = start_time
+                        if isinstance(last_active, str):
+                            end_dt = datetime.fromisoformat(
+                                last_active.replace("Z", "+00:00")
+                            )
+                        else:
+                            end_dt = last_active
+                        duration = (end_dt - start_dt).total_seconds()
+                        session_durations.append(duration)
+                    except:
+                        pass
+
+                # Track user agents for device diversity
+                user_agent = session.get("userAgent")
+                if user_agent:
+                    user_agents.add(user_agent)
+
+            # Calculate cross-session span
+            cross_session_span_days = 0
+            if len(session_dates) > 1:
+                min_date = min(session_dates)
+                max_date = max(session_dates)
+                cross_session_span_days = (max_date - min_date).days
+
+            # Calculate session frequency score (sessions per day)
+            session_frequency_score = 0.0
+            if cross_session_span_days > 0:
+                session_frequency_score = total_sessions / cross_session_span_days
+
+            # Calculate average session duration
+            avg_session_duration = None
+            if session_durations:
+                avg_session_duration = sum(session_durations) / len(session_durations)
+
+            return {
+                "totalUnifiedSessions": total_sessions,
+                "crossSessionSpanDays": cross_session_span_days,
+                "sessionFrequencyScore": round(session_frequency_score, 4),
+                "deviceDiversity": len(user_agents),
+                "avgSessionDuration": (
+                    round(avg_session_duration, 2) if avg_session_duration else None
+                ),
+            }
+
+        except Exception as e:
+            logger.error(f"Error computing cross-session features: {str(e)}")
+            return {
+                "totalUnifiedSessions": 0,
+                "crossSessionSpanDays": 0,
+                "sessionFrequencyScore": 0.0,
+                "deviceDiversity": 0,
+                "avgSessionDuration": None,
+            }
+
+    def _compute_extension_features(
+        self, user_interactions: List[Dict[str, Any]], customer_id: str
+    ) -> Dict[str, Any]:
+        """Compute extension-specific features from unified analytics"""
+        try:
+            if not user_interactions:
+                return {
+                    "phoenixInteractionCount": 0,
+                    "apolloInteractionCount": 0,
+                    "venusInteractionCount": 0,
+                    "atlasInteractionCount": 0,
+                    "extensionEngagementScore": 0.0,
+                    "recommendationClickRate": 0.0,
+                    "upsellInteractionCount": 0,
+                }
+
+            # Filter interactions for this customer
+            customer_interactions = [
+                i for i in user_interactions if i.get("customerId") == customer_id
+            ]
+
+            if not customer_interactions:
+                return {
+                    "phoenixInteractionCount": 0,
+                    "apolloInteractionCount": 0,
+                    "venusInteractionCount": 0,
+                    "atlasInteractionCount": 0,
+                    "extensionEngagementScore": 0.0,
+                    "recommendationClickRate": 0.0,
+                    "upsellInteractionCount": 0,
+                }
+
+            # Count interactions by extension type
+            extension_counts = {}
+            recommendation_clicks = 0
+            total_interactions = len(customer_interactions)
+            upsell_interactions = 0
+
+            for interaction in customer_interactions:
+                extension_type = interaction.get("extensionType", "").lower()
+                interaction_type = interaction.get("interactionType", "").lower()
+
+                # Count by extension
+                extension_counts[extension_type] = (
+                    extension_counts.get(extension_type, 0) + 1
+                )
+
+                # Count recommendation clicks
+                if "recommendation" in interaction_type and "click" in interaction_type:
+                    recommendation_clicks += 1
+
+                # Count upsell interactions
+                if "upsell" in interaction_type or "post_purchase" in interaction_type:
+                    upsell_interactions += 1
+
+            # Calculate extension engagement score (diversity of extensions used)
+            extension_engagement_score = (
+                len(extension_counts) / 4.0
+            )  # 4 total extensions
+
+            # Calculate recommendation click rate
+            recommendation_click_rate = 0.0
+            if total_interactions > 0:
+                recommendation_click_rate = recommendation_clicks / total_interactions
+
+            return {
+                "phoenixInteractionCount": extension_counts.get("phoenix", 0),
+                "apolloInteractionCount": extension_counts.get("apollo", 0),
+                "venusInteractionCount": extension_counts.get("venus", 0),
+                "atlasInteractionCount": extension_counts.get("atlas", 0),
+                "extensionEngagementScore": round(extension_engagement_score, 4),
+                "recommendationClickRate": round(recommendation_click_rate, 4),
+                "upsellInteractionCount": upsell_interactions,
+            }
+
+        except Exception as e:
+            logger.error(f"Error computing extension features: {str(e)}")
+            return {
+                "phoenixInteractionCount": 0,
+                "apolloInteractionCount": 0,
+                "venusInteractionCount": 0,
+                "atlasInteractionCount": 0,
+                "extensionEngagementScore": 0.0,
+                "recommendationClickRate": 0.0,
+                "upsellInteractionCount": 0,
+            }
+
+    def _compute_enhanced_session_metrics(
+        self, user_sessions: List[Dict[str, Any]], customer_id: str
+    ) -> Dict[str, Any]:
+        """Compute enhanced session metrics from unified analytics"""
+        try:
+            if not user_sessions:
+                return {
+                    "totalInteractionsInSessions": 0,
+                    "avgInteractionsPerSession": 0.0,
+                    "sessionEngagementScore": 0.0,
+                }
+
+            # Filter sessions for this customer
+            customer_sessions = [
+                s for s in user_sessions if s.get("customerId") == customer_id
+            ]
+
+            if not customer_sessions:
+                return {
+                    "totalInteractionsInSessions": 0,
+                    "avgInteractionsPerSession": 0.0,
+                    "sessionEngagementScore": 0.0,
+                }
+
+            # Calculate session interaction metrics
+            total_interactions = sum(
+                s.get("totalInteractions", 0) for s in customer_sessions
+            )
+            avg_interactions_per_session = (
+                total_interactions / len(customer_sessions) if customer_sessions else 0
+            )
+
+            # Calculate session engagement score (based on interaction density)
+            session_engagement_score = min(
+                avg_interactions_per_session / 10.0, 1.0
+            )  # Normalize to 0-1
+
+            return {
+                "totalInteractionsInSessions": total_interactions,
+                "avgInteractionsPerSession": round(avg_interactions_per_session, 2),
+                "sessionEngagementScore": round(session_engagement_score, 4),
+            }
+
+        except Exception as e:
+            logger.error(f"Error computing enhanced session metrics: {str(e)}")
+            return {
+                "totalInteractionsInSessions": 0,
+                "avgInteractionsPerSession": 0.0,
+                "sessionEngagementScore": 0.0,
+            }
+
+    def _compute_attribution_features(
+        self, purchase_attributions: List[Dict[str, Any]], customer_id: str
+    ) -> Dict[str, Any]:
+        """Compute attribution features from unified analytics"""
+        try:
+            if not purchase_attributions:
+                return {
+                    "multiTouchAttributionScore": 0.0,
+                    "attributionRevenue": 0.0,
+                    "conversionPathLength": 0,
+                    "extensionContributionWeights": {},
+                }
+
+            # Filter attributions for this customer
+            customer_attributions = [
+                a for a in purchase_attributions if a.get("customerId") == customer_id
+            ]
+
+            if not customer_attributions:
+                return {
+                    "multiTouchAttributionScore": 0.0,
+                    "attributionRevenue": 0.0,
+                    "conversionPathLength": 0,
+                    "extensionContributionWeights": {},
+                }
+
+            # Calculate attribution metrics
+            total_revenue = sum(
+                float(a.get("totalRevenue", 0)) for a in customer_attributions
+            )
+            total_interactions = sum(
+                a.get("totalInteractions", 0) for a in customer_attributions
+            )
+
+            # Calculate multi-touch attribution score (based on interaction diversity)
+            multi_touch_score = 0.0
+            if total_interactions > 0:
+                # Higher score for more diverse interaction patterns
+                unique_extensions = set()
+                for attribution in customer_attributions:
+                    contributing_extensions = attribution.get(
+                        "contributingExtensions", []
+                    )
+                    if isinstance(contributing_extensions, list):
+                        unique_extensions.update(contributing_extensions)
+                multi_touch_score = min(
+                    len(unique_extensions) / 4.0, 1.0
+                )  # Normalize to 0-1
+
+            # Calculate average conversion path length
+            conversion_path_length = 0
+            if customer_attributions:
+                conversion_path_length = int(
+                    total_interactions / len(customer_attributions)
+                )
+
+            # Calculate extension contribution weights
+            extension_weights = {}
+            for attribution in customer_attributions:
+                attribution_weights = attribution.get("attributionWeights", [])
+                if isinstance(attribution_weights, list):
+                    for weight_data in attribution_weights:
+                        if isinstance(weight_data, dict):
+                            ext_type = weight_data.get("extensionType", "")
+                            weight = weight_data.get("weight", 0.0)
+                            if ext_type:
+                                extension_weights[ext_type] = (
+                                    extension_weights.get(ext_type, 0.0) + weight
+                                )
+
+            # Normalize weights
+            total_weight = sum(extension_weights.values())
+            if total_weight > 0:
+                extension_weights = {
+                    k: v / total_weight for k, v in extension_weights.items()
+                }
+
+            return {
+                "multiTouchAttributionScore": round(multi_touch_score, 4),
+                "attributionRevenue": round(total_revenue, 2),
+                "conversionPathLength": conversion_path_length,
+                "extensionContributionWeights": extension_weights,
+            }
+
+        except Exception as e:
+            logger.error(f"Error computing attribution features: {str(e)}")
+            return {
+                "multiTouchAttributionScore": 0.0,
+                "attributionRevenue": 0.0,
+                "conversionPathLength": 0,
+                "extensionContributionWeights": {},
+            }

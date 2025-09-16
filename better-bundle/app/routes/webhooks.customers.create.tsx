@@ -36,7 +36,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Store raw customer data immediately
     const created = await prisma.rawCustomer.create({
-      data: ({
+      data: {
         shopId: shopRecord.id,
         payload: customer,
         shopifyId: customerId,
@@ -49,12 +49,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         source: "webhook",
         format: "rest",
         receivedAt: new Date(),
-      }) as any,
+      } as any,
     });
 
     console.log(
       `✅ Customer ${customerId} stored in raw table for shop ${shop}`,
     );
+
+    // ===== CUSTOMER LINKING INTEGRATION =====
+    console.log(
+      `🔗 Triggering customer linking for new customer ${customerId}`,
+    );
+
+    try {
+      // Call your Python worker's customer linking API
+      const response = await fetch(
+        `${process.env.PYTHON_WORKER_URL}/api/customer-identity/identify-customer`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session_id: null, // No specific session for account creation
+            customer_id: customerId,
+            shop_id: shop,
+            trigger_event: "account_creation",
+            customer_data: {
+              email: customer.email,
+              phone: customer.phone,
+              first_name: customer.first_name,
+              last_name: customer.last_name,
+              created_at: customer.created_at,
+            },
+          }),
+        },
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(
+          `✅ Customer linking successful: ${result.data?.total_sessions_linked || 0} sessions linked`,
+        );
+      } else {
+        console.error(
+          `❌ Customer linking failed: ${response.status} ${response.statusText}`,
+        );
+      }
+    } catch (error) {
+      console.error(`❌ Error calling customer linking API:`, error);
+      // Don't fail the webhook if customer linking fails
+    }
 
     // Publish to Redis Stream for real-time processing
     try {

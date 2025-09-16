@@ -617,6 +617,121 @@ class FeatureRepository(IFeatureRepository):
             )
             return []
 
+    # Unified Analytics Data Loading Methods
+    async def get_user_interactions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of user interactions for a shop"""
+        try:
+            db = await self._get_database()
+            result = await db.userinteraction.find_many(
+                where={"shopId": shop_id},
+                order={"createdAt": "desc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get user interactions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_user_interactions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get user interactions since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            result = await db.userinteraction.find_many(
+                where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
+                order={"createdAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get user interactions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_user_sessions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of user sessions for a shop"""
+        try:
+            db = await self._get_database()
+            result = await db.usersession.find_many(
+                where={"shopId": shop_id},
+                order={"createdAt": "desc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get user sessions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_user_sessions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get user sessions since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            result = await db.usersession.find_many(
+                where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
+                order={"createdAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get user sessions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_purchase_attributions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of purchase attributions for a shop"""
+        try:
+            db = await self._get_database()
+            result = await db.purchaseattribution.find_many(
+                where={"shopId": shop_id},
+                order={"createdAt": "desc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get purchase attributions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_purchase_attributions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get purchase attributions since a specific timestamp for incremental processing"""
+        try:
+            db = await self._get_database()
+            result = await db.purchaseattribution.find_many(
+                where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
+                order={"createdAt": "asc"},
+                take=limit,
+                skip=offset,
+            )
+            return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.error(
+                f"Failed to get purchase attributions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
     async def get_feature_counts_for_shop(self, shop_id: str) -> Dict[str, int]:
         """Get counts of existing features for a shop to determine if incremental processing is needed"""
         try:

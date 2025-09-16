@@ -188,7 +188,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         Args:
             shop_id: Shop ID to process
-            entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'behavioral_events')
+            entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'behavioral_events', 'user_interactions', 'user_sessions', 'purchase_attributions')
             batch_size: Total batch size to process
             chunk_size: Size of each chunk to process in memory
             incremental: Whether to use incremental loading
@@ -226,6 +226,20 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         chunk = await self.repository.get_behavioral_events_batch_since(
                             shop_id, since_timestamp, current_chunk_size, offset
                         )
+                    elif entity_type == "user_interactions":
+                        chunk = await self.repository.get_user_interactions_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "user_sessions":
+                        chunk = await self.repository.get_user_sessions_batch_since(
+                            shop_id, since_timestamp, current_chunk_size, offset
+                        )
+                    elif entity_type == "purchase_attributions":
+                        chunk = (
+                            await self.repository.get_purchase_attributions_batch_since(
+                                shop_id, since_timestamp, current_chunk_size, offset
+                            )
+                        )
                     else:
                         logger.error(
                             f"Unknown entity type for incremental loading: {entity_type}"
@@ -251,6 +265,18 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         )
                     elif entity_type == "behavioral_events":
                         chunk = await self.repository.get_behavioral_events_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "user_interactions":
+                        chunk = await self.repository.get_user_interactions_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "user_sessions":
+                        chunk = await self.repository.get_user_sessions_batch(
+                            shop_id, current_chunk_size, offset
+                        )
+                    elif entity_type == "purchase_attributions":
+                        chunk = await self.repository.get_purchase_attributions_batch(
                             shop_id, current_chunk_size, offset
                         )
                     else:
@@ -305,6 +331,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         customers: List[Dict[str, Any]],
         shop: Dict[str, Any],
         behavioral_events: Optional[List[Dict[str, Any]]] = None,
+        # NEW: Unified analytics data
+        user_interactions: Optional[List[Dict[str, Any]]] = None,
+        user_sessions: Optional[List[Dict[str, Any]]] = None,
+        purchase_attributions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute customer behavior features"""
         try:
@@ -321,8 +351,30 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     if event_customer_id == customer_id:
                         customer_events.append(event)
 
+                # NEW: Filter unified analytics data for this customer
+                customer_interactions = []
+                for interaction in user_interactions or []:
+                    if interaction.get("customerId") == customer_id:
+                        customer_interactions.append(interaction)
+
+                customer_sessions = []
+                for session in user_sessions or []:
+                    if session.get("customerId") == customer_id:
+                        customer_sessions.append(session)
+
+                customer_attributions = []
+                for attribution in purchase_attributions or []:
+                    if attribution.get("customerId") == customer_id:
+                        customer_attributions.append(attribution)
+
+                # Build enhanced context with unified analytics data
                 context = self._build_base_context(
-                    shop, behavioral_events=customer_events
+                    shop,
+                    behavioral_events=customer_events,
+                    # NEW: Add unified analytics data to context
+                    user_interactions=customer_interactions,
+                    user_sessions=customer_sessions,
+                    purchase_attributions=customer_attributions,
                 )
 
                 features = await self._compute_feature_safely(
@@ -540,9 +592,44 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     since_timestamp=last_computation_time,
                 )
 
+                # NEW: Load unified analytics data
+                user_interactions = await self.process_entities_in_chunks(
+                    shop_id,
+                    "user_interactions",
+                    batch_size * 3,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
+                )
+                user_sessions = await self.process_entities_in_chunks(
+                    shop_id,
+                    "user_sessions",
+                    batch_size,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
+                )
+                purchase_attributions = await self.process_entities_in_chunks(
+                    shop_id,
+                    "purchase_attributions",
+                    batch_size,
+                    chunk_size=100,
+                    incremental=True,
+                    since_timestamp=last_computation_time,
+                )
+
                 # If no recent data, skip processing
                 if not any(
-                    [products, customers, orders, collections, behavioral_events]
+                    [
+                        products,
+                        customers,
+                        orders,
+                        collections,
+                        behavioral_events,
+                        user_interactions,
+                        user_sessions,
+                        purchase_attributions,
+                    ]
                 ):
 
                     return {
@@ -579,7 +666,18 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     shop_id, "behavioral_events", batch_size * 5, chunk_size=100
                 )
 
-            # Compute all features using existing method
+                # NEW: Load unified analytics data for full processing
+                user_interactions = await self.process_entities_in_chunks(
+                    shop_id, "user_interactions", batch_size * 3, chunk_size=100
+                )
+                user_sessions = await self.process_entities_in_chunks(
+                    shop_id, "user_sessions", batch_size, chunk_size=100
+                )
+                purchase_attributions = await self.process_entities_in_chunks(
+                    shop_id, "purchase_attributions", batch_size, chunk_size=100
+                )
+
+            # Compute all features using enhanced method with unified analytics data
             all_features = await self.compute_all_features_for_shop(
                 shop=shop_data,
                 products=products,
@@ -587,6 +685,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 orders=orders,
                 collections=collections,
                 behavioral_events=behavioral_events,
+                # NEW: Pass unified analytics data
+                user_interactions=user_interactions,
+                user_sessions=user_sessions,
+                purchase_attributions=purchase_attributions,
             )
 
             # Save all features to database with parallel processing
@@ -646,6 +748,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     "orders": len(orders),
                     "collections": len(collections),
                     "behavioral_events": len(behavioral_events),
+                    # NEW: Include unified analytics data counts
+                    "user_interactions": len(user_interactions),
+                    "user_sessions": len(user_sessions),
+                    "purchase_attributions": len(purchase_attributions),
                 },
                 "timestamp": now_utc().isoformat(),
             }
@@ -667,6 +773,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         customers: Optional[List[Dict[str, Any]]] = None,
         collections: Optional[List[Dict[str, Any]]] = None,
         behavioral_events: Optional[List[Dict[str, Any]]] = None,
+        # NEW: Unified analytics data
+        user_interactions: Optional[List[Dict[str, Any]]] = None,
+        user_sessions: Optional[List[Dict[str, Any]]] = None,
+        purchase_attributions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Comprehensive feature computation for all entities in a shop"""
         try:
@@ -678,6 +788,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             customers = customers or []
             collections = collections or []
             behavioral_events = behavioral_events or []
+            # NEW: Prepare unified analytics data
+            user_interactions = user_interactions or []
+            user_sessions = user_sessions or []
+            purchase_attributions = purchase_attributions or []
 
             # 1. Product Features
             # Create product ID mapping for product features
@@ -716,9 +830,15 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             all_features["collections"] = collection_features
 
-            # 4. Customer Behavior Features
+            # 4. Customer Behavior Features (Enhanced with unified analytics)
             behavior_features = await self.compute_all_customer_behavior_features(
-                customers, shop, behavioral_events
+                customers,
+                shop,
+                behavioral_events,
+                # NEW: Pass unified analytics data
+                user_interactions=user_interactions,
+                user_sessions=user_sessions,
+                purchase_attributions=purchase_attributions,
             )
             all_features["customer_behaviors"] = behavior_features
 

@@ -112,24 +112,6 @@ model RawBehavioralEvents {
   @@map("RawBehavioralEvents")
 }
 
-// ===================== STAGING LAYER =====================
-
-// Staging tables removed - data flows directly from Raw to Main tables
-// Raw → NormalizationConsumer → Main (canonical format)
-
-model NormalizationWatermark {
-  id               String   @id @default(cuid())
-  shopId           String
-  dataType         String   @db.VarChar(50) // orders, products, customers, collections
-  lastNormalizedAt DateTime
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@unique([shopId, dataType])
-  @@index([shopId])
-  @@map("NormalizationWatermark")
-}
-
 model OrderData {
   id                      String    @id @default(cuid())
   shopId                  String
@@ -317,448 +299,6 @@ model BehavioralEvents {
   @@map("BehavioralEvents")
 }
 
-model ProductAnalytics {
-  id              String    @id @default(cuid())
-  shopId          String
-  productId       String
-  viewCount       Int       @default(0)
-  addToCartCount  Int       @default(0)
-  purchaseCount   Int       @default(0)
-  revenue         Float     @default(0)
-  avgOrderValue   Float     @default(0)
-  lastViewedAt    DateTime?
-  lastPurchasedAt DateTime?
-  lastComputedAt  DateTime  @default(now())
-  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, productId])
-  @@index([shopId, viewCount])
-  @@index([shopId, purchaseCount])
-  @@index([shopId, revenue])
-  @@index([shopId, lastViewedAt])
-  @@map("ProductAnalytics")
-}
-
-model CustomerAnalytics {
-  id                  String    @id @default(cuid())
-  shopId              String
-  customerId          String
-  totalSessions       Int       @default(0)
-  totalPageViews      Int       @default(0)
-  totalSearchQueries  Int       @default(0)
-  cartAbandonmentRate Float     @default(0)
-  avgSessionDuration  Float     @default(0)
-  lastActivityAt      DateTime?
-  preferredCategories Json?
-  lastComputedAt      DateTime  @default(now())
-  shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, customerId])
-  @@index([shopId, totalSessions])
-  @@index([shopId, lastActivityAt])
-  @@map("CustomerAnalytics")
-}
-
-model CollectionAnalytics {
-  id     String @id @default(cuid())
-  shopId String
-
-  // Collection counts
-  totalCollections     Int @default(0)
-  manualCollections    Int @default(0)
-  automatedCollections Int @default(0)
-
-  // Performance metrics
-  avgProductsPerCollection  Float @default(0)
-  collectionAutomationRatio Float @default(0)
-
-  // Top collections
-  topCollectionsByProducts Json? // Top 10 collections by product count
-  topCollectionsByRevenue  Json? // Top 10 collections by revenue
-
-  lastComputedAt DateTime @default(now())
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId])
-  @@index([shopId, totalCollections])
-  @@index([shopId, collectionAutomationRatio])
-  @@map("CollectionAnalytics")
-}
-
-model CustomerBehaviorAnalytics {
-  id     String @id @default(cuid())
-  shopId String
-
-  // Customer counts
-  totalCustomersWithBehavior Int @default(0)
-  highEngagementCustomers    Int @default(0)
-  activeCustomers            Int @default(0)
-
-  // Average scores
-  avgEngagementScore Float @default(0)
-  avgRecencyScore    Float @default(0)
-  avgDiversityScore  Float @default(0)
-
-  // Behavioral distribution
-  engagementDistribution Json? // Distribution of engagement scores
-  recencyDistribution    Json? // Distribution of recency scores
-
-  lastComputedAt DateTime @default(now())
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId])
-  @@index([shopId, totalCustomersWithBehavior])
-  @@index([shopId, avgEngagementScore])
-  @@map("CustomerBehaviorAnalytics")
-}
-
-model BundleAnalysisResult {
-  id              String   @id @default(cuid())
-  shopId          String
-  productIds      String[]
-  bundleSize      Int
-  coPurchaseCount Int
-  confidence      Float
-  lift            Float
-  support         Float
-  revenue         Float
-  avgOrderValue   Float
-  analysisDate    DateTime @default(now())
-  isActive        Boolean  @default(true)
-  discount        Float    @default(0)
-  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, productIds])
-  @@index([shopId, confidence])
-  @@index([shopId, lift])
-  @@index([shopId, revenue])
-  @@index([shopId, isActive])
-  @@index([shopId, bundleSize])
-  @@index([shopId, analysisDate])
-  @@map("BundleAnalysisResult")
-}
-
-model TrackedSale {
-  id               String   @id @default(cuid())
-  shopId           String
-  shopifyOrderId   String
-  revenueGenerated Float
-  commissionOwed   Float
-  status           String   @default("pending")
-  billingPeriod    String?  @db.VarChar(50)
-  createdAt        DateTime @default(now())
-  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, shopifyOrderId])
-  @@index([shopId, billingPeriod])
-  @@index([shopId, status])
-  @@map("TrackedSale")
-}
-
-model WidgetEvent {
-  id         String   @id @default(cuid())
-  shopId     String
-  sessionId  String
-  bundleId   String?  @db.VarChar(100)
-  action     String
-  productIds String[]
-  timestamp  DateTime @default(now())
-  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, sessionId])
-  @@index([shopId, action])
-  @@index([shopId, timestamp])
-  @@map("WidgetEvent")
-}
-
-model WidgetConfiguration {
-  id                    String   @id @default(cuid())
-  shopId                String   @unique
-  // Global enable/disable
-  isActive              Boolean  @default(true)
-
-  // Global styling
-  layoutStyle           String   @default("grid") // grid | carousel | list
-  gridColumns           Int      @default(3)
-  useThemeColors        Boolean  @default(true)
-
-  // Product Page Settings
-  productPageEnabled     Boolean @default(true)
-  productPageTitle       String  @default("You might also like")
-  productPageLimit       Int     @default(6)
-  productPageShowPrices  Boolean @default(true)
-  productPageShowReasons Boolean @default(true)
-
-  // Cart Page Settings
-  cartPageEnabled        Boolean @default(true)
-  cartPageTitle          String  @default("Frequently bought together")
-  cartPageLimit          Int     @default(4)
-  cartPageShowPrices     Boolean @default(true)
-  cartPageShowReasons    Boolean @default(true)
-
-  // Homepage Settings
-  homepageEnabled        Boolean @default(false)
-  homepageTitle          String  @default("Popular products")
-  homepageLimit          Int     @default(8)
-  homepageShowPrices     Boolean @default(true)
-  homepageShowReasons    Boolean @default(false)
-
-  // Collection Page Settings
-  collectionPageEnabled        Boolean @default(true)
-  collectionPageTitle          String  @default("Similar products")
-  collectionPageLimit          Int     @default(6)
-  collectionPageShowPrices     Boolean @default(true)
-  collectionPageShowReasons    Boolean @default(true)
-
-  // Search Results Settings
-  searchPageEnabled        Boolean @default(true)
-  searchPageTitle          String  @default("You might also like")
-  searchPageLimit          Int     @default(6)
-  searchPageShowPrices     Boolean @default(true)
-  searchPageShowReasons    Boolean @default(true)
-
-  // Blog Post Settings
-  blogPageEnabled        Boolean @default(false)
-  blogPageTitle          String  @default("Featured products")
-  blogPageLimit          Int     @default(4)
-  blogPageShowPrices     Boolean @default(true)
-  blogPageShowReasons    Boolean @default(false)
-
-  // Checkout Settings (note: implement via Checkout UI Extension if supported)
-  checkoutPageEnabled        Boolean @default(false)
-  checkoutPageTitle          String  @default("Last chance to add")
-  checkoutPageLimit          Int     @default(3)
-  checkoutPageShowPrices     Boolean @default(true)
-  checkoutPageShowReasons    Boolean @default(false)
-
-  // Customer Account Settings
-  accountPageEnabled        Boolean @default(false)
-  accountPageTitle          String  @default("Recommended for you")
-  accountPageLimit          Int     @default(6)
-  accountPageShowPrices     Boolean @default(true)
-  accountPageShowReasons    Boolean @default(true)
-
-  // 404 Page Settings
-  notFoundPageEnabled        Boolean @default(false)
-  notFoundPageTitle          String  @default("Popular products")
-  notFoundPageLimit          Int     @default(6)
-  notFoundPageShowPrices     Boolean @default(true)
-  notFoundPageShowReasons    Boolean @default(false)
-
-  // Analytics
-  analyticsEnabled        Boolean @default(true)
-
-  // Custom page contexts (JSON array of regex patterns and contexts)
-  customContexts         Json?   @default("[]")
-
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@map("WidgetConfiguration")
-}
-
-model AnalysisJob {
-  id          String    @id @default(cuid())
-  shopId      String
-  status      String    @default("pending")
-  jobId       String    @unique
-  progress    Int       @default(0)
-  startedAt   DateTime?
-  completedAt DateTime?
-  error       String?   @db.Text
-  result      Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, status])
-  @@index([shopId, createdAt])
-  @@index([status, createdAt])
-  @@map("AnalysisJob")
-}
-
-model ShopAnalysisConfig {
-  id               String   @id @default(cuid())
-  shopId           String   @unique
-  similarityConfig Json?
-  bundleConfig     Json?
-  isEnabled        Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  shop             Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-}
-
-model HeuristicDecision {
-  id                String @id @default(cuid())
-  shopId            String
-  decision          String @db.VarChar(500) // Human-readable decision
-  reason            String @db.Text // Detailed reasoning
-  nextAnalysisHours Int // Next analysis interval in hours
-  confidence        Float // Confidence score (0.0 to 1.0)
-
-  // Key heuristic factors as individual fields
-  orderVolume         Float // Orders per day
-  revenueVelocity     Float // Revenue per day
-  bundleEffectiveness Float // Bundle performance score (0.0 to 1.0)
-  dataChangeRate      Float // Data change percentage
-  shopActivityLevel   String @db.VarChar(20) // 'low', 'medium', 'high'
-  userEngagement      Float // User engagement score (0.0 to 1.0)
-
-  // Additional metadata
-  reasoningSummary  String?  @db.Text // Summary of reasoning
-  analysisTimestamp DateTime @default(now())
-  createdAt         DateTime @default(now())
-
-  // Relations
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, decision])
-  @@index([shopId, createdAt])
-  @@index([nextAnalysisHours])
-  @@index([confidence])
-  @@map("HeuristicDecision")
-}
-
-model IncrementalAnalysisLog {
-  id        String   @id @default(cuid())
-  shopId    String
-  jobId     String
-  action    String
-  details   Json?
-  createdAt DateTime @default(now())
-  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, jobId])
-  @@index([shopId, action])
-  @@index([shopId, createdAt])
-}
-
-// New tracking models
-model TrackingEvent {
-  id         String   @id @default(cuid())
-  shopId     String
-  eventType  String   @db.VarChar(100) // "recommendation_displayed", "recommendation_clicked", etc.
-  sessionId  String   @db.VarChar(100)
-  trackingId String   @db.VarChar(100)
-  userId     String?  @db.VarChar(100)
-  timestamp  DateTime
-  metadata   Json
-  rawEvent   Json
-  createdAt  DateTime @default(now())
-
-  // Relations
-  shop Shop @relation(fields: [shopId], references: [id])
-
-  @@index([shopId, eventType])
-  @@index([sessionId])
-  @@index([trackingId])
-  @@index([timestamp])
-  @@index([userId])
-}
-
-// Billing models
-model BillingSubscription {
-  id               String   @id @default(cuid())
-  shopId           String
-  planName         String   @db.VarChar(100)
-  status           String   @db.VarChar(50) // "active", "cancelled", "declined", "frozen"
-  trialDays        Int      @default(14)
-  currentPeriodEnd DateTime
-  nextBillingDate  DateTime
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  // Relations
-  shop    Shop            @relation(fields: [shopId], references: [id])
-  charges BillingCharge[]
-
-  @@index([shopId, status])
-  @@index([status, nextBillingDate])
-}
-
-model BillingCharge {
-  id             String    @id @default(cuid())
-  shopId         String
-  subscriptionId String
-  amount         Float
-  currency       String    @default("USD") @db.VarChar(10)
-  description    String    @db.VarChar(500)
-  billingPeriod  String    @db.VarChar(50)
-  status         String    @db.VarChar(50) // "pending", "active", "cancelled", "declined"
-  createdAt      DateTime  @default(now())
-  dueDate        DateTime
-  paidAt         DateTime?
-
-  // Relations
-  shop         Shop                @relation(fields: [shopId], references: [id])
-  subscription BillingSubscription @relation(fields: [subscriptionId], references: [id])
-
-  @@index([shopId, status])
-  @@index([subscriptionId])
-  @@index([billingPeriod])
-  @@index([dueDate])
-}
-
-// ML Training Logs - Simple and Clean
-model MLTrainingLog {
-  id                  String    @id @default(cuid())
-  shopId              String
-  status              String    @default("started") // "started", "completed", "failed", "skipped"
-  startedAt           DateTime  @default(now())
-  completedAt         DateTime?
-  durationMs          Int? // Training duration in milliseconds
-  
-  // Data push counts
-  usersPushed         Int       @default(0)
-  itemsPushed         Int       @default(0)
-  feedbackPushed      Int       @default(0)
-  totalPushed         Int       @default(0)
-  
-  // Job configuration
-  jobType             String?   // "full_training", "incremental_training", "model_refresh", "custom"
-  pushStrategy        String?   // "full", "incremental"
-  triggerSource       String?   // "api", "scheduled", "manual"
-  
-  // Last push timestamps for incremental logic
-  usersLastPushAt     DateTime?
-  itemsLastPushAt     DateTime?
-  feedbackLastPushAt  DateTime?
-  
-  // Legacy fields (keeping for backward compatibility)
-  productsCount       Int       @default(0)
-  usersCount          Int       @default(0)
-  collectionsCount    Int       @default(0)
-  customerEventsCount Int       @default(0)
-  
-  error               String?   @db.Text
-  createdAt           DateTime  @default(now())
-  shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, status])
-  @@index([shopId, createdAt])
-  @@index([status, createdAt])
-  @@index([shopId, jobType])
-  @@map("MLTrainingLog")
-}
-
-model FeatureComputation {
-  id           String    @id @default(cuid())
-  shopId       String
-  jobId        String
-  status       String    @default("pending") // "pending", "computing", "completed", "failed"
-  featureCount Int       @default(0)
-  metadata     Json?
-  createdAt    DateTime  @default(now())
-  completedAt  DateTime?
-  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, status])
-  @@index([shopId, createdAt])
-  @@map("FeatureComputation")
-}
 
 model Session {
   id            String    @id
@@ -791,28 +331,14 @@ model Shop {
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
   lastAnalysisAt       DateTime?
-  analysisJobs         AnalysisJob[]
-  bundleAnalysis       BundleAnalysisResult[]
-  heuristicDecisions   HeuristicDecision[]
-  incrementalLogs      IncrementalAnalysisLog[]
   orderData            OrderData[]
   productData          ProductData[]
   customerData         CustomerData[]
   collectionData       CollectionData[]
-  analysisConfig       ShopAnalysisConfig?
-  trackedSales         TrackedSale[]
-  widgetConfig         WidgetConfiguration?
-  widgetEvents         WidgetEvent[]
-  trackingEvents       TrackingEvent[]
-  featureComputations  FeatureComputation[]
-  mlTrainingLogs       MLTrainingLog[]
-  billingSubscriptions BillingSubscription[]
-  billingCharges       BillingCharge[]
+
   userFeatures         UserFeatures[]
   productFeatures      ProductFeatures[]
   interactionFeatures  InteractionFeatures[]
-  productAnalytics     ProductAnalytics[]
-  customerAnalytics    CustomerAnalytics[]
 
   // Enhanced feature models
   collectionFeatures        CollectionFeatures[]
@@ -820,17 +346,11 @@ model Shop {
   sessionFeatures           SessionFeatures[]
   productPairFeatures       ProductPairFeatures[]
   searchProductFeatures     SearchProductFeatures[]
-  collectionAnalytics       CollectionAnalytics?
-  customerBehaviorAnalytics CustomerBehaviorAnalytics?
 
   // Behavioral events
   rawBehavioralEvents RawBehavioralEvents[]
   behavioralEvents    BehavioralEvents[]
   
-  // Recommendation tracking
-  recommendationSessions     RecommendationSession[]
-  attributionEvents         AttributionEvent[]
-  recommendationAttributions RecommendationAttribution[]
 }
 
 // ============= USER/CUSTOMER FEATURES =============
@@ -1037,7 +557,6 @@ model CustomerBehaviorFeatures {
 
   // Session Metrics
   sessionCount        Int    @default(0)
-  avgSessionDuration  Int? // seconds
   avgEventsPerSession Float?
 
   // Timestamps
@@ -1080,6 +599,33 @@ model CustomerBehaviorFeatures {
   diversityScore  Float @default(0)
   behavioralScore Float @default(0)
 
+  // NEW: Enhanced features from unified analytics
+  // Cross-session features
+  totalUnifiedSessions    Int   @default(0)
+  crossSessionSpanDays    Int   @default(0)
+  sessionFrequencyScore   Float @default(0)
+  deviceDiversity         Int   @default(0)
+  avgSessionDuration      Float? // Enhanced session duration from unified analytics
+
+  // Extension-specific features
+  phoenixInteractionCount    Int   @default(0)
+  apolloInteractionCount     Int   @default(0)
+  venusInteractionCount      Int   @default(0)
+  atlasInteractionCount      Int   @default(0)
+  extensionEngagementScore   Float @default(0)
+  recommendationClickRate    Float @default(0)
+  upsellInteractionCount     Int   @default(0)
+
+  // Enhanced session metrics
+  totalInteractionsInSessions Int   @default(0)
+  avgInteractionsPerSession   Float @default(0)
+  sessionEngagementScore      Float @default(0)
+
+  // Attribution features
+  multiTouchAttributionScore Float @default(0)
+  attributionRevenue         Float @default(0)
+  conversionPathLength       Int   @default(0)
+
   lastComputedAt DateTime @default(now())
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -1087,6 +633,9 @@ model CustomerBehaviorFeatures {
   @@index([shopId, engagementScore])
   @@index([shopId, behavioralScore])
   @@index([shopId, daysSinceLastEvent])
+  @@index([shopId, totalUnifiedSessions])
+  @@index([shopId, extensionEngagementScore])
+  @@index([shopId, multiTouchAttributionScore])
   @@map("CustomerBehaviorFeatures")
 }
 
@@ -1274,104 +823,9 @@ model UserIdentityLink {
 }
 
 // ============= RECOMMENDATION TRACKING =============
-
-model RecommendationSession {
-  id              String   @id @default(cuid())
-  shopId          String
-  extensionType   String   @db.VarChar(50) // venus, mercury, phoenix, atlas, apollo
-  context         String   @db.VarChar(50) // profile, checkout, product_page, cart, order_index
-  userId          String?  @db.VarChar(100)
-  sessionId       String   @db.VarChar(100) // Browser session ID
-  createdAt       DateTime @default(now())
-  expiresAt       DateTime
-  isActive        Boolean  @default(true)
-  
-  // Relations
-  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  interactions    RecommendationInteraction[]
-  
-  @@unique([shopId, sessionId, extensionType, context])
-  @@index([shopId, extensionType])
-  @@index([shopId, context])
-  @@index([shopId, createdAt])  // For dashboard date range queries
-  @@index([shopId, context, createdAt])  // For context performance with date ranges
-  @@index([expiresAt])
-  @@map("RecommendationSessions")
-}
-
-model RecommendationInteraction {
-  id                String   @id @default(cuid())
-  sessionId         String
-  productId         String   @db.VarChar(100)
-  interactionType   String   @db.VarChar(50) // view, click, add_to_cart, purchase
-  position          Int?
-  extensionType     String   @db.VarChar(50)
-  context           String   @db.VarChar(50)
-  timestamp         DateTime @default(now())
-  metadata          Json?
-  
-  // Relations
-  session           RecommendationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  
-  @@index([sessionId])
-  @@index([productId])
-  @@index([interactionType])
-  @@index([sessionId, interactionType])  // For session-based filtering
-  @@index([productId, interactionType])  // For product performance queries
-  @@index([timestamp])  // For time-based queries
-  @@map("RecommendationInteractions")
-}
-
-model AttributionEvent {
-  id                String   @id @default(cuid())
-  shopId            String
-  customerId        String   @db.VarChar(100)
-  sessionId         String   @db.VarChar(100)
-  productId         String   @db.VarChar(100)
-  position          Int
-  eventType         String   @db.VarChar(50) // 'product_viewed', 'add_to_cart', 'checkout_started', etc.
-  eventData         Json?    // Additional event metadata
-  orderId           String?  @db.VarChar(100) // Set when order is completed
-  linkedAt          DateTime?
-  createdAt         DateTime @default(now())
-  
-  // Relations
-  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  
-  @@index([shopId, customerId])
-  @@index([shopId, createdAt])  // For date range queries
-  @@index([sessionId])
-  @@index([orderId])
-  @@index([eventType])  // For event type filtering
-  @@map("AttributionEvents")
-}
-
-model RecommendationAttribution {
-  id                String   @id @default(cuid())
-  shopId            String
-  sessionId         String?  @db.VarChar(100) // From cart attributes
-  productId         String   @db.VarChar(100)
-  orderId           String   @db.VarChar(100)
-  extensionType     String   @db.VarChar(50)
-  context           String   @db.VarChar(50)
-  position          Int?
-  revenue           Float
-  attributionSource String   @db.VarChar(50) // 'cart_attributes', 'customer_behavior', etc.
-  confidenceScore   Float    @default(1.0)
-  attributionDate   DateTime @default(now())
-  status            String   @db.VarChar(50) @default("confirmed")
-  
-  // Relations
-  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  
-  @@unique([orderId, productId]) // One attribution per product per order
-  @@index([shopId, attributionDate])
-  @@index([shopId, status, attributionDate])  // For confirmed revenue queries
-  @@index([shopId, context, attributionDate])  // For context performance
-  @@index([shopId, productId, attributionDate])  // For product revenue queries
-  @@index([sessionId])
-  @@map("RecommendationAttributions")
-}
+// NOTE: Old recommendation tracking tables removed - replaced by unified analytics system
+// Old tables: RecommendationSession, RecommendationInteraction, AttributionEvent, RecommendationAttribution
+// New tables: UserSession, UserInteraction, PurchaseAttribution (see unified analytics section below)
 
 // ============= GORSE TABLES =============
 
@@ -1404,6 +858,121 @@ model GorseUsers {
   comment   String @default("") @db.Text
 
   @@map("users")
+}
+
+// ============= UNIFIED ANALYTICS TABLES =============
+
+model UserSession {
+  id                String   @id @default(cuid())
+  shopId            String   @map("shop_id") @db.VarChar(255)
+  customerId        String?  @map("customer_id") @db.VarChar(255)
+  browserSessionId  String   @map("browser_session_id") @db.VarChar(255)
+  status            String   @default("active") @db.VarChar(50)
+
+  // Timestamps
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  lastActive        DateTime @default(now()) @map("last_active") @db.Timestamptz
+  expiresAt         DateTime? @map("expires_at") @db.Timestamptz
+
+  // Metadata
+  userAgent         String?  @map("user_agent") @db.Text
+  ipAddress         String?  @map("ip_address") @db.VarChar(45)
+  referrer          String?  @db.Text
+
+  // Extension tracking
+  extensionsUsed    Json     @default("[]") @map("extensions_used")
+  totalInteractions Int      @default(0) @map("total_interactions")
+
+  // Relations
+  interactions      UserInteraction[]
+  attributions      PurchaseAttribution[]
+
+  @@unique([shopId, customerId, browserSessionId])
+  @@index([shopId])
+  @@index([customerId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+model UserInteraction {
+  id                      String   @id @default(cuid())
+  sessionId               String   @map("session_id") @db.VarChar(255)
+  extensionType           String   @map("extension_type") @db.VarChar(50)
+  context                 String   @db.VarChar(50)
+  interactionType         String   @map("interaction_type") @db.VarChar(50)
+
+  // User and session info
+  customerId              String?  @map("customer_id") @db.VarChar(255)
+  shopId                  String   @map("shop_id") @db.VarChar(255)
+
+  // Interaction details
+  productId               String?  @map("product_id") @db.VarChar(255)
+  collectionId            String?  @map("collection_id") @db.VarChar(255)
+  orderId                 String?  @map("order_id") @db.VarChar(255)
+
+  // Recommendation specific
+  recommendationId        String?  @map("recommendation_id") @db.VarChar(255)
+  recommendationPosition  Int?     @map("recommendation_position")
+  recommendationAlgorithm String?  @map("recommendation_algorithm") @db.VarChar(100)
+
+  // Interaction metadata
+  value                   Float?
+  quantity                Int?
+  metadata                Json     @default("{}")
+
+  // Timestamps
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@index([shopId])
+  @@index([extensionType])
+  @@index([interactionType])
+  @@index([productId])
+  @@index([createdAt])
+  @@map("user_interactions")
+}
+
+model PurchaseAttribution {
+  id                      String   @id @default(cuid())
+  sessionId               String   @map("session_id") @db.VarChar(255)
+  orderId                 String   @map("order_id") @db.VarChar(255)
+  customerId              String?  @map("customer_id") @db.VarChar(255)
+  shopId                  String   @map("shop_id") @db.VarChar(255)
+
+  // Attribution details
+  contributingExtensions  Json     @map("contributing_extensions")
+  attributionWeights      Json     @map("attribution_weights")
+
+  // Revenue tracking
+  totalRevenue            Decimal  @map("total_revenue") @db.Decimal(10, 2)
+  attributedRevenue       Json     @map("attributed_revenue")
+
+  // Interaction tracking
+  totalInteractions       Int      @map("total_interactions")
+  interactionsByExtension Json     @map("interactions_by_extension")
+
+  // Timestamps
+  purchaseAt              DateTime @map("purchase_at") @db.Timestamptz
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Metadata
+  attributionAlgorithm    String   @default("multi_touch") @map("attribution_algorithm") @db.VarChar(50)
+  metadata                Json     @default("{}")
+
+  // Relations
+  session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([orderId])
+  @@index([customerId])
+  @@index([shopId])
+  @@index([purchaseAt])
+  @@map("purchase_attributions")
 }
 
 

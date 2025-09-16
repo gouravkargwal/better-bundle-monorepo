@@ -46,6 +46,64 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(`📝 Note: ${payload.note || "No note"}`);
     console.log(`🔗 Note Attributes:`, payload.note_attributes || []);
 
+    // ===== CUSTOMER LINKING INTEGRATION =====
+    // Extract session ID from order note attributes for customer linking
+    const sessionId = payload.note_attributes?.find(
+      (attr) => attr.name === "session_id",
+    )?.value;
+
+    if (payload.customer && payload.customer.id && sessionId) {
+      console.log(
+        `🔗 Triggering customer linking for customer ${payload.customer.id} with session ${sessionId}`,
+      );
+
+      try {
+        // Call your Python worker's customer linking API
+        const response = await fetch(
+          `${process.env.PYTHON_WORKER_URL}/api/customer-identity/identify-customer`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              customer_id: payload.customer.id.toString(),
+              shop_id: shop,
+              trigger_event: "purchase",
+              customer_data: {
+                email: payload.customer.email,
+                phone: payload.customer.phone,
+                first_name: payload.customer.first_name,
+                last_name: payload.customer.last_name,
+                order_id: payload.id,
+                order_total: payload.total_price,
+                order_currency: payload.currency,
+              },
+            }),
+          },
+        );
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log(
+            `✅ Customer linking successful: ${result.data?.total_sessions_linked || 0} sessions linked`,
+          );
+        } else {
+          console.error(
+            `❌ Customer linking failed: ${response.status} ${response.statusText}`,
+          );
+        }
+      } catch (error) {
+        console.error(`❌ Error calling customer linking API:`, error);
+        // Don't fail the webhook if customer linking fails
+      }
+    } else {
+      console.log(
+        `ℹ️ Skipping customer linking - no customer ID or session ID found`,
+      );
+    }
+
     // Extract order data from payload
     const order = payload;
     const orderId = order.id?.toString();
