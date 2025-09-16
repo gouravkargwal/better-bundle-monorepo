@@ -33,7 +33,8 @@ class MainTableProcessingConsumer(BaseConsumer):
         )
 
         self.logger = get_logger(__name__)
-        self.main_table_service = MainTableStorageService()
+        # Enable debug_mode to capture detailed item-level errors (e.g., products extraction failures)
+        self.main_table_service = MainTableStorageService(debug_mode=True)
 
         # Job tracking
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
@@ -45,6 +46,8 @@ class MainTableProcessingConsumer(BaseConsumer):
         shop_id = message.get("shop_id")
         shop_domain = message.get("shop_domain")
         job_type = message.get("job_type")
+        requested_data_type = message.get("data_type")
+        requested_data_types = message.get("data_types")
 
         # Check if this is a main table processing job
         if job_type != "main_table_processing":
@@ -83,7 +86,13 @@ class MainTableProcessingConsumer(BaseConsumer):
 
         try:
             # Process the main table processing job
-            await self._process_main_table_job(job_id, shop_id, shop_domain)
+            await self._process_main_table_job(
+                job_id,
+                shop_id,
+                shop_domain,
+                data_type=requested_data_type,
+                data_types=requested_data_types,
+            )
 
             # Mark job as completed ONLY if processing succeeded
             await self._mark_job_completed(job_id)
@@ -101,7 +110,12 @@ class MainTableProcessingConsumer(BaseConsumer):
             raise
 
     async def _process_main_table_job(
-        self, job_id: str, shop_id: str, shop_domain: str
+        self,
+        job_id: str,
+        shop_id: str,
+        shop_domain: str,
+        data_type: str | None = None,
+        data_types: list[str] | None = None,
     ):
         """Process main table storage for a shop"""
         self.logger.info(
@@ -111,10 +125,49 @@ class MainTableProcessingConsumer(BaseConsumer):
             shop_domain=shop_domain,
         )
 
-        # Run main table storage with incremental processing
-        result = await self.main_table_service.store_all_data(
-            shop_id=shop_id, incremental=True
-        )
+        # If specific data_type(s) requested, process only those; else process all
+        if data_type or data_types:
+            types_to_process = [data_type] if data_type else list(set(data_types or []))
+            total_processed = 0
+            total_errors = 0
+            all_errors = []
+            for dt in types_to_process:
+                try:
+                    res = await self.main_table_service.store_data_type(
+                        data_type=dt, shop_id=shop_id, incremental=True
+                    )
+                    total_processed += res.processed_count
+                    total_errors += res.error_count
+                    all_errors.extend(res.errors)
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to store {dt}: {str(e)}",
+                        job_id=job_id,
+                        shop_id=shop_id,
+                    )
+                    total_errors += 1
+                    all_errors.append(str(e))
+
+            # Construct a result-like object
+            class _Result:
+                def __init__(self, processed_count, error_count, errors, success):
+                    self.processed_count = processed_count
+                    self.error_count = error_count
+                    self.errors = errors
+                    self.duration_ms = 0
+                    self.success = success
+
+            result = _Result(
+                processed_count=total_processed,
+                error_count=total_errors,
+                errors=all_errors,
+                success=total_errors == 0,
+            )
+        else:
+            # Run main table storage with incremental processing
+            result = await self.main_table_service.store_all_data(
+                shop_id=shop_id, incremental=True
+            )
 
         if result.success:
             self.logger.info(

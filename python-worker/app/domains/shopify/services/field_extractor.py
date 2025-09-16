@@ -25,20 +25,58 @@ class FieldExtractorService:
     def _detect_data_format(self, payload: Dict[str, Any]) -> str:
         """Detect if the payload is in webhook (REST) or GraphQL format"""
         # Check for webhook format indicators
-        if "admin_graphql_api_id" in payload:
+        if isinstance(payload, dict) and "admin_graphql_api_id" in payload:
             return "webhook"
 
-        # Check for GraphQL format indicators
-        if "data" in payload and "edges" in payload.get("data", {}).get("orders", {}):
-            return "graphql"
+        # Check for GraphQL format indicators across possible roots
+        try:
+            data_section = payload.get("data", {}) if isinstance(payload, dict) else {}
+            raw_data_section = (
+                payload.get("raw_data", {}) if isinstance(payload, dict) else {}
+            )
 
-        # Check for direct GraphQL node structure
-        if "edges" in payload:
-            return "graphql"
+            # Any nested edges strongly indicate GraphQL
+            if isinstance(payload, dict) and "edges" in payload:
+                return "graphql"
+            if isinstance(data_section, dict):
+                for key, value in data_section.items():
+                    if isinstance(value, dict) and "edges" in value:
+                        return "graphql"
+            if isinstance(raw_data_section, dict):
+                for key, value in raw_data_section.items():
+                    if isinstance(value, dict) and "edges" in value:
+                        return "graphql"
+
+            # Check common GraphQL product node shape: fields that contain edges
+            if isinstance(payload, dict):
+                for field in (
+                    "variants",
+                    "images",
+                    "metafields",
+                    "collections",
+                    "media",
+                ):
+                    value = payload.get(field)
+                    if isinstance(value, dict) and "edges" in value:
+                        return "graphql"
+        except Exception:
+            pass
 
         # Check for webhook direct structure (simple ID as number)
-        if "id" in payload and isinstance(payload["id"], (int, float)):
+        if (
+            isinstance(payload, dict)
+            and "id" in payload
+            and isinstance(payload["id"], (int, float))
+        ):
             return "webhook"
+
+        # Default to graphql if it looks like a single product node with gid id
+        if (
+            isinstance(payload, dict)
+            and isinstance(payload.get("id"), str)
+            and payload["id"].startswith("gid://shopify/")
+        ):
+            return "graphql"
 
         # Default to webhook format for raw data
         return "webhook"
@@ -252,6 +290,53 @@ class FieldExtractorService:
                 # Extract product data using generic method for GraphQL
                 product_data = self._extract_payload_data(payload, "product")
 
+                # Fallbacks for common GraphQL shapes when direct 'product' is absent
+                if isinstance(payload, dict):
+                    # Case: root is a node
+                    if (
+                        not product_data
+                        or not isinstance(product_data, dict)
+                        or not product_data.get("id")
+                    ) and isinstance(payload.get("node"), dict):
+                        node_obj = payload.get("node")
+                        if node_obj and node_obj.get("id"):
+                            product_data = node_obj
+
+                    # Case: products.edges under payload or payload.data
+                    if (
+                        not product_data
+                        or not isinstance(product_data, dict)
+                        or not product_data.get("id")
+                    ):
+                        products_block = payload.get("products") or payload.get(
+                            "data", {}
+                        ).get("products")
+                        if (
+                            isinstance(products_block, dict)
+                            and isinstance(products_block.get("edges"), list)
+                            and products_block["edges"]
+                        ):
+                            first_node = products_block["edges"][0].get("node", {})
+                            if isinstance(first_node, dict) and first_node.get("id"):
+                                product_data = first_node
+
+                    # Case: raw_data.products.edges (our stored wrapper sometimes contains raw_data)
+                    if (
+                        not product_data
+                        or not isinstance(product_data, dict)
+                        or not product_data.get("id")
+                    ) and isinstance(payload.get("raw_data"), dict):
+                        rd = payload["raw_data"]
+                        products_block = rd.get("products")
+                        if (
+                            isinstance(products_block, dict)
+                            and isinstance(products_block.get("edges"), list)
+                            and products_block["edges"]
+                        ):
+                            first_node = products_block["edges"][0].get("node", {})
+                            if isinstance(first_node, dict) and first_node.get("id"):
+                                product_data = first_node
+
             if (
                 not product_data
                 or not isinstance(product_data, dict)
@@ -259,24 +344,47 @@ class FieldExtractorService:
             ):
                 return None
 
-            # Extract product ID based on format
+            # Extract product ID based on format, with fallbacks
             if data_format == "webhook":
-                # Webhook format: ID is a simple number
-                product_id = str(product_data.get("id", ""))
+                # Webhook format: ID is a simple number; fallback to admin_graphql_api_id
+                raw_id = product_data.get("id") or product_data.get(
+                    "admin_graphql_api_id"
+                )
+                product_id = (
+                    str(raw_id)
+                    if raw_id and not isinstance(raw_id, str)
+                    else (raw_id or "")
+                )
+                # Normalize if it's a GID string
+                if isinstance(product_id, str) and product_id.startswith(
+                    "gid://shopify/"
+                ):
+                    product_id = self._extract_shopify_id(product_id) or product_id
             else:
-                # GraphQL format: ID is a GID
-                product_id = self._extract_shopify_id(product_data.get("id", ""))
+                # GraphQL format: ID is a GID; fallback to admin_graphql_api_id
+                raw_id = product_data.get("id") or product_data.get(
+                    "admin_graphql_api_id"
+                )
+                product_id = self._extract_shopify_id(raw_id or "")
 
             if not product_id:
                 return None
 
             # Extract data based on format
             if data_format == "webhook":
-                # Webhook format: direct arrays
+                # Webhook format: direct arrays; normalize if dict-with-edges sneaks in
                 variants = product_data.get("variants", [])
+                if isinstance(variants, dict):
+                    variants = self._extract_graphql_edges(variants)
                 images = product_data.get("images", [])
+                if isinstance(images, dict):
+                    images = self._extract_graphql_edges(images)
                 collections = product_data.get("collections", [])
+                if isinstance(collections, dict):
+                    collections = self._extract_graphql_edges(collections)
                 metafields = product_data.get("metafields", [])
+                if isinstance(metafields, dict):
+                    metafields = self._extract_graphql_edges(metafields)
                 options = product_data.get("options", [])
             else:
                 # GraphQL format: edge structure
@@ -292,18 +400,11 @@ class FieldExtractorService:
 
             # Get main image URL for fast access
             main_image_url = None
-            if images:
+            # Safely compute main image URL
+            if isinstance(images, list) and len(images) > 0:
                 main_image = images[0]
-                # Handle both dict and list formats
                 if isinstance(main_image, dict):
-                    main_image_url = main_image.get("url")
-                elif isinstance(main_image, list) and main_image:
-                    # If main_image is a list, take the first item
-                    main_image_url = (
-                        main_image[0].get("url")
-                        if isinstance(main_image[0], dict)
-                        else None
-                    )
+                    main_image_url = main_image.get("url") or main_image.get("src")
 
             # Process tags using generic method
             tags = self._process_tags(product_data.get("tags", []))

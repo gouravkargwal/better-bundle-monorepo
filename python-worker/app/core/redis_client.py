@@ -256,6 +256,8 @@ class RedisStreamsManager:
         shop_domain: str,
         access_token: str,
         job_type: str = "data_collection",
+        data_type: str | None = None,
+        data_types: list[str] | None = None,
     ) -> str:
         """Publish a data job event"""
         event_data = {
@@ -266,6 +268,12 @@ class RedisStreamsManager:
             "job_type": job_type,
             "status": "queued",
         }
+
+        # Optional scoping to specific storage/processing types
+        if data_type:
+            event_data["data_type"] = data_type
+        if data_types:
+            event_data["data_types"] = data_types
 
         return await self.publish_event(settings.DATA_JOB_STREAM, event_data)
 
