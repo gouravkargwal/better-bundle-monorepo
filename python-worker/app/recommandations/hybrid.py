@@ -299,24 +299,58 @@ class HybridRecommendationService:
                 }
             return result
 
-        elif source == "session_recommendations" and session_id:
+        elif source == "session_recommendations":
             logger.info(
                 f"🎯 Processing session_recommendations | session_id={session_id} | user_id={user_id}"
             )
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
+
+            # We allow session recommendations even without an explicit session_id
+            # as long as we have session-derived metadata (cart/recent views/context products).
+            has_session_context = False
+            if metadata:
+                has_session_context = any(
+                    bool(metadata.get(key))
+                    for key in [
+                        "cart_contents",
+                        "recent_views",
+                        "recent_adds",
+                        "cart_data",
+                        "product_ids",
+                    ]
+                )
+
+            # If session_id is missing, synthesize a lightweight one for logging/comment purposes
+            effective_session_id = session_id or "auto"
+
             session_data = self._build_session_data(
-                session_id, prefixed_user_id, metadata
+                session_id=effective_session_id,
+                user_id=prefixed_user_id,
+                metadata=metadata,
+                shop_id=shop_id,
             )
             logger.info(f"📊 Session data built: {session_data}")
+
+            if not session_data or (not session_id and not has_session_context):
+                logger.warning(
+                    "⚠️ Skipping session_recommendations: no session_id and no session context in metadata"
+                )
+                return {
+                    "success": False,
+                    "items": [],
+                    "source": "gorse_session_recommendations_skipped",
+                    "error": "No session_id or session context",
+                }
+
             result = await self.gorse_client.get_session_recommendations(
                 session_data=session_data, n=limit, category=category
             )
             logger.info(f"📊 Session recommendations result: {result}")
-            if result["success"]:
+            if result.get("success"):
                 # Check if we actually got recommendations
                 recommendations = result.get("recommendations", [])
-                if recommendations and len(recommendations) > 0:
+                if recommendations:
                     logger.info(
                         f"✅ Session recommendations successful | count={len(recommendations)}"
                     )
@@ -325,21 +359,19 @@ class HybridRecommendationService:
                         "items": recommendations,
                         "source": "gorse_session_recommendations",
                     }
-                else:
-                    logger.warning(
-                        f"⚠️ Session recommendations returned empty results | session_data_count={len(session_data)}"
-                    )
-                    return {
-                        "success": False,
-                        "items": [],
-                        "source": "gorse_session_recommendations_empty",
-                        "error": "No recommendations returned from session data",
-                    }
-            else:
                 logger.warning(
-                    f"⚠️ Session recommendations failed | error={result.get('error', 'Unknown error')}"
+                    f"⚠️ Session recommendations returned empty results | session_data_count={len(session_data)}"
                 )
-                return result
+                return {
+                    "success": False,
+                    "items": [],
+                    "source": "gorse_session_recommendations_empty",
+                    "error": "No recommendations returned from session data",
+                }
+            logger.warning(
+                f"⚠️ Session recommendations failed | error={result.get('error', 'Unknown error')}"
+            )
+            return result
 
         elif source == "popular":
             result = await self.gorse_client.get_popular_items(
@@ -394,6 +426,7 @@ class HybridRecommendationService:
         session_id: str,
         user_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        shop_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Build session data for Gorse session recommendations as array of feedback objects"""
         feedback_objects = []
@@ -412,7 +445,9 @@ class HybridRecommendationService:
             if metadata.get("cart_contents"):
                 for item_id in metadata["cart_contents"]:
                     cart_feedback = base_feedback.copy()
-                    cart_feedback["ItemId"] = item_id
+                    cart_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}" if shop_id else item_id
+                    )
                     cart_feedback["FeedbackType"] = "add_to_cart"
                     cart_feedback["Comment"] = f"cart_item_{item_id}"
                     feedback_objects.append(cart_feedback)
@@ -421,7 +456,9 @@ class HybridRecommendationService:
             if metadata.get("recent_views"):
                 for item_id in metadata["recent_views"][:10]:  # Last 10
                     view_feedback = base_feedback.copy()
-                    view_feedback["ItemId"] = item_id
+                    view_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}" if shop_id else item_id
+                    )
                     view_feedback["FeedbackType"] = "view"
                     view_feedback["Comment"] = f"recent_view_{item_id}"
                     feedback_objects.append(view_feedback)
@@ -430,7 +467,9 @@ class HybridRecommendationService:
             if metadata.get("product_ids"):
                 for product_id in metadata["product_ids"][:5]:  # Limit to 5 products
                     product_feedback = base_feedback.copy()
-                    product_feedback["ItemId"] = product_id
+                    product_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{product_id}" if shop_id else product_id
+                    )
                     product_feedback["FeedbackType"] = "view"
                     product_feedback["Comment"] = f"context_product_{product_id}"
                     feedback_objects.append(product_feedback)
@@ -441,7 +480,9 @@ class HybridRecommendationService:
                     if line.get("merchandise", {}).get("product", {}).get("id"):
                         product_id = line["merchandise"]["product"]["id"]
                         cart_feedback = base_feedback.copy()
-                        cart_feedback["ItemId"] = product_id
+                        cart_feedback["ItemId"] = (
+                            f"shop_{shop_id}_{product_id}" if shop_id else product_id
+                        )
                         cart_feedback["FeedbackType"] = "add_to_cart"
                         cart_feedback["Comment"] = f"cart_product_{product_id}"
                         feedback_objects.append(cart_feedback)

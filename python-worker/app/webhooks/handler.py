@@ -170,13 +170,6 @@ class WebhookHandler:
                 event_id=event_id, shop_id=shop_domain, payload=payload
             )
 
-            logger.info(
-                "Behavioral event queued for processing.",
-                event_id=event_id,
-                shop_domain=shop_domain,
-                message_id=message_id,
-            )
-
             return {
                 "status": "queued",
                 "event_id": event_id,
@@ -217,12 +210,6 @@ class WebhookHandler:
                 # Backfill customer_id for existing events
                 await self._backfill_customer_id(shop_id, client_id, customer_id)
 
-                logger.info(f"Created customer link: {client_id} → {customer_id}")
-            else:
-                logger.info(
-                    f"Customer link already exists: {client_id} → {customer_id}"
-                )
-
         except Exception as e:
             logger.error(f"Failed to handle customer linking: {e}")
 
@@ -241,10 +228,6 @@ class WebhookHandler:
                     "customerId": customer_id,
                     "timestamp": now_utc(),  # Update timestamp to trigger incremental processing
                 },
-            )
-
-            logger.info(
-                f"Backfilled {result} events for {client_id} → {customer_id} (updated timestamps for incremental processing)"
             )
 
         except Exception as e:
@@ -286,7 +269,6 @@ class WebhookHandler:
 
             # Step 1: Save raw payload immediately (no validation)
             await self.repository.save_raw_behavioral_event(shop_db_id, payload)
-            logger.info(f"Raw payload saved for shop {shop_domain}")
 
             # Step 2: Process attribution from raw event (before validation)
             # This ensures attribution is captured even if validation fails
@@ -301,9 +283,6 @@ class WebhookHandler:
                     event_data=payload,
                     event_type=payload.get("name"),
                 )
-
-                if attribution_event:
-                    logger.info(f"Attribution event created: {attribution_event.id}")
 
             except Exception as e:
                 logger.warning(
@@ -330,9 +309,6 @@ class WebhookHandler:
                             validated_event.data.clientId,
                             validated_event.data.customerId,
                         )
-                        logger.info(
-                            f"Customer linking processed for {validated_event.data.clientId} → {validated_event.data.customerId} (not saved to behavioral events)"
-                        )
                         # Skip saving to behavioral events table - this is just a linking event
                         return
                     else:
@@ -353,21 +329,12 @@ class WebhookHandler:
                         if existing_customer_id:
                             # Update the validated event with the linked customer ID
                             validated_event.customer_id = existing_customer_id
-                            logger.info(
-                                f"Auto-linked event {validated_event.id} to customer {existing_customer_id}"
-                            )
 
                 # Save structured data
                 await self.repository.save_structured_behavioral_event(
                     shop_db_id, payload, validated_event
                 )
 
-                logger.info(
-                    "Successfully processed behavioral event.",
-                    event_id=validated_event.id,
-                    type=validated_event.name,
-                    shop_domain=shop_domain,
-                )
                 return {"status": "success"}
 
             except ValidationError as e:
@@ -430,9 +397,6 @@ class WebhookHandler:
 
         # Check shop-level rate limit
         if len(self._rate_limiters[shop_id]) >= self.rate_limit_max_requests:
-            logger.warning(
-                f"Shop {shop_id} rate limited: {len(self._rate_limiters[shop_id])} requests in window"
-            )
             self._metrics["rate_limited_requests"] += 1
             return False
 
@@ -441,9 +405,6 @@ class WebhookHandler:
             client_id
             and len(self._client_rate_limiters[client_id]) >= self.rate_limit_per_client
         ):
-            logger.warning(
-                f"Client {client_id} rate limited: {len(self._client_rate_limiters[client_id])} requests in window"
-            )
             self._metrics["rate_limited_requests"] += 1
             return False
 
@@ -481,9 +442,6 @@ class WebhookHandler:
                 event_id for event_id in event_ids if event_id not in existing_ids
             ]
 
-            logger.info(
-                f"Found {len(unprocessed_ids)} unprocessed events out of {len(event_ids)} total"
-            )
             return unprocessed_ids
 
         except Exception as e:
@@ -533,14 +491,7 @@ class WebhookHandler:
             ]
 
             if not unprocessed_events:
-                logger.info(
-                    f"All {len(events)} events already processed for shop {shop_id}"
-                )
                 return {"status": "success", "processed": 0, "skipped": len(events)}
-
-            logger.info(
-                f"Processing {len(unprocessed_events)} unprocessed events out of {len(events)} total"
-            )
 
             # Process events in smaller sub-batches to avoid overwhelming the database
             sub_batch_size = 20
@@ -572,11 +523,6 @@ class WebhookHandler:
             self._metrics["events_batched"] += len(events)
             if error_count > 0:
                 self._metrics["processing_errors"] += error_count
-
-            logger.info(
-                f"Batch processing completed: {processed_count} processed, {error_count} errors, "
-                f"{len(events) - len(unprocessed_events)} skipped in {duration:.2f}s"
-            )
 
             return {
                 "status": "success",
@@ -629,7 +575,6 @@ class WebhookHandler:
 
             if events:
                 result = await self._process_event_batch(shop_id, events)
-                logger.info(f"Batch processing result for shop {shop_id}: {result}")
 
     async def queue_behavioral_event_batch(
         self, shop_domain: str, payload: Dict[str, Any], force_immediate: bool = False
@@ -877,7 +822,6 @@ class WebhookHandler:
 
             # Cancel any remaining background tasks
             if self._background_tasks:
-                logger.info(f"Canceling {len(self._background_tasks)} background tasks")
                 for task in self._background_tasks:
                     if not task.done():
                         task.cancel()
@@ -893,8 +837,6 @@ class WebhookHandler:
                     logger.warning(
                         "Timeout waiting for background tasks during shutdown"
                     )
-
-            logger.info("Webhook handler shutdown completed")
 
             return {
                 "status": "success",

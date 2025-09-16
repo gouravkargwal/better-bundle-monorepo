@@ -1276,9 +1276,6 @@ async def handle_behavioral_event(request: Request):
         payload = await request.json()
         shop_domain = payload.get("shop_domain")
 
-        logger.info(f"Received behavioral event for shop domain: {shop_domain}")
-        logger.info(f"Payload: {payload}")
-
         # Validate shop domain
         if not shop_domain:
             raise HTTPException(

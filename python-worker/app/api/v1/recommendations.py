@@ -743,19 +743,29 @@ async def get_recommendations(request: RecommendationRequest):
 
         # Auto-detect category if missing and product_ids are provided
         category = request.category
-        if not category and request.product_ids and len(request.product_ids) > 0:
-            # Use first product for category detection
-            first_product_id = request.product_ids[0]
-            logger.debug(f"🔍 Auto-detecting category for product {first_product_id}")
-            category = await category_service.get_product_category(
-                first_product_id, shop.id
-            )
-            if category:
+        if not category and request.product_ids:
+            # Detect categories across all provided products (up to 10)
+            detected_categories = set()
+            for pid in request.product_ids[:10]:
+                try:
+                    cat = await category_service.get_product_category(pid, shop.id)
+                    if cat:
+                        detected_categories.add(cat)
+                except Exception as e:
+                    logger.debug(f"⚠️ Category detection failed for product {pid}: {e}")
+            if len(detected_categories) == 1:
+                category = next(iter(detected_categories))
                 logger.info(
-                    f"✅ Auto-detected category '{category}' for product {first_product_id}"
+                    f"✅ Auto-detected single category '{category}' from product_ids"
+                )
+            elif len(detected_categories) > 1:
+                # Mixed categories: avoid over-filtering
+                category = None
+                logger.info(
+                    f"🧭 Mixed-category context detected; disabling category filter | categories={list(detected_categories)[:5]}"
                 )
             else:
-                logger.debug(f"⚠️ No category detected for product {first_product_id}")
+                logger.debug("⚠️ No categories detected from provided product_ids")
 
         # Determine products to exclude from recommendations
         exclude_items = []
@@ -911,13 +921,53 @@ async def get_recommendations(request: RecommendationRequest):
                     f"📊 Enhanced metadata with session data | cart_items={len(session_data.get('cart_contents', []))} | views={len(session_data.get('recent_views', []))}"
                 )
 
+            # If the cart spans multiple categories, avoid over-filtering by category
+            effective_category = category
+            try:
+                product_types = (
+                    enhanced_metadata.get("product_types")
+                    if enhanced_metadata
+                    else None
+                )
+                if isinstance(product_types, list):
+                    unique_types = {t for t in product_types if t}
+                    if len(unique_types) > 1:
+                        logger.info(
+                            f"🧭 Mixed-category cart detected; disabling category filter | categories={list(unique_types)[:5]}"
+                        )
+                        effective_category = None
+            except Exception:
+                # Non-fatal: fallback to original category
+                pass
+
+            # Fallback session_id from cart attributes if not provided
+            effective_session_id = request.session_id
+            try:
+                if (
+                    not effective_session_id
+                    and enhanced_metadata
+                    and enhanced_metadata.get("cart_data")
+                ):
+                    attributes = enhanced_metadata["cart_data"].get("attributes", [])
+                    if isinstance(attributes, list):
+                        for attr in attributes:
+                            if (
+                                isinstance(attr, dict)
+                                and attr.get("key") == "bb_recommendation_session_id"
+                                and attr.get("value")
+                            ):
+                                effective_session_id = attr["value"]
+                                break
+            except Exception:
+                pass
+
             result = await hybrid_service.blend_recommendations(
                 context=request.context,
                 shop_id=shop.id,
                 product_ids=request.product_ids,
                 user_id=request.user_id,
-                session_id=request.session_id,
-                category=category,  # Use auto-detected category
+                session_id=effective_session_id,
+                category=effective_category,  # Mixed-category aware
                 limit=request.limit,
                 metadata=enhanced_metadata,
                 exclude_items=exclude_items,

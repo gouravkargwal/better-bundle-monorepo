@@ -56,7 +56,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get shop ID from database
-    const shopRecord = await prisma.shop.findUnique({
+    // Use findFirst to avoid depending on DB unique constraint during local/dev
+    const shopRecord = await prisma.shop.findFirst({
       where: { shopDomain: shop },
       select: { id: true },
     });
@@ -66,32 +67,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Store raw order payment data immediately (upsert to prevent duplicates)
-    await prisma.rawOrder.upsert({
-      where: {
-        shopId_shopifyId: {
-          shopId: shopRecord.id,
-          shopifyId: orderId,
-        },
-      },
-      update: {
-        payload: order,
-        shopifyUpdatedAt: order.updated_at
-          ? new Date(order.updated_at)
-          : new Date(),
-      },
-      create: {
-        shopId: shopRecord.id,
-        payload: order,
-        shopifyId: orderId,
-        shopifyCreatedAt: order.created_at
-          ? new Date(order.created_at)
-          : new Date(),
-        shopifyUpdatedAt: order.updated_at
-          ? new Date(order.updated_at)
-          : new Date(),
-      },
+    // Upsert without composite unique (shopifyId is nullable in schema)
+    const existing = await prisma.rawOrder.findFirst({
+      where: { shopId: shopRecord.id, shopifyId: orderId },
+      select: { id: true },
     });
+
+    if (existing) {
+      await prisma.rawOrder.update({
+        where: { id: existing.id },
+        data: {
+          payload: order,
+          shopifyUpdatedAt: order.updated_at
+            ? new Date(order.updated_at)
+            : new Date(),
+        },
+      });
+    } else {
+      await prisma.rawOrder.create({
+        data: {
+          shopId: shopRecord.id,
+          payload: order,
+          shopifyId: orderId,
+          shopifyCreatedAt: order.created_at
+            ? new Date(order.created_at)
+            : new Date(),
+          shopifyUpdatedAt: order.updated_at
+            ? new Date(order.updated_at)
+            : new Date(),
+        },
+      });
+    }
 
     console.log(
       `✅ Order ${orderId} payment confirmed in raw table for shop ${shop}`,
