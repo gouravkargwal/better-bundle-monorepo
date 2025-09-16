@@ -5,7 +5,7 @@ import prisma from "../db.server";
 import { getRedisStreamService } from "../services/redis-stream.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log("🚀 Webhook request received - orders/updated");
+  console.log("🚀 Webhook request received - refunds/create");
   console.log("📋 Request method:", request.method);
   console.log("📋 Request URL:", request.url);
   console.log(
@@ -36,23 +36,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     console.log(`🔔 ${topic} webhook received for ${shop}`);
-    console.log(`📦 Order ID: ${payload.id}`);
-    console.log(`💰 Total: ${payload.total_price}`);
-    console.log(`📧 Customer: ${payload.email || "Guest"}`);
+    console.log(`📦 Refund ID: ${payload.id}`);
+    console.log(`📦 Order ID: ${payload.order_id}`);
+    console.log(
+      `💰 Refund Amount: ${payload.transactions?.reduce((sum: number, t: any) => sum + parseFloat(t.amount || 0), 0) || 0}`,
+    );
     console.log(`📅 Created: ${payload.created_at}`);
-    console.log(`🔄 Financial Status: ${payload.financial_status}`);
-    console.log(`📋 Fulfillment Status: ${payload.fulfillment_status}`);
-    console.log(`🏷️ Tags: ${payload.tags}`);
     console.log(`📝 Note: ${payload.note || "No note"}`);
-    console.log(`🔗 Note Attributes:`, payload.note_attributes || []);
+    console.log(`🔄 Restock: ${payload.restock}`);
+    console.log(
+      `📋 Refund Line Items: ${payload.refund_line_items?.length || 0} items`,
+    );
 
-    // Extract order data from payload
-    const order = payload;
-    const orderId = order.id?.toString();
+    // Extract refund data from payload
+    const refund = payload;
+    const refundId = refund.id?.toString();
+    const orderId = refund.order_id?.toString();
 
-    if (!orderId) {
-      console.error("❌ No order ID found in payload");
-      return json({ error: "No order ID found" }, { status: 400 });
+    if (!refundId || !orderId) {
+      console.error("❌ No refund ID or order ID found in payload");
+      return json({ error: "No refund ID or order ID found" }, { status: 400 });
     }
 
     // Get shop ID from database
@@ -67,74 +70,81 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Upsert without composite unique (shopifyId is nullable in schema)
+    // Store refund data in RawOrder table (wrapping the full refund payload)
     const existing = await prisma.rawOrder.findFirst({
       where: { shopId: shopRecord.id, shopifyId: orderId },
-      select: { id: true },
+      select: { id: true, payload: true },
     });
 
     if (existing) {
+      // Update existing order with refund information
+      const existingPayload = existing.payload as any;
+      const updatedPayload = {
+        ...existingPayload,
+        refunds: [...(existingPayload.refunds || []), refund],
+      };
+
       await prisma.rawOrder.update({
         where: { id: existing.id },
         data: {
-          payload: order,
-          shopifyUpdatedAt: order.updated_at
-            ? new Date(order.updated_at)
+          payload: updatedPayload,
+          shopifyUpdatedAt: refund.created_at
+            ? new Date(refund.created_at)
             : new Date(),
         },
       });
     } else {
+      // Create new order record with refund data
       await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,
-          payload: order,
+          payload: { refunds: [refund] },
           shopifyId: orderId,
-          shopifyCreatedAt: order.created_at
-            ? new Date(order.created_at)
+          shopifyCreatedAt: refund.created_at
+            ? new Date(refund.created_at)
             : new Date(),
-          shopifyUpdatedAt: order.updated_at
-            ? new Date(order.updated_at)
+          shopifyUpdatedAt: refund.created_at
+            ? new Date(refund.created_at)
             : new Date(),
         },
       });
     }
 
-    console.log(`✅ Order ${orderId} updated in raw table for shop ${shop}`);
+    console.log(
+      `✅ Refund ${refundId} for order ${orderId} stored in raw table for shop ${shop}`,
+    );
 
-    // Publish to Redis Stream for real-time processing (only for significant updates)
+    // Publish to Redis Stream for real-time processing
     try {
       const streamService = await getRedisStreamService();
 
-      // Only publish if this is a significant status change
-      const currentStatus = payload.financial_status;
-      const shouldPublish =
-        currentStatus === "paid" ||
-        currentStatus === "partially_paid" ||
-        currentStatus === "refunded";
+      const totalRefundAmount =
+        refund.transactions?.reduce(
+          (sum: number, t: any) => sum + parseFloat(t.amount || 0),
+          0,
+        ) || 0;
 
-      if (shouldPublish) {
-        const streamData = {
-          event_type: "order_updated",
-          shop_id: shopRecord.id,
-          shopify_id: orderId,
-          timestamp: new Date().toISOString(),
-          order_status: currentStatus,
-        };
+      const streamData = {
+        event_type: "refund_created",
+        shop_id: shopRecord.id,
+        shopify_id: orderId,
+        refund_id: refundId,
+        timestamp: new Date().toISOString(),
+        refund_amount: totalRefundAmount,
+        refund_note: refund.note || "",
+        refund_restock: refund.restock || false,
+      };
 
-        const messageId = await streamService.publishShopifyEvent(streamData);
+      const messageId = await streamService.publishShopifyEvent(streamData);
 
-        console.log(`📡 Published to Redis Stream:`, {
-          messageId,
-          eventType: streamData.event_type,
-          shopId: streamData.shop_id,
-          shopifyId: streamData.shopify_id,
-          orderStatus: streamData.order_status,
-        });
-      } else {
-        console.log(
-          `⏭️ Skipping Redis Stream publish for minor update: ${currentStatus}`,
-        );
-      }
+      console.log(`📡 Published to Redis Stream:`, {
+        messageId,
+        eventType: streamData.event_type,
+        shopId: streamData.shop_id,
+        shopifyId: streamData.shopify_id,
+        refundId: streamData.refund_id,
+        refundAmount: streamData.refund_amount,
+      });
     } catch (streamError) {
       console.error(`❌ Error publishing to Redis Stream:`, streamError);
       // Don't fail the webhook if stream publishing fails
@@ -142,9 +152,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({
       success: true,
+      refundId: refundId,
       orderId: orderId,
       shopId: shopRecord.id,
-      message: "Order data updated successfully",
+      message: "Refund data stored successfully",
     });
   } catch (error) {
     console.error(`❌ Error processing ${topic} webhook:`, error);

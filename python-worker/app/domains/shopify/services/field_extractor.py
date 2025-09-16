@@ -75,6 +75,19 @@ class FieldExtractorService:
             # Handle different data formats
             if data_format == "webhook":
                 # For webhook format, order data is directly in payload
+                # But check if this is a refund webhook payload (contains refunds array)
+                if "refunds" in payload:
+                    # Check if order_id is at top level or in first refund
+                    order_id = payload.get("order_id")
+                    if not order_id and payload.get("refunds"):
+                        # Extract order_id from first refund
+                        order_id = payload["refunds"][0].get("order_id")
+
+                    if order_id:
+                        # This is a refund webhook payload - extract refund data
+                        return self._extract_refund_data(payload, shop_id)
+
+                # Regular order webhook payload (whether it has refunds or not)
                 order_data = payload
             else:
                 # Extract order data using generic method for GraphQL
@@ -756,4 +769,52 @@ class FieldExtractorService:
         try:
             return str(collection_data.get("id", ""))
         except Exception:
+            return None
+
+    def _extract_refund_data(
+        self, payload: Dict[str, Any], shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Extract order data from a refund webhook payload"""
+        try:
+            # Get the order ID from the refund payload
+            order_id = payload.get("order_id")
+            if not order_id and payload.get("refunds"):
+                # Extract order_id from first refund
+                order_id = payload["refunds"][0].get("order_id")
+
+            order_id = str(order_id) if order_id else ""
+            if not order_id:
+                self.logger.warning("No order_id found in refund payload")
+                return None
+
+            # Calculate total refund amount from transactions
+            total_refund_amount = 0.0
+            refunds = payload.get("refunds", [])
+
+            for refund in refunds:
+                transactions = refund.get("transactions", [])
+                for transaction in transactions:
+                    amount = transaction.get("amount", "0")
+                    try:
+                        total_refund_amount += float(amount)
+                    except (ValueError, TypeError):
+                        self.logger.warning(f"Invalid refund amount: {amount}")
+
+            # Extract refund note
+            refund_note = ""
+            if refunds:
+                refund_note = refunds[0].get("note", "")
+
+            # For refunds, we only return the fields that need to be updated
+            # The upsert logic will merge these with existing order data
+            return {
+                "shopId": shop_id,
+                "orderId": order_id,  # This is the actual order ID, not refund ID
+                "totalRefundedAmount": total_refund_amount,
+                "note": refund_note,
+                "financialStatus": "refunded" if total_refund_amount > 0 else "paid",
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to extract refund data: {str(e)}")
             return None

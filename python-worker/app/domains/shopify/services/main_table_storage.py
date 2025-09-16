@@ -552,10 +552,24 @@ class MainTableStorageService:
             field_mapping = DATA_TYPE_CONFIG[data_type]["field_mapping"]
             db_data = {}
 
+            # Check if this is a refund update (has totalRefundedAmount but missing required fields)
+            is_refund_update = (
+                data_type == "orders"
+                and "totalRefundedAmount" in cleaned_data
+                and "totalAmount" not in cleaned_data
+            )
+
             # Add required fields
             for field in field_mapping["required_fields"]:
                 if field in cleaned_data:
                     db_data[field] = cleaned_data[field]
+                elif is_refund_update:
+                    # For refund updates, skip missing required fields
+                    # The upsert will merge with existing order data
+                    self.logger.info(
+                        f"Skipping required field '{field}' for refund update"
+                    )
+                    continue
                 else:
                     error_msg = f"Missing required field '{field}' for {data_type} data"
                     self.logger.error(error_msg)
@@ -596,31 +610,46 @@ class MainTableStorageService:
         table_name = config["main_table"]
         id_field = config["id_field"]
 
-        try:
-            # Try batch create first for new records (without skip_duplicates for proper error handling)
-            create_data = [
-                self._convert_to_db_format(data_type, item) for item in items
-            ]
+        # Check if any items are refund updates (partial updates)
+        has_refund_updates = any(
+            data_type == "orders"
+            and "totalRefundedAmount" in item
+            and "totalAmount" not in item
+            for item in items
+        )
 
-            # Don't use skip_duplicates - we want to know about conflicts and handle them with upsert
-            await getattr(db, table_name.lower()).create_many(data=create_data)
+        if not has_refund_updates:
+            try:
+                # Try batch create first for new records (without skip_duplicates for proper error handling)
+                create_data = [
+                    self._convert_to_db_format(data_type, item) for item in items
+                ]
 
-            # Extract attribution for orders after successful storage
-            if data_type == "orders":
-                await self._extract_order_attributions(items)
+                # Don't use skip_duplicates - we want to know about conflicts and handle them with upsert
+                await getattr(db, table_name.lower()).create_many(data=create_data)
 
-        except Exception as e:
-            # Fallback to individual upserts if batch insert fails
-            import traceback
+                # Extract attribution for orders after successful storage
+                if data_type == "orders":
+                    await self._extract_order_attributions(items)
 
-            self.logger.warning(
-                f"{data_type} batch insert failed, falling back to individual upserts: {str(e)}"
-            )
-            self.logger.warning(
-                f"{data_type} batch insert error details: {type(e).__name__}"
-            )
-            self.logger.warning(
-                f"{data_type} batch insert traceback: {traceback.format_exc()}"
+            except Exception as e:
+                # Fallback to individual upserts if batch insert fails
+                import traceback
+
+                self.logger.warning(
+                    f"{data_type} batch insert failed, falling back to individual upserts: {str(e)}"
+                )
+                self.logger.warning(
+                    f"{data_type} batch insert error details: {type(e).__name__}"
+                )
+                self.logger.warning(
+                    f"{data_type} batch insert traceback: {traceback.format_exc()}"
+                )
+
+        # Always do individual upserts for refund updates or if batch insert failed
+        if has_refund_updates:
+            self.logger.info(
+                f"Using individual upserts for {data_type} (contains refund updates)"
             )
 
             # 🚀 OPTIMIZATION: Parallel individual upserts for better performance
@@ -632,13 +661,42 @@ class MainTableStorageService:
 
                     # Manual upsert logic - try update first, then create if not exists
                     table_accessor = getattr(db, table_name.lower())
-                    where_clause = {
-                        "shopId_"
-                        + id_field: {
+
+                    # Use the correct where clause based on the unique constraint
+                    if data_type == "orders":
+                        where_clause = {
+                            "shopId_orderId": {
+                                "shopId": item["shopId"],
+                                "orderId": item[id_field],
+                            }
+                        }
+                    elif data_type == "products":
+                        where_clause = {
+                            "shopId_productId": {
+                                "shopId": item["shopId"],
+                                "productId": item[id_field],
+                            }
+                        }
+                    elif data_type == "customers":
+                        where_clause = {
+                            "shopId_customerId": {
+                                "shopId": item["shopId"],
+                                "customerId": item[id_field],
+                            }
+                        }
+                    elif data_type == "collections":
+                        where_clause = {
+                            "shopId_collectionId": {
+                                "shopId": item["shopId"],
+                                "collectionId": item[id_field],
+                            }
+                        }
+                    else:
+                        # Fallback to individual fields
+                        where_clause = {
                             "shopId": item["shopId"],
                             id_field: item[id_field],
                         }
-                    }
 
                     try:
                         # Try update first (more common case for incremental processing)
