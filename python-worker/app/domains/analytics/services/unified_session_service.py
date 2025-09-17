@@ -210,16 +210,13 @@ class UnifiedSessionService:
     async def increment_session_interactions(self, session_id: str) -> bool:
         """Increment session's total interactions count"""
         try:
-            session = await self.get_session(session_id)
-            if not session:
-                return False
-
-            new_count = session.total_interactions + 1
-
-            await self.update_session(
-                session_id, SessionUpdate(total_interactions=new_count)
+            db = await get_database()
+            await db.usersession.update(
+                where={"id": session_id},
+                data={
+                    "totalInteractions": {"increment": 1},
+                },
             )
-
             return True
 
         except Exception as e:

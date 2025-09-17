@@ -74,46 +74,56 @@ export const trackInteraction = async (
   shopDomain: string,
   userAgent: string,
   customerId: string | null,
+  interactionType: string,
   pageUrl: string,
   referrer: string,
   sessionStorage: any,
   sendBeacon: any,
 ): Promise<void> => {
-  const sessionId = await getOrCreateSession(
-    shopDomain,
-    userAgent,
-    customerId,
-    pageUrl,
-    referrer,
-    sessionStorage,
-  );
+  try {
+    const sessionId = await getOrCreateSession(
+      shopDomain,
+      userAgent,
+      customerId,
+      pageUrl,
+      referrer,
+      sessionStorage,
+    );
 
-  const interactionData = {
-    session_id: sessionId,
-    shop_domain: shopDomain,
-    customer_id: customerId,
-    metadata: {
-      ...event,
-    },
-  };
+    const interactionData = {
+      session_id: sessionId,
+      shop_domain: shopDomain,
+      customer_id: customerId,
+      interaction_type: interactionType,
+      metadata: {
+        ...event,
+      },
+    };
 
-  // Send to unified analytics endpoint
-  const url = `${UNIFIED_ANALYTICS_BASE_URL}/api/atlas/track-interaction`;
+    // Send to unified analytics endpoint
+    const url = `${UNIFIED_ANALYTICS_BASE_URL}/api/atlas/track-interaction`;
 
-  const response = await sendBeacon(url, {
-    body: JSON.stringify(interactionData),
-  });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(interactionData),
+      keepalive: true,
+    });
 
-  if (!response.ok) {
-    throw new Error(`Interaction tracking failed: ${response.status}`);
-  }
-
-  const result = await response.json();
-
-  if (result.success) {
-    console.log("✅ Atlas interaction tracked:", result.data?.interaction_id);
-  } else {
-    throw new Error(result.message || "Failed to track interaction");
+    if (!response.ok) {
+      throw new Error(`Interaction tracking failed: ${response.status}`);
+    }
+    const result = await response.json();
+    if (result.success) {
+      console.log("✅ Atlas interaction tracked:", result.data?.interaction_id);
+    } else {
+      throw new Error(result.message || "Failed to track interaction");
+    }
+  } catch (error) {
+    console.error("💥 Atlas interaction tracking error:", error);
+    throw error;
   }
 };
 

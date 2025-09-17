@@ -58,8 +58,6 @@ class InteractionCreate(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     extension_type: ExtensionType = Field(..., description="Extension type")
     interaction_type: InteractionType = Field(..., description="Type of interaction")
-
-    # User and session info
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     shop_id: str = Field(..., description="Shop identifier")
 

@@ -101,14 +101,21 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             data={
                 "interaction_id": interaction.id,
                 "session_id": request.session_id,
-                "interaction_type": request.interaction_type,
             },
         )
 
     except Exception as e:
-        logger.error(f"Error tracking Atlas interaction: {str(e)}")
+        # Log full traceback and payload for better diagnostics
+        try:
+            payload = locals().get("data")
+        except Exception:
+            payload = None
+        logger.exception(
+            "Error tracking Atlas interaction",
+        )
         raise HTTPException(
-            status_code=500, detail=f"Failed to track interaction: {str(e)}"
+            status_code=500,
+            detail=f"Failed to track interaction: {e.__class__.__name__}: {str(e)}",
         )
 
 
@@ -155,7 +162,13 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
         )
 
     except Exception as e:
-        logger.error(f"Error creating Atlas session: {str(e)}")
+        # Log full traceback and request context
+        try:
+            ctx = request.dict()
+        except Exception:
+            ctx = None
+        logger.exception("Error creating Atlas session")
         raise HTTPException(
-            status_code=500, detail=f"Failed to create session: {str(e)}"
+            status_code=500,
+            detail=f"Failed to create session: {e.__class__.__name__}: {str(e)}",
         )

@@ -1,6 +1,7 @@
 generator client {
   provider             = "prisma-client-py"
   recursive_type_depth = 5
+  enable_experimental_decimal = true
 }
 
 datasource db {
@@ -973,41 +974,20 @@ model UserInteraction {
   id                      String   @id @default(cuid())
   sessionId               String   @map("session_id") @db.VarChar(255)
   extensionType           String   @map("extension_type") @db.VarChar(50)
-  context                 String   @db.VarChar(50)
   interactionType         String   @map("interaction_type") @db.VarChar(50)
-
-  // User and session info
   customerId              String?  @map("customer_id") @db.VarChar(255)
   shopId                  String   @map("shop_id") @db.VarChar(255)
-
-  // Interaction details
-  productId               String?  @map("product_id") @db.VarChar(255)
-  collectionId            String?  @map("collection_id") @db.VarChar(255)
-  orderId                 String?  @map("order_id") @db.VarChar(255)
-
-  // Recommendation specific
-  recommendationId        String?  @map("recommendation_id") @db.VarChar(255)
-  recommendationPosition  Int?     @map("recommendation_position")
-  recommendationAlgorithm String?  @map("recommendation_algorithm") @db.VarChar(100)
-
-  // Interaction metadata
-  value                   Float?
-  quantity                Int?
   metadata                Json     @default("{}")
-
   // Timestamps
   createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-
   // Relations
   session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
   @@index([sessionId])
   @@index([customerId])
   @@index([shopId])
   @@index([extensionType])
   @@index([interactionType])
-  @@index([productId])
   @@index([createdAt])
   @@index([shopId, extensionType])
   @@index([shopId, interactionType])
