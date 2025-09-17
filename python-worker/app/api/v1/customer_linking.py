@@ -152,19 +152,19 @@ async def get_customer_link_stats(shop_id: str) -> CustomerLinkStats:
         all_links = await db.useridentitylink.find_many(where={"shopId": shop_id})
 
         for link in all_links:
-            events_needing_backfill = await db.behavioralevents.find_first(
+            events_needing_backfill = await db.userinteraction.find_first(
                 where={"shopId": shop_id, "clientId": link.clientId, "customerId": None}
             )
             if events_needing_backfill:
                 unprocessed_links += 1
 
         # Get total anonymous events
-        total_anonymous_events = await db.behavioralevents.count(
+        total_anonymous_events = await db.userinteraction.count(
             where={"shopId": shop_id, "customerId": None}
         )
 
         # Get events needing backfill
-        events_needing_backfill = await db.behavioralevents.count(
+        events_needing_backfill = await db.userinteraction.count(
             where={
                 "shopId": shop_id,
                 "customerId": None,
@@ -226,13 +226,13 @@ async def get_customer_links(
         link_infos = []
         for link in links:
             # Count events for this link
-            events_count = await db.behavioralevents.count(
+            events_count = await db.userinteraction.count(
                 where={"shopId": shop_id, "clientId": link.clientId}
             )
 
             # Check if needs backfill
             needs_backfill = (
-                await db.behavioralevents.find_first(
+                await db.userinteraction.find_first(
                     where={
                         "shopId": shop_id,
                         "clientId": link.clientId,

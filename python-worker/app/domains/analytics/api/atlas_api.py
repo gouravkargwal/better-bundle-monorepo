@@ -93,6 +93,15 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             },
         )
 
+        if interaction:
+            # Fire feature computation event to trigger ML pipeline
+            await analytics_service.fire_feature_computation_event(
+                shop_id=shop_id,
+                trigger_source="atlas_interaction",
+                interaction_id=interaction.id,
+                incremental=True,
+            )
+
         logger.info(f"Atlas interaction tracked successfully: {interaction.id}")
 
         return AtlasResponse(

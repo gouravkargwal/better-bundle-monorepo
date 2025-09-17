@@ -40,7 +40,8 @@ from app.consumers.feature_computation_consumer import FeatureComputationConsume
 # Webhook imports
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
-from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
+
+# from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer  # Removed - using unified analytics
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 
 # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
@@ -144,8 +145,7 @@ async def initialize_services():
         # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
 
-        # Initialize behavioral events consumer
-        services["behavioral_events_consumer"] = BehavioralEventsConsumer()
+        # Behavioral events consumer removed - using unified analytics system
 
         # Initialize customer linking consumer
         services["customer_linking_consumer"] = CustomerLinkingConsumer()
@@ -163,10 +163,10 @@ async def initialize_services():
             data_collection_consumer=services["data_collection_consumer"],
             normalization_consumer=services["normalization_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
-            behavioral_events_consumer=services["behavioral_events_consumer"],
             customer_linking_consumer=services["customer_linking_consumer"],
             # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
             # Note: ShopifyEventsConsumer removed - replaced by NormalizationConsumer
+            # Note: BehavioralEventsConsumer removed - using unified analytics system
         )
 
         # Start consumer manager (this will start all registered consumers)
@@ -1071,136 +1071,6 @@ async def handle_behavioral_event(request: Request):
         raise HTTPException(status_code=500, detail=result)
 
     return result
-
-
-@app.get("/api/behavioral-events/status")
-async def get_behavioral_events_status():
-    """Get status of behavioral events processing"""
-    try:
-        if "behavioral_events_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Behavioral events consumer not available"
-            )
-
-        active_events = await services["behavioral_events_consumer"].get_active_events()
-
-        return {
-            "status": "active",
-            "active_events_count": len(active_events),
-            "active_events": active_events,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get behavioral events status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/behavioral-events/status/{event_id}")
-async def get_behavioral_event_status(event_id: str):
-    """Get status of a specific behavioral event"""
-    try:
-        if "behavioral_events_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Behavioral events consumer not available"
-            )
-
-        event_status = await services["behavioral_events_consumer"].get_event_status(
-            event_id
-        )
-
-        if not event_status:
-            raise HTTPException(status_code=404, detail="Event not found")
-
-        return {
-            "event_id": event_id,
-            "status": event_status,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get behavioral event status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Replay raw behavioral events → queue for processing
-@app.post("/api/behavioral-events/replay")
-async def replay_behavioral_events(
-    shop_id: str, since: Optional[str] = None, batch_size: int = 1000
-):
-    """Publish all raw behavioral events for a shop to the processing stream.
-
-    - shop_id: required shop identifier
-    - since: optional ISO datetime string; if provided, only events with receivedAt > since are replayed
-    - batch_size: pagination size when scanning raw table
-    """
-    try:
-        db = await get_database()
-
-        offset = 0
-        total_published = 0
-
-        where_clause = {"shopId": shop_id}
-        if since:
-            try:
-                # Accept ISO format with or without Z
-                since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
-                where_clause["receivedAt"] = {"gt": since_dt}
-            except Exception:
-                await close_database()
-                raise HTTPException(
-                    status_code=400, detail="Invalid 'since' datetime format"
-                )
-
-        # Get shop domain from shop ID
-        shop = await db.shop.find_unique(where={"id": shop_id})
-        if not shop:
-            await close_database()
-            raise HTTPException(
-                status_code=404, detail=f"Shop not found for ID: {shop_id}"
-            )
-
-        shop_domain = shop.shopDomain
-
-        while True:
-            rows = await db.rawbehavioralevents.find_many(
-                where=where_clause,
-                skip=offset,
-                take=batch_size,
-                order={"receivedAt": "asc"},
-            )
-
-            if not rows:
-                break
-
-            for row in rows:
-                payload = row.payload
-                event_id = f"replay_{row.id}"
-                await streams_manager.publish_behavioral_event(
-                    event_id=event_id, shop_id=shop_domain, payload=payload
-                )
-                total_published += 1
-
-            offset += batch_size
-
-        await close_database()
-
-        return {"status": "queued", "shop_id": shop_id, "published": total_published}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        try:
-            await close_database()
-        except Exception:
-            pass
-        logger.error(f"Failed to replay behavioral events: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Note: All Gorse sync and training endpoints moved to unified_gorse.py
 
 
 # Error handlers

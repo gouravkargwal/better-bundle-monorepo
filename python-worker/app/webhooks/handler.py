@@ -223,11 +223,11 @@ class WebhookHandler:
 
             # Update all events with this clientId that don't have a customerId
             # Also update the timestamp so incremental processing picks up the changes
-            result = await db.behavioralevents.update_many(
+            result = await db.userinteraction.update_many(
                 where={"shopId": shop_id, "clientId": client_id, "customerId": None},
                 data={
                     "customerId": customer_id,
-                    "timestamp": now_utc(),  # Update timestamp to trigger incremental processing
+                    "updatedAt": now_utc(),  # Update timestamp to trigger incremental processing
                 },
             )
 
@@ -418,7 +418,7 @@ class WebhookHandler:
             db = await get_database()
 
             # Query for existing event IDs
-            existing_events = await db.behavioralevents.find_many(
+            existing_events = await db.userinteraction.find_many(
                 where={"shopId": shop_id, "eventId": {"in": event_ids}},
                 select={"eventId": True},
             )

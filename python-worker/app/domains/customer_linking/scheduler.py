@@ -60,7 +60,7 @@ class CustomerLinkingScheduler:
 
             for link in all_links:
                 # Check if there are any events with this clientId that still need backfilling
-                events_needing_backfill = await db.behavioralevents.find_first(
+                events_needing_backfill = await db.userinteraction.find_first(
                     where={
                         "shopId": link.shopId,
                         "clientId": link.clientId,
@@ -103,7 +103,7 @@ class CustomerLinkingScheduler:
 
                     now_utc = lambda: datetime.now()
 
-                    updated_count = await db.behavioralevents.update_many(
+                    updated_count = await db.userinteraction.update_many(
                         where={
                             "shopId": link.shopId,
                             "clientId": link.clientId,
@@ -111,7 +111,7 @@ class CustomerLinkingScheduler:
                         },
                         data={
                             "customerId": link.customerId,
-                            "timestamp": now_utc(),  # Update timestamp to trigger feature computation
+                            "updatedAt": now_utc(),  # Update timestamp to trigger feature computation
                         },
                     )
 

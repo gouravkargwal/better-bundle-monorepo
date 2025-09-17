@@ -67,7 +67,7 @@ class WebhookRepository:
             db = await self._get_database()
 
             # Save the full, raw payload for auditing using Prisma native method
-            await db.rawbehavioralevents.create(
+            await db.rawuserinteraction.create(
                 data={
                     "shopId": shop_id,
                     "payload": Json(raw_payload),
@@ -142,7 +142,7 @@ class WebhookRepository:
                 validated_event.customer_id
             )
 
-            await db.behavioralevents.upsert(
+            await db.userinteraction.upsert(
                 where={"eventId": validated_event.id},
                 data={
                     "create": {
@@ -150,15 +150,15 @@ class WebhookRepository:
                         "shopId": shop_id,
                         "customerId": normalized_customer_id,
                         "clientId": client_id,
-                        "eventType": validated_event.name,
-                        "timestamp": validated_event.timestamp,
-                        "eventData": event_data_json,
+                        "interactionType": validated_event.name,
+                        "createdAt": validated_event.timestamp,
+                        "metadata": event_data_json,
                     },
                     "update": {
                         "customerId": normalized_customer_id,
                         "clientId": client_id,
-                        "timestamp": validated_event.timestamp,
-                        "eventData": event_data_json,
+                        "updatedAt": validated_event.timestamp,
+                        "metadata": event_data_json,
                     },
                 },
             )

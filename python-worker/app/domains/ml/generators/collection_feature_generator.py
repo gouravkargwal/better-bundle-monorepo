@@ -83,6 +83,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
+            # Add lastComputedAt timestamp
+            from app.shared.helpers import now_utc
+
+            features["lastComputedAt"] = now_utc()
+
             logger.debug(
                 f"Computed {len(features)} features for collection: {collection.get('collectionId', 'unknown')}"
             )

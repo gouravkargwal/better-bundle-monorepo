@@ -90,26 +90,23 @@ class UnifiedGorseService:
         try:
             db = await self._get_database()
 
-            # Get the most recent timestamp from feature tables
+            # Get the most recent timestamp from source data tables (not feature tables)
+            # This ensures we sync based on when the actual data was created, not when features were computed
             result = await db.query_raw(
                 """
-                SELECT MAX(last_computed) as last_sync FROM (
-                    SELECT MAX("lastComputedAt") as last_computed FROM "UserFeatures" WHERE "shopId" = $1
+                SELECT MAX(last_created) as last_sync FROM (
+                    SELECT MAX("created_at") as last_created FROM "user_interactions" WHERE "shop_id" = $1
                     UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "ProductFeatures" WHERE "shopId" = $1
+                    SELECT MAX("created_at") as last_created FROM "user_sessions" WHERE "shop_id" = $1
                     UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "CustomerBehaviorFeatures" WHERE "shopId" = $1
+                    SELECT MAX("created_at") as last_created FROM "purchase_attributions" WHERE "shop_id" = $1
                     UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "CollectionFeatures" WHERE "shopId" = $1
+                    SELECT MAX("createdAt") as last_created FROM "ProductData" WHERE "shopId" = $1
                     UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "InteractionFeatures" WHERE "shopId" = $1
+                    SELECT MAX("createdAt") as last_created FROM "CustomerData" WHERE "shopId" = $1
                     UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "SessionFeatures" WHERE "shopId" = $1
-                    UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "ProductPairFeatures" WHERE "shopId" = $1
-                    UNION ALL
-                    SELECT MAX("lastComputedAt") as last_computed FROM "SearchProductFeatures" WHERE "shopId" = $1
-                ) as all_features
+                    SELECT MAX("createdAt") as last_created FROM "CollectionData" WHERE "shopId" = $1
+                ) as all_source_data
                 """,
                 shop_id,
             )
@@ -118,17 +115,25 @@ class UnifiedGorseService:
                 last_sync = result[0]["last_sync"]
                 # Handle case where result might be 0 or other non-datetime values
                 if last_sync and last_sync != 0:
-                    return last_sync
-            return None
+                    # Ensure last_sync is a datetime object
+                    if isinstance(last_sync, str):
+                        from datetime import datetime
+
+                        last_sync = datetime.fromisoformat(
+                            last_sync.replace("Z", "+00:00")
+                        )
+                    # Add a small buffer to ensure we don't miss any data
+                    return last_sync - timedelta(minutes=5)
+
+            # If no source data found, look back 24 hours
+            return now_utc() - timedelta(hours=24)
 
         except Exception as e:
-            # Only log error if it's not a simple "0" result (which is normal for new shops)
-            error_msg = str(e)
-            if error_msg != "0" and "0" not in error_msg:
-                logger.error(
-                    f"Failed to get last sync timestamp for shop {shop_id}: {error_msg}"
-                )
-            return None
+            logger.error(
+                f"Failed to get last sync timestamp for shop {shop_id}: {str(e)}"
+            )
+            # Fallback to 24 hours ago
+            return now_utc() - timedelta(hours=24)
 
     async def sync_and_train(
         self,
@@ -192,23 +197,23 @@ class UnifiedGorseService:
             # Sync data types in parallel for better performance
             sync_tasks = []
 
-            if sync_type in ["all", "users"]:
+            if sync_type in ["all", "users", "incremental"]:
                 sync_tasks.append(
                     ("users", self._sync_users_to_gorse(shop_id, since_time))
                 )
 
-            if sync_type in ["all", "items"]:
+            if sync_type in ["all", "items", "incremental"]:
                 sync_tasks.append(
                     ("items", self._sync_items_to_gorse(shop_id, since_time))
                 )
 
-            if sync_type in ["all", "feedback"]:
+            if sync_type in ["all", "feedback", "incremental"]:
                 sync_tasks.append(
                     ("feedback", self._sync_feedback_to_gorse(shop_id, since_time))
                 )
 
             # Add new feature table sync tasks with graceful skipping
-            if sync_type in ["all", "sessions"]:
+            if sync_type in ["all", "sessions", "incremental"]:
                 # Check if session features exist before adding sync task
                 has_session_data = await self._check_feature_table_has_data(
                     "sessionfeatures", shop_id, since_time
@@ -226,7 +231,7 @@ class UnifiedGorseService:
                     )
                     results["sessions_synced"] = 0
 
-            if sync_type in ["all", "product_pairs"]:
+            if sync_type in ["all", "product_pairs", "incremental"]:
                 # Check if product pair features exist before adding sync task
                 has_product_pair_data = await self._check_feature_table_has_data(
                     "productpairfeatures", shop_id, since_time
@@ -246,7 +251,7 @@ class UnifiedGorseService:
                     )
                     results["product_pairs_synced"] = 0
 
-            if sync_type in ["all", "search_products"]:
+            if sync_type in ["all", "search_products", "incremental"]:
                 # Check if search product features exist before adding sync task
                 has_search_product_data = await self._check_feature_table_has_data(
                     "searchproductfeatures", shop_id, since_time
@@ -266,7 +271,7 @@ class UnifiedGorseService:
                     )
                     results["search_products_synced"] = 0
 
-            if sync_type in ["all", "collections"]:
+            if sync_type in ["all", "collections", "incremental"]:
                 # Check if collection features exist before adding sync task
                 has_collection_data = await self._check_feature_table_has_data(
                     "collectionfeatures", shop_id, since_time
@@ -286,7 +291,7 @@ class UnifiedGorseService:
                     )
                     results["collections_synced"] = 0
 
-            if sync_type in ["all", "customer_behaviors"]:
+            if sync_type in ["all", "customer_behaviors", "incremental"]:
                 # Check if customer behavior features exist before adding sync task
                 has_customer_behavior_data = await self._check_feature_table_has_data(
                     "customerbehaviorfeatures", shop_id, since_time

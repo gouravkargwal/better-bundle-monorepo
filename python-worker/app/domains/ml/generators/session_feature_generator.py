@@ -82,12 +82,13 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Return empty session features when no events exist"""
         shop = context.get("shop", {})
+        current_time = now_utc()
         return {
             "shopId": shop.get("id", ""),
             "sessionId": session_data.get("sessionId", ""),
             "customerId": session_data.get("customerId"),
-            "startTime": None,
-            "endTime": None,
+            "startTime": current_time,
+            "endTime": current_time,
             "durationSeconds": 0,
             "eventCount": 0,
             "pageViewCount": 0,

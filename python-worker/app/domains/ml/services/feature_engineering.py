@@ -188,7 +188,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
         Args:
             shop_id: Shop ID to process
-            entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'behavioral_events', 'user_interactions', 'user_sessions', 'purchase_attributions')
+            entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'user_interactions', 'user_sessions', 'purchase_attributions')
             batch_size: Total batch size to process
             chunk_size: Size of each chunk to process in memory
             incremental: Whether to use incremental loading
@@ -222,10 +222,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         chunk = await self.repository.get_collections_batch_since(
                             shop_id, since_timestamp, current_chunk_size, offset
                         )
-                    elif entity_type == "behavioral_events":
-                        chunk = await self.repository.get_behavioral_events_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
+                    # behavioral_events removed - using unified analytics
                     elif entity_type == "user_interactions":
                         chunk = await self.repository.get_user_interactions_batch_since(
                             shop_id, since_timestamp, current_chunk_size, offset
@@ -263,10 +260,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         chunk = await self.repository.get_collections_batch(
                             shop_id, current_chunk_size, offset
                         )
-                    elif entity_type == "behavioral_events":
-                        chunk = await self.repository.get_behavioral_events_batch(
-                            shop_id, current_chunk_size, offset
-                        )
+                    # behavioral_events removed - using unified analytics
                     elif entity_type == "user_interactions":
                         chunk = await self.repository.get_user_interactions_batch(
                             shop_id, current_chunk_size, offset
@@ -338,9 +332,49 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         try:
             results = {}
 
+            # Get all unique customer IDs from interactions, sessions, and attributions
+            all_customer_ids = set()
+
+            # Add customer IDs from existing customers
             for customer in customers:
-                # Filter data for this customer
                 customer_id = customer.get("customerId", "")
+                if customer_id:
+                    all_customer_ids.add(customer_id)
+
+            # Add customer IDs from interactions
+            for interaction in user_interactions or []:
+                customer_id = interaction.get("customerId", "")
+                if customer_id:
+                    all_customer_ids.add(customer_id)
+
+            # Add customer IDs from sessions
+            for session in user_sessions or []:
+                customer_id = session.get("customerId", "")
+                if customer_id:
+                    all_customer_ids.add(customer_id)
+
+            # Add customer IDs from attributions
+            for attribution in purchase_attributions or []:
+                customer_id = attribution.get("customerId", "")
+                if customer_id:
+                    all_customer_ids.add(customer_id)
+
+            # Process each unique customer ID
+            for customer_id in all_customer_ids:
+                # Find existing customer data or create minimal customer object
+                customer_data = None
+                for customer in customers:
+                    if customer.get("customerId") == customer_id:
+                        customer_data = customer
+                        break
+
+                # If no customer data exists, create minimal customer object
+                if not customer_data:
+                    customer_data = {
+                        "customerId": customer_id,
+                        "id": customer_id,  # Use customerId as id for consistency
+                        "shopId": shop.get("id", ""),
+                    }
 
                 # Filter unified analytics data for this customer
                 customer_interactions = []
@@ -368,14 +402,14 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
                 features = await self._compute_feature_safely(
                     self.customer_behavior_generator,
-                    customer,
+                    customer_data,
                     context,
-                    entity_id=customer["id"],
+                    entity_id=customer_id,
                     feature_type="customer_behavior",
                 )
 
                 if features:
-                    results[customer["id"]] = features
+                    results[customer_id] = features
 
             return results
         except Exception as e:
@@ -386,16 +420,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
     async def generate_session_features_from_events(
         self,
-        behavioral_events: List[Dict[str, Any]],
+        user_interactions: List[Dict[str, Any]],
         shop: Dict[str, Any],
         order_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
-        """Generate session features by grouping behavioral events into sessions"""
+        """Generate session features by grouping user interactions into sessions"""
         try:
             results = {}
 
-            # Group events by session/customer
-            sessions = self._group_events_into_sessions(behavioral_events)
+            # Group interactions by session/customer
+            sessions = self._group_events_into_sessions(user_interactions)
 
             context = {
                 "shop": shop,
@@ -654,6 +688,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     shop_id, "purchase_attributions", batch_size, chunk_size=100
                 )
 
+            # Debug logging for data being passed to feature computation
+            logger.info(f"Data for feature computation - shop_id: {shop_id}")
+            logger.info(f"  - products: {len(products)}")
+            logger.info(f"  - orders: {len(orders)}")
+            logger.info(f"  - customers: {len(customers)}")
+            logger.info(f"  - collections: {len(collections)}")
+            logger.info(f"  - user_interactions: {len(user_interactions)}")
+            logger.info(f"  - user_sessions: {len(user_sessions)}")
+            logger.info(f"  - purchase_attributions: {len(purchase_attributions)}")
+
             # Compute all features using unified analytics data
             all_features = await self.compute_all_features_for_shop(
                 shop=shop_data,
@@ -672,6 +716,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
 
             # Trigger unified Gorse sync after successful feature computation
+            # Add a small delay to ensure database transactions are committed
+            import asyncio
+
+            await asyncio.sleep(0.1)  # 100ms delay to ensure DB commit
             await self._trigger_gorse_sync(shop_id, save_results)
 
             # Check if all feature types succeeded for logging purposes
@@ -759,7 +807,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             orders = orders or []
             customers = customers or []
             collections = collections or []
-            behavioral_events = behavioral_events or []
             # NEW: Prepare unified analytics data
             user_interactions = user_interactions or []
             user_sessions = user_sessions or []
@@ -768,14 +815,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # 1. Product Features
             # Create product ID mapping for product features
             product_id_mapping = self._create_product_id_mapping(
-                behavioral_events, products
+                user_interactions, products
             )
             product_context = self._build_base_context(
                 shop,
                 product_data=products or [],
                 orders=orders or [],
                 collections=collections or [],
-                behavioral_events=behavioral_events or [],
+                user_interactions=user_interactions or [],
+                user_sessions=user_sessions or [],
+                purchase_attributions=purchase_attributions or [],
                 product_id_mapping=product_id_mapping,
             )
             product_features = await self._process_entities_batch(
@@ -805,6 +854,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["collections"] = collection_features
 
             # 4. Customer Behavior Features (using unified analytics)
+            logger.info(
+                f"Computing customer behavior features - customers: {len(customers)}, interactions: {len(user_interactions)}"
+            )
             behavior_features = await self.compute_all_customer_behavior_features(
                 customers,
                 shop,
@@ -812,12 +864,17 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 user_sessions=user_sessions,
                 purchase_attributions=purchase_attributions,
             )
+            logger.info(f"Customer behavior features result: {behavior_features}")
             all_features["customer_behaviors"] = behavior_features
 
             # 5. Session Features (from unified analytics)
+            logger.info(
+                f"Computing session features - interactions: {len(user_interactions)}, sessions: {len(user_sessions)}"
+            )
             session_features = await self.generate_session_features_from_interactions(
                 user_interactions, user_sessions, shop, orders
             )
+            logger.info(f"Session features result: {session_features}")
             all_features["sessions"] = session_features
 
             # 6. Interaction Features (sample of customer-product pairs)
@@ -842,27 +899,41 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Find customer-product pairs that have interactions
             interaction_pairs = set()
 
-            # Create product ID mapping from behavioral events to ProductData
+            # Create product ID mapping from user interactions to ProductData
             product_id_mapping = self._create_product_id_mapping(
-                behavioral_events, products
+                user_interactions, products
             )
 
-            # From behavioral events
-            for event in behavioral_events:
-                if event.get("customerId") and "eventData" in event:
-                    event_product_id = self._extract_product_id_from_event(event)
-                    if event_product_id:
-                        customer_id = event.get("customerId")
-                        # IDs are already normalized at data ingestion level
+            # From user interactions
+            for event in user_interactions:
+                if event.get("customerId") and "metadata" in event:
+                    customer_id = event.get("customerId")
+                    event_type = event.get("interactionType", "")
 
-                        # Map behavioral event product ID to ProductData product ID
-                        mapped_product_id = product_id_mapping.get(
-                            event_product_id, event_product_id
+                    # Handle cart_viewed events specially - extract all products from cart
+                    if event_type == "cart_viewed":
+                        product_ids = self._extract_all_product_ids_from_cart_event(
+                            event
                         )
-
-                        # Only add if both IDs are valid
-                        if customer_id and mapped_product_id:
-                            interaction_pairs.add((customer_id, mapped_product_id))
+                        for product_id in product_ids:
+                            # Map behavioral event product ID to ProductData product ID
+                            mapped_product_id = product_id_mapping.get(
+                                product_id, product_id
+                            )
+                            # Only add if both IDs are valid
+                            if customer_id and mapped_product_id:
+                                interaction_pairs.add((customer_id, mapped_product_id))
+                    else:
+                        # Handle other event types normally
+                        event_product_id = self._extract_product_id_from_event(event)
+                        if event_product_id:
+                            # Map behavioral event product ID to ProductData product ID
+                            mapped_product_id = product_id_mapping.get(
+                                event_product_id, event_product_id
+                            )
+                            # Only add if both IDs are valid
+                            if customer_id and mapped_product_id:
+                                interaction_pairs.add((customer_id, mapped_product_id))
 
             # From orders
             for order in orders:
@@ -926,7 +997,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             product_pair_context = self._build_base_context(
                 shop,
                 orders=orders or [],
-                behavioral_events=behavioral_events or [],
+                user_interactions=user_interactions or [],
             )
             # Add variant-to-product mapping for product pair analysis
             product_pair_context["variant_to_product_map"] = variant_to_product_map
@@ -988,7 +1059,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # 8. Search Product Features (from search events)
             search_context = self._build_base_context(
                 shop,
-                behavioral_events=behavioral_events or [],
+                user_interactions=user_interactions or [],
             )
 
             # Find search-to-product correlations
@@ -998,29 +1069,29 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             search_events = []
             product_view_events = []
 
-            for event in behavioral_events:
-                if event.get("eventType") == "search_submitted":
+            for event in user_interactions:
+                if event.get("interactionType") == "search_submitted":
                     search_events.append(event)
-                elif event.get("eventType") == "product_viewed":
+                elif event.get("interactionType") == "product_viewed":
                     product_view_events.append(event)
 
             # Sort all events by timestamp for time-based correlation
             all_events = search_events + product_view_events
-            all_events.sort(key=lambda x: x.get("timestamp", ""))
+            all_events.sort(key=lambda x: x.get("createdAt", ""))
 
             # Find search events followed by product views within 24 hours
             for i, event in enumerate(all_events):
-                if event.get("eventType") == "search_submitted":
+                if event.get("interactionType") == "search_submitted":
                     search_query = self._extract_search_query_from_event(event)
                     if search_query:
-                        search_time = event.get("timestamp")
+                        search_time = event.get("createdAt")
                         search_customer = event.get("customerId") or "anonymous"
 
                         # Look for product views within 24 hours after search
                         for j in range(i + 1, len(all_events)):
                             later_event = all_events[j]
-                            if later_event.get("eventType") == "product_viewed":
-                                later_time = later_event.get("timestamp")
+                            if later_event.get("interactionType") == "product_viewed":
+                                later_time = later_event.get("createdAt")
                                 later_customer = (
                                     later_event.get("customerId") or "anonymous"
                                 )
@@ -1251,46 +1322,63 @@ class FeatureEngineeringService(IFeatureEngineeringService):
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract product ID from event data (IDs are already normalized)"""
         try:
-            event_type = event.get("eventType")
-            event_data = event.get("eventData", {})
+            event_type = event.get("interactionType")
+            metadata = event.get("metadata", {})
 
-            # Handle string eventData
-            if isinstance(event_data, str):
+            # Handle string metadata
+            if isinstance(metadata, str):
                 try:
                     import json
 
-                    event_data = json.loads(event_data)
+                    metadata = json.loads(metadata)
                 except:
                     return None
 
             if event_type == "product_viewed":
-                # Handle nested data structure: eventData.data.productVariant.product
-                if "data" in event_data:
-                    product_variant = event_data.get("data", {}).get(
-                        "productVariant", {}
-                    )
+                # Handle nested data structure: metadata.data.productVariant.product
+                if "data" in metadata:
+                    product_variant = metadata.get("data", {}).get("productVariant", {})
                 else:
-                    product_variant = event_data.get("productVariant", {})
+                    product_variant = metadata.get("productVariant", {})
                 product = product_variant.get("product", {})
                 return product.get("id", "")
 
             elif event_type == "product_added_to_cart":
-                # Handle nested data structure: eventData.data.cartLine.merchandise.product
-                if "data" in event_data:
-                    cart_line = event_data.get("data", {}).get("cartLine", {})
+                # Handle nested data structure: metadata.data.cartLine.merchandise.product
+                if "data" in metadata:
+                    cart_line = metadata.get("data", {}).get("cartLine", {})
                 else:
-                    cart_line = event_data.get("cartLine", {})
+                    cart_line = metadata.get("cartLine", {})
                 merchandise = cart_line.get("merchandise", {})
                 product = merchandise.get("product", {})
                 return product.get("id", "")
 
             elif event_type == "product_removed_from_cart":
-                cart_line = event_data.get("data", {}).get(
+                cart_line = metadata.get("data", {}).get(
                     "cartLine", {}
-                ) or event_data.get("cartLine", {})
+                ) or metadata.get("cartLine", {})
                 merchandise = cart_line.get("merchandise", {})
                 product = merchandise.get("product", {})
                 return product.get("id", "")
+
+            elif event_type == "cart_viewed":
+                # Handle cart_viewed events - extract all product IDs from cart lines
+                # For cart_viewed, we return the first product ID found
+                # The interaction features will handle multiple products in the cart
+                if "data" in metadata:
+                    cart_data = metadata.get("data", {}).get("cart", {})
+                else:
+                    cart_data = metadata.get("cart", {})
+
+                lines = cart_data.get("lines", [])
+                if lines and len(lines) > 0:
+                    # Return the first product ID from the cart
+                    first_line = lines[0]
+                    merchandise = first_line.get("merchandise", {})
+                    product = merchandise.get("product", {})
+                    return product.get("id", "")
+
+                return None
 
             return None
 
@@ -1298,59 +1386,97 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             logger.error(f"Error extracting product ID from event: {str(e)}")
             return None
 
+    def _extract_all_product_ids_from_cart_event(
+        self, event: Dict[str, Any]
+    ) -> List[str]:
+        """Extract all product IDs from cart_viewed event data"""
+        try:
+            metadata = event.get("metadata", {})
+            product_ids = []
+
+            # Handle string metadata
+            if isinstance(metadata, str):
+                try:
+                    import json
+
+                    metadata = json.loads(metadata)
+                except:
+                    return product_ids
+
+            # Extract cart data
+            if "data" in metadata:
+                data = metadata.get("data") or {}
+                cart_data = data.get("cart", {})
+            else:
+                cart_data = metadata.get("cart", {})
+
+            lines = cart_data.get("lines", [])
+            for line in lines:
+                merchandise = line.get("merchandise", {})
+                product = merchandise.get("product", {})
+                product_id = product.get("id", "")
+                if product_id:
+                    product_ids.append(product_id)
+
+            return product_ids
+
+        except Exception as e:
+            logger.error(f"Error extracting product IDs from cart event: {str(e)}")
+            return []
+
     def _create_product_id_mapping(
-        self, behavioral_events: List[Dict[str, Any]], products: List[Dict[str, Any]]
+        self, user_interactions: List[Dict[str, Any]], products: List[Dict[str, Any]]
     ) -> Dict[str, str]:
-        """Create mapping between behavioral event product IDs and ProductData product IDs (IDs are already normalized)"""
+        """Create mapping between user interaction product IDs and ProductData product IDs (IDs are already normalized)"""
         mapping = {}
 
         # Create a mapping based on product titles
         # Since IDs are already normalized, we can directly use them
-        for event in behavioral_events:
-            if event.get("eventType") in [
+        for interaction in user_interactions:
+            if interaction.get("interactionType") in [
                 "product_viewed",
                 "product_added_to_cart",
                 "checkout_completed",
             ]:
-                event_data = event.get("eventData", {})
+                metadata = interaction.get("metadata", {})
 
-                # Handle string eventData
-                if isinstance(event_data, str):
+                # Handle string metadata
+                if isinstance(metadata, str):
                     try:
                         import json
 
-                        event_data = json.loads(event_data)
+                        metadata = json.loads(metadata)
                     except:
                         continue
 
-                # Extract product information from different event types
+                # Extract product information from different interaction types
                 product_info = None
 
-                if event.get("eventType") == "product_viewed":
-                    # Handle nested data structure: eventData.data.productVariant.product
-                    if "data" in event_data:
-                        product_variant = event_data.get("data", {}).get(
+                if interaction.get("interactionType") == "product_viewed":
+                    # Handle nested data structure: metadata.data.productVariant.product
+                    if "data" in metadata:
+                        product_variant = metadata.get("data", {}).get(
                             "productVariant", {}
                         )
                     else:
-                        product_variant = event_data.get("productVariant", {})
+                        product_variant = metadata.get("productVariant", {})
                     product_info = product_variant.get("product", {})
 
-                elif event.get("eventType") == "product_added_to_cart":
-                    # Handle nested data structure: eventData.data.cartLine.merchandise.product
-                    if "data" in event_data:
-                        cart_line = event_data.get("data", {}).get("cartLine", {})
+                elif interaction.get("interactionType") == "product_added_to_cart":
+                    # Handle nested data structure: metadata.data.cartLine.merchandise.product
+                    if "data" in metadata:
+                        cart_line = metadata.get("data", {}).get("cartLine", {})
                     else:
-                        cart_line = event_data.get("cartLine", {})
+                        cart_line = metadata.get("cartLine", {})
                     merchandise = cart_line.get("merchandise", {})
                     product_info = merchandise.get("product", {})
 
-                elif event.get("eventType") == "checkout_completed":
-                    # Handle nested data structure: eventData.data.checkout.lineItems
-                    if "data" in event_data:
-                        checkout = event_data.get("data", {}).get("checkout", {})
+                elif interaction.get("interactionType") == "checkout_completed":
+                    # Handle nested data structure: metadata.data.checkout.lineItems
+                    if "data" in metadata:
+                        checkout = metadata.get("data", {}).get("checkout", {})
                     else:
-                        checkout = event_data.get("checkout", {})
+                        checkout = metadata.get("checkout", {})
                     line_items = checkout.get("lineItems", [])
                     for item in line_items:
                         variant = item.get("variant", {})
@@ -1375,27 +1501,27 @@ class FeatureEngineeringService(IFeatureEngineeringService):
     def _extract_search_query_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract search query from search event"""
         try:
-            event_data = event.get("eventData")
-            if event_data and isinstance(event_data, dict):
+            metadata = event.get("metadata")
+            if metadata and isinstance(metadata, dict):
                 # Check for searchResult.query first (Shopify format)
-                if "searchResult" in event_data and isinstance(
-                    event_data["searchResult"], dict
+                if "searchResult" in metadata and isinstance(
+                    metadata["searchResult"], dict
                 ):
-                    query = event_data["searchResult"].get("query")
+                    query = metadata["searchResult"].get("query")
                     if query:
                         return query
 
-                # Check for direct query field in eventData
-                query = event_data.get("query")
+                # Check for direct query field in metadata
+                query = metadata.get("query")
                 if query:
                     return query
 
                 # Fallback to other possible query fields
                 query = (
-                    event_data.get("searchQuery")
-                    or event_data.get("q")
-                    or event_data.get("search_term")
-                    or event_data.get("searchTerm")
+                    metadata.get("searchQuery")
+                    or metadata.get("q")
+                    or metadata.get("search_term")
+                    or metadata.get("searchTerm")
                 )
                 return query
             return None
@@ -1432,23 +1558,57 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 feature_results=save_results,
             )
 
-            # Run unified sync and training with incremental sync since we just computed features
-            result = await gorse_service.sync_and_train(
-                shop_id=shop_id,
-                sync_type="incremental",
-                since_hours=0,  # Only sync data from last hour since we just computed features
-                trigger_source="feature_computation",
+            # Run unified sync and training
+            # If we have new features, use incremental sync, otherwise skip
+            total_new_features = sum(
+                result.get("saved_count", 0)
+                for result in save_results.values()
+                if isinstance(result, dict)
             )
+
+            if total_new_features > 0:
+                # We have new features, run incremental sync
+                # Use a small time buffer to ensure we catch the features we just created
+                result = await gorse_service.sync_and_train(
+                    shop_id=shop_id,
+                    sync_type="incremental",
+                    since_hours=0,  # Use auto-detection to find the right timestamp
+                    trigger_source="feature_computation",
+                )
+            else:
+                # No new features, skip sync
+                import time
+
+                result = {
+                    "job_id": f"skipped_sync_{shop_id}_{int(time.time())}",
+                    "shop_id": shop_id,
+                    "sync_type": "skipped",
+                    "users_synced": 0,
+                    "items_synced": 0,
+                    "feedback_synced": 0,
+                    "sessions_synced": 0,
+                    "customer_behaviors_synced": 0,
+                    "collections_synced": 0,
+                    "training_triggered": False,
+                    "errors": [],
+                }
 
             logger.info(
                 f"Unified Gorse sync completed after feature computation",
                 shop_id=shop_id,
-                gorse_success=result.get("success", False),
+                gorse_success=len(result.get("errors", [])) == 0,
                 gorse_job_id=result.get("job_id"),
-                training_triggered=result.get("training_status", {}).get(
-                    "triggered", False
-                ),
-                sync_results=result.get("sync_results", {}),
+                training_triggered=result.get("training_triggered", False),
+                sync_results={
+                    "users_synced": result.get("users_synced", 0),
+                    "items_synced": result.get("items_synced", 0),
+                    "feedback_synced": result.get("feedback_synced", 0),
+                    "sessions_synced": result.get("sessions_synced", 0),
+                    "customer_behaviors_synced": result.get(
+                        "customer_behaviors_synced", 0
+                    ),
+                    "collections_synced": result.get("collections_synced", 0),
+                },
             )
 
         except Exception as e:
@@ -1467,42 +1627,94 @@ class FeatureEngineeringService(IFeatureEngineeringService):
     ) -> Dict[str, Dict[str, Any]]:
         """Generate session features from user interactions and sessions"""
         try:
-            if not user_sessions:
-                logger.debug("No user sessions available for feature generation")
-                return {}
-
             features = {}
-            for session in user_sessions:
-                session_id = session.get("id")
-                if not session_id:
-                    continue
 
-                # Get interactions for this session
-                session_interactions = [
-                    interaction
-                    for interaction in user_interactions or []
-                    if interaction.get("sessionId") == session_id
-                ]
+            # If we have existing sessions, process them
+            if user_sessions:
+                for session in user_sessions:
+                    session_id = session.get("id")
+                    if not session_id:
+                        continue
 
-                # Build session context
-                context = {
-                    "shop": shop or {},
-                    "session": session,
-                    "interactions": session_interactions,
-                    "orders": orders or [],
-                }
+                    # Get interactions for this session
+                    session_interactions = [
+                        interaction
+                        for interaction in user_interactions or []
+                        if interaction.get("sessionId") == session_id
+                    ]
 
-                # Generate features for this session
-                session_features = await self._compute_feature_safely(
-                    self.session_generator,
-                    session,
-                    context,
-                    entity_id=session_id,
-                    feature_type="session",
-                )
+                    # Build session context
+                    context = {
+                        "shop": shop or {},
+                        "session": session,
+                        "interactions": session_interactions,
+                        "orders": orders or [],
+                    }
 
-                if session_features:
-                    features[session_id] = session_features
+                    # Generate features for this session
+                    session_features = await self._compute_feature_safely(
+                        self.session_generator,
+                        session,
+                        context,
+                        entity_id=session_id,
+                        feature_type="session",
+                    )
+
+                    if session_features:
+                        features[session_id] = session_features
+
+            # If we have interactions but no sessions, create sessions from interactions
+            elif user_interactions:
+                # Group interactions by sessionId
+                session_groups = {}
+                for interaction in user_interactions:
+                    session_id = interaction.get("sessionId")
+                    if session_id:
+                        if session_id not in session_groups:
+                            session_groups[session_id] = []
+                        session_groups[session_id].append(interaction)
+
+                # Create session features for each session group
+                for session_id, session_interactions in session_groups.items():
+                    # Create a minimal session object from the interactions
+                    session_data = {
+                        "id": session_id,
+                        "sessionId": session_id,
+                        "customerId": (
+                            session_interactions[0].get("customerId")
+                            if session_interactions
+                            else None
+                        ),
+                        "shopId": shop.get("id") if shop else None,
+                        "createdAt": (
+                            min(
+                                interaction.get("createdAt", "")
+                                for interaction in session_interactions
+                            )
+                            if session_interactions
+                            else None
+                        ),
+                    }
+
+                    # Build session context
+                    context = {
+                        "shop": shop or {},
+                        "session": session_data,
+                        "interactions": session_interactions,
+                        "orders": orders or [],
+                    }
+
+                    # Generate features for this session
+                    session_features = await self._compute_feature_safely(
+                        self.session_generator,
+                        session_data,
+                        context,
+                        entity_id=session_id,
+                        feature_type="session",
+                    )
+
+                    if session_features:
+                        features[session_id] = session_features
 
             logger.info(f"Generated session features for {len(features)} sessions")
             return features

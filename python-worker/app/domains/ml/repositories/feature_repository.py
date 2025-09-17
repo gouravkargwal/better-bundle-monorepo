@@ -390,8 +390,13 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of orders for a shop from main table"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
+            result = await db.orderdata.find_many(
+                where={"shopId": shop_id},
+                order={"id": "asc"},
+                take=limit,
+                skip=offset,
+                include={"lineItems": True},
+            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get orders batch for shop {shop_id}: {str(e)}")
@@ -473,9 +478,16 @@ class FeatureRepository(IFeatureRepository):
                     continue
 
             if latest_timestamp:
-                return latest_timestamp.isoformat()
+                result_timestamp = latest_timestamp.isoformat()
+                logger.info(
+                    f"Last feature computation time for shop {shop_id}: {result_timestamp}"
+                )
+                return result_timestamp
             else:
                 # Return a very old timestamp for first run
+                logger.info(
+                    f"No previous feature computation found for shop {shop_id}, using 1970-01-01T00:00:00Z"
+                )
                 return "1970-01-01T00:00:00Z"
 
         except Exception as e:
@@ -501,7 +513,7 @@ class FeatureRepository(IFeatureRepository):
         """Get a batch of behavioral events for a shop"""
         try:
             db = await self._get_database()
-            query = 'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 ORDER BY "timestamp" DESC LIMIT $2 OFFSET $3'
+            query = 'SELECT * FROM "UserInteraction" WHERE "shopId" = $1 ORDER BY "createdAt" DESC LIMIT $2 OFFSET $3'
             result = await db.query_raw(query, shop_id, limit, offset)
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -569,6 +581,7 @@ class FeatureRepository(IFeatureRepository):
                 order={"updatedAt": "asc"},
                 take=limit,
                 skip=offset,
+                include={"lineItems": True},
             )
             return [dict(row) for row in result] if result else []
         except Exception as e:
@@ -604,9 +617,9 @@ class FeatureRepository(IFeatureRepository):
         try:
             db = await self._get_database()
             # Use Prisma's native find_many with where conditions
-            result = await db.behavioralevents.find_many(
-                where={"shopId": shop_id, "timestamp": {"gt": since_timestamp}},
-                order={"timestamp": "asc"},
+            result = await db.userinteraction.find_many(
+                where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
+                order={"createdAt": "asc"},
                 take=limit,
                 skip=offset,
             )
@@ -643,12 +656,37 @@ class FeatureRepository(IFeatureRepository):
         """Get user interactions since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
+
+            # Debug logging
+            logger.info(
+                f"Querying user interactions since {since_timestamp} for shop {shop_id}"
+            )
+
+            # Check total user interactions for this shop
+            total_count = await db.userinteraction.count(where={"shopId": shop_id})
+            logger.info(f"Total user interactions for shop {shop_id}: {total_count}")
+
             result = await db.userinteraction.find_many(
                 where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
                 order={"createdAt": "asc"},
                 take=limit,
                 skip=offset,
             )
+
+            # Debug logging
+            logger.info(
+                f"Found {len(result) if result else 0} user interactions since {since_timestamp}"
+            )
+
+            # Debug: Show sample interaction data
+            if result and len(result) > 0:
+                sample_interaction = result[0]
+                logger.info(f"Sample interaction data: {sample_interaction}")
+                logger.info(
+                    f"Sample interactionType: {sample_interaction.interactionType}"
+                )
+                logger.info(f"Sample metadata: {sample_interaction.metadata}")
+
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(

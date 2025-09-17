@@ -82,48 +82,49 @@ async def extract_session_data_from_behavioral_events(
         from datetime import timezone
 
         now = datetime.now(timezone.utc)
-        recent_cart_events = await db.behavioralevents.find_many(
+        recent_cart_events = await db.userinteraction.find_many(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
-                "eventType": "cart_viewed",
-                "timestamp": {"gte": now - timedelta(minutes=30)},
+                "interactionType": "cart_viewed",
+                "createdAt": {"gte": now - timedelta(minutes=30)},
             },
             take=5,
-            order={"timestamp": "desc"},
+            order={"createdAt": "desc"},
         )
 
         # Get recent product_viewed events (last 2 hours)
-        recent_view_events = await db.behavioralevents.find_many(
+        recent_view_events = await db.userinteraction.find_many(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
-                "eventType": "product_viewed",
-                "timestamp": {"gte": now - timedelta(hours=2)},
+                "interactionType": "product_viewed",
+                "createdAt": {"gte": now - timedelta(hours=2)},
             },
             take=20,
-            order={"timestamp": "desc"},
+            order={"createdAt": "desc"},
         )
 
         # Get recent add_to_cart events (last 1 hour)
-        recent_add_events = await db.behavioralevents.find_many(
+        recent_add_events = await db.userinteraction.find_many(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
-                "eventType": "product_added_to_cart",
-                "timestamp": {"gte": now - timedelta(hours=1)},
+                "interactionType": "product_added_to_cart",
+                "createdAt": {"gte": now - timedelta(hours=1)},
             },
             take=10,
-            order={"timestamp": "desc"},
+            order={"createdAt": "desc"},
         )
 
         # Extract cart contents from cart_viewed events
         cart_contents = []
         cart_data = None
         for event in recent_cart_events:
-            if event.eventData and event.eventData.get("cart", {}).get("lines"):
-                cart_data = event.eventData["cart"]
-                for line in event.eventData["cart"]["lines"]:
+            metadata = event.metadata or {}
+            if metadata.get("cart", {}).get("lines"):
+                cart_data = metadata["cart"]
+                for line in metadata["cart"]["lines"]:
                     if line.get("merchandise", {}).get("product", {}).get("id"):
                         product_id = line["merchandise"]["product"]["id"]
                         if product_id not in cart_contents:
@@ -133,23 +134,23 @@ async def extract_session_data_from_behavioral_events(
         recent_views = []
         product_types = set()
         for event in recent_view_events:
-            if event.eventData and event.eventData.get("product", {}).get("id"):
-                product_id = event.eventData["product"]["id"]
-                if product_id not in recent_views:
-                    recent_views.append(product_id)
+            metadata = event.metadata or {}
+            product_id = metadata.get("product_id")
+            if product_id and product_id not in recent_views:
+                recent_views.append(product_id)
 
-                # Extract product type
-                product_type = event.eventData["product"].get("type")
-                if product_type:
-                    product_types.add(product_type)
+            # Extract product type
+            product_type = metadata.get("product_type")
+            if product_type:
+                product_types.add(product_type)
 
         # Extract recent adds to cart
         recent_adds = []
         for event in recent_add_events:
-            if event.eventData and event.eventData.get("product", {}).get("id"):
-                product_id = event.eventData["product"]["id"]
-                if product_id not in recent_adds:
-                    recent_adds.append(product_id)
+            metadata = event.metadata or {}
+            product_id = metadata.get("product_id")
+            if product_id and product_id not in recent_adds:
+                recent_adds.append(product_id)
 
         # Build session metadata
         session_metadata = {
@@ -218,15 +219,18 @@ def _apply_time_decay_filtering(
 
         # Group interactions by product ID
         for interaction in cart_interactions:
-            if not interaction.productId:
+            # Extract product ID from metadata
+            metadata = interaction.metadata or {}
+            product_id = metadata.get("product_id")
+
+            if not product_id:
                 continue
 
-            product_id = interaction.productId
             if product_id not in product_interactions:
                 product_interactions[product_id] = []
 
             # Ensure timestamp is timezone-aware
-            timestamp = interaction.timestamp
+            timestamp = interaction.createdAt
             if timestamp.tzinfo is None:
                 # If timestamp is naive, assume it's UTC
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
@@ -781,19 +785,17 @@ async def get_recommendations(request: RecommendationRequest):
         if request.user_id:
             try:
                 # Get cart interactions from the last 48 hours for time decay analysis
-                cart_interactions = await db.recommendationinteraction.find_many(
+                cart_interactions = await db.userinteraction.find_many(
                     where={
-                        "session": {
-                            "shopId": shop.id,
-                            "userId": request.user_id,
-                        },
+                        "shopId": shop.id,
+                        "customerId": request.user_id,
                         "interactionType": "add_to_cart",
-                        "timestamp": {
+                        "createdAt": {
                             "gte": datetime.utcnow()
                             - timedelta(hours=48)  # Extended to 48 hours for time decay
                         },
                     },
-                    order={"timestamp": "desc"},
+                    order={"createdAt": "desc"},
                     take=100,  # Get more interactions for better time decay analysis
                 )
 

@@ -113,6 +113,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             # Validate and clean features
             features = self.validate_features(features)
 
+            # Add lastComputedAt timestamp
+            from app.shared.helpers import now_utc
+
+            features["lastComputedAt"] = now_utc()
+
             logger.debug(
                 f"Computed {len(features)} behavior features for customer: {customer_id}"
             )
@@ -261,8 +266,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "apolloInteractionCount": extension_counts["apollo"],
             "atlasInteractionCount": extension_counts["atlas"],
             # NEW: Recommendation-specific counts
-            "recommendationViewCount": counts["recommendation_view"],
-            "recommendationClickCount": counts["recommendation_click"],
+            "recommendationClickRate": counts.get("recommendation_click", 0)
+            / max(counts.get("recommendation_view", 1), 1),
+            "upsellInteractionCount": counts.get("upsell_interaction", 0),
         }
 
     def _compute_interaction_temporal_patterns(
@@ -460,8 +466,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "apolloInteractionCount": 0,
             "atlasInteractionCount": 0,
             # NEW: Recommendation-specific counts
-            "recommendationViewCount": 0,
-            "recommendationClickCount": 0,
+            "recommendationClickRate": 0.0,
+            "upsellInteractionCount": 0,
         }
 
     def _compute_basic_features(
