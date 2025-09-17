@@ -9,15 +9,14 @@ import {
   DataTable,
   Spinner,
   Banner,
-  Divider,
   Box,
   Icon,
 } from "@shopify/polaris";
 import {
-  CashDollarMajor,
-  CalendarMajor,
-  ReceiptMajor,
-  AlertTriangleMajor,
+  CashDollarIcon,
+  CalendarIcon,
+  ReceiptIcon,
+  AlertTriangleIcon,
 } from "@shopify/polaris-icons";
 
 interface BillingData {
@@ -246,7 +245,7 @@ export function BillingDashboard() {
               >
                 <BlockStack gap="100">
                   <InlineStack gap="200" align="center">
-                    <Icon source={CashDollarMajor} tone="base" />
+                    <Icon source={CashDollarIcon} tone="base" />
                     <Text as="p" variant="bodyMd" tone="subdued">
                       Attributed Revenue
                     </Text>
@@ -267,7 +266,7 @@ export function BillingDashboard() {
               >
                 <BlockStack gap="100">
                   <InlineStack gap="200" align="center">
-                    <Icon source={ReceiptMajor} tone="base" />
+                    <Icon source={ReceiptIcon} tone="base" />
                     <Text as="p" variant="bodyMd" tone="subdued">
                       Your Fee (3%)
                     </Text>
@@ -286,7 +285,7 @@ export function BillingDashboard() {
               >
                 <BlockStack gap="100">
                   <InlineStack gap="200" align="center">
-                    <Icon source={CalendarMajor} tone="base" />
+                    <Icon source={CalendarIcon} tone="base" />
                     <Text as="p" variant="bodyMd" tone="subdued">
                       Conversion Rate
                     </Text>

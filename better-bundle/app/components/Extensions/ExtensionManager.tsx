@@ -13,14 +13,13 @@ import {
   InlineGrid,
 } from "@shopify/polaris";
 import {
-  CheckCircleMajor,
-  AlertTriangleMajor,
-  XCircleMajor,
-  ExternalMajor,
-  SettingsMajor,
-  AnalyticsMajor,
-  ThemeMajor,
-  CustomerMajor,
+  CheckCircleIcon,
+  AlertTriangleIcon,
+  XCircleIcon,
+  ExternalIcon,
+  SettingsIcon,
+  ThemeIcon,
+  TeamIcon,
 } from "@shopify/polaris-icons";
 import type { ExtensionStatus } from "../../services/extension.service";
 
@@ -40,13 +39,13 @@ export function ExtensionManager({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "active":
-        return <Icon source={CheckCircleMajor} tone="success" />;
+        return <Icon source={CheckCircleIcon} tone="success" />;
       case "inactive":
-        return <Icon source={AlertTriangleMajor} tone="warning" />;
+        return <Icon source={AlertTriangleIcon} tone="warning" />;
       case "not_installed":
-        return <Icon source={XCircleMajor} tone="critical" />;
+        return <Icon source={XCircleIcon} tone="critical" />;
       default:
-        return <Icon source={AlertTriangleMajor} tone="subdued" />;
+        return <Icon source={AlertTriangleIcon} tone="subdued" />;
     }
   };
 
@@ -66,15 +65,16 @@ export function ExtensionManager({
   const getExtensionIcon = (extensionType: string) => {
     switch (extensionType) {
       case "web_pixel":
-        return <Icon source={AnalyticsMajor} tone="base" />;
+        // return <Icon source={AnalyticsIcon} tone="base" />;
+        return "";
       case "customer_account_ui":
-        return <Icon source={CustomerMajor} tone="base" />;
+        return <Icon source={TeamIcon} tone="base" />;
       case "theme_extension":
-        return <Icon source={ThemeMajor} tone="base" />;
+        return <Icon source={ThemeIcon} tone="base" />;
       case "post_purchase":
-        return <Icon source={SettingsMajor} tone="base" />;
+        return <Icon source={SettingsIcon} tone="base" />;
       default:
-        return <Icon source={SettingsMajor} tone="base" />;
+        return <Icon source={SettingsIcon} tone="base" />;
     }
   };
 
@@ -201,7 +201,7 @@ export function ExtensionManager({
                     size="slim"
                     url={extension.installation_url}
                     external
-                    icon={ExternalMajor}
+                    icon={ExternalIcon}
                     fullWidth
                   >
                     Manage

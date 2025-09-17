@@ -1,6 +1,18 @@
 import React from "react";
-import { Card, Text, BlockStack, InlineStack, Badge, Icon, Box } from "@shopify/polaris";
-import { CheckCircleMajor, AlertTriangleMajor, ClockMajor } from "@shopify/polaris-icons";
+import {
+  Card,
+  Text,
+  BlockStack,
+  InlineStack,
+  Badge,
+  Icon,
+  Box,
+} from "@shopify/polaris";
+import {
+  CheckCircleIcon,
+  AlertTriangleIcon,
+  ClockIcon,
+} from "@shopify/polaris-icons";
 
 interface StatusOverviewProps {
   data: {
@@ -29,16 +41,16 @@ export function StatusOverview({ data }: StatusOverviewProps) {
       case "healthy":
       case "active":
       case "synced":
-        return <Icon source={CheckCircleMajor} tone="success" />;
+        return <Icon source={CheckCircleIcon} tone="success" />;
       case "warning":
       case "syncing":
-        return <Icon source={ClockMajor} tone="warning" />;
+        return <Icon source={ClockIcon} tone="warning" />;
       case "critical":
       case "error":
       case "inactive":
-        return <Icon source={AlertTriangleMajor} tone="critical" />;
+        return <Icon source={AlertTriangleIcon} tone="critical" />;
       default:
-        return <Icon source={ClockMajor} tone="subdued" />;
+        return <Icon source={ClockIcon} tone="subdued" />;
     }
   };
 
@@ -75,8 +87,14 @@ export function StatusOverview({ data }: StatusOverviewProps) {
       <Text as="h2" variant="headingLg">
         System Status
       </Text>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: "16px",
+        }}
+      >
         {/* Overall System Health */}
         <Card>
           <BlockStack gap="300">
@@ -86,10 +104,11 @@ export function StatusOverview({ data }: StatusOverviewProps) {
               </Text>
               <Badge tone={getStatusTone(data.system_health)}>
                 {getStatusIcon(data.system_health)}
-                {data.system_health.charAt(0).toUpperCase() + data.system_health.slice(1)}
+                {data.system_health.charAt(0).toUpperCase() +
+                  data.system_health.slice(1)}
               </Badge>
             </InlineStack>
-            
+
             <BlockStack gap="200">
               <InlineStack align="space-between">
                 <Text as="span" variant="bodySm" tone="subdued">
@@ -128,10 +147,11 @@ export function StatusOverview({ data }: StatusOverviewProps) {
               </Text>
               <Badge tone={getStatusTone(data.data_sync_status.status)}>
                 {getStatusIcon(data.data_sync_status.status)}
-                {data.data_sync_status.status.charAt(0).toUpperCase() + data.data_sync_status.status.slice(1)}
+                {data.data_sync_status.status.charAt(0).toUpperCase() +
+                  data.data_sync_status.status.slice(1)}
               </Badge>
             </InlineStack>
-            
+
             <BlockStack gap="200">
               <InlineStack align="space-between">
                 <Text as="span" variant="bodySm" tone="subdued">
@@ -160,7 +180,13 @@ export function StatusOverview({ data }: StatusOverviewProps) {
           <Text as="h3" variant="headingMd">
             Extensions Status
           </Text>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "12px",
+            }}
+          >
             {data.extensions_status.map((extension) => (
               <Box
                 key={extension.name}
@@ -177,11 +203,13 @@ export function StatusOverview({ data }: StatusOverviewProps) {
                     </Text>
                     <Badge tone={getStatusTone(extension.status)} size="small">
                       {getStatusIcon(extension.status)}
-                      {extension.status.charAt(0).toUpperCase() + extension.status.slice(1)}
+                      {extension.status.charAt(0).toUpperCase() +
+                        extension.status.slice(1)}
                     </Badge>
                   </InlineStack>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Last activity: {new Date(extension.last_activity).toLocaleDateString()}
+                    Last activity:{" "}
+                    {new Date(extension.last_activity).toLocaleDateString()}
                   </Text>
                 </BlockStack>
               </Box>

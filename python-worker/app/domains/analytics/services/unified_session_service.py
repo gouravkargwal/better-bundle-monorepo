@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
+from prisma import Json
+
 from app.core.database import get_database
 from app.domains.analytics.models.session import (
     UserSession,
@@ -58,7 +60,7 @@ class UnifiedSessionService:
         """
         try:
             # Clean up expired sessions periodically
-            await self._cleanup_expired_sessions()
+            # await self._cleanup_expired_sessions()
 
             # Try to find existing active session
             existing_session = await self._find_active_session(
@@ -150,7 +152,7 @@ class UnifiedSessionService:
             if "lastActive" in update_dict:
                 prisma_update["lastActive"] = update_dict["lastActive"]
             if "extensions_used" in update_dict:
-                prisma_update["extensionsUsed"] = update_dict["extensions_used"]
+                prisma_update["extensionsUsed"] = Json(update_dict["extensions_used"])
             if "total_interactions" in update_dict:
                 prisma_update["totalInteractions"] = update_dict["total_interactions"]
 

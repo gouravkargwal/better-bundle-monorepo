@@ -11,19 +11,16 @@ import {
   Icon,
   Box,
   Divider,
-  Link,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import {
-  AnalyticsMajor,
-  SettingsMajor,
-  BillingMajor,
-  StarFilledMajor,
-  ArrowRightMajor,
-  CheckCircleMajor,
+  SettingsIcon,
+  BillIcon,
+  StarFilledIcon,
+  ArrowRightIcon,
+  CheckCircleIcon,
 } from "@shopify/polaris-icons";
 import { formatCurrency } from "../utils/currency";
-import type { DashboardOverview } from "../services/dashboard.service";
 
 interface WelcomePageProps {
   dashboardData: any;
@@ -85,7 +82,7 @@ export function WelcomePage({
                     </Text>
                   </BlockStack>
                   <Badge tone="success" size="large">
-                    <Icon source={StarFilledMajor} />
+                    <Icon source={StarFilledIcon} tone="base" />
                     Active
                   </Badge>
                 </InlineStack>
@@ -222,7 +219,7 @@ export function WelcomePage({
                     url="/app/widget-config"
                     variant="primary"
                     size="large"
-                    icon={SettingsMajor}
+                    icon={SettingsIcon}
                   >
                     {isNewUser ? "Get Started" : "Manage Extensions"}
                   </Button>
@@ -230,7 +227,7 @@ export function WelcomePage({
                     url="/app/dashboard"
                     variant="secondary"
                     size="large"
-                    icon={AnalyticsMajor}
+                    //icon={AnalyticsMajor}
                   >
                     View Analytics
                   </Button>
@@ -239,7 +236,7 @@ export function WelcomePage({
                       url="/app/billing"
                       variant="tertiary"
                       size="large"
-                      icon={BillingMajor}
+                      icon={BillIcon}
                     >
                       Billing & Performance
                     </Button>
@@ -261,7 +258,7 @@ export function WelcomePage({
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
                     <InlineStack gap="200" blockAlign="center">
-                      <Icon source={SettingsMajor} tone="base" />
+                      <Icon source={SettingsIcon} tone="base" />
                       <Text as="p" variant="bodyMd">
                         Configure Extensions
                       </Text>
@@ -270,14 +267,14 @@ export function WelcomePage({
                       url="/app/widget-config"
                       variant="plain"
                       size="slim"
-                      icon={ArrowRightMajor}
+                      icon={ArrowRightIcon}
                     >
                       Configure
                     </Button>
                   </InlineStack>
                   <InlineStack align="space-between" blockAlign="center">
                     <InlineStack gap="200" blockAlign="center">
-                      <Icon source={AnalyticsMajor} tone="base" />
+                      {/* <Icon source={AnalyticsIcon} tone="base" /> */}
                       <Text as="p" variant="bodyMd">
                         View Performance
                       </Text>
@@ -286,7 +283,7 @@ export function WelcomePage({
                       url="/app/dashboard"
                       variant="plain"
                       size="slim"
-                      icon={ArrowRightMajor}
+                      icon={ArrowRightIcon}
                     >
                       View
                     </Button>
@@ -294,7 +291,7 @@ export function WelcomePage({
                   {!isNewUser && (
                     <InlineStack align="space-between" blockAlign="center">
                       <InlineStack gap="200" blockAlign="center">
-                        <Icon source={BillingMajor} tone="base" />
+                        <Icon source={BillIcon} tone="base" />
                         <Text as="p" variant="bodyMd">
                           Check Billing
                         </Text>
@@ -303,7 +300,7 @@ export function WelcomePage({
                         url="/app/billing"
                         variant="plain"
                         size="slim"
-                        icon={ArrowRightMajor}
+                        icon={ArrowRightIcon}
                       >
                         View
                       </Button>
@@ -322,7 +319,7 @@ export function WelcomePage({
                 </Text>
                 <BlockStack gap="300">
                   <InlineStack gap="200" blockAlign="start">
-                    <Icon source={CheckCircleMajor} tone="success" />
+                    <Icon source={CheckCircleIcon} tone="success" />
                     <BlockStack gap="100">
                       <Text as="p" variant="bodyMd">
                         Unified Analytics System
@@ -334,7 +331,7 @@ export function WelcomePage({
                     </BlockStack>
                   </InlineStack>
                   <InlineStack gap="200" blockAlign="start">
-                    <Icon source={CheckCircleMajor} tone="success" />
+                    <Icon source={CheckCircleIcon} tone="success" />
                     <BlockStack gap="100">
                       <Text as="p" variant="bodyMd">
                         Pay-as-Performance Billing
@@ -346,7 +343,7 @@ export function WelcomePage({
                     </BlockStack>
                   </InlineStack>
                   <InlineStack gap="200" blockAlign="start">
-                    <Icon source={CheckCircleMajor} tone="success" />
+                    <Icon source={CheckCircleIcon} tone="success" />
                     <BlockStack gap="100">
                       <Text as="p" variant="bodyMd">
                         Enhanced AI Recommendations

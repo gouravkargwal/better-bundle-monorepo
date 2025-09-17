@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
+from prisma import Json
+
 from app.core.database import get_database
 from app.domains.analytics.models.interaction import (
     UserInteraction,
@@ -16,7 +18,7 @@ from app.domains.analytics.models.interaction import (
     InteractionQuery,
     InteractionType,
 )
-from app.domains.analytics.models.extension import ExtensionType, ExtensionContext
+from app.domains.analytics.models.extension import ExtensionType
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
@@ -34,18 +36,9 @@ class AnalyticsTrackingService:
         self,
         session_id: str,
         extension_type: ExtensionType,
-        context: ExtensionContext,
         interaction_type: InteractionType,
         shop_id: str,
         customer_id: Optional[str] = None,
-        product_id: Optional[str] = None,
-        collection_id: Optional[str] = None,
-        order_id: Optional[str] = None,
-        recommendation_id: Optional[str] = None,
-        recommendation_position: Optional[int] = None,
-        recommendation_algorithm: Optional[str] = None,
-        value: Optional[float] = None,
-        quantity: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[UserInteraction]:
         """
@@ -54,18 +47,9 @@ class AnalyticsTrackingService:
         Args:
             session_id: Unified session identifier
             extension_type: Extension that generated the interaction
-            context: Context where interaction occurred
             interaction_type: Type of interaction
             shop_id: Shop identifier
             customer_id: Customer identifier (optional)
-            product_id: Product involved (optional)
-            collection_id: Collection involved (optional)
-            order_id: Order involved (optional)
-            recommendation_id: Recommendation identifier (optional)
-            recommendation_position: Position of recommendation (optional)
-            recommendation_algorithm: Algorithm used (optional)
-            value: Monetary value (optional)
-            quantity: Quantity involved (optional)
             metadata: Additional metadata (optional)
 
         Returns:
@@ -79,28 +63,17 @@ class AnalyticsTrackingService:
                 return None
 
             # Validate extension can run in this context
-            if not self._validate_extension_context(extension_type, context):
-                logger.warning(
-                    f"Extension {extension_type} cannot run in context {context}"
-                )
+            if not self._validate_extension_context(extension_type):
+                logger.warning(f"Extension {extension_type} cannot run in context")
                 return None
 
             # Create interaction record
             interaction_data = InteractionCreate(
                 session_id=session_id,
                 extension_type=extension_type,
-                context=context,
                 interaction_type=interaction_type,
                 customer_id=customer_id,
                 shop_id=shop_id,
-                product_id=product_id,
-                collection_id=collection_id,
-                order_id=order_id,
-                recommendation_id=recommendation_id,
-                recommendation_position=recommendation_position,
-                recommendation_algorithm=recommendation_algorithm,
-                value=value,
-                quantity=quantity,
                 metadata=metadata or {},
             )
 
@@ -115,7 +88,7 @@ class AnalyticsTrackingService:
                 await self.session_service.increment_session_interactions(session_id)
 
                 logger.info(
-                    f"Tracked interaction: {interaction_type} from {extension_type} in {context}"
+                    f"Tracked interaction: {interaction_type} from {extension_type} in"
                 )
 
             return interaction
@@ -146,14 +119,8 @@ class AnalyticsTrackingService:
             if query.extension_type:
                 where_conditions["extensionType"] = query.extension_type.value
 
-            if query.context:
-                where_conditions["context"] = query.context.value
-
             if query.interaction_type:
                 where_conditions["interactionType"] = query.interaction_type.value
-
-            if query.product_id:
-                where_conditions["productId"] = query.product_id
 
             if query.created_after:
                 where_conditions["createdAt"] = {"gte": query.created_after}
@@ -179,18 +146,9 @@ class AnalyticsTrackingService:
                     id=interaction_data.id,
                     session_id=interaction_data.sessionId,
                     extension_type=ExtensionType(interaction_data.extensionType),
-                    context=ExtensionContext(interaction_data.context),
                     interaction_type=InteractionType(interaction_data.interactionType),
                     customer_id=interaction_data.customerId,
                     shop_id=interaction_data.shopId,
-                    product_id=interaction_data.productId,
-                    collection_id=interaction_data.collectionId,
-                    order_id=interaction_data.orderId,
-                    recommendation_id=interaction_data.recommendationId,
-                    recommendation_position=interaction_data.recommendationPosition,
-                    recommendation_algorithm=interaction_data.recommendationAlgorithm,
-                    value=interaction_data.value,
-                    quantity=interaction_data.quantity,
                     metadata=interaction_data.metadata,
                     created_at=interaction_data.createdAt,
                 )
@@ -227,11 +185,11 @@ class AnalyticsTrackingService:
             return []
 
     async def get_product_interactions(
-        self, product_id: str, shop_id: str, limit: int = 100
+        self, shop_id: str, limit: int = 100
     ) -> List[UserInteraction]:
         """Get all interactions for a specific product"""
         try:
-            query = InteractionQuery(product_id=product_id, shop_id=shop_id)
+            query = InteractionQuery(shop_id=shop_id)
             return await self.get_interactions(query, limit=limit)
 
         except Exception as e:
@@ -350,7 +308,7 @@ class AnalyticsTrackingService:
             # Group by context
             interactions_by_context = {}
             for interaction in interactions:
-                context = interaction.context
+                context = interaction.extension_type.value
                 if context not in interactions_by_context:
                     interactions_by_context[context] = 0
                 interactions_by_context[context] += 1
@@ -374,15 +332,13 @@ class AnalyticsTrackingService:
             logger.error(f"Error getting extension performance: {str(e)}")
             return {}
 
-    def _validate_extension_context(
-        self, extension_type: ExtensionType, context: ExtensionContext
-    ) -> bool:
+    def _validate_extension_context(self, extension_type: ExtensionType) -> bool:
         """Validate that extension can run in the specified context"""
         try:
             from app.domains.analytics.models.extension import get_extension_capability
 
             capability = get_extension_capability(extension_type)
-            return context in capability.supported_contexts
+            return True
 
         except Exception as e:
             logger.error(f"Error validating extension context: {str(e)}")
@@ -404,19 +360,10 @@ class AnalyticsTrackingService:
                     "id": interaction_id,
                     "sessionId": interaction_data.session_id,
                     "extensionType": interaction_data.extension_type.value,
-                    "context": interaction_data.context.value,
                     "interactionType": interaction_data.interaction_type.value,
                     "customerId": interaction_data.customer_id,
                     "shopId": interaction_data.shop_id,
-                    "productId": interaction_data.product_id,
-                    "collectionId": interaction_data.collection_id,
-                    "orderId": interaction_data.order_id,
-                    "recommendationId": interaction_data.recommendation_id,
-                    "recommendationPosition": interaction_data.recommendation_position,
-                    "recommendationAlgorithm": interaction_data.recommendation_algorithm,
-                    "value": interaction_data.value,
-                    "quantity": interaction_data.quantity,
-                    "metadata": interaction_data.metadata,
+                    "metadata": Json(interaction_data.metadata),
                     "createdAt": utcnow(),
                 }
             )
@@ -426,18 +373,9 @@ class AnalyticsTrackingService:
                 id=interaction_data_db.id,
                 session_id=interaction_data_db.sessionId,
                 extension_type=ExtensionType(interaction_data_db.extensionType),
-                context=ExtensionContext(interaction_data_db.context),
                 interaction_type=InteractionType(interaction_data_db.interactionType),
                 customer_id=interaction_data_db.customerId,
                 shop_id=interaction_data_db.shopId,
-                product_id=interaction_data_db.productId,
-                collection_id=interaction_data_db.collectionId,
-                order_id=interaction_data_db.orderId,
-                recommendation_id=interaction_data_db.recommendationId,
-                recommendation_position=interaction_data_db.recommendationPosition,
-                recommendation_algorithm=interaction_data_db.recommendationAlgorithm,
-                value=interaction_data_db.value,
-                quantity=interaction_data_db.quantity,
                 metadata=interaction_data_db.metadata,
                 created_at=interaction_data_db.createdAt,
             )

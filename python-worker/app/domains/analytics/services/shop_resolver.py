@@ -133,7 +133,7 @@ class ShopResolverService:
 
             shop = await db.shop.find_unique(
                 where={
-                    {"shopDomain": normalized_domain},
+                    "shopDomain": normalized_domain,
                 },
             )
 

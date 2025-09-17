@@ -1,19 +1,15 @@
 import { register } from "@shopify/web-pixels-extension";
-import type { AtlasConfig } from "./types";
 import { SUBSCRIBABLE_EVENTS } from "./config/constants";
 import { trackInteraction } from "./utils/api-client";
 
-const createConfig = (settings: any, init: any): AtlasConfig => {
-  return {
-    backendUrl: settings.backend_url,
-    shopDomain: init?.data?.shop?.myshopifyDomain,
-  };
-};
-
-register(({ analytics, settings, init, browser }) => {
-  const config = createConfig(settings, init);
-  // Get customer ID from init object
-  const customerId = init?.data?.customer?.id;
+register(({ analytics, init, browser }) => {
+  const customerId = init?.data?.customer?.id || null;
+  const userAgent = init?.context?.navigator?.userAgent;
+  const pageUrl = init?.context?.document?.location?.href;
+  const referrer = init?.context?.document?.referrer;
+  const shopDomain = init?.data?.shop?.myshopifyDomain;
+  const sessionStorage = browser?.sessionStorage;
+  const sendBeacon = browser?.sendBeacon;
   let clientId: string | null = null; // Helper function to handle customer linking detection
   const handleCustomerLinking = async (event: any) => {
     // Extract clientId from the event if available
@@ -36,8 +32,13 @@ register(({ analytics, settings, init, browser }) => {
               linkedAt: new Date().toISOString(),
             },
           },
-          config,
+          shopDomain,
+          userAgent,
           customerId,
+          pageUrl,
+          referrer,
+          sessionStorage,
+          sendBeacon,
         );
       }
     }
@@ -133,7 +134,16 @@ register(({ analytics, settings, init, browser }) => {
     const enhancedEvent = await enhanceEventWithCustomerId(event);
 
     // Use new unified tracking system
-    await trackInteraction(enhancedEvent, config, customerId);
+    await trackInteraction(
+      enhancedEvent,
+      shopDomain,
+      userAgent,
+      customerId,
+      pageUrl,
+      referrer,
+      sessionStorage,
+      sendBeacon,
+    );
   });
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_ADDED_TO_CART,
@@ -141,7 +151,16 @@ register(({ analytics, settings, init, browser }) => {
       // Handle customer linking detection (only on first event with clientId)
       await handleCustomerLinking(event);
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -152,7 +171,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -163,7 +191,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -172,7 +209,16 @@ register(({ analytics, settings, init, browser }) => {
     await handleCustomerLinking(event);
 
     const enhancedEvent = await enhanceEventWithCustomerId(event);
-    await trackInteraction(enhancedEvent, config, customerId);
+    await trackInteraction(
+      enhancedEvent,
+      shopDomain,
+      userAgent,
+      customerId,
+      pageUrl,
+      referrer,
+      sessionStorage,
+      sendBeacon,
+    );
   });
 
   analytics.subscribe(
@@ -182,7 +228,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -193,7 +248,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -204,7 +268,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 
@@ -215,7 +288,16 @@ register(({ analytics, settings, init, browser }) => {
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
-      await trackInteraction(enhancedEvent, config, customerId);
+      await trackInteraction(
+        enhancedEvent,
+        shopDomain,
+        userAgent,
+        customerId,
+        pageUrl,
+        referrer,
+        sessionStorage,
+        sendBeacon,
+      );
     },
   );
 });

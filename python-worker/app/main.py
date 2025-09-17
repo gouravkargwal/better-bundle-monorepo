@@ -52,7 +52,6 @@ from typing import Optional
 from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
-from app.api.v1.analytics import router as analytics_router
 
 # Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
@@ -89,7 +88,6 @@ app = FastAPI(
 app.include_router(unified_gorse_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
-app.include_router(analytics_router, prefix="/api/v1")
 
 # Include unified analytics routers
 from app.domains.analytics.api import (
@@ -959,95 +957,6 @@ async def check_table_counts(shop_id: str):
         return {
             "shop_id": shop_id,
             "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/id-comparison/{shop_id}")
-async def debug_id_comparison(shop_id: str, data_type: str = "products"):
-    """Debug the exact ID comparison logic to see why records aren't being processed"""
-    try:
-        from app.domains.shopify.services.main_table_storage import (
-            MainTableStorageService,
-        )
-        from app.core.database.simple_db_client import get_database
-
-        storage_service = MainTableStorageService()
-        db = await get_database()
-
-        # Import the module-level config
-        from app.domains.shopify.services.main_table_storage import DATA_TYPE_CONFIG
-
-        # Get the config
-        config = DATA_TYPE_CONFIG[data_type]
-
-        # Step 1: Get raw IDs (same logic as _store_data_generic)
-        raw_result = await db.query_raw(
-            f'SELECT "{config["raw_id_field"]}" FROM "{config["raw_table"]}" WHERE "shopId" = $1 AND "{config["raw_id_field"]}" IS NOT NULL ORDER BY "extractedAt" ASC LIMIT 10',
-            shop_id,
-        )
-
-        # Extract numeric IDs from raw data
-        raw_shopify_ids = [
-            row[config["raw_id_field"]]
-            for row in raw_result
-            if row[config["raw_id_field"]]
-        ]
-        raw_ids_extracted = [
-            storage_service._extract_shopify_id(id) for id in raw_shopify_ids
-        ]
-        raw_ids = [id for id in raw_ids_extracted if id]  # Filter out None values
-
-        # Step 2: Get processed IDs (original format)
-        processed_ids_raw = await storage_service._get_processed_shopify_ids(
-            shop_id, data_type
-        )
-
-        # Step 3: Normalize processed IDs (same as the fix)
-        processed_ids_normalized = set()
-        for pid in processed_ids_raw:
-            extracted_id = storage_service._extract_shopify_id(pid) if pid else None
-            if extracted_id:
-                processed_ids_normalized.add(extracted_id)
-
-        # Step 4: Compare
-        new_ids = [id for id in raw_ids if id not in processed_ids_normalized]
-
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "analysis": {
-                "raw_shopify_ids_sample": raw_shopify_ids[:5],
-                "raw_ids_extracted_sample": raw_ids[:5],
-                "processed_ids_raw_sample": list(processed_ids_raw)[:5],
-                "processed_ids_normalized_sample": list(processed_ids_normalized)[:5],
-                "new_ids_sample": new_ids[:5],
-                "counts": {
-                    "total_raw_ids": len(raw_ids),
-                    "total_processed_ids": len(processed_ids_normalized),
-                    "new_ids_to_process": len(new_ids),
-                },
-            },
-            "conclusion": {
-                "should_process": len(new_ids) > 0,
-                "reason": (
-                    "All records already processed"
-                    if len(new_ids) == 0
-                    else f"{len(new_ids)} new records found"
-                ),
-            },
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        import traceback
-
-        logger.error(f"ID comparison debug failed: {e}")
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
             "timestamp": now_utc().isoformat(),
         }
 

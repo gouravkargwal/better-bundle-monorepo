@@ -10,12 +10,10 @@ import {
 import {
   ArrowUpIcon,
   ArrowDownIcon,
-  StarFilledMajor,
-  TrendingUpMajor,
-  EyeMajor,
-  ClickMajor,
-  DollarMajor,
-  CustomerMajor,
+  StarFilledIcon,
+  EyeCheckMarkIcon,
+  CashDollarIcon,
+  TeamIcon,
 } from "@shopify/polaris-icons";
 import type { DashboardOverview } from "../../services/dashboard.service";
 import { formatCurrency } from "../../utils/currency";
@@ -135,7 +133,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={DollarMajor} tone="base" />}
+          icon={<Icon source={CashDollarIcon} tone="base" />}
           color="#10B981"
           description="Revenue from recommendations"
         />
@@ -150,7 +148,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={TrendingUpMajor} tone="base" />}
+          // icon={<Icon source={TrendingUpMajor} tone="base" />}
           color="#3B82F6"
           description="Click-to-purchase rate"
         />
@@ -165,7 +163,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={EyeMajor} tone="base" />}
+          icon={<Icon source={EyeCheckMarkIcon} tone="base" />}
           color="#8B5CF6"
           description="Total impressions"
         />
@@ -180,7 +178,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={ClickMajor} tone="base" />}
+          // icon={<Icon source={ClickMajor} tone="base" />}
           color="#F59E0B"
           description="User interactions"
         />
@@ -195,7 +193,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={StarFilledMajor} tone="base" />}
+          icon={<Icon source={StarFilledIcon} tone="base" />}
           color="#EF4444"
           description="Per transaction value"
         />
@@ -210,7 +208,7 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
-          icon={<Icon source={CustomerMajor} tone="base" />}
+          icon={<Icon source={TeamIcon} tone="base" />}
           color="#06B6D4"
           description="Active customers"
         />

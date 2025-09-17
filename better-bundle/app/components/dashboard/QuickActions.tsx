@@ -1,12 +1,19 @@
 import React from "react";
-import { Card, Text, BlockStack, InlineStack, Button, Icon, Box } from "@shopify/polaris";
 import {
-  SettingsMajor,
-  AnalyticsMajor,
-  BillingMajor,
-  RefreshMajor,
-  ViewMajor,
-  EditMajor,
+  Card,
+  Text,
+  BlockStack,
+  InlineStack,
+  Button,
+  Icon,
+  Box,
+} from "@shopify/polaris";
+import {
+  SettingsIcon,
+  BillIcon,
+  RefreshIcon,
+  ViewIcon,
+  EditIcon,
 } from "@shopify/polaris-icons";
 
 interface QuickActionsProps {
@@ -19,21 +26,21 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
     {
       title: "Configure Extensions",
       description: "Manage your recommendation widgets",
-      icon: SettingsMajor,
+      icon: SettingsIcon,
       url: "/app/widget-config",
       variant: "primary" as const,
     },
     {
       title: "View Analytics",
       description: "Check performance metrics",
-      icon: AnalyticsMajor,
+      // icon: AnalyticsMajor,
       url: "/app/dashboard",
       variant: "secondary" as const,
     },
     {
       title: "Billing & Performance",
       description: "Review your billing and ROI",
-      icon: BillingMajor,
+      icon: BillIcon,
       url: "/app/billing",
       variant: "tertiary" as const,
     },
@@ -50,7 +57,7 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
             <Button
               variant="plain"
               size="slim"
-              icon={RefreshMajor}
+              icon={RefreshIcon}
               onClick={onRefresh}
               loading={isLoading}
               disabled={isLoading}
@@ -60,7 +67,13 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
           )}
         </InlineStack>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "16px",
+          }}
+        >
           {actions.map((action) => (
             <Box
               key={action.title}
@@ -86,8 +99,11 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
                   size="slim"
                   fullWidth
                 >
-                  {action.variant === "primary" ? "Configure" : 
-                   action.variant === "secondary" ? "View" : "Review"}
+                  {action.variant === "primary"
+                    ? "Configure"
+                    : action.variant === "secondary"
+                      ? "View"
+                      : "Review"}
                 </Button>
               </BlockStack>
             </Box>
@@ -103,7 +119,7 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
             <Button
               variant="tertiary"
               size="slim"
-              icon={ViewMajor}
+              icon={ViewIcon}
               url="/app/widget-config"
             >
               Preview Widgets
@@ -111,7 +127,7 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
             <Button
               variant="tertiary"
               size="slim"
-              icon={EditMajor}
+              icon={EditIcon}
               url="/app/widget-config"
             >
               Customize Settings
@@ -119,7 +135,7 @@ export function QuickActions({ onRefresh, isLoading }: QuickActionsProps) {
             <Button
               variant="tertiary"
               size="slim"
-              icon={AnalyticsMajor}
+              // icon={AnalyticsMajor}
               url="/app/dashboard"
             >
               Export Data
