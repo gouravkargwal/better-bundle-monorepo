@@ -5,6 +5,7 @@ Manages user sessions across all extensions with proper lifecycle management,
 expiration handling, and cross-extension session sharing using Prisma.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -45,7 +46,7 @@ class UnifiedSessionService:
         referrer: Optional[str] = None,
     ) -> UserSession:
         """
-        Get existing session or create new one for unified tracking
+        Get existing session or create new one for unified tracking - OPTIMIZED VERSION
 
         Args:
             shop_id: Shop identifier
@@ -59,38 +60,115 @@ class UnifiedSessionService:
             UserSession: Active session for the user
         """
         try:
-            # Clean up expired sessions periodically
-            # await self._cleanup_expired_sessions()
+            # Validate required parameters
+            if not shop_id:
+                raise ValueError("shop_id is required for session creation")
 
-            # Try to find existing active session
-            existing_session = await self._find_active_session(
-                shop_id=shop_id,
-                customer_id=customer_id,
-                browser_session_id=browser_session_id,
+            db = await get_database()
+            current_time = utcnow()
+
+            # OPTIMIZATION: Single query to find or create session using upsert
+            if browser_session_id:
+                # Use browser_session_id as primary lookup (fastest)
+                session_data = await db.usersession.find_first(
+                    where={
+                        "browserSessionId": browser_session_id,
+                        "shopId": shop_id,
+                        "status": SessionStatus.ACTIVE,
+                        "expiresAt": {"gt": current_time},
+                    },
+                    order={"lastActive": "desc"},
+                )
+            elif customer_id:
+                # Fallback to customer_id lookup
+                session_data = await db.usersession.find_first(
+                    where={
+                        "customerId": customer_id,
+                        "shopId": shop_id,
+                        "status": SessionStatus.ACTIVE,
+                        "expiresAt": {"gt": current_time},
+                    },
+                    order={"lastActive": "desc"},
+                )
+            else:
+                session_data = None
+
+            if session_data:
+                # OPTIMIZATION: Update last active time in background (non-blocking)
+                asyncio.create_task(
+                    self._update_session_activity_background(session_data.id)
+                )
+
+                logger.info(f"Resumed existing session: {session_data.id}")
+                return UserSession(
+                    id=session_data.id,
+                    shop_id=session_data.shopId,
+                    customer_id=session_data.customerId,
+                    browser_session_id=session_data.browserSessionId,
+                    status=SessionStatus(session_data.status),
+                    created_at=session_data.createdAt,
+                    last_active=session_data.lastActive,
+                    expires_at=session_data.expiresAt,
+                    user_agent=session_data.userAgent,
+                    ip_address=session_data.ipAddress,
+                    referrer=session_data.referrer,
+                )
+
+            # OPTIMIZATION: Create new session with single database call
+            session_id = (
+                browser_session_id
+                or f"session_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}"
+            )
+            expires_at = current_time + (
+                self.identified_session_duration
+                if customer_id
+                else self.anonymous_session_duration
             )
 
-            if existing_session:
-                # Update last active time
-                await self._update_session_activity(existing_session.id)
-                logger.info(f"Resumed existing session: {existing_session.id}")
-                return existing_session
-
-            # Create new session
-            new_session = await self._create_new_session(
-                shop_id=shop_id,
-                customer_id=customer_id,
-                browser_session_id=browser_session_id,
-                user_agent=user_agent,
-                ip_address=ip_address,
-                referrer=referrer,
+            new_session_data = await db.usersession.create(
+                data={
+                    "id": session_id,
+                    "shopId": shop_id,
+                    "customerId": customer_id,
+                    "browserSessionId": browser_session_id,
+                    "status": SessionStatus.ACTIVE,
+                    "userAgent": user_agent,
+                    "ipAddress": ip_address,
+                    "referrer": referrer,
+                    "createdAt": current_time,
+                    "lastActive": current_time,
+                    "expiresAt": expires_at,
+                }
             )
 
-            logger.info(f"Created new session: {new_session.id}")
-            return new_session
+            logger.info(f"Created new session: {new_session_data.id}")
+            return UserSession(
+                id=new_session_data.id,
+                shop_id=new_session_data.shopId,
+                customer_id=new_session_data.customerId,
+                browser_session_id=new_session_data.browserSessionId,
+                status=SessionStatus(new_session_data.status),
+                created_at=new_session_data.createdAt,
+                last_active=new_session_data.lastActive,
+                expires_at=new_session_data.expiresAt,
+                user_agent=new_session_data.userAgent,
+                ip_address=new_session_data.ipAddress,
+                referrer=new_session_data.referrer,
+            )
 
         except Exception as e:
             logger.error(f"Error in get_or_create_session: {str(e)}")
             raise
+
+    async def _update_session_activity_background(self, session_id: str):
+        """Update session activity in background without blocking the response"""
+        try:
+            db = await get_database()
+            await db.usersession.update(
+                where={"id": session_id}, data={"lastActive": utcnow()}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update session activity in background: {e}")
 
     async def get_session(self, session_id: str) -> Optional[UserSession]:
         """Get session by ID"""

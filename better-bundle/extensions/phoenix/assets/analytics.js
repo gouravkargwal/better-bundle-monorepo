@@ -8,26 +8,48 @@
 class AnalyticsApiClient {
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app";
+    // For production, this should be your actual backend URL
+    // For development, you can use ngrok or localhost
+    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
   }
 
   /**
-   * Get or create a session for Phoenix tracking
+   * Get or create a session for Phoenix tracking - OPTIMIZED WITH SESSION STORAGE
    */
   async getOrCreateSession(shopId, customerId) {
-    // Check if we have a valid session
+    const sessionKey = `phoenix_session_${shopId}_${customerId || 'anon'}`;
+    const expiryKey = `phoenix_session_expiry_${shopId}_${customerId || 'anon'}`;
+
+    // OPTIMIZATION: Check session storage first (fastest)
+    try {
+      const cachedSessionId = sessionStorage.getItem(sessionKey);
+      const cachedExpiry = sessionStorage.getItem(expiryKey);
+
+      if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
+        console.log("⚡ Phoenix session loaded from cache:", cachedSessionId);
+        this.currentSessionId = cachedSessionId;
+        this.sessionExpiresAt = parseInt(cachedExpiry);
+        return cachedSessionId;
+      }
+    } catch (error) {
+      console.warn("Failed to read from session storage:", error);
+    }
+
+    // OPTIMIZATION: Check in-memory cache second
     if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
+      console.log("⚡ Phoenix session loaded from memory:", this.currentSessionId);
       return this.currentSessionId;
     }
 
+    // OPTIMIZATION: Only make API call if no valid cached session
     try {
       const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
 
       const payload = {
         shop_id: shopId,
-        customer_id: customerId || undefined,
+        customer_id: customerId ? String(customerId) : undefined,
         browser_session_id: this.getBrowserSessionId(),
         user_agent: navigator.userAgent,
         ip_address: undefined, // Will be detected server-side
@@ -52,18 +74,31 @@ class AnalyticsApiClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        this.currentSessionId = sessionId;
-        // Set session to expire 30 minutes from now (server handles actual expiration)
-        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
+        const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
 
-        console.log("🔄 Phoenix session created/retrieved:", sessionId);
+        // OPTIMIZATION: Store in both memory and session storage
+        this.currentSessionId = sessionId;
+        this.sessionExpiresAt = expiresAt;
+
+        try {
+          sessionStorage.setItem(sessionKey, sessionId);
+          sessionStorage.setItem(expiryKey, expiresAt.toString());
+        } catch (error) {
+          console.warn("Failed to store session in session storage:", error);
+        }
+
+        console.log("🔄 Phoenix session created/retrieved from API:", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
       console.error("💥 Phoenix session creation error:", error);
-      throw error;
+
+      // OPTIMIZATION: Fallback to browser session ID if API fails
+      const fallbackSessionId = this.getBrowserSessionId();
+      console.log("🔄 Using fallback session ID:", fallbackSessionId);
+      return fallbackSessionId;
     }
   }
 
@@ -73,7 +108,7 @@ class AnalyticsApiClient {
   async trackUnifiedInteraction(request) {
     try {
       // Get or create session first
-      const sessionId = await this.getOrCreateSession(request.shop_id, request.customer_id);
+      const sessionId = await this.getOrCreateSession(request.shop_id, request.customer_id ? String(request.customer_id) : undefined);
 
       // Update request with session ID
       const interactionData = {
@@ -112,6 +147,35 @@ class AnalyticsApiClient {
   }
 
   /**
+   * Track Phoenix recommendation carousel view (unique to Phoenix)
+   */
+  async trackRecommendationCarouselView(shopId, customerId, productIds, metadata = {}) {
+    try {
+      const request = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_id: shopId,
+        context: "cart_page",
+        interaction_type: "recommendation_viewed", // Use custom recommendation event
+        customer_id: customerId ? String(customerId) : undefined,
+        page_url: window.location.href,
+        referrer: document.referrer,
+        metadata: {
+          ...metadata,
+          extension_type: "phoenix",
+          source: "phoenix_theme_extension",
+          recommendation_count: productIds?.length || 0,
+          recommendation_ids: productIds || [],
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
+    } catch (error) {
+      console.error("Failed to track Phoenix carousel view:", error);
+      return false;
+    }
+  }
+
+  /**
    * Track recommendation view (when recommendations are displayed)
    */
   async trackRecommendationView(shopId, context, customerId, productIds, metadata) {
@@ -120,8 +184,8 @@ class AnalyticsApiClient {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
         context: context,
-        interaction_type: "view",
-        customer_id: customerId,
+        interaction_type: "recommendation_viewed", // Use custom recommendation event
+        customer_id: customerId ? String(customerId) : undefined,
         page_url: window.location.href,
         referrer: document.referrer,
         metadata: {
@@ -149,17 +213,16 @@ class AnalyticsApiClient {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
         context: context,
-        interaction_type: "click",
-        customer_id: customerId,
+        interaction_type: "recommendation_clicked", // Use custom recommendation event
+        customer_id: customerId ? String(customerId) : undefined,
         product_id: productId,
         page_url: window.location.href,
         referrer: document.referrer,
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          position,
+          recommendation_position: position,
           source: "phoenix_theme_extension",
-          interaction_type: "recommendation_click",
         },
       };
 
@@ -179,8 +242,8 @@ class AnalyticsApiClient {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
         context: context,
-        interaction_type: "add_to_cart",
-        customer_id: customerId,
+        interaction_type: "recommendation_add_to_cart", // Use custom recommendation event
+        customer_id: customerId ? String(customerId) : undefined,
         product_id: productId,
         page_url: window.location.href,
         referrer: document.referrer,
@@ -188,9 +251,8 @@ class AnalyticsApiClient {
           ...metadata,
           extension_type: "phoenix",
           variant_id: variantId,
-          position,
+          recommendation_position: position,
           source: "phoenix_theme_extension",
-          interaction_type: "add_to_cart",
         },
       };
 

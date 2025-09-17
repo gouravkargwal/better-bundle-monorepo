@@ -3,7 +3,9 @@
 class RecommendationAPI {
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app";
+    // For production, this should be your actual backend URL
+    // For development, you can use ngrok or localhost
+    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app"; // Update this to your actual backend URL
     this.shopifyBaseUrl = window.location.origin; // For Shopify API calls
   }
 

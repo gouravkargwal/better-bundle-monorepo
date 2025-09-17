@@ -140,6 +140,12 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
         logger.info(f"Atlas session request for shop: {request.shop_domain}")
 
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
+        
+        if not shop_id:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Could not resolve shop ID for domain: {request.shop_domain}"
+            )
 
         # Get or create session
         session = await session_service.get_or_create_session(

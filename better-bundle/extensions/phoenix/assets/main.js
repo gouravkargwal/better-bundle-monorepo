@@ -51,6 +51,17 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
+      // Track Phoenix carousel view (unique to Phoenix, not tracked by Atlas)
+      await this.analyticsApi.trackRecommendationCarouselView(
+        this.config.shopDomain?.replace('.myshopify.com', '') || '',
+        this.config.customerId,
+        this.config.productIds,
+        {
+          source: 'phoenix_initialization',
+          cart_product_count: this.config.productIds?.length || 0
+        }
+      );
+
       // Fetch recommendations
       const recommendations = await this.api.fetchRecommendations(
         this.config.productIds,
