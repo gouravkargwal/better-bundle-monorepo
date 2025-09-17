@@ -135,7 +135,18 @@ async def extract_session_data_from_behavioral_events(
         product_types = set()
         for event in recent_view_events:
             metadata = event.metadata or {}
-            product_id = metadata.get("product_id")
+            product_id = None
+
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
+
             if product_id and product_id not in recent_views:
                 recent_views.append(product_id)
 
@@ -148,7 +159,18 @@ async def extract_session_data_from_behavioral_events(
         recent_adds = []
         for event in recent_add_events:
             metadata = event.metadata or {}
-            product_id = metadata.get("product_id")
+            product_id = None
+
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
+
             if product_id and product_id not in recent_adds:
                 recent_adds.append(product_id)
 
@@ -165,7 +187,7 @@ async def extract_session_data_from_behavioral_events(
                 "total_adds": len(recent_adds),
                 "categories": list(product_types),
                 "last_activity": (
-                    recent_cart_events[0].timestamp.isoformat()
+                    recent_cart_events[0].createdAt.isoformat()
                     if recent_cart_events
                     else None
                 ),
@@ -221,7 +243,17 @@ def _apply_time_decay_filtering(
         for interaction in cart_interactions:
             # Extract product ID from metadata
             metadata = interaction.metadata or {}
-            product_id = metadata.get("product_id")
+            product_id = None
+
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
 
             if not product_id:
                 continue
@@ -315,7 +347,7 @@ def _apply_time_decay_filtering(
         for interaction in cart_interactions:
             if interaction.productId:
                 # Ensure timestamp is timezone-aware for comparison
-                timestamp = interaction.timestamp
+                timestamp = interaction.createdAt
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
                 elif timestamp.tzinfo != timezone.utc:
@@ -789,7 +821,9 @@ async def get_recommendations(request: RecommendationRequest):
                     where={
                         "shopId": shop.id,
                         "customerId": request.user_id,
-                        "interactionType": "add_to_cart",
+                        "interactionType": {
+                            "in": ["product_added_to_cart", "product_removed_from_cart"]
+                        },
                         "createdAt": {
                             "gte": datetime.utcnow()
                             - timedelta(hours=48)  # Extended to 48 hours for time decay

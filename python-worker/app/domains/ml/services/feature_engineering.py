@@ -881,7 +881,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             interaction_context = {
                 "shop": shop,
                 "orders": orders or [],
-                "user_interactions": user_interactions or [],
+                "behavioral_events": user_interactions or [],
             }
 
             # Create variant ID to product ID mapping from products data
@@ -1398,19 +1398,25 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             if isinstance(metadata, str):
                 try:
                     import json
-
                     metadata = json.loads(metadata)
                 except:
                     return product_ids
 
+            # Ensure metadata is not None
+            if not metadata:
+                return product_ids
+
             # Extract cart data
             if "data" in metadata:
-                data = metadata.get("data") or {}
-                cart_data = data.get("cart", {})
+                data = metadata.get("data")
+                if data:
+                    cart_data = data.get("cart", {})
+                else:
+                    cart_data = {}
             else:
                 cart_data = metadata.get("cart", {})
 
-            lines = cart_data.get("lines", [])
+            lines = cart_data.get("lines", []) if cart_data else []
             for line in lines:
                 merchandise = line.get("merchandise", {})
                 product = merchandise.get("product", {})

@@ -158,8 +158,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract product ID from behavioral event"""
-        event_type = event.get("eventType", "")
-        event_data = event.get("eventData", {})
+        event_type = event.get("interactionType", event.get("eventType", ""))
+        event_data = event.get("metadata", event.get("eventData", {}))
 
         if event_type == "product_viewed":
             # Handle both nested and direct structures
@@ -266,7 +266,9 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
     def _count_product_views(self, product_events: List[Dict[str, Any]]) -> int:
         """Count product view events"""
         return sum(
-            1 for event in product_events if event.get("eventType") == "product_viewed"
+            1
+            for event in product_events
+            if event.get("interactionType", event.get("eventType")) == "product_viewed"
         )
 
     def _count_cart_adds(self, product_events: List[Dict[str, Any]]) -> int:
@@ -274,13 +276,16 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return sum(
             1
             for event in product_events
-            if event.get("eventType") == "product_added_to_cart"
+            if event.get("interactionType", event.get("eventType"))
+            == "product_added_to_cart"
         )
 
     def _count_cart_views(self, product_events: List[Dict[str, Any]]) -> int:
         """Count cart view events"""
         return sum(
-            1 for event in product_events if event.get("eventType") == "cart_viewed"
+            1
+            for event in product_events
+            if event.get("interactionType", event.get("eventType")) == "cart_viewed"
         )
 
     def _count_cart_removes(self, product_events: List[Dict[str, Any]]) -> int:
@@ -288,7 +293,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return sum(
             1
             for event in product_events
-            if event.get("eventType") == "product_removed_from_cart"
+            if event.get("interactionType", event.get("eventType"))
+            == "product_removed_from_cart"
         )
 
     def _compute_temporal_features(
