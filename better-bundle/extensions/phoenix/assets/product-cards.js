@@ -319,20 +319,22 @@ class ProductCardManager {
     }
   }
 
-  // Handle product click with analytics tracking
+  // Handle product click with unified analytics tracking
   handleProductClick(productId, position, productUrl, sessionId) {
     if (window.analyticsApi && sessionId) {
-      // Track click interaction
+      // Track click interaction using unified analytics
+      const shopDomain = window.shopDomain?.replace('.myshopify.com', '') || '';
+      const customerId = window.customerId;
+
       window.analyticsApi
-        .trackInteraction({
-          session_id: sessionId,
-          product_id: productId,
-          interaction_type: "click",
-          position: position,
-          extension_type: "phoenix",
-          context: "cart",
-          metadata: { source: "cart_recommendation" },
-        })
+        .trackRecommendationClick(
+          shopDomain,
+          "cart",
+          productId,
+          position,
+          customerId,
+          { source: "cart_recommendation" }
+        )
         .catch((error) => {
           console.error("Failed to track product click:", error);
         });
@@ -380,31 +382,32 @@ class ProductCardManager {
         selectedQuantity,
       );
 
-      // Track add to cart interaction
+      // Track add to cart interaction using unified analytics
       if (window.analyticsApi && sessionId) {
-        await window.analyticsApi.trackInteraction({
-          session_id: sessionId,
-          product_id: productId,
-          interaction_type: "add_to_cart",
-          position: position,
-          extension_type: "phoenix",
-          context: context,
-          metadata: {
+        const shopDomain = window.shopDomain?.replace('.myshopify.com', '') || '';
+        const customerId = window.customerId;
+
+        await window.analyticsApi.trackAddToCart(
+          shopDomain,
+          context,
+          productId,
+          selectedVariantId,
+          position,
+          customerId,
+          {
             source: "cart_recommendation",
             variant_id: selectedVariantId,
             quantity: selectedQuantity,
-          },
-        });
+          }
+        );
 
         // Store attribution data in cart attributes for order processing
-        await window.analyticsApi.storeCartAttribution({
-          session_id: sessionId,
-          product_id: productId,
-          extension_type: "phoenix",
-          context: context,
-          position: position,
-          timestamp: new Date().toISOString(),
-        });
+        await window.analyticsApi.storeCartAttribution(
+          sessionId,
+          productId,
+          context,
+          position
+        );
       }
 
       // Restore button state

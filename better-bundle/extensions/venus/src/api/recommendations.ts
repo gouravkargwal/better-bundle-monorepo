@@ -1,15 +1,22 @@
 // API client for recommendation endpoints
 
+export type ExtensionContext =
+  | "homepage"
+  | "product_page"
+  | "collection_page"
+  | "cart_page"
+  | "search_page"
+  | "customer_account"
+  | "checkout_page"
+  | "order_page"
+  | "thank_you_page"
+  | "profile"
+  | "order_status"
+  | "order_history";
+
 export interface RecommendationRequest {
   shop_domain?: string;
-  context:
-    | "product_page"
-    | "homepage"
-    | "cart"
-    | "profile"
-    | "checkout"
-    | "order_history"
-    | "order_status";
+  context: ExtensionContext;
   product_id?: string;
   user_id?: string;
   session_id?: string;

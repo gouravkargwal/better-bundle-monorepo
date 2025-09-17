@@ -1,126 +1,235 @@
 /**
- * Analytics API Client for BetterBundle Phoenix Extension
+ * Unified Analytics API Client for BetterBundle Phoenix Extension
  * 
- * This client handles all analytics and attribution tracking for the Phoenix extension.
- * Follows the same pattern as Venus extension for consistency.
+ * This client handles all analytics and attribution tracking using the unified analytics system.
+ * Designed specifically for Shopify Theme Extensions with their unique constraints.
  */
 
 class AnalyticsApiClient {
   constructor() {
-    // Use the same analytics service URL as Venus
-    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app/api/v1/analytics";
+    // Use the unified analytics service URL
+    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app";
+    this.currentSessionId = null;
+    this.sessionExpiresAt = null;
   }
 
   /**
-   * Create a new recommendation session for tracking
+   * Get or create a session for Phoenix tracking
    */
-  async createSession(sessionData) {
+  async getOrCreateSession(shopId, customerId) {
+    // Check if we have a valid session
+    if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
+      return this.currentSessionId;
+    }
+
     try {
-      const response = await fetch(`${this.baseUrl}/session`, {
+      const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
+
+      const payload = {
+        shop_id: shopId,
+        customer_id: customerId || undefined,
+        browser_session_id: this.getBrowserSessionId(),
+        user_agent: navigator.userAgent,
+        ip_address: undefined, // Will be detected server-side
+        referrer: document.referrer,
+        page_url: window.location.href,
+      };
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(sessionData),
+        body: JSON.stringify(payload),
+        keepalive: true,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Session creation failed: ${response.status}`);
       }
 
       const result = await response.json();
-      return result.success;
+
+      if (result.success && result.data && result.data.session_id) {
+        const sessionId = result.data.session_id;
+        this.currentSessionId = sessionId;
+        // Set session to expire 30 minutes from now (server handles actual expiration)
+        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
+
+        console.log("🔄 Phoenix session created/retrieved:", sessionId);
+        return sessionId;
+      } else {
+        throw new Error(result.message || "Failed to create session");
+      }
     } catch (error) {
-      console.error("Failed to create analytics session:", error);
-      return false;
+      console.error("💥 Phoenix session creation error:", error);
+      throw error;
     }
   }
 
   /**
-   * Track a recommendation interaction
+   * Track interaction using unified analytics
    */
-  async trackInteraction(interactionData) {
+  async trackUnifiedInteraction(request) {
     try {
-      const response = await fetch(`${this.baseUrl}/interaction`, {
+      // Get or create session first
+      const sessionId = await this.getOrCreateSession(request.shop_id, request.customer_id);
+
+      // Update request with session ID
+      const interactionData = {
+        ...request,
+        session_id: sessionId,
+      };
+
+      // Send to unified analytics endpoint
+      const url = `${this.baseUrl}/api/phoenix/track-interaction`;
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(interactionData),
+        keepalive: true,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Interaction tracking failed: ${response.status}`);
       }
 
       const result = await response.json();
-      return result.success;
-    } catch (error) {
-      console.error("Failed to track interaction:", error);
-      return false;
-    }
-  }
 
-  /**
-   * Get attribution metrics for a shop
-   */
-  async getMetrics(shopId, startDate, endDate, extensionType) {
-    try {
-      const params = new URLSearchParams();
-      if (startDate) params.append("start_date", startDate);
-      if (endDate) params.append("end_date", endDate);
-      if (extensionType) params.append("extension_type", extensionType);
-
-      const response = await fetch(
-        `${this.baseUrl}/metrics/${shopId}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (result.success) {
+        console.log("✅ Phoenix interaction tracked:", result.data?.interaction_id);
+        return true;
+      } else {
+        throw new Error(result.message || "Failed to track interaction");
       }
-
-      return await response.json();
     } catch (error) {
-      console.error("Failed to get analytics metrics:", error);
-      return { success: false, error: String(error) };
+      console.error("💥 Phoenix interaction tracking error:", error);
+      return false;
     }
   }
 
   /**
-   * Health check for analytics service
+   * Track recommendation view (when recommendations are displayed)
    */
-  async healthCheck() {
+  async trackRecommendationView(shopId, context, customerId, productIds, metadata) {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
+      const request = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_id: shopId,
+        context: context,
+        interaction_type: "view",
+        customer_id: customerId,
+        page_url: window.location.href,
+        referrer: document.referrer,
+        metadata: {
+          ...metadata,
+          extension_type: "phoenix",
+          product_ids: productIds,
+          recommendation_count: productIds?.length || 0,
+          source: "phoenix_theme_extension",
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Analytics health check failed:", error);
+      console.error("Failed to track recommendation view:", error);
       return false;
     }
   }
+
+  /**
+   * Track recommendation click (when user clicks on a recommendation)
+   */
+  async trackRecommendationClick(shopId, context, productId, position, customerId, metadata) {
+    try {
+      const request = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_id: shopId,
+        context: context,
+        interaction_type: "click",
+        customer_id: customerId,
+        product_id: productId,
+        page_url: window.location.href,
+        referrer: document.referrer,
+        metadata: {
+          ...metadata,
+          extension_type: "phoenix",
+          position,
+          source: "phoenix_theme_extension",
+          interaction_type: "recommendation_click",
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
+    } catch (error) {
+      console.error("Failed to track recommendation click:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Track add to cart action
+   */
+  async trackAddToCart(shopId, context, productId, variantId, position, customerId, metadata) {
+    try {
+      const request = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_id: shopId,
+        context: context,
+        interaction_type: "add_to_cart",
+        customer_id: customerId,
+        product_id: productId,
+        page_url: window.location.href,
+        referrer: document.referrer,
+        metadata: {
+          ...metadata,
+          extension_type: "phoenix",
+          variant_id: variantId,
+          position,
+          source: "phoenix_theme_extension",
+          interaction_type: "add_to_cart",
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
+    } catch (error) {
+      console.error("Failed to track add to cart:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Get browser session ID (fallback if no session exists)
+   */
+  getBrowserSessionId() {
+    let sessionId = sessionStorage.getItem("phoenix_session_id");
+    if (!sessionId) {
+      sessionId = "phoenix_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem("phoenix_session_id", sessionId);
+    }
+    return sessionId;
+  }
+
 
   /**
    * Store attribution data in cart attributes for order processing
    */
-  async storeCartAttribution(attributionData) {
+  async storeCartAttribution(sessionId, productId, context, position) {
     try {
       const response = await fetch("/cart/update.js", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           attributes: {
-            bb_recommendation_session_id: attributionData.session_id,
-            bb_recommendation_product_id: attributionData.product_id,
-            bb_recommendation_extension: attributionData.extension_type,
-            bb_recommendation_context: attributionData.context,
-            bb_recommendation_position: attributionData.position.toString(),
-            bb_recommendation_timestamp: attributionData.timestamp,
+            bb_recommendation_session_id: sessionId,
+            bb_recommendation_product_id: productId,
+            bb_recommendation_extension: "phoenix",
+            bb_recommendation_context: context,
+            bb_recommendation_position: position.toString(),
+            bb_recommendation_timestamp: new Date().toISOString(),
             bb_recommendation_source: "betterbundle",
           },
         }),

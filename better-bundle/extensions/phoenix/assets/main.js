@@ -59,20 +59,16 @@ class RecommendationCarousel {
       );
 
       if (recommendations && recommendations.length > 0) {
-        // Create analytics session first
-        const viewedProducts = recommendations.map((product, index) => ({
-          product_id: product.id,
-          position: index + 1
-        }));
+        // Track recommendation view using unified analytics
+        const productIds = recommendations.map((product) => product.id);
 
-        await this.analyticsApi.createSession({
-          extension_type: "phoenix",
-          context: this.config.context,
-          user_id: String(this.config.customerId), // Convert to string as backend expects string
-          session_id: this.sessionId,
-          viewed_products: viewedProducts,
-          metadata: { source: `${this.config.context}_page` }
-        });
+        await this.analyticsApi.trackRecommendationView(
+          this.config.shopDomain?.replace('.myshopify.com', '') || '',
+          this.config.context,
+          this.config.customerId,
+          productIds,
+          { source: `${this.config.context}_page` }
+        );
 
         // Update product cards with real recommendations and analytics tracking
         this.cardManager.updateProductCards(recommendations, this.analyticsApi, this.sessionId, this.config.context);

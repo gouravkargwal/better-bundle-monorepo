@@ -1,8 +1,8 @@
 /**
- * Unified Analytics API Client for BetterBundle Venus Extension
+ * Unified Analytics API Client for BetterBundle Apollo Post-Purchase Extension
  *
  * This client handles all analytics and attribution tracking using the unified analytics system.
- * Follows proper separation of concerns and single responsibility principle.
+ * Designed specifically for Shopify Post-Purchase Extensions with their unique constraints.
  */
 
 // Unified Analytics Types
@@ -16,9 +16,7 @@ export type ExtensionContext =
   | "checkout_page"
   | "order_page"
   | "thank_you_page"
-  | "profile"
-  | "order_status"
-  | "order_history";
+  | "post_purchase";
 
 export type InteractionType =
   | "page_view"
@@ -33,6 +31,7 @@ export type InteractionType =
   | "view"
   | "shop_now"
   | "buy_now"
+  | "add_to_order"
   | "other";
 
 // Unified Analytics Request Types
@@ -77,7 +76,7 @@ export interface UnifiedResponse {
   };
 }
 
-class AnalyticsApiClient {
+class ApolloAnalyticsClient {
   private baseUrl: string;
   private currentSessionId: string | null = null;
   private sessionExpiresAt: number | null = null;
@@ -88,7 +87,7 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Get or create a session for Venus tracking
+   * Get or create a session for Apollo tracking
    */
   async getOrCreateSession(
     shopId: string,
@@ -104,14 +103,14 @@ class AnalyticsApiClient {
     }
 
     try {
-      const url = `${this.baseUrl}/api/venus/get-or-create-session`;
+      const url = `${this.baseUrl}/api/apollo/get-or-create-session`;
 
       const payload: UnifiedSessionRequest = {
         shop_id: shopId,
-        customer_id: customerId || null,
+        customer_id: customerId || undefined,
         browser_session_id: this.getBrowserSessionId(),
         user_agent: navigator.userAgent,
-        ip_address: null, // Will be detected server-side
+        ip_address: undefined, // Will be detected server-side
         referrer: document.referrer,
         page_url: window.location.href,
       };
@@ -131,21 +130,19 @@ class AnalyticsApiClient {
 
       const result: UnifiedResponse = await response.json();
 
-      if (result.success && result.data) {
-        this.currentSessionId = result.data.session_id!;
+      if (result.success && result.data && result.data.session_id) {
+        const sessionId = result.data.session_id;
+        this.currentSessionId = sessionId;
         // Set session to expire 30 minutes from now (server handles actual expiration)
         this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
 
-        console.log(
-          "🔄 Venus session created/retrieved:",
-          this.currentSessionId,
-        );
-        return this.currentSessionId;
+        console.log("🔄 Apollo session created/retrieved:", sessionId);
+        return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Venus session creation error:", error);
+      console.error("💥 Apollo session creation error:", error);
       throw error;
     }
   }
@@ -170,7 +167,7 @@ class AnalyticsApiClient {
       };
 
       // Send to unified analytics endpoint
-      const url = `${this.baseUrl}/api/venus/track-interaction`;
+      const url = `${this.baseUrl}/api/apollo/track-interaction`;
 
       const response = await fetch(url, {
         method: "POST",
@@ -189,7 +186,7 @@ class AnalyticsApiClient {
 
       if (result.success) {
         console.log(
-          "✅ Venus interaction tracked:",
+          "✅ Apollo interaction tracked:",
           result.data?.interaction_id,
         );
         return true;
@@ -197,31 +194,18 @@ class AnalyticsApiClient {
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Venus interaction tracking error:", error);
+      console.error("💥 Apollo interaction tracking error:", error);
       return false;
     }
   }
 
   /**
-   * Get browser session ID (fallback if no session exists)
-   */
-  private getBrowserSessionId(): string {
-    let sessionId = sessionStorage.getItem("venus_session_id");
-    if (!sessionId) {
-      sessionId =
-        "venus_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("venus_session_id", sessionId);
-    }
-    return sessionId;
-  }
-
-  /**
-   * Track recommendation view (when recommendations are displayed)
+   * Track post-purchase recommendation view
    */
   async trackRecommendationView(
     shopId: string,
-    context: ExtensionContext,
     customerId?: string,
+    orderId?: string,
     productIds?: string[],
     metadata?: Record<string, any>,
   ): Promise<boolean> {
@@ -229,17 +213,18 @@ class AnalyticsApiClient {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
-        context,
+        context: "post_purchase",
         interaction_type: "view",
         customer_id: customerId,
         page_url: window.location.href,
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "venus",
+          extension_type: "apollo",
           product_ids: productIds,
           recommendation_count: productIds?.length || 0,
-          source: "venus_recommendation",
+          order_id: orderId,
+          source: "apollo_post_purchase",
         },
       };
 
@@ -251,21 +236,21 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Track recommendation click (when user clicks on a recommendation)
+   * Track post-purchase recommendation click
    */
   async trackRecommendationClick(
     shopId: string,
-    context: ExtensionContext,
     productId: string,
     position: number,
     customerId?: string,
+    orderId?: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
-        context,
+        context: "post_purchase",
         interaction_type: "click",
         customer_id: customerId,
         product_id: productId,
@@ -273,9 +258,10 @@ class AnalyticsApiClient {
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "venus",
+          extension_type: "apollo",
           position,
-          source: "venus_recommendation",
+          order_id: orderId,
+          source: "apollo_post_purchase",
           interaction_type: "recommendation_click",
         },
       };
@@ -288,75 +274,58 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Track shop now action (when user clicks "Shop Now" button)
+   * Track add to order action
    */
-  async trackShopNow(
+  async trackAddToOrder(
     shopId: string,
-    context: ExtensionContext,
     productId: string,
+    variantId: string,
     position: number,
     customerId?: string,
+    orderId?: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
-        context,
-        interaction_type: "shop_now",
+        context: "post_purchase",
+        interaction_type: "add_to_order",
         customer_id: customerId,
         product_id: productId,
         page_url: window.location.href,
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "venus",
+          extension_type: "apollo",
+          variant_id: variantId,
           position,
-          source: "venus_recommendation",
-          interaction_type: "shop_now",
+          order_id: orderId,
+          source: "apollo_post_purchase",
+          interaction_type: "add_to_order",
         },
       };
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track shop now:", error);
+      console.error("Failed to track add to order:", error);
       return false;
     }
   }
 
   /**
-   * Store attribution data in cart attributes for order processing
+   * Get browser session ID (fallback if no session exists)
    */
-  async storeCartAttribution(
-    sessionId: string,
-    productId: string,
-    context: ExtensionContext,
-    position: number,
-  ): Promise<boolean> {
-    try {
-      const response = await fetch("/cart/update.js", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          attributes: {
-            bb_recommendation_session_id: sessionId,
-            bb_recommendation_product_id: productId,
-            bb_recommendation_extension: "venus",
-            bb_recommendation_context: context,
-            bb_recommendation_position: position.toString(),
-            bb_recommendation_timestamp: new Date().toISOString(),
-            bb_recommendation_source: "betterbundle",
-          },
-        }),
-      });
-
-      return response.ok;
-    } catch (error) {
-      console.error("Failed to store cart attribution:", error);
-      return false;
+  private getBrowserSessionId(): string {
+    let sessionId = sessionStorage.getItem("apollo_session_id");
+    if (!sessionId) {
+      sessionId =
+        "apollo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem("apollo_session_id", sessionId);
     }
+    return sessionId;
   }
 }
 
 // Default instance
-export const analyticsApi = new AnalyticsApiClient();
+export const apolloAnalytics = new ApolloAnalyticsClient();

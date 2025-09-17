@@ -14,7 +14,11 @@ interface Product {
 
 interface ProductGridProps {
   products: Product[];
-  onShopNow: (productId: string, position: number, productUrl: string) => void;
+  onShopNow: (
+    productId: string,
+    position: number,
+    productUrl: string,
+  ) => Promise<void>;
   columns?: {
     extraSmall?: number;
     small?: number;

@@ -1042,3 +1042,188 @@ model PurchaseAttribution {
   @@index([shopId, customerId, purchaseAt])
   @@map("purchase_attributions")
 }
+
+// ============= BILLING SYSTEM TABLES =============
+
+model BillingPlan {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  shopDomain       String   @map("shop_domain") @db.VarChar(255)
+  
+  // Plan Configuration
+  name             String   @db.VarChar(100)
+  type             BillingPlanType
+  status           BillingPlanStatus @default(active)
+  
+  // Plan Settings
+  configuration    Json     @default("{}")
+  
+  // Timestamps
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  effectiveFrom    DateTime @map("effective_from") @db.Timestamptz
+  effectiveUntil   DateTime? @map("effective_until") @db.Timestamptz
+  
+  // Relations
+  invoices         BillingInvoice[]
+  metrics          BillingMetrics[]
+  events           BillingEvent[]
+  
+  @@unique([shopId])
+  @@index([shopDomain])
+  @@index([status])
+  @@index([effectiveFrom])
+  @@map("billing_plans")
+}
+
+model BillingMetrics {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  planId           String   @map("plan_id") @db.VarChar(255)
+  
+  // Period
+  periodStart      DateTime @map("period_start") @db.Timestamptz
+  periodEnd        DateTime @map("period_end") @db.Timestamptz
+  cycle            BillingCycle
+  
+  // Revenue Metrics
+  totalRevenue     Decimal  @map("total_revenue") @db.Decimal(12, 2)
+  attributedRevenue Decimal @map("attributed_revenue") @db.Decimal(12, 2)
+  billableRevenue  Decimal  @map("billable_revenue") @db.Decimal(12, 2)
+  
+  // Performance Metrics
+  totalInteractions Int     @map("total_interactions")
+  totalConversions  Int     @map("total_conversions")
+  conversionRate    Float   @map("conversion_rate")
+  averageOrderValue Decimal @map("average_order_value") @db.Decimal(10, 2)
+  
+  // Extension Performance
+  extensionMetrics  Json    @map("extension_metrics") @default("[]")
+  
+  // Calculated Billing
+  calculatedFee     Decimal @map("calculated_fee") @db.Decimal(10, 2)
+  appliedDiscounts  Decimal @map("applied_discounts") @db.Decimal(10, 2)
+  finalFee          Decimal @map("final_fee") @db.Decimal(10, 2)
+  
+  // Timestamps
+  calculatedAt      DateTime @default(now()) @map("calculated_at") @db.Timestamptz
+  billedAt          DateTime? @map("billed_at") @db.Timestamptz
+  
+  // Relations
+  plan              BillingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  @@unique([shopId, periodStart, periodEnd])
+  @@index([shopId])
+  @@index([planId])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@map("billing_metrics")
+}
+
+model BillingInvoice {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  planId           String   @map("plan_id") @db.VarChar(255)
+  
+  // Invoice Details
+  invoiceNumber    String   @map("invoice_number") @db.VarChar(50)
+  status           InvoiceStatus @default(pending)
+  
+  // Financial Details
+  subtotal         Decimal  @db.Decimal(10, 2)
+  taxes            Decimal  @db.Decimal(10, 2)
+  discounts        Decimal  @db.Decimal(10, 2)
+  total            Decimal  @db.Decimal(10, 2)
+  currency         String   @db.VarChar(3)
+  
+  // Period and Metrics
+  periodStart      DateTime @map("period_start") @db.Timestamptz
+  periodEnd        DateTime @map("period_end") @db.Timestamptz
+  metricsId        String   @map("metrics_id") @db.VarChar(255)
+  
+  // Payment
+  dueDate          DateTime @map("due_date") @db.Timestamptz
+  paidAt           DateTime? @map("paid_at") @db.Timestamptz
+  paymentMethod    String?  @map("payment_method") @db.VarChar(50)
+  paymentReference String?  @map("payment_reference") @db.VarChar(255)
+  
+  // Timestamps
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  
+  // Relations
+  plan             BillingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  @@unique([invoiceNumber])
+  @@index([shopId])
+  @@index([planId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdAt])
+  @@map("billing_invoices")
+}
+
+model BillingEvent {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  type             BillingEventType
+  
+  // Event Data
+  data             Json     @default("{}")
+  metadata         Json     @default("{}")
+  
+  // Timestamps
+  occurredAt       DateTime @map("occurred_at") @db.Timestamptz
+  processedAt      DateTime @default(now()) @map("processed_at") @db.Timestamptz
+  
+  // Relations
+  plan             BillingPlan @relation(fields: [shopId], references: [shopId], onDelete: Cascade)
+  
+  @@index([shopId])
+  @@index([type])
+  @@index([occurredAt])
+  @@index([processedAt])
+  @@map("billing_events")
+}
+
+// Billing Enums
+enum BillingPlanType {
+  revenue_share
+  performance_tier
+  hybrid
+  usage_based
+}
+
+enum BillingPlanStatus {
+  active
+  inactive
+  suspended
+  trial
+}
+
+enum BillingCycle {
+  monthly
+  quarterly
+  annually
+}
+
+enum InvoiceStatus {
+  draft
+  pending
+  paid
+  overdue
+  cancelled
+  refunded
+}
+
+enum BillingEventType {
+  plan_created
+  plan_updated
+  metrics_calculated
+  invoice_generated
+  payment_received
+  payment_failed
+  refund_processed
+  billing_suspended
+  billing_reactivated
+}

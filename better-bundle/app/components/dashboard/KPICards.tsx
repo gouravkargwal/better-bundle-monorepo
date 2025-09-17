@@ -1,5 +1,22 @@
-import { Card, Text, BlockStack, InlineStack, Icon } from "@shopify/polaris";
-import { ArrowUpIcon, ArrowDownIcon } from "@shopify/polaris-icons";
+import {
+  Card,
+  Text,
+  BlockStack,
+  InlineStack,
+  Icon,
+  Box,
+  Badge,
+} from "@shopify/polaris";
+import {
+  ArrowUpIcon,
+  ArrowDownIcon,
+  StarFilledMajor,
+  TrendingUpMajor,
+  EyeMajor,
+  ClickMajor,
+  DollarMajor,
+  CustomerMajor,
+} from "@shopify/polaris-icons";
 import type { DashboardOverview } from "../../services/dashboard.service";
 import { formatCurrency } from "../../utils/currency";
 
@@ -13,9 +30,19 @@ interface KPICardProps {
   change?: number | null;
   trend?: "up" | "down" | "neutral";
   icon?: React.ReactNode;
+  color?: string;
+  description?: string;
 }
 
-function KPICard({ title, value, change, trend, icon }: KPICardProps) {
+function KPICard({
+  title,
+  value,
+  change,
+  trend,
+  icon,
+  color = "#3B82F6",
+  description,
+}: KPICardProps) {
   const getTrendColor = () => {
     if (trend === "up") return "success";
     if (trend === "down") return "critical";
@@ -31,29 +58,45 @@ function KPICard({ title, value, change, trend, icon }: KPICardProps) {
 
   return (
     <Card>
-      <BlockStack gap="200">
-        <InlineStack align="space-between">
-          <Text as="h3" variant="headingSm" tone="subdued">
-            {title}
-          </Text>
-          {icon}
+      <BlockStack gap="300">
+        <InlineStack align="space-between" blockAlign="start">
+          <BlockStack gap="100">
+            <Text as="h3" variant="headingSm" tone="subdued">
+              {title}
+            </Text>
+            {description && (
+              <Text as="p" variant="bodySm" tone="subdued">
+                {description}
+              </Text>
+            )}
+          </BlockStack>
+          <Box
+            padding="200"
+            background="bg-surface-brand"
+            borderRadius="200"
+            style={{ backgroundColor: color + "20" }}
+          >
+            {icon}
+          </Box>
         </InlineStack>
+
         <Text as="p" variant="heading2xl">
           {value}
         </Text>
+
         {change !== undefined && change !== null && (
           <InlineStack gap="100" align="start">
             {getTrendIcon()}
-            <Text as="span" variant="bodySm" tone={getTrendColor()}>
+            <Badge tone={getTrendColor()} size="small">
               {change > 0 ? "+" : ""}
               {change}% vs last period
-            </Text>
+            </Badge>
           </InlineStack>
         )}
         {change === null && (
-          <Text as="span" variant="bodySm" tone="subdued">
-            First period - no comparison available
-          </Text>
+          <Badge tone="subdued" size="small">
+            First period - no comparison
+          </Badge>
         )}
       </BlockStack>
     </Card>
@@ -92,6 +135,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={DollarMajor} tone="base" />}
+          color="#10B981"
+          description="Revenue from recommendations"
         />
         <KPICard
           title="Conversion Rate"
@@ -104,6 +150,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={TrendingUpMajor} tone="base" />}
+          color="#3B82F6"
+          description="Click-to-purchase rate"
         />
         <KPICard
           title="Recommendations Shown"
@@ -116,6 +165,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={EyeMajor} tone="base" />}
+          color="#8B5CF6"
+          description="Total impressions"
         />
         <KPICard
           title="Total Clicks"
@@ -128,6 +180,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={ClickMajor} tone="base" />}
+          color="#F59E0B"
+          description="User interactions"
         />
         <KPICard
           title="Average Order Value"
@@ -140,6 +195,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={StarFilledMajor} tone="base" />}
+          color="#EF4444"
+          description="Per transaction value"
         />
         <KPICard
           title="Total Customers"
@@ -152,6 +210,9 @@ export function KPICards({ data }: KPICardsProps) {
                 : "down"
               : "neutral"
           }
+          icon={<Icon source={CustomerMajor} tone="base" />}
+          color="#06B6D4"
+          description="Active customers"
         />
       </div>
     </BlockStack>
