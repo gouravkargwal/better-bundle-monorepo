@@ -135,6 +135,12 @@ class RedisStreamsManager:
             )
             raise
 
+    async def publish_shopify_event(self, event_data: Dict[str, Any]) -> str:
+        """Publish a Shopify normalization/processing event to the data job stream."""
+        if not self.redis:
+            await self.initialize()
+        return await self.publish_event(settings.DATA_JOB_STREAM, event_data)
+
     def _clean_for_serialization(self, obj: Any) -> Any:
         """
         Recursively clean objects for JSON serialization by converting datetime objects to ISO strings.

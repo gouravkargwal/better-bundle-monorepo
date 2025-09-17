@@ -73,8 +73,8 @@ class CanonicalOrder(BaseModel):
     )  # transactions (JSON)
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for orderDate
-    shopifyUpdatedAt: datetime
+    createdAt: datetime  # Used for orderDate
+    updatedAt: datetime
 
     # Preserve unknown fields from raw payloads
     extras: Dict[str, Any] = Field(default_factory=dict)
@@ -125,8 +125,8 @@ class CanonicalProduct(BaseModel):
     metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for productCreatedAt
-    shopifyUpdatedAt: datetime  # Used for productUpdatedAt
+    createdAt: datetime  # Used for productCreatedAt
+    updatedAt: datetime  # Used for productUpdatedAt
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads
@@ -154,8 +154,8 @@ class CanonicalCollection(BaseModel):
     metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
-    shopifyCreatedAt: datetime
-    shopifyUpdatedAt: datetime
+    createdAt: datetime
+    updatedAt: datetime
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads
@@ -177,7 +177,8 @@ class CanonicalCustomer(BaseModel):
     orderCount: int = 0  # orderCount
     lastOrderDate: Optional[datetime] = None  # lastOrderDate
     tags: List[str] = Field(default_factory=list)  # tags (JSON)
-    createdAtShopify: Optional[datetime] = None  # createdAtShopify
+    createdAt: Optional[datetime] = None  # createdAtShopify
+    updatedAt: Optional[datetime] = None  # updatedAtShopify
     lastOrderId: Optional[str] = None  # lastOrderId
     location: Optional[Dict[str, Any]] = None  # location (JSON)
     metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
@@ -190,8 +191,8 @@ class CanonicalCustomer(BaseModel):
     customerLocale: Optional[str] = "en"  # customerLocale
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for createdAtShopify
-    shopifyUpdatedAt: datetime
+    createdAt: datetime  # Used for createdAt
+    updatedAt: datetime  # Used for updatedAt
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads

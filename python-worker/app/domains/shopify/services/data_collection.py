@@ -165,14 +165,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 raw_data_results, internal_shop_id
             )
 
-            # Step 4.5: Trigger normalization scans for processed data types
             await self._trigger_normalization_scans(
-                internal_shop_id, storage_result.get("data_types_processed", [])
-            )
-
-            # Step 5: Fire event for main table processing
-            main_table_event_result = await self._trigger_main_table_processing(
-                internal_shop_id, shop_domain
+                internal_shop_id,
+                storage_result.get("data_types_processed", []),
+                collectable_data,
             )
 
             # Step 6: Return simple success result
@@ -181,7 +177,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             return {
                 "success": True,
                 "total_items": total_items,
-                "main_table_event": main_table_event_result,
             }
 
         except Exception as e:
@@ -359,16 +354,20 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         return {"data_types_processed": data_types_processed}
 
     async def _trigger_normalization_scans(
-        self, internal_shop_id: str, data_types_processed: List[str]
+        self,
+        internal_shop_id: str,
+        data_types_processed: List[str],
+        fallback_types: List[str] | None = None,
     ) -> None:
         """Trigger normalization scans for processed data types."""
-        if not data_types_processed:
+        types_to_scan = data_types_processed or (fallback_types or [])
+        if not types_to_scan:
             return
 
         try:
             from app.core.redis_client import streams_manager
 
-            for data_type in data_types_processed:
+            for data_type in types_to_scan:
                 await streams_manager.publish_shopify_event(
                     {
                         "event_type": "normalize_scan",
@@ -390,48 +389,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 data_types=data_types_processed,
                 error=str(scan_error),
             )
-
-    async def _trigger_main_table_processing(
-        self, internal_shop_id: str, shop_domain: str
-    ) -> Dict[str, Any]:
-        """Fire event to trigger main table processing."""
-        try:
-            from app.core.redis_client import streams_manager
-
-            # Generate a unique job ID for main table processing
-            main_table_job_id = (
-                f"main_table_processing_{internal_shop_id}_{int(now_utc().timestamp())}"
-            )
-
-            # Publish main table processing event
-            event_id = await streams_manager.publish_data_job_event(
-                job_id=main_table_job_id,
-                shop_id=internal_shop_id,
-                shop_domain=shop_domain,
-                access_token="",  # Not needed for main table processing
-                job_type="main_table_processing",
-            )
-
-            logger.info(
-                f"Published main table processing event",
-                event_id=event_id,
-                job_id=main_table_job_id,
-                shop_id=internal_shop_id,
-                shop_domain=shop_domain,
-            )
-
-            return {
-                "event_id": event_id,
-                "job_id": main_table_job_id,
-                "status": "published",
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to publish main table processing event: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-            }
 
     async def _collect_data_generic(
         self,

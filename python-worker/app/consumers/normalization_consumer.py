@@ -12,6 +12,8 @@ from app.domains.shopify.normalization.canonical_models import NormalizeJob
 from app.core.database.simple_db_client import get_database
 from app.core.redis_client import streams_manager
 
+logger = get_logger(__name__)
+
 
 class NormalizationConsumer(BaseConsumer):
     """Consumes normalize_entity, normalize_batch, and normalize_scan jobs and upserts into Staging* tables."""
@@ -31,6 +33,29 @@ class NormalizationConsumer(BaseConsumer):
     async def _process_single_message(self, message: Dict[str, Any]):
         try:
             payload = message.get("data") or message
+            logger.info(f"Normalization message received: {payload}")
+            logger.info(f"Normalization message type: {type(payload)}")
+            logger.info(f"Normalization message keys: {list(payload.keys())[:5]}")
+            logger.info(f"Normalization message values: {list(payload.values())[:5]}")
+            logger.info(f"Normalization message length: {len(payload)}")
+            logger.info(f"Normalization message is dict: {isinstance(payload, dict)}")
+            logger.info(f"Normalization message is list: {isinstance(payload, list)}")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    pass
+            # Trace message payload shape
+            try:
+                self.logger.info(
+                    "Normalization message received",
+                    event_type=(
+                        payload.get("event_type") if isinstance(payload, dict) else None
+                    ),
+                    payload_type=type(payload).__name__,
+                )
+            except Exception:
+                pass
             event_type = payload.get("event_type")
 
             if event_type == "normalize_entity":
@@ -102,6 +127,19 @@ class NormalizationConsumer(BaseConsumer):
 
         # Build query conditions
         where_conditions = {"shopId": shop_id}
+        # Normalize since value; Redis may serialize None as "None"
+        if isinstance(since, str) and since.lower() in ("none", "null", ""):
+            since = None
+        # Trace since after sanitation
+        try:
+            self.logger.info(
+                "Normalization batch since",
+                since_value=since,
+                since_type=type(since).__name__,
+                data_type=data_type,
+            )
+        except Exception:
+            pass
         if since:
             # Parse since timestamp
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -110,7 +148,7 @@ class NormalizationConsumer(BaseConsumer):
         # Fetch page of raw records, ordered by updatedAt, id for consistency
         raw_records = await raw_table.find_many(
             where=where_conditions,
-            order_by=[{"shopifyUpdatedAt": "asc"}, {"id": "asc"}],
+            order=[{"shopifyUpdatedAt": "asc"}, {"id": "asc"}],
             take=page_size,
         )
 
@@ -122,11 +160,21 @@ class NormalizationConsumer(BaseConsumer):
             )
             return
 
-        # Process each record
-        last_updated_at = None
-        for raw_record in raw_records:
-            await self._normalize_single_raw_record(raw_record, shop_id, data_type)
-            last_updated_at = raw_record.shopifyUpdatedAt
+        # Process each record concurrently with bounded parallelism
+        import asyncio
+
+        semaphore = asyncio.Semaphore(20)
+
+        async def process_record(raw_record):
+            async with semaphore:
+                await self._normalize_single_raw_record(raw_record, shop_id, data_type)
+                return raw_record.shopifyUpdatedAt
+
+        tasks = [process_record(raw_record) for raw_record in raw_records]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        # Track the last updated timestamp from the processed batch
+        last_updated_at = max(results) if results else None
 
         # If we got a full page, publish next batch event
         if len(raw_records) == page_size:
@@ -134,10 +182,11 @@ class NormalizationConsumer(BaseConsumer):
                 "event_type": "normalize_batch",
                 "shop_id": shop_id,
                 "data_type": data_type,
-                "since": last_updated_at.isoformat() if last_updated_at else None,
                 "page_size": page_size,
                 "timestamp": datetime.now().isoformat(),
             }
+            if last_updated_at:
+                next_batch_payload["since"] = last_updated_at.isoformat()
             await streams_manager.publish_shopify_event(next_batch_payload)
             self.logger.info(
                 f"Published next batch event",
@@ -151,6 +200,22 @@ class NormalizationConsumer(BaseConsumer):
                 shop_id=shop_id,
                 data_type=data_type,
                 processed=len(raw_records),
+            )
+
+        # Update watermark to the last successfully processed updatedAt
+        if last_updated_at is not None:
+            await db.normalizationwatermark.upsert(
+                where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}},
+                data={
+                    "shopId": shop_id,
+                    "dataType": data_type,
+                    "lastNormalizedAt": last_updated_at,
+                },
+                create={
+                    "shopId": shop_id,
+                    "dataType": data_type,
+                    "lastNormalizedAt": last_updated_at,
+                },
             )
 
     async def _handle_normalize_scan(self, payload: Dict[str, Any]):
@@ -187,27 +252,13 @@ class NormalizationConsumer(BaseConsumer):
             "event_type": "normalize_batch",
             "shop_id": shop_id,
             "data_type": data_type,
-            "since": since,
             "page_size": page_size,
             "timestamp": datetime.now().isoformat(),
         }
+        # Only include 'since' when present to avoid sending string "None"
+        if since:
+            batch_payload["since"] = since
         await streams_manager.publish_shopify_event(batch_payload)
-
-        # Update watermark to current time (scan initiated)
-        # Note: Now tracking main table normalization instead of staging
-        await db.normalizationwatermark.upsert(
-            where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}},
-            data={
-                "shopId": shop_id,
-                "dataType": data_type,
-                "lastNormalizedAt": datetime.now(),
-            },
-            create={
-                "shopId": shop_id,
-                "dataType": data_type,
-                "lastNormalizedAt": datetime.now(),
-            },
-        )
 
         self.logger.info(
             f"Initiated scan normalization", shop_id=shop_id, data_type=data_type
@@ -217,21 +268,78 @@ class NormalizationConsumer(BaseConsumer):
         self, raw_record: Any, shop_id: str, data_type: str
     ):
         """Normalize a single raw record and upsert to staging."""
-        # Detect format from raw record or use heuristic
+        # Normalize payload to a dict (guards against stringified JSON, bytes, or single-item lists)
+        payload = raw_record.payload
+        try:
+            self.logger.info(
+                "Raw payload received",
+                payload_type=type(payload).__name__,
+                data_type=data_type,
+            )
+        except Exception:
+            pass
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                payload = payload.decode("utf-8")
+            except Exception:
+                self.logger.warning(
+                    "Skipping raw record: invalid bytes payload", shop_id=shop_id
+                )
+                return
+        if isinstance(payload, str):
+            try:
+                import json as _json
+
+                payload = _json.loads(payload)
+            except Exception:
+                self.logger.warning(
+                    "Skipping raw record: invalid JSON payload string", shop_id=shop_id
+                )
+                return
+        # Some sources may wrap node in a single-element list
+        if (
+            isinstance(payload, list)
+            and len(payload) == 1
+            and isinstance(payload[0], dict)
+        ):
+            payload = payload[0]
+        try:
+            self.logger.info(
+                "Raw payload normalized",
+                normalized_type=type(payload).__name__,
+                has_id=(isinstance(payload, dict) and ("id" in payload)),
+                keys=(list(payload.keys())[:5] if isinstance(payload, dict) else None),
+            )
+        except Exception:
+            pass
+        if not isinstance(payload, dict):
+            self.logger.warning(
+                "Skipping raw record: unexpected payload type",
+                type=type(payload).__name__,
+            )
+            return
+
+        # Detect format from normalized payload or use heuristic
         data_format = getattr(raw_record, "format", None)
         if not data_format:
-            # Fallback heuristic: GraphQL has 'gid://' in IDs, REST uses numeric IDs
-            payload = raw_record.payload
-            if isinstance(payload, dict):
-                entity_id = payload.get("id", "")
-                data_format = (
-                    "graphql" if str(entity_id).startswith("gid://") else "rest"
-                )
-            else:
-                data_format = "rest"  # Default fallback
+            # GraphQL has 'gid://' in IDs, REST uses numeric IDs
+            entity_id = payload.get("id", "")
+            data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
 
         adapter = get_adapter(data_format, data_type)
-        canonical = adapter.to_canonical(raw_record.payload, shop_id)
+        try:
+            canonical = adapter.to_canonical(payload, shop_id)
+        except Exception as e:
+            self.logger.error(
+                "Adapter to_canonical failed",
+                error=str(e),
+                data_format=data_format,
+                data_type=data_type,
+                payload_keys=(
+                    list(payload.keys())[:8] if isinstance(payload, dict) else None
+                ),
+            )
+            raise
 
         db = await get_database()
         main_table = {
