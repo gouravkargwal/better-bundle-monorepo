@@ -5,6 +5,7 @@ Customer Behavior Feature Generator for ML feature engineering
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 import json
+import math
 import statistics
 from collections import Counter
 from prisma import Json
@@ -22,17 +23,15 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         self, customer: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Generate behavioral features for a customer to match CustomerBehaviorFeatures schema
-        Now enhanced to use both BehavioralEvents and unified analytics data
+        Generate behavioral features for a customer using unified analytics data
 
         Args:
             customer: Customer data (from CustomerData table)
             context: Additional context data:
                 - shop: Shop data
-                - behavioral_events: List of BehavioralEvents for this customer
-                - user_interactions: List of UserInteraction for this customer (NEW)
-                - user_sessions: List of UserSession for this customer (NEW)
-                - purchase_attributions: List of PurchaseAttribution for this customer (NEW)
+                - user_interactions: List of UserInteraction for this customer
+                - user_sessions: List of UserSession for this customer
+                - purchase_attributions: List of PurchaseAttribution for this customer
 
         Returns:
             Dictionary of generated features matching CustomerBehaviorFeatures schema
@@ -45,39 +44,41 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             features = {}
             shop = context.get("shop", {})
-            behavioral_events = context.get("behavioral_events", [])
 
-            # NEW: Get unified analytics data
+            # Get unified analytics data
             user_interactions = context.get("user_interactions", [])
             user_sessions = context.get("user_sessions", [])
             purchase_attributions = context.get("purchase_attributions", [])
 
-            # If no data at all, return empty features
-            if not behavioral_events and not user_interactions:
+            # If no interaction data, return empty features
+            if not user_interactions:
                 return self._get_empty_behavior_features(customer, shop)
 
             # Basic customer features
             features.update(self._compute_basic_features(customer, shop))
 
-            # Standard features from BehavioralEvents (unchanged)
-            if behavioral_events:
-                # Session metrics (aggregate across all sessions)
-                features.update(self._compute_session_metrics(behavioral_events))
+            # Enhanced features from unified analytics data
+            if user_interactions:
+                # Session metrics from user interactions
+                features.update(
+                    self._compute_interaction_session_metrics(
+                        user_interactions, user_sessions
+                    )
+                )
 
-                # Event counts (aggregate all event types)
-                features.update(self._compute_event_counts(behavioral_events))
+                # Event counts from user interactions
+                features.update(
+                    self._compute_interaction_event_counts(user_interactions)
+                )
 
-                # Temporal patterns
-                features.update(self._compute_temporal_patterns(behavioral_events))
+                # Temporal patterns from user interactions
+                features.update(
+                    self._compute_interaction_temporal_patterns(user_interactions)
+                )
 
                 # Behavior patterns (unique items, search terms, etc.)
-                features.update(self._compute_behavior_patterns(behavioral_events))
-
-            # NEW: Enhanced features from unified analytics
-            if user_interactions or user_sessions:
-                # Cross-session features
                 features.update(
-                    self._compute_cross_session_features(user_sessions, customer_id)
+                    self._compute_interaction_behavior_patterns(user_interactions)
                 )
 
                 # Extension-specific features
@@ -85,12 +86,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                     self._compute_extension_features(user_interactions, customer_id)
                 )
 
-                # Enhanced session metrics
+            # Cross-session features
+            if user_sessions:
                 features.update(
-                    self._compute_enhanced_session_metrics(user_sessions, customer_id)
+                    self._compute_cross_session_features(user_sessions, customer_id)
                 )
 
-            # NEW: Attribution features
+            # Attribution features
             if purchase_attributions:
                 features.update(
                     self._compute_attribution_features(
@@ -98,13 +100,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                     )
                 )
 
-            # Conversion metrics (rates between event types) - enhanced with unified data
+            # Conversion metrics (rates between interaction types)
             features.update(self._compute_conversion_metrics(features))
 
-            # Computed scores (engagement, recency, diversity, behavioral) - enhanced
+            # Computed scores (engagement, recency, diversity, behavioral)
             features.update(
-                self._compute_computed_scores(
-                    features, behavioral_events, user_interactions
+                self._compute_computed_scores_from_interactions(
+                    features, user_interactions
                 )
             )
 
@@ -121,6 +123,302 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 f"Failed to compute behavior features for customer: {customer.get('customerId', 'unknown')}: {str(e)}"
             )
             return {}
+
+    # ===================== NEW METHODS FOR USER INTERACTIONS =====================
+
+    def _compute_interaction_session_metrics(
+        self, interactions: List[Dict[str, Any]], sessions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute session metrics from user interactions and sessions"""
+        if not sessions:
+            # Fallback: estimate sessions from interactions
+            session_ids = set(
+                i.get("sessionId") for i in interactions if i.get("sessionId")
+            )
+            session_count = len(session_ids)
+
+            total_interactions = len(interactions)
+            avg_events_per_session = (
+                total_interactions / session_count if session_count > 0 else None
+            )
+
+            return {
+                "sessionCount": session_count,
+                "avgSessionDuration": None,  # Can't calculate without session data
+                "avgEventsPerSession": avg_events_per_session,
+            }
+
+        # Use actual session data
+        session_count = len(sessions)
+        total_duration = 0
+        total_interactions = len(interactions)
+
+        for session in sessions:
+            created_at = self._parse_datetime(session.get("createdAt"))
+            last_active = self._parse_datetime(session.get("lastActive"))
+
+            if created_at and last_active:
+                duration = int((last_active - created_at).total_seconds())
+                total_duration += duration
+
+        avg_duration = total_duration // session_count if session_count > 0 else None
+        avg_events_per_session = (
+            total_interactions / session_count if session_count > 0 else None
+        )
+
+        return {
+            "sessionCount": session_count,
+            "avgSessionDuration": avg_duration,
+            "avgEventsPerSession": avg_events_per_session,
+        }
+
+    def _compute_interaction_event_counts(
+        self, interactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute counts for different interaction types"""
+        total_event_count = len(interactions)
+
+        # Initialize counters
+        counts = {
+            "product_view": 0,
+            "collection_view": 0,
+            "cart_add": 0,
+            "cart_view": 0,
+            "cart_remove": 0,
+            "search": 0,
+            "checkout_start": 0,
+            "purchase": 0,
+            "recommendation_view": 0,
+            "recommendation_click": 0,
+        }
+
+        # Extension-specific counters
+        extension_counts = {
+            "venus": 0,
+            "phoenix": 0,
+            "apollo": 0,
+            "atlas": 0,
+        }
+
+        for interaction in interactions:
+            interaction_type = interaction.get("interactionType", "").lower()
+            extension_type = interaction.get("extensionType", "").lower()
+
+            # Count by extension
+            if extension_type in extension_counts:
+                extension_counts[extension_type] += 1
+
+            # Map interaction types to traditional event types
+            if interaction_type in ["product_viewed", "view"]:
+                # Check metadata for context
+                metadata = interaction.get("metadata", {})
+                if metadata.get("product_id"):
+                    counts["product_view"] += 1
+                elif metadata.get("collection_id"):
+                    counts["collection_view"] += 1
+
+            elif interaction_type in ["product_added_to_cart", "add_to_cart", "click"]:
+                metadata = interaction.get("metadata", {})
+                if metadata.get("interaction_type") == "add_to_cart":
+                    counts["cart_add"] += 1
+                elif metadata.get("product_id"):
+                    counts["product_view"] += 1  # Click on product = view
+
+            elif interaction_type == "cart_viewed":
+                counts["cart_view"] += 1
+
+            elif interaction_type in ["product_removed_from_cart", "remove_from_cart"]:
+                counts["cart_remove"] += 1
+
+            elif interaction_type in ["search_submitted", "search"]:
+                counts["search"] += 1
+
+            elif interaction_type in ["checkout_started", "checkout_begin"]:
+                counts["checkout_start"] += 1
+
+            elif interaction_type in ["purchase", "checkout_completed", "add_to_order"]:
+                counts["purchase"] += 1
+
+            elif interaction_type == "recommendation_viewed":
+                counts["recommendation_view"] += 1
+
+            elif interaction_type == "recommendation_clicked":
+                counts["recommendation_click"] += 1
+
+        return {
+            "totalEventCount": total_event_count,
+            "productViewCount": counts["product_view"],
+            "collectionViewCount": counts["collection_view"],
+            "cartAddCount": counts["cart_add"],
+            "cartViewCount": counts["cart_view"],
+            "cartRemoveCount": counts["cart_remove"],
+            "searchCount": counts["search"],
+            "checkoutStartCount": counts["checkout_start"],
+            "purchaseCount": counts["purchase"],
+            # NEW: Extension-specific counts
+            "venusInteractionCount": extension_counts["venus"],
+            "phoenixInteractionCount": extension_counts["phoenix"],
+            "apolloInteractionCount": extension_counts["apollo"],
+            "atlasInteractionCount": extension_counts["atlas"],
+            # NEW: Recommendation-specific counts
+            "recommendationViewCount": counts["recommendation_view"],
+            "recommendationClickCount": counts["recommendation_click"],
+        }
+
+    def _compute_interaction_temporal_patterns(
+        self, interactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute temporal patterns from user interactions"""
+        if not interactions:
+            return {
+                "daysSinceFirstEvent": 0,
+                "daysSinceLastEvent": 0,
+                "mostActiveHour": None,
+                "mostActiveDay": None,
+            }
+
+        # Sort interactions by timestamp
+        valid_interactions = []
+        for interaction in interactions:
+            created_at = self._parse_datetime(interaction.get("createdAt"))
+            if created_at:
+                valid_interactions.append((interaction, created_at))
+
+        if not valid_interactions:
+            return {
+                "daysSinceFirstEvent": 0,
+                "daysSinceLastEvent": 0,
+                "mostActiveHour": None,
+                "mostActiveDay": None,
+            }
+
+        valid_interactions.sort(key=lambda x: x[1])
+
+        first_event_time = valid_interactions[0][1]
+        last_event_time = valid_interactions[-1][1]
+        current_time = datetime.now(timezone.utc)
+
+        days_since_first = (current_time - first_event_time).days
+        days_since_last = (current_time - last_event_time).days
+
+        # Calculate most active hour and day
+        hours = [timestamp.hour for _, timestamp in valid_interactions]
+        days = [timestamp.weekday() for _, timestamp in valid_interactions]
+
+        most_active_hour = max(set(hours), key=hours.count) if hours else None
+        most_active_day = max(set(days), key=days.count) if days else None
+
+        return {
+            "daysSinceFirstEvent": days_since_first,
+            "daysSinceLastEvent": days_since_last,
+            "mostActiveHour": most_active_hour,
+            "mostActiveDay": most_active_day,
+        }
+
+    def _compute_interaction_behavior_patterns(
+        self, interactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute behavior patterns from user interactions"""
+        unique_products = set()
+        unique_collections = set()
+        search_terms = []
+        categories = []
+        device_types = []
+        referrers = []
+
+        for interaction in interactions:
+            metadata = interaction.get("metadata", {})
+
+            # Extract product and collection IDs
+            if metadata.get("product_id"):
+                unique_products.add(metadata["product_id"])
+            if metadata.get("collection_id"):
+                unique_collections.add(metadata["collection_id"])
+
+            # Extract search terms
+            if metadata.get("search_query"):
+                search_terms.append(metadata["search_query"])
+
+            # Extract categories
+            if metadata.get("product_category"):
+                categories.append(metadata["product_category"])
+            elif metadata.get("category"):
+                categories.append(metadata["category"])
+
+            # Extract device types
+            if metadata.get("device_type"):
+                device_types.append(metadata["device_type"])
+
+            # Extract referrers
+            if metadata.get("referrer") and metadata["referrer"] != "":
+                referrers.append(metadata["referrer"])
+
+        # Get top categories (up to 3)
+        category_counts = Counter(categories)
+        top_categories = [cat for cat, _ in category_counts.most_common(3)]
+
+        # Get primary device type
+        device_counts = Counter(device_types)
+        primary_device = device_counts.most_common(1)[0][0] if device_types else None
+
+        # Get primary referrer
+        referrer_counts = Counter(referrers)
+        primary_referrer = referrer_counts.most_common(1)[0][0] if referrers else None
+
+        return {
+            "uniqueProductsViewed": len(unique_products),
+            "uniqueCollectionsViewed": len(unique_collections),
+            "searchTerms": Json(search_terms[:10]),  # Keep last 10 search terms
+            "topCategories": Json(top_categories),
+            "deviceType": primary_device,
+            "primaryReferrer": primary_referrer,
+        }
+
+    def _compute_computed_scores_from_interactions(
+        self, features: Dict[str, Any], interactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute engagement, recency, diversity, and behavioral scores from interactions"""
+
+        # Engagement score (based on interaction variety and frequency)
+        total_interactions = features.get("totalEventCount", 0)
+        session_count = features.get("sessionCount", 1)
+        unique_products = features.get("uniqueProductsViewed", 0)
+
+        # Normalize engagement (0-1 scale)
+        engagement_raw = (
+            min(total_interactions / 50, 1.0) * 0.4  # Interaction frequency
+            + min(unique_products / 20, 1.0) * 0.3  # Product diversity
+            + min(session_count / 10, 1.0) * 0.3  # Session frequency
+        )
+        engagement_score = max(0.0, min(1.0, engagement_raw))
+
+        # Recency score (based on days since last interaction)
+        days_since_last = features.get("daysSinceLastEvent", float("inf"))
+        if days_since_last == float("inf"):
+            recency_score = 0.0
+        else:
+            # Exponential decay: 1.0 for today, 0.5 for 7 days ago, 0.1 for 30 days ago
+            recency_score = max(0.0, min(1.0, math.exp(-days_since_last / 10)))
+
+        # Diversity score (based on variety of interaction types)
+        interaction_types = set()
+        for interaction in interactions:
+            interaction_types.add(interaction.get("interactionType", ""))
+
+        diversity_raw = len(interaction_types) / 8.0  # Assume max 8 different types
+        diversity_score = max(0.0, min(1.0, diversity_raw))
+
+        # Behavioral score (weighted combination of all scores)
+        behavioral_score = (
+            engagement_score * 0.4 + recency_score * 0.3 + diversity_score * 0.3
+        )
+
+        return {
+            "engagementScore": round(engagement_score, 3),
+            "recencyScore": round(recency_score, 3),
+            "diversityScore": round(diversity_score, 3),
+            "behavioralScore": round(behavioral_score, 3),
+        }
 
     def _get_empty_behavior_features(
         self, customer: Dict[str, Any], shop: Dict[str, Any]
@@ -156,6 +454,14 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "recencyScore": 0.0,
             "diversityScore": 0.0,
             "behavioralScore": 0.0,
+            # NEW: Extension-specific interaction counts
+            "venusInteractionCount": 0,
+            "phoenixInteractionCount": 0,
+            "apolloInteractionCount": 0,
+            "atlasInteractionCount": 0,
+            # NEW: Recommendation-specific counts
+            "recommendationViewCount": 0,
+            "recommendationClickCount": 0,
         }
 
     def _compute_basic_features(

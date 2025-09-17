@@ -109,18 +109,6 @@ model RawCollection {
   @@map("RawCollection")
 }
 
-model RawBehavioralEvents {
-  id         String   @id @default(cuid())
-  shopId     String
-  payload    Json
-  receivedAt DateTime @default(now())
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId])
-  @@index([shopId, receivedAt])
-  @@map("RawBehavioralEvents")
-}
 
 // ===================== STAGING LAYER =====================
 
@@ -328,24 +316,6 @@ model CollectionData {
   @@map("CollectionData")
 }
 
-model BehavioralEvents {
-  eventId    String   @id
-  shopId     String
-  customerId String?  @db.VarChar(100)
-  clientId   String?  @db.VarChar(100) // Session identifier from Shopify Web Pixels
-  eventType  String   @db.VarChar(100)
-  timestamp DateTime
-  eventData  Json?
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, eventType])
-  @@index([shopId, timestamp])
-  @@index([shopId, customerId])
-  @@index([shopId, clientId])
-  @@index([shopId, eventType, timestamp])
-  @@map("BehavioralEvents")
-}
 
 model Session {
   id            String    @id
@@ -398,9 +368,6 @@ model Shop {
   productPairFeatures       ProductPairFeatures[]
   searchProductFeatures     SearchProductFeatures[]
 
-  // Behavioral events
-  rawBehavioralEvents RawBehavioralEvents[]
-  behavioralEvents    BehavioralEvents[]
   
   // Unified analytics
   userSessions        UserSession[]

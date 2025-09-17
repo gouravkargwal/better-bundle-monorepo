@@ -94,7 +94,12 @@ class CustomerIdentityResolutionService:
                 customer_id, current_session_id, linked_sessions
             )
 
-            # Step 5: Fire Redis stream event for customer linking backfill
+            # Step 5: Store customer identity links in UserIdentityLink table
+            await self._store_customer_identity_links(
+                customer_id, shop_id, current_session_id, linked_sessions
+            )
+
+            # Step 6: Fire Redis stream event for customer linking backfill
             await self._fire_customer_linking_event(
                 customer_id, shop_id, current_session_id, linked_sessions
             )
@@ -509,11 +514,11 @@ class CustomerIdentityResolutionService:
             return 1
 
     async def _fire_customer_linking_event(
-        self, 
-        customer_id: str, 
-        shop_id: str, 
-        current_session_id: str, 
-        linked_sessions: List[str]
+        self,
+        customer_id: str,
+        shop_id: str,
+        current_session_id: str,
+        linked_sessions: List[str],
     ) -> None:
         """Fire Redis stream event for customer linking backfill operations"""
         try:
@@ -534,7 +539,15 @@ class CustomerIdentityResolutionService:
                 await self.redis_manager.initialize()
 
             # Fire event to customer linking stream for backfill processors
-            message_id = await self.redis_manager.publish_event(CUSTOMER_LINKING_STREAM, event_data)
+            message_id = await self.redis_manager.publish_customer_linking_event(
+                job_id=f"customer_linking_{customer_id}_{int(utcnow().timestamp())}",
+                shop_id=shop_id,
+                customer_id=customer_id,
+                event_type="customer_linking",
+                trigger_session_id=current_session_id,
+                linked_sessions=linked_sessions,
+                metadata=event_data,
+            )
 
             logger.info(
                 f"Customer linking event fired: {message_id} for customer {customer_id} "
@@ -564,3 +577,73 @@ class CustomerIdentityResolutionService:
                 else 0
             ),
         }
+
+    async def _store_customer_identity_links(
+        self,
+        customer_id: str,
+        shop_id: str,
+        current_session_id: str,
+        linked_sessions: List[str],
+    ) -> None:
+        """
+        Store customer identity links in UserIdentityLink table
+
+        Args:
+            customer_id: The customer ID to link to
+            shop_id: The shop ID
+            current_session_id: The current session ID
+            linked_sessions: List of linked session IDs
+        """
+        try:
+            db = await get_database()
+
+            # Get all session IDs that need to be linked
+            all_session_ids = [current_session_id] + linked_sessions
+
+            # Get browser session IDs for these sessions
+            sessions_data = await db.usersession.find_many(
+                where={
+                    "id": {"in": all_session_ids},
+                    "shopId": shop_id,
+                },
+                select={"id": True, "browserSessionId": True},
+            )
+
+            # Create identity links for each session
+            for session_data in sessions_data:
+                browser_session_id = session_data.browserSessionId
+
+                # Check if link already exists
+                existing_link = await db.useridentitylink.find_first(
+                    where={
+                        "shopId": shop_id,
+                        "clientId": browser_session_id,
+                        "customerId": customer_id,
+                    }
+                )
+
+                if not existing_link:
+                    # Create new identity link
+                    await db.useridentitylink.create(
+                        data={
+                            "shopId": shop_id,
+                            "clientId": browser_session_id,
+                            "customerId": customer_id,
+                        }
+                    )
+
+                    logger.info(
+                        f"Created identity link: {browser_session_id} -> {customer_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"Identity link already exists: {browser_session_id} -> {customer_id}"
+                    )
+
+            logger.info(
+                f"Stored {len(sessions_data)} customer identity links for customer {customer_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to store customer identity links: {str(e)}")
+            raise

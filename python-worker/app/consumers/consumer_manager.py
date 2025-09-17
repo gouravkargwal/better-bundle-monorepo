@@ -11,6 +11,7 @@ from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.normalization_consumer import NormalizationConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
+from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 
 # ShopifyEventsConsumer removed - replaced by NormalizationConsumer
 from app.core.logging import get_logger
@@ -48,6 +49,7 @@ class ConsumerManager:
         normalization_consumer: Optional[NormalizationConsumer] = None,
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         behavioral_events_consumer: Optional[BehavioralEventsConsumer] = None,
+        customer_linking_consumer: Optional[CustomerLinkingConsumer] = None,
     ):
         """Register consumers with the manager (all parameters are optional)"""
         if data_collection_consumer:
@@ -58,6 +60,8 @@ class ConsumerManager:
             self.consumers["feature_computation"] = feature_computation_consumer
         if behavioral_events_consumer:
             self.consumers["behavioral_events"] = behavioral_events_consumer
+        if customer_linking_consumer:
+            self.consumers["customer_linking"] = customer_linking_consumer
         # shopify_events_consumer removed - replaced by normalization_consumer
 
     async def start_all_consumers(self):

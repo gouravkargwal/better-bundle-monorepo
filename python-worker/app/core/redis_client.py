@@ -407,6 +407,30 @@ class RedisStreamsManager:
         }
         return await self.publish_event("betterbundle:gorse-training", event_data)
 
+    async def publish_customer_linking_event(
+        self,
+        job_id: str,
+        shop_id: str,
+        customer_id: str,
+        event_type: str = "customer_linking",
+        trigger_session_id: Optional[str] = None,
+        linked_sessions: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Publish a customer linking event for identity resolution and backfill"""
+        event_data = {
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "customer_id": customer_id,
+            "event_type": event_type,
+            "trigger_session_id": trigger_session_id,
+            "linked_sessions": linked_sessions or [],
+            "metadata": metadata or {},
+            "status": "queued",
+        }
+
+        return await self.publish_event(settings.CUSTOMER_LINKING_STREAM, event_data)
+
 
 # Global streams manager instance
 streams_manager = RedisStreamsManager()

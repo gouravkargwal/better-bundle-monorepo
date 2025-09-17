@@ -385,3 +385,63 @@ class AnalyticsTrackingService:
         except Exception as e:
             logger.error(f"Error saving interaction: {str(e)}")
             return None
+
+    async def fire_feature_computation_event(
+        self,
+        shop_id: str,
+        trigger_source: str,
+        interaction_id: Optional[str] = None,
+        batch_size: int = 50,
+        incremental: bool = True,
+    ) -> Optional[str]:
+        """
+        Fire a feature computation event to trigger incremental ML pipeline
+
+        Args:
+            shop_id: The shop ID to compute features for
+            trigger_source: Source that triggered the computation (e.g., "venus_interaction")
+            interaction_id: Optional interaction ID that triggered the computation
+            batch_size: Batch size for feature processing
+            incremental: Whether to run incremental processing
+
+        Returns:
+            Event ID if successful, None if failed
+        """
+        try:
+            from app.core.redis_client import streams_manager
+            from app.shared.helpers.datetime_utils import utcnow
+
+            # Generate a unique job ID
+            job_id = f"analytics_triggered_{shop_id}_{int(utcnow().timestamp())}"
+
+            # Prepare event metadata
+            metadata = {
+                "batch_size": batch_size,
+                "incremental": incremental,
+                "trigger_source": trigger_source,
+                "interaction_id": interaction_id,
+                "timestamp": utcnow().isoformat(),
+                "processed_count": 0,
+            }
+
+            # Publish the feature computation event to Redis stream
+            event_id = await streams_manager.publish_features_computed_event(
+                job_id=job_id,
+                shop_id=shop_id,
+                features_ready=False,  # Need to be computed
+                metadata=metadata,
+            )
+
+            logger.info(
+                f"Fired feature computation event from {trigger_source}",
+                job_id=job_id,
+                shop_id=shop_id,
+                interaction_id=interaction_id,
+                event_id=event_id,
+            )
+
+            return event_id
+
+        except Exception as e:
+            logger.error(f"Failed to fire feature computation event: {str(e)}")
+            return None

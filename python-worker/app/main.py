@@ -41,6 +41,7 @@ from app.consumers.feature_computation_consumer import FeatureComputationConsume
 from app.webhooks.handler import WebhookHandler
 from app.webhooks.repository import WebhookRepository
 from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer
+from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 
 # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 from app.core.database.simple_db_client import get_database, close_database
@@ -146,6 +147,9 @@ async def initialize_services():
         # Initialize behavioral events consumer
         services["behavioral_events_consumer"] = BehavioralEventsConsumer()
 
+        # Initialize customer linking consumer
+        services["customer_linking_consumer"] = CustomerLinkingConsumer()
+
         # ShopifyEventsConsumer removed - replaced by NormalizationConsumer
 
         # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
@@ -160,6 +164,7 @@ async def initialize_services():
             normalization_consumer=services["normalization_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             behavioral_events_consumer=services["behavioral_events_consumer"],
+            customer_linking_consumer=services["customer_linking_consumer"],
             # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
             # Note: ShopifyEventsConsumer removed - replaced by NormalizationConsumer
         )

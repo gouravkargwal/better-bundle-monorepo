@@ -166,6 +166,16 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
         if not interaction:
             raise HTTPException(status_code=500, detail="Failed to track interaction")
 
+        # Fire feature computation event for incremental processing
+        try:
+            await analytics_service.fire_feature_computation_event(
+                shop_id=request.shop_id,
+                trigger_source="phoenix_interaction",
+                interaction_id=interaction.id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fire feature computation event: {str(e)}")
+
         logger.info(f"Phoenix interaction tracked successfully: {interaction.id}")
 
         return PhoenixResponse(

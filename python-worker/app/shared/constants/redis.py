@@ -27,6 +27,7 @@ ML_TRAINING_GROUP = "ml-training-consumers"
 HEURISTIC_DECISION_GROUP = "heuristic-decision-processors"
 COMPLETION_HANDLER_GROUP = "completion-handlers"
 GORSE_SYNC_GROUP = "gorse-sync-processors"
+CUSTOMER_LINKING_GROUP = "customer-linking-processors"
 
 # Redis Configuration
 DEFAULT_REDIS_PORT = 6379
@@ -62,6 +63,7 @@ __all__ = [
     "HEURISTIC_DECISION_GROUP",
     "COMPLETION_HANDLER_GROUP",
     "GORSE_SYNC_GROUP",
+    "CUSTOMER_LINKING_GROUP",
     "DEFAULT_REDIS_PORT",
     "DEFAULT_REDIS_DB",
     "DEFAULT_REDIS_TLS",

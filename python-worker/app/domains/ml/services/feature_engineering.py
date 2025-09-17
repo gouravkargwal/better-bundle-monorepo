@@ -307,17 +307,17 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         collections: List[Dict[str, Any]],
         shop: Dict[str, Any],
         products: Optional[List[Dict[str, Any]]] = None,
-        behavioral_events: Optional[List[Dict[str, Any]]] = None,
+        user_interactions: Optional[List[Dict[str, Any]]] = None,
         order_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Batch compute features for multiple collections"""
         try:
-            context = self._build_base_context(
-                shop,
-                products=products or [],
-                behavioral_events=behavioral_events or [],
-                order_data=order_data or [],
-            )
+            context = {
+                "shop": shop,
+                "products": products or [],
+                "user_interactions": user_interactions or [],
+                "order_data": order_data or [],
+            }
 
             return await self._process_entities_batch(
                 collections, self.collection_generator, context, "id", "collection"
@@ -330,8 +330,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         self,
         customers: List[Dict[str, Any]],
         shop: Dict[str, Any],
-        behavioral_events: Optional[List[Dict[str, Any]]] = None,
-        # NEW: Unified analytics data
         user_interactions: Optional[List[Dict[str, Any]]] = None,
         user_sessions: Optional[List[Dict[str, Any]]] = None,
         purchase_attributions: Optional[List[Dict[str, Any]]] = None,
@@ -341,17 +339,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             results = {}
 
             for customer in customers:
-                # Filter events for this customer
+                # Filter data for this customer
                 customer_id = customer.get("customerId", "")
-                customer_events = []
 
-                for event in behavioral_events or []:
-                    event_customer_id = event.get("customerId", "")
-                    # Customer IDs are already normalized at data ingestion level
-                    if event_customer_id == customer_id:
-                        customer_events.append(event)
-
-                # NEW: Filter unified analytics data for this customer
+                # Filter unified analytics data for this customer
                 customer_interactions = []
                 for interaction in user_interactions or []:
                     if interaction.get("customerId") == customer_id:
@@ -367,15 +358,13 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     if attribution.get("customerId") == customer_id:
                         customer_attributions.append(attribution)
 
-                # Build enhanced context with unified analytics data
-                context = self._build_base_context(
-                    shop,
-                    behavioral_events=customer_events,
-                    # NEW: Add unified analytics data to context
-                    user_interactions=customer_interactions,
-                    user_sessions=customer_sessions,
-                    purchase_attributions=customer_attributions,
-                )
+                # Build context with unified analytics data
+                context = {
+                    "shop": shop,
+                    "user_interactions": customer_interactions,
+                    "user_sessions": customer_sessions,
+                    "purchase_attributions": customer_attributions,
+                }
 
                 features = await self._compute_feature_safely(
                     self.customer_behavior_generator,
@@ -583,14 +572,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     incremental=True,
                     since_timestamp=last_computation_time,
                 )
-                behavioral_events = await self.process_entities_in_chunks(
-                    shop_id,
-                    "behavioral_events",
-                    batch_size * 5,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=last_computation_time,
-                )
 
                 # NEW: Load unified analytics data
                 user_interactions = await self.process_entities_in_chunks(
@@ -625,7 +606,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         customers,
                         orders,
                         collections,
-                        behavioral_events,
                         user_interactions,
                         user_sessions,
                         purchase_attributions,
@@ -662,11 +642,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 collections = await self.process_entities_in_chunks(
                     shop_id, "collections", batch_size, chunk_size=100
                 )
-                behavioral_events = await self.process_entities_in_chunks(
-                    shop_id, "behavioral_events", batch_size * 5, chunk_size=100
-                )
 
-                # NEW: Load unified analytics data for full processing
+                # Load unified analytics data for full processing
                 user_interactions = await self.process_entities_in_chunks(
                     shop_id, "user_interactions", batch_size * 3, chunk_size=100
                 )
@@ -677,15 +654,13 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     shop_id, "purchase_attributions", batch_size, chunk_size=100
                 )
 
-            # Compute all features using enhanced method with unified analytics data
+            # Compute all features using unified analytics data
             all_features = await self.compute_all_features_for_shop(
                 shop=shop_data,
                 products=products,
                 customers=customers,
                 orders=orders,
                 collections=collections,
-                behavioral_events=behavioral_events,
-                # NEW: Pass unified analytics data
                 user_interactions=user_interactions,
                 user_sessions=user_sessions,
                 purchase_attributions=purchase_attributions,
@@ -747,7 +722,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     "customers": len(customers),
                     "orders": len(orders),
                     "collections": len(collections),
-                    "behavioral_events": len(behavioral_events),
                     # NEW: Include unified analytics data counts
                     "user_interactions": len(user_interactions),
                     "user_sessions": len(user_sessions),
@@ -772,8 +746,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         orders: Optional[List[Dict[str, Any]]] = None,
         customers: Optional[List[Dict[str, Any]]] = None,
         collections: Optional[List[Dict[str, Any]]] = None,
-        behavioral_events: Optional[List[Dict[str, Any]]] = None,
-        # NEW: Unified analytics data
         user_interactions: Optional[List[Dict[str, Any]]] = None,
         user_sessions: Optional[List[Dict[str, Any]]] = None,
         purchase_attributions: Optional[List[Dict[str, Any]]] = None,
@@ -816,9 +788,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             all_features["products"] = product_features
 
             # 2. User/Customer Features
-            user_context = self._build_base_context(
-                shop, orders=orders or [], events=behavioral_events or []
-            )
+            user_context = {
+                "shop": shop,
+                "orders": orders or [],
+                "user_interactions": user_interactions or [],
+            }
             user_features = await self._process_entities_batch(
                 customers, self.user_generator, user_context, "customerId", "user"
             )
@@ -826,34 +800,32 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # 3. Collection Features
             collection_features = await self.compute_all_collection_features(
-                collections, shop, products, behavioral_events, orders
+                collections, shop, products, user_interactions, orders
             )
             all_features["collections"] = collection_features
 
-            # 4. Customer Behavior Features (Enhanced with unified analytics)
+            # 4. Customer Behavior Features (using unified analytics)
             behavior_features = await self.compute_all_customer_behavior_features(
                 customers,
                 shop,
-                behavioral_events,
-                # NEW: Pass unified analytics data
                 user_interactions=user_interactions,
                 user_sessions=user_sessions,
                 purchase_attributions=purchase_attributions,
             )
             all_features["customer_behaviors"] = behavior_features
 
-            # 5. Session Features
-            session_features = await self.generate_session_features_from_events(
-                behavioral_events, shop, orders
+            # 5. Session Features (from unified analytics)
+            session_features = await self.generate_session_features_from_interactions(
+                user_interactions, user_sessions, shop, orders
             )
             all_features["sessions"] = session_features
 
             # 6. Interaction Features (sample of customer-product pairs)
-            interaction_context = self._build_base_context(
-                shop,
-                orders=orders or [],
-                behavioral_events=behavioral_events or [],
-            )
+            interaction_context = {
+                "shop": shop,
+                "orders": orders or [],
+                "user_interactions": user_interactions or [],
+            }
 
             # Create variant ID to product ID mapping from products data
             variant_to_product_map = {}
@@ -1485,3 +1457,58 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 shop_id=shop_id,
             )
             # Don't raise the exception - feature computation succeeded, Gorse sync failure shouldn't fail the whole job
+
+    async def generate_session_features_from_interactions(
+        self,
+        user_interactions: Optional[List[Dict[str, Any]]] = None,
+        user_sessions: Optional[List[Dict[str, Any]]] = None,
+        shop: Optional[Dict[str, Any]] = None,
+        orders: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Generate session features from user interactions and sessions"""
+        try:
+            if not user_sessions:
+                logger.debug("No user sessions available for feature generation")
+                return {}
+
+            features = {}
+            for session in user_sessions:
+                session_id = session.get("id")
+                if not session_id:
+                    continue
+
+                # Get interactions for this session
+                session_interactions = [
+                    interaction
+                    for interaction in user_interactions or []
+                    if interaction.get("sessionId") == session_id
+                ]
+
+                # Build session context
+                context = {
+                    "shop": shop or {},
+                    "session": session,
+                    "interactions": session_interactions,
+                    "orders": orders or [],
+                }
+
+                # Generate features for this session
+                session_features = await self._compute_feature_safely(
+                    self.session_generator,
+                    session,
+                    context,
+                    entity_id=session_id,
+                    feature_type="session",
+                )
+
+                if session_features:
+                    features[session_id] = session_features
+
+            logger.info(f"Generated session features for {len(features)} sessions")
+            return features
+
+        except Exception as e:
+            logger.error(
+                f"Failed to generate session features from interactions: {str(e)}"
+            )
+            return {}
