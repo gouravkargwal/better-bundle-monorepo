@@ -36,6 +36,8 @@ model RawOrder {
   @@index([shopId, shopifyId])
   @@index([shopId, shopifyUpdatedAt])
   @@index([shopId, shopifyCreatedAt])
+  @@index([shopId, source])
+  @@index([shopId, format])
   @@map("RawOrder")
 }
 
@@ -56,6 +58,8 @@ model RawProduct {
   @@index([shopId, shopifyId])
   @@index([shopId, shopifyUpdatedAt])
   @@index([shopId, shopifyCreatedAt])
+  @@index([shopId, source])
+  @@index([shopId, format])
   @@map("RawProduct")
 }
 
@@ -76,6 +80,8 @@ model RawCustomer {
   @@index([shopId, shopifyId])
   @@index([shopId, shopifyUpdatedAt])
   @@index([shopId, shopifyCreatedAt])
+  @@index([shopId, source])
+  @@index([shopId, format])
   @@map("RawCustomer")
 }
 
@@ -96,6 +102,8 @@ model RawCollection {
   @@index([shopId, shopifyId])
   @@index([shopId, shopifyUpdatedAt])
   @@index([shopId, shopifyCreatedAt])
+  @@index([shopId, source])
+  @@index([shopId, format])
   @@map("RawCollection")
 }
 
@@ -110,6 +118,24 @@ model RawBehavioralEvents {
   @@index([shopId])
   @@index([shopId, receivedAt])
   @@map("RawBehavioralEvents")
+}
+
+// ===================== STAGING LAYER =====================
+
+// Staging tables removed - data flows directly from Raw to Main tables
+// Raw → NormalizationConsumer → Main (canonical format)
+
+model NormalizationWatermark {
+  id               String   @id @default(cuid())
+  shopId           String
+  dataType         String   @db.VarChar(50) // orders, products, customers, collections
+  lastNormalizedAt DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopId, dataType])
+  @@index([shopId])
+  @@map("NormalizationWatermark")
 }
 
 model OrderData {
@@ -168,6 +194,8 @@ model OrderData {
   @@index([shopId, financialStatus])
   @@index([shopId, fulfillmentStatus])
   @@index([shopId, orderStatus])
+  @@index([shopId, totalAmount])
+  @@index([shopId, orderDate, financialStatus])
   @@map("OrderData")
 }
 
@@ -215,6 +243,8 @@ model ProductData {
   @@index([shopId, status])
   @@index([shopId, isActive])
   @@index([shopId, totalInventory])
+  @@index([shopId, productType, status])
+  @@index([shopId, price, status])
   @@map("ProductData")
 }
 
@@ -251,6 +281,7 @@ model CustomerData {
   @@index([shopId, lastOrderDate])
   @@index([shopId, state])
   @@index([shopId, verifiedEmail])
+  @@index([shopId, totalSpent, lastOrderDate])
   @@map("CustomerData")
 }
 
@@ -278,6 +309,7 @@ model CollectionData {
   @@index([shopId, title])
   @@index([shopId, handle])
   @@index([shopId, isAutomated])
+  @@index([shopId, productCount])
   @@map("CollectionData")
 }
 
@@ -296,9 +328,9 @@ model BehavioralEvents {
   @@index([shopId, timestamp])
   @@index([shopId, customerId])
   @@index([shopId, clientId])
+  @@index([shopId, eventType, timestamp])
   @@map("BehavioralEvents")
 }
-
 
 model Session {
   id            String    @id
@@ -316,6 +348,10 @@ model Session {
   locale        String?   @db.VarChar(10)
   collaborator  Boolean?
   emailVerified Boolean?
+
+  @@index([shop])
+  @@index([expires])
+  @@map("Session")
 }
 
 model Shop {
@@ -335,7 +371,7 @@ model Shop {
   productData          ProductData[]
   customerData         CustomerData[]
   collectionData       CollectionData[]
-
+  featureComputations  FeatureComputation[]
   userFeatures         UserFeatures[]
   productFeatures      ProductFeatures[]
   interactionFeatures  InteractionFeatures[]
@@ -351,6 +387,16 @@ model Shop {
   rawBehavioralEvents RawBehavioralEvents[]
   behavioralEvents    BehavioralEvents[]
   
+  // Unified analytics
+  userSessions        UserSession[]
+  userInteractions    UserInteraction[]
+  purchaseAttributions PurchaseAttribution[]
+
+  @@index([shopDomain])
+  @@index([isActive])
+  @@index([planType])
+  @@index([lastAnalysisAt])
+  @@map("Shop")
 }
 
 // ============= USER/CUSTOMER FEATURES =============
@@ -411,6 +457,7 @@ model UserFeatures {
   @@index([shopId, daysSinceLastOrder])
   @@index([shopId, refundRate])
   @@index([shopId, netLifetimeValue])
+  @@index([shopId, lifetimeValue, daysSinceLastOrder])
   @@map("UserFeatures")
 }
 
@@ -497,6 +544,7 @@ model ProductFeatures {
   @@index([shopId, refundRate])
   @@index([shopId, refundRiskScore])
   @@index([shopId, netRevenue])
+  @@index([shopId, popularityScore, trendingScore])
   @@map("ProductFeatures")
 }
 
@@ -545,6 +593,7 @@ model CollectionFeatures {
   @@unique([shopId, collectionId])
   @@index([shopId, productCount])
   @@index([shopId, performanceScore])
+  @@index([shopId, viewCount30d, performanceScore])
   @@map("CollectionFeatures")
 }
 
@@ -636,6 +685,7 @@ model CustomerBehaviorFeatures {
   @@index([shopId, totalUnifiedSessions])
   @@index([shopId, extensionEngagementScore])
   @@index([shopId, multiTouchAttributionScore])
+  @@index([shopId, engagementScore, behavioralScore])
   @@map("CustomerBehaviorFeatures")
 }
 
@@ -689,6 +739,7 @@ model InteractionFeatures {
   @@index([shopId, refundRate])
   @@index([shopId, refundRiskScore])
   @@index([shopId, netPurchaseValue])
+  @@index([shopId, customerId, interactionScore])
   @@map("InteractionFeatures")
 }
 
@@ -739,6 +790,7 @@ model SessionFeatures {
   @@index([shopId, customerId])
   @@index([shopId, startTime])
   @@index([shopId, checkoutCompleted])
+  @@index([shopId, startTime, checkoutCompleted])
   @@map("SessionFeatures")
 }
 
@@ -773,6 +825,7 @@ model ProductPairFeatures {
   @@index([shopId, productId1])
   @@index([shopId, productId2])
   @@index([shopId, coPurchaseCount])
+  @@index([shopId, productId1, coPurchaseCount])
   @@map("ProductPairFeatures")
 }
 
@@ -806,6 +859,7 @@ model SearchProductFeatures {
   @@index([shopId, searchQuery])
   @@index([shopId, productId])
   @@index([shopId, clickThroughRate])
+  @@index([shopId, searchQuery, clickThroughRate])
   @@map("SearchProductFeatures")
 }
 
@@ -822,10 +876,22 @@ model UserIdentityLink {
   @@map("UserIdentityLink")
 }
 
-// ============= RECOMMENDATION TRACKING =============
-// NOTE: Old recommendation tracking tables removed - replaced by unified analytics system
-// Old tables: RecommendationSession, RecommendationInteraction, AttributionEvent, RecommendationAttribution
-// New tables: UserSession, UserInteraction, PurchaseAttribution (see unified analytics section below)
+model FeatureComputation {
+  id           String    @id @default(cuid())
+  shopId       String
+  jobId        String
+  status       String    @default("pending") // "pending", "computing", "completed", "failed"
+  featureCount Int       @default(0)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@index([shopId, status, createdAt])
+  @@map("FeatureComputation")
+}
 
 // ============= GORSE TABLES =============
 
@@ -837,6 +903,8 @@ model GorseFeedback {
   comment      String   @default("") @db.Text
 
   @@id([feedbackType, userId, itemId])
+  @@index([feedbackType, timeStamp])
+  @@index([userId, timeStamp])
   @@map("feedback")
 }
 
@@ -848,6 +916,8 @@ model GorseItems {
   labels     Json     @default("[]")
   comment    String   @default("") @db.Text
 
+  @@index([isHidden])
+  @@index([timeStamp])
   @@map("items")
 }
 
@@ -886,12 +956,15 @@ model UserSession {
   // Relations
   interactions      UserInteraction[]
   attributions      PurchaseAttribution[]
+  shop              Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId, browserSessionId])
   @@index([shopId])
   @@index([customerId])
   @@index([status])
   @@index([expiresAt])
+  @@index([shopId, status])
+  @@index([shopId, customerId, status])
   @@map("user_sessions")
 }
 
@@ -926,6 +999,7 @@ model UserInteraction {
 
   // Relations
   session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
   @@index([customerId])
@@ -934,6 +1008,9 @@ model UserInteraction {
   @@index([interactionType])
   @@index([productId])
   @@index([createdAt])
+  @@index([shopId, extensionType])
+  @@index([shopId, interactionType])
+  @@index([shopId, customerId, createdAt])
   @@map("user_interactions")
 }
 
@@ -966,12 +1043,15 @@ model PurchaseAttribution {
 
   // Relations
   session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
   @@index([orderId])
   @@index([customerId])
   @@index([shopId])
   @@index([purchaseAt])
+  @@index([shopId, purchaseAt])
+  @@index([shopId, customerId, purchaseAt])
   @@map("purchase_attributions")
 }
 
@@ -1159,6 +1239,3 @@ enum BillingEventType {
   billing_suspended
   billing_reactivated
 }
-
-
-

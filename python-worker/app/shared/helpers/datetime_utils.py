@@ -13,6 +13,15 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def utcnow() -> datetime:
+    """Backward-compatible alias for current UTC time.
+
+    Several modules import `utcnow` from this helper. Provide a thin wrapper
+    to avoid duplicate implementations and ensure timezone-aware datetimes.
+    """
+    return now_utc()
+
+
 def parse_datetime(
     date_string: str,
     format_string: Optional[str] = None,

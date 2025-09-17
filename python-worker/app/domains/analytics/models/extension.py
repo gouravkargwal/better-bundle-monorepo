@@ -37,7 +37,6 @@ class ExtensionContext(str, Enum):
 
     # Phoenix contexts (currently cart, future expansion)
     CART_DRAWER = "cart_drawer"
-    CART_PAGE = "cart_page"
     # Future: HOMEPAGE, PRODUCT_PAGE, COLLECTION_PAGE
 
     # Apollo contexts

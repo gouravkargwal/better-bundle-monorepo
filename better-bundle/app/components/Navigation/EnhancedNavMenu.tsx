@@ -1,28 +1,19 @@
 import React from "react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import { Link, useLocation } from "@remix-run/react";
-import { Badge, Icon, Box } from "@shopify/polaris";
-import {
-  HomeMajor,
-  AnalyticsMajor,
-  SettingsMajor,
-  BillingMajor,
-  CheckCircleMajor,
-  AlertTriangleMajor,
-} from "@shopify/polaris-icons";
+import { Badge } from "@shopify/polaris";
 
 interface NavItemProps {
   to: string;
   children: React.ReactNode;
-  icon?: React.ReactNode;
   badge?: {
     content: string;
-    tone: "success" | "warning" | "critical" | "info" | "subdued";
+    tone: "success" | "warning" | "critical";
   };
   isActive?: boolean;
 }
 
-function NavItem({ to, children, icon, badge, isActive }: NavItemProps) {
+function NavItem({ to, children, badge, isActive }: NavItemProps) {
   return (
     <Link
       to={to}
@@ -39,15 +30,12 @@ function NavItem({ to, children, icon, badge, isActive }: NavItemProps) {
         transition: "all 0.2s ease",
       }}
     >
-      {icon && (
-        <Box style={{ display: "flex", alignItems: "center" }}>{icon}</Box>
-      )}
       <span>{children}</span>
-      {badge && (
+      {badge ? (
         <Badge tone={badge.tone} size="small">
           {badge.content}
         </Badge>
-      )}
+      ) : null}
     </Link>
   );
 }
@@ -136,22 +124,14 @@ export function EnhancedNavMenu({ systemStatus }: EnhancedNavMenuProps) {
                 marginBottom: "4px",
               }}
             >
-              <Icon
-                source={
-                  systemStatus.health === "healthy"
-                    ? CheckCircleMajor
-                    : AlertTriangleMajor
-                }
-                tone={systemStatus.health === "healthy" ? "success" : "warning"}
-              />
               <span style={{ fontSize: "14px", fontWeight: "600" }}>
                 System Status
               </span>
-              {systemBadge && (
+              {systemBadge ? (
                 <Badge tone={systemBadge.tone} size="small">
                   {systemBadge.content}
                 </Badge>
-              )}
+              ) : null}
             </div>
             <div style={{ fontSize: "12px", color: "#6B7280" }}>
               Extensions: {systemStatus.extensionsActive}/
@@ -161,18 +141,13 @@ export function EnhancedNavMenu({ systemStatus }: EnhancedNavMenuProps) {
         )}
 
         {/* Navigation Items */}
-        <NavItem
-          to="/app"
-          icon={<Icon source={HomeMajor} tone="base" />}
-          isActive={location.pathname === "/app"}
-        >
+        <NavItem to="/app" isActive={location.pathname === "/app"}>
           Home
         </NavItem>
 
         <NavItem
           to="/app/dashboard"
-          icon={<Icon source={AnalyticsMajor} tone="base" />}
-          badge={systemBadge}
+          badge={systemBadge ?? undefined}
           isActive={location.pathname === "/app/dashboard"}
         >
           Analytics Dashboard
@@ -180,8 +155,7 @@ export function EnhancedNavMenu({ systemStatus }: EnhancedNavMenuProps) {
 
         <NavItem
           to="/app/widget-config"
-          icon={<Icon source={SettingsMajor} tone="base" />}
-          badge={extensionsBadge}
+          badge={extensionsBadge ?? undefined}
           isActive={location.pathname === "/app/widget-config"}
         >
           Extensions
@@ -189,10 +163,13 @@ export function EnhancedNavMenu({ systemStatus }: EnhancedNavMenuProps) {
 
         <NavItem
           to="/app/billing"
-          icon={<Icon source={BillingMajor} tone="base" />}
           isActive={location.pathname === "/app/billing"}
         >
           Billing & Performance
+        </NavItem>
+
+        <NavItem to="/app/help" isActive={location.pathname === "/app/help"}>
+          Help & Support
         </NavItem>
       </NavMenu>
     </div>
