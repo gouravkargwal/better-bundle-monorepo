@@ -14,6 +14,8 @@ from app.domains.analytics.models.session import UserSession, SessionStatus
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
+from app.core.redis_client import RedisStreamsManager
+from app.shared.constants.redis import CUSTOMER_LINKING_STREAM
 
 logger = get_logger(__name__)
 
@@ -38,6 +40,7 @@ class CustomerIdentityResolutionService:
 
     def __init__(self):
         self.session_service = UnifiedSessionService()
+        self.redis_manager = RedisStreamsManager()
         # Industry-standard confidence thresholds
         self.deterministic_threshold = 0.95  # High confidence
         self.probabilistic_threshold = 0.70  # Medium confidence
@@ -89,6 +92,11 @@ class CustomerIdentityResolutionService:
             # Step 4: Update customer journey
             journey_stats = await self._update_customer_journey(
                 customer_id, current_session_id, linked_sessions
+            )
+
+            # Step 5: Fire Redis stream event for customer linking backfill
+            await self._fire_customer_linking_event(
+                customer_id, shop_id, current_session_id, linked_sessions
             )
 
             result = {
@@ -499,6 +507,43 @@ class CustomerIdentityResolutionService:
         except Exception as e:
             logger.error(f"Error calculating journey span: {str(e)}")
             return 1
+
+    async def _fire_customer_linking_event(
+        self, 
+        customer_id: str, 
+        shop_id: str, 
+        current_session_id: str, 
+        linked_sessions: List[str]
+    ) -> None:
+        """Fire Redis stream event for customer linking backfill operations"""
+        try:
+            event_data = {
+                "event_type": "customer_linked",
+                "customer_id": customer_id,
+                "shop_id": shop_id,
+                "trigger_session_id": current_session_id,
+                "linked_session_ids": linked_sessions,
+                "total_sessions_linked": len(linked_sessions) + 1,
+                "timestamp": utcnow().isoformat(),
+                "source": "identity_resolution_service",
+                "backfill_needed": True,
+            }
+
+            # Initialize Redis manager if not already done
+            if not self.redis_manager.redis:
+                await self.redis_manager.initialize()
+
+            # Fire event to customer linking stream for backfill processors
+            message_id = await self.redis_manager.publish_event(CUSTOMER_LINKING_STREAM, event_data)
+
+            logger.info(
+                f"Customer linking event fired: {message_id} for customer {customer_id} "
+                f"with {len(linked_sessions)} linked sessions"
+            )
+
+        except Exception as e:
+            logger.error(f"Error firing customer linking event: {str(e)}")
+            # Don't fail the main operation if event firing fails
 
     def _get_resolution_summary(self, matches: List[IdentityMatch]) -> Dict[str, Any]:
         """Get summary of resolution methods used"""

@@ -27,46 +27,29 @@ analytics_service = AnalyticsTrackingService()
 session_service = UnifiedSessionService()
 
 
+class ApolloSessionRequest(BaseModel):
+    """Request model for Apollo session creation"""
+
+    shop_id: str = Field(..., description="Shop identifier")
+    customer_id: Optional[str] = Field(None, description="Customer identifier")
+    browser_session_id: Optional[str] = Field(
+        None, description="Browser session identifier"
+    )
+    user_agent: Optional[str] = Field(None, description="User agent string")
+    ip_address: Optional[str] = Field(None, description="IP address")
+    referrer: Optional[str] = Field(None, description="Referrer URL")
+    page_url: Optional[str] = Field(None, description="Current page URL")
+
+
 class ApolloInteractionRequest(BaseModel):
     """Request model for Apollo interactions"""
 
     session_id: str = Field(..., description="Session identifier")
     shop_id: str = Field(..., description="Shop identifier")
-    context: ExtensionContext = Field(
-        ..., description="Context where interaction occurred"
-    )
     interaction_type: InteractionType = Field(..., description="Type of interaction")
-
-    # User info
     customer_id: Optional[str] = Field(None, description="Customer identifier")
-    order_id: str = Field(..., description="Order identifier")
-
-    # Interaction details
-    product_id: Optional[str] = Field(
-        None, description="Product involved in interaction"
-    )
-    quantity: Optional[int] = Field(None, description="Quantity involved")
-    value: Optional[float] = Field(None, description="Monetary value of interaction")
-
-    # Recommendation specific
-    recommendation_id: Optional[str] = Field(
-        None, description="Recommendation identifier"
-    )
-    recommendation_position: Optional[int] = Field(
-        None, description="Position of recommendation"
-    )
-    recommendation_algorithm: Optional[str] = Field(
-        None, description="Algorithm used for recommendation"
-    )
-
-    # Post-purchase specific
-    order_total: Optional[float] = Field(None, description="Total order value")
-    order_currency: Optional[str] = Field(None, description="Order currency")
-    purchase_timestamp: Optional[str] = Field(None, description="Purchase timestamp")
-
-    # Metadata
     metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional interaction metadata"
+        default_factory=dict, description="Raw interaction data as JSON"
     )
 
 
@@ -107,42 +90,84 @@ class ApolloResponse(BaseModel):
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
 
 
+@router.post("/get-or-create-session", response_model=ApolloResponse)
+async def get_or_create_apollo_session(request: ApolloSessionRequest):
+    """
+    Get or create unified session for Apollo extension
+
+    Apollo is a post-purchase extension that runs after checkout completion
+    and always has access to customer_id from the order context.
+    """
+    try:
+        # Get or create unified session
+        session = await session_service.get_or_create_session(
+            shop_id=request.shop_id,
+            customer_id=request.customer_id,
+            browser_session_id=request.browser_session_id,
+            user_agent=request.user_agent,
+            ip_address=request.ip_address,
+            referrer=request.referrer,
+        )
+
+        # Add Apollo to extensions used
+        await session_service.add_extension_to_session(session.id, ExtensionType.APOLLO)
+
+        if not session:
+            raise HTTPException(status_code=500, detail="Failed to create session")
+
+        logger.info(
+            f"Apollo session started: {session.id} for customer {request.customer_id}"
+        )
+
+        return ApolloResponse(
+            success=True,
+            message="Apollo session started successfully",
+            data={
+                "session_id": session.id,
+                "customer_id": session.customer_id,
+                "created_at": session.created_at.isoformat(),
+                "expires_at": (
+                    session.expires_at.isoformat() if session.expires_at else None
+                ),
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Error starting Apollo session: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to start session: {str(e)}"
+        )
+
+
 @router.post("/track-interaction", response_model=ApolloResponse)
 async def track_apollo_interaction(request: ApolloInteractionRequest):
     """
     Track user interaction from Apollo Post-Purchase extension
 
     This endpoint is called by the Apollo extension to track user interactions
-    in the post-purchase flow (recommendations, upsells, etc.).
+    in the post-purchase flow (recommendations, add to order, etc.).
     """
     try:
-        logger.info(
-            f"Apollo interaction tracking: {request.interaction_type} in {request.context}"
-        )
+        logger.info(f"Apollo interaction tracking: {request.interaction_type}")
+
+        # Add extension type to metadata
+        enhanced_metadata = {
+            **request.metadata,
+            "extension_type": "apollo",
+        }
 
         # Track the interaction
         interaction = await analytics_service.track_interaction(
             session_id=request.session_id,
             extension_type=ExtensionType.APOLLO,
-            context=request.context,
             interaction_type=request.interaction_type,
-            customer_id=request.customer_id,
             shop_id=request.shop_id,
-            product_id=request.product_id,
-            order_id=request.order_id,
-            quantity=request.quantity,
-            value=request.value,
-            recommendation_id=request.recommendation_id,
-            recommendation_position=request.recommendation_position,
-            recommendation_algorithm=request.recommendation_algorithm,
-            metadata={
-                **request.metadata,
-                "order_total": request.order_total,
-                "order_currency": request.order_currency,
-                "purchase_timestamp": request.purchase_timestamp,
-                "source": "apollo_post_purchase",
-            },
+            customer_id=request.customer_id,
+            metadata=enhanced_metadata,
         )
+
+        if not interaction:
+            raise HTTPException(status_code=500, detail="Failed to track interaction")
 
         logger.info(f"Apollo interaction tracked successfully: {interaction.id}")
 
@@ -153,8 +178,7 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
                 "interaction_id": interaction.id,
                 "session_id": request.session_id,
                 "interaction_type": request.interaction_type,
-                "context": request.context,
-                "order_id": request.order_id,
+                "timestamp": interaction.created_at.isoformat(),
             },
         )
 

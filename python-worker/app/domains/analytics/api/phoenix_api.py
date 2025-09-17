@@ -27,46 +27,31 @@ analytics_service = AnalyticsTrackingService()
 session_service = UnifiedSessionService()
 
 
+class PhoenixSessionRequest(BaseModel):
+    """Request model for Phoenix session creation"""
+
+    shop_id: str = Field(..., description="Shop identifier")
+    customer_id: Optional[str] = Field(None, description="Customer identifier")
+    browser_session_id: Optional[str] = Field(
+        None, description="Browser session identifier"
+    )
+    user_agent: Optional[str] = Field(None, description="User agent string")
+    ip_address: Optional[str] = Field(None, description="IP address")
+    referrer: Optional[str] = Field(None, description="Referrer URL")
+    page_url: Optional[str] = Field(None, description="Current page URL")
+
+
 class PhoenixInteractionRequest(BaseModel):
     """Request model for Phoenix interactions"""
 
     session_id: str = Field(..., description="Session identifier")
     shop_id: str = Field(..., description="Shop identifier")
-    context: ExtensionContext = Field(
-        ..., description="Context where interaction occurred"
-    )
     interaction_type: InteractionType = Field(..., description="Type of interaction")
-
-    # Optional user info
     customer_id: Optional[str] = Field(
         None, description="Customer identifier (if known)"
     )
-
-    # Interaction details
-    product_id: Optional[str] = Field(
-        None, description="Product involved in interaction"
-    )
-    quantity: Optional[int] = Field(None, description="Quantity involved")
-    value: Optional[float] = Field(None, description="Monetary value of interaction")
-
-    # Recommendation specific
-    recommendation_id: Optional[str] = Field(
-        None, description="Recommendation identifier"
-    )
-    recommendation_position: Optional[int] = Field(
-        None, description="Position of recommendation"
-    )
-    recommendation_algorithm: Optional[str] = Field(
-        None, description="Algorithm used for recommendation"
-    )
-
-    # Checkout specific
-    checkout_id: Optional[str] = Field(None, description="Checkout identifier")
-    line_item_id: Optional[str] = Field(None, description="Line item identifier")
-
-    # Metadata
     metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional interaction metadata"
+        default_factory=dict, description="Raw interaction data as JSON"
     )
 
 
@@ -100,40 +85,86 @@ class PhoenixResponse(BaseModel):
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
 
 
+@router.post("/get-or-create-session", response_model=PhoenixResponse)
+async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
+    """
+    Get or create unified session for Phoenix extension
+
+    Phoenix is a theme extension that runs on cart pages and can work with both
+    anonymous users and identified customers.
+    """
+    try:
+        # Get or create unified session
+        session = await session_service.get_or_create_session(
+            shop_id=request.shop_id,
+            customer_id=request.customer_id,
+            browser_session_id=request.browser_session_id,
+            user_agent=request.user_agent,
+            ip_address=request.ip_address,
+            referrer=request.referrer,
+        )
+
+        # Add Phoenix to extensions used
+        await session_service.add_extension_to_session(
+            session.id, ExtensionType.PHOENIX
+        )
+
+        if not session:
+            raise HTTPException(status_code=500, detail="Failed to create session")
+
+        logger.info(
+            f"Phoenix session started: {session.id} for customer {request.customer_id}"
+        )
+
+        return PhoenixResponse(
+            success=True,
+            message="Phoenix session started successfully",
+            data={
+                "session_id": session.id,
+                "customer_id": session.customer_id,
+                "created_at": session.created_at.isoformat(),
+                "expires_at": (
+                    session.expires_at.isoformat() if session.expires_at else None
+                ),
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Error starting Phoenix session: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to start session: {str(e)}"
+        )
+
+
 @router.post("/track-interaction", response_model=PhoenixResponse)
 async def track_phoenix_interaction(request: PhoenixInteractionRequest):
     """
-    Track user interaction from Phoenix Checkout UI extension
+    Track user interaction from Phoenix theme extension
 
     This endpoint is called by the Phoenix extension to track user interactions
-    in the checkout flow (cart view, recommendations, etc.).
+    in the cart flow (recommendations, clicks, etc.).
     """
     try:
-        logger.info(
-            f"Phoenix interaction tracking: {request.interaction_type} in {request.context}"
-        )
+        logger.info(f"Phoenix interaction tracking: {request.interaction_type}")
+
+        # Add extension type to metadata
+        enhanced_metadata = {
+            **request.metadata,
+            "extension_type": "phoenix",
+        }
 
         # Track the interaction
         interaction = await analytics_service.track_interaction(
             session_id=request.session_id,
             extension_type=ExtensionType.PHOENIX,
-            context=request.context,
             interaction_type=request.interaction_type,
-            customer_id=request.customer_id,
             shop_id=request.shop_id,
-            product_id=request.product_id,
-            quantity=request.quantity,
-            value=request.value,
-            recommendation_id=request.recommendation_id,
-            recommendation_position=request.recommendation_position,
-            recommendation_algorithm=request.recommendation_algorithm,
-            metadata={
-                **request.metadata,
-                "checkout_id": request.checkout_id,
-                "line_item_id": request.line_item_id,
-                "source": "phoenix_checkout_ui",
-            },
+            customer_id=request.customer_id,
+            metadata=enhanced_metadata,
         )
+
+        if not interaction:
+            raise HTTPException(status_code=500, detail="Failed to track interaction")
 
         logger.info(f"Phoenix interaction tracked successfully: {interaction.id}")
 
@@ -144,7 +175,7 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
                 "interaction_id": interaction.id,
                 "session_id": request.session_id,
                 "interaction_type": request.interaction_type,
-                "context": request.context,
+                "timestamp": interaction.created_at.isoformat(),
             },
         )
 

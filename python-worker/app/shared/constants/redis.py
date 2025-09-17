@@ -17,6 +17,7 @@ COMPLETION_RESULTS_STREAM = "betterbundle:completion-results"
 COMPLETION_EVENTS_STREAM = "betterbundle:ml-training-complete"
 BEHAVIORAL_EVENTS_STREAM = "betterbundle:behavioral-events"
 GORSE_SYNC_STREAM = "betterbundle:gorse-sync"
+CUSTOMER_LINKING_STREAM = "betterbundle:customer-linking"
 
 # Consumer Group Names
 DATA_PROCESSOR_GROUP = "data-processors"
