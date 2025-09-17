@@ -92,13 +92,21 @@ class GraphQLOrderAdapter(BaseAdapter):
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
+        # Compute canonical timestamps
+        created_at = _parse_iso(payload.get("createdAt")) or datetime.utcnow()
+        updated_at = (
+            _parse_iso(payload.get("updatedAt"))
+            or _parse_iso(payload.get("createdAt"))
+            or created_at
+        )
+
         model = CanonicalOrder(
             shopId=shop_id,
-            entityId=entity_id,
+            orderId=entity_id,
             originalGid=payload.get("id"),
-            shopifyUpdatedAt=_parse_iso(payload.get("updatedAt"))
-            or _parse_iso(payload.get("createdAt"))
-            or datetime.utcnow(),
+            # Canonical internal timestamps
+            createdAt=created_at,
+            updatedAt=updated_at,
             currencyCode=payload.get("currencyCode"),
             presentmentCurrencyCode=payload.get("presentmentCurrencyCode"),
             totalAmount=total_amount,
@@ -114,8 +122,9 @@ class GraphQLOrderAdapter(BaseAdapter):
             test=payload.get("test"),
             orderName=payload.get("name"),
             note=payload.get("note"),
-            email=payload.get("email"),
-            phone=payload.get("phone"),
+            customerEmail=payload.get("email"),
+            customerPhone=payload.get("phone"),
+            customerDisplayName=(payload.get("customer") or {}).get("displayName"),
             financialStatus=payload.get("financialStatus") or None,
             fulfillmentStatus=payload.get("fulfillmentStatus") or None,
             customerId=customer_id,

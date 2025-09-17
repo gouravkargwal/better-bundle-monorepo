@@ -6,9 +6,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-CANONICAL_VERSION = 1
-
-
 class CanonicalLineItem(BaseModel):
     productId: Optional[str] = None
     variantId: Optional[str] = None
@@ -20,9 +17,9 @@ class CanonicalLineItem(BaseModel):
 class CanonicalOrder(BaseModel):
     """Canonical order model - matches OrderData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
     shopId: str
-    entityId: str  # Maps to orderId
+    orderId: str  # Maps to orderId
+    originalGid: Optional[str] = None  # Shopify GraphQL ID
 
     # Exact field mapping to OrderData table
     orderName: Optional[str] = None  # orderName
@@ -53,31 +50,27 @@ class CanonicalOrder(BaseModel):
     financialStatus: Optional[str] = None  # financialStatus
     fulfillmentStatus: Optional[str] = None  # fulfillmentStatus
     orderStatus: Optional[str] = None  # orderStatus
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
+    tags: Any = Field(default_factory=list)  # tags (JSON)
     note: Optional[str] = ""  # note
-    noteAttributes: List[Dict[str, Any]] = Field(
+    noteAttributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
+    lineItems: List[CanonicalLineItem] = Field(
         default_factory=list
-    )  # noteAttributes (JSON)
-    lineItems: List[CanonicalLineItem] = Field(default_factory=list)  # lineItems (JSON)
-    shippingAddress: Optional[Dict[str, Any]] = None  # shippingAddress (JSON)
-    billingAddress: Optional[Dict[str, Any]] = None  # billingAddress (JSON)
-    discountApplications: List[Dict[str, Any]] = Field(
+    )  # Extracted separately for LineItemData records
+    shippingAddress: Any = Field(default_factory=dict)  # shippingAddress (JSON)
+    billingAddress: Any = Field(default_factory=dict)  # billingAddress (JSON)
+    discountApplications: Any = Field(
         default_factory=list
     )  # discountApplications (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
-    fulfillments: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # fulfillments (JSON)
-    transactions: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # transactions (JSON)
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
+    fulfillments: Any = Field(default_factory=list)  # fulfillments (JSON)
+    transactions: Any = Field(default_factory=list)  # transactions (JSON)
 
     # Internal fields
     createdAt: datetime  # Used for orderDate
     updatedAt: datetime
 
     # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalVariant(BaseModel):
@@ -93,9 +86,9 @@ class CanonicalVariant(BaseModel):
 class CanonicalProduct(BaseModel):
     """Canonical product model - matches ProductData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
     shopId: str
-    entityId: str  # Maps to productId
+    productId: str  # Maps to productId
+    originalGid: Optional[str] = None  # Shopify GraphQL ID
 
     # Exact field mapping to ProductData table
     title: str  # title (required)
@@ -104,7 +97,7 @@ class CanonicalProduct(BaseModel):
     descriptionHtml: Optional[str] = None  # descriptionHtml
     productType: Optional[str] = ""  # productType
     vendor: Optional[str] = ""  # vendor
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
+    tags: Any = Field(default_factory=list)  # tags (JSON)
     status: Optional[str] = "ACTIVE"  # status
     totalInventory: Optional[int] = 0  # totalInventory
     price: float = 0.0  # price
@@ -119,10 +112,11 @@ class CanonicalProduct(BaseModel):
     seoTitle: Optional[str] = None  # seoTitle
     seoDescription: Optional[str] = None  # seoDescription
     templateSuffix: Optional[str] = None  # templateSuffix
-    variants: List[CanonicalVariant] = Field(default_factory=list)  # variants (JSON)
-    images: List[Dict[str, Any]] = Field(default_factory=list)  # images (JSON)
-    options: List[Dict[str, Any]] = Field(default_factory=list)  # options (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    variants: Any = Field(default_factory=list)  # variants (JSON)
+    images: Any = Field(default_factory=list)  # images (JSON)
+    media: Any = Field(default_factory=list)  # media (JSON)
+    options: Any = Field(default_factory=list)  # options (JSON)
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
     createdAt: datetime  # Used for productCreatedAt
@@ -130,17 +124,15 @@ class CanonicalProduct(BaseModel):
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCollection(BaseModel):
     """Canonical collection model - matches CollectionData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
     shopId: str
-    entityId: str  # Maps to collectionId
-
-    # Exact field mapping to CollectionData table
+    collectionId: str  # Maps to collectionId
+    originalGid: Optional[str] = None  # Shopify GraphQL ID
     title: str  # title (required)
     handle: str  # handle (required)
     description: Optional[str] = ""  # description
@@ -151,7 +143,7 @@ class CanonicalCollection(BaseModel):
     imageAlt: Optional[str] = None  # imageAlt
     productCount: int = 0  # productCount
     isAutomated: bool = False  # isAutomated
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
     createdAt: datetime
@@ -159,15 +151,15 @@ class CanonicalCollection(BaseModel):
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCustomer(BaseModel):
     """Canonical customer model - matches CustomerData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
     shopId: str
-    entityId: str  # Maps to customerId
+    customerId: str  # Maps to customerId
+    originalGid: Optional[str] = None  # Shopify GraphQL ID
 
     # Exact field mapping to CustomerData table
     email: Optional[str] = None  # email
@@ -176,17 +168,17 @@ class CanonicalCustomer(BaseModel):
     totalSpent: float = 0.0  # totalSpent
     orderCount: int = 0  # orderCount
     lastOrderDate: Optional[datetime] = None  # lastOrderDate
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
-    createdAt: Optional[datetime] = None  # createdAtShopify
-    updatedAt: Optional[datetime] = None  # updatedAtShopify
+    tags: Any = Field(default_factory=list)  # tags (JSON)
+    customerCreatedAt: Optional[datetime] = None  # Rename this
+    customerUpdatedAt: Optional[datetime] = None  # Rename this
     lastOrderId: Optional[str] = None  # lastOrderId
-    location: Optional[Dict[str, Any]] = None  # location (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    location: Any = Field(default_factory=dict)  # location (JSON)
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
     state: Optional[str] = ""  # state
     verifiedEmail: bool = False  # verifiedEmail
     taxExempt: bool = False  # taxExempt
-    defaultAddress: Optional[Dict[str, Any]] = None  # defaultAddress (JSON)
-    addresses: List[Dict[str, Any]] = Field(default_factory=list)  # addresses (JSON)
+    defaultAddress: Any = Field(default_factory=dict)  # defaultAddress (JSON)
+    addresses: Any = Field(default_factory=list)  # addresses (JSON)
     currencyCode: Optional[str] = "USD"  # currencyCode
     customerLocale: Optional[str] = "en"  # customerLocale
 
@@ -196,7 +188,7 @@ class CanonicalCustomer(BaseModel):
     isActive: bool = True  # For soft deletes
 
     # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: Any = Field(default_factory=dict)
 
 
 class NormalizeJob(BaseModel):

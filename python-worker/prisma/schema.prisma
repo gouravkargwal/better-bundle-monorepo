@@ -175,7 +175,7 @@ model OrderData {
   tags                    Json?     @default("[]")
   note                    String?   @default("") @db.Text
   noteAttributes          Json?     @default("[]")
-  lineItems               Json      @default("[]")
+  lineItems               LineItemData[]
   shippingAddress         Json?     @default("{}")
   billingAddress          Json?     @default("{}")
   discountApplications    Json?     @default("[]")
@@ -199,6 +199,19 @@ model OrderData {
   @@index([shopId, totalAmount])
   @@index([shopId, orderDate, financialStatus])
   @@map("OrderData")
+}
+
+model LineItemData {
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String?
+  variantId   String?
+  title       String?
+  quantity    Int
+  price       Float
+
+  // Establish the relation back to the OrderData table
+  order       OrderData @relation(fields: [orderId], references: [id])
 }
 
 model ProductData {

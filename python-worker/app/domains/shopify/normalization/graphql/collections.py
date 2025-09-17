@@ -30,20 +30,58 @@ def _extract_numeric_gid(gid: Optional[str]) -> Optional[str]:
 
 
 class GraphQLCollectionAdapter(BaseAdapter):
+    def _normalize_metafields(self, metafields):
+        """Normalize metafields to ensure proper JSON type for Prisma."""
+        if not metafields:
+            return []
+        if isinstance(metafields, dict):
+            # Handle GraphQL connection format
+            edges = metafields.get("edges", [])
+            return edges if isinstance(edges, list) else []
+        if isinstance(metafields, list):
+            return metafields
+        return []
+
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
-        entity_id = _extract_numeric_gid(payload.get("id")) or ""
+        collectionId = _extract_numeric_gid(payload.get("id")) or ""
+        created_at = (
+            _parse_iso(payload.get("createdAt"))
+            or _parse_iso(payload.get("updatedAt"))
+            or datetime.utcnow()
+        )
+        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
 
         model = CanonicalCollection(
             shopId=shop_id,
-            entityId=entity_id,
+            collectionId=collectionId,
             originalGid=payload.get("id"),
-            title=payload.get("title"),
-            handle=payload.get("handle"),
-            description=payload.get("description") or payload.get("descriptionHtml"),
-            templateSuffix=payload.get("templateSuffix"),
-            publishedAt=None,  # not present in provided payload
-            collectionUpdatedAt=_parse_iso(payload.get("updatedAt")),
-            status=None,
+            title=payload.get("title") or "Untitled Collection",
+            handle=payload.get("handle") or "untitled-collection",
+            description=payload.get("description")
+            or payload.get("descriptionHtml")
+            or "",
+            templateSuffix=payload.get("templateSuffix") or "",
+            seoTitle=(payload.get("seo", {}) or {}).get("title"),
+            seoDescription=(payload.get("seo", {}) or {}).get("description"),
+            imageUrl=(
+                (payload.get("image") or {}).get("url")
+                if isinstance(payload.get("image"), dict)
+                else None
+            ),
+            imageAlt=(
+                (payload.get("image") or {}).get("altText")
+                if isinstance(payload.get("image"), dict)
+                else None
+            ),
+            productCount=(
+                len(payload.get("products") or [])
+                if isinstance(payload.get("products"), list)
+                else 0
+            ),
+            isAutomated=bool(payload.get("ruleSet") is not None),
+            metafields=self._normalize_metafields(payload.get("metafields")),
+            createdAt=created_at,
+            updatedAt=updated_at,
             isActive=True,
             extras={},
         )

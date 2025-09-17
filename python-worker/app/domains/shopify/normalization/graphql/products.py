@@ -90,14 +90,20 @@ class GraphQLProductAdapter(BaseAdapter):
         seo_title = seo.get("title")
         seo_description = seo.get("description")
 
+        # Canonical internal timestamps (required)
+        created_at = _parse_iso(payload.get("createdAt")) or datetime.utcnow()
+        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
+
         model = CanonicalProduct(
             shopId=shop_id,
-            entityId=entity_id,
+            productId=entity_id,
             originalGid=payload.get("id"),
             productCreatedAt=_parse_iso(payload.get("createdAt")),
             productUpdatedAt=_parse_iso(payload.get("updatedAt")) or datetime.utcnow(),
-            title=payload.get("title"),
-            handle=payload.get("handle"),
+            createdAt=created_at,
+            updatedAt=updated_at,
+            title=payload.get("title") or "Untitled Product",
+            handle=payload.get("handle") or "untitled-product",
             description=payload.get("description"),
             vendor=payload.get("vendor"),
             productType=payload.get("productType"),

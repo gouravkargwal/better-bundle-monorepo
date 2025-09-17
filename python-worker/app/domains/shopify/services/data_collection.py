@@ -373,6 +373,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         "event_type": "normalize_scan",
                         "shop_id": internal_shop_id,
                         "data_type": data_type,
+                        "format": "graphql",
                         "page_size": 100,  # Configure as needed
                         "timestamp": now_utc().isoformat(),
                     }
