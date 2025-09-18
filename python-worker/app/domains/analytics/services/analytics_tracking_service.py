@@ -18,6 +18,8 @@ from app.domains.analytics.models.interaction import (
     InteractionQuery,
     InteractionType,
 )
+
+# Removed complex constants - keeping it simple
 from app.domains.analytics.models.extension import ExtensionType
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
@@ -204,18 +206,13 @@ class AnalyticsTrackingService:
             db = await get_database()
 
             # Get all interactions for this recommendation
-            result = await db.execute(
-                select(UserInteraction)
-                .where(
-                    and_(
-                        UserInteraction.recommendation_id == recommendation_id,
-                        UserInteraction.shop_id == shop_id,
-                    )
-                )
-                .order_by(desc(UserInteraction.created_at))
+            interactions = await db.userinteraction.find_many(
+                where={
+                    "recommendationId": recommendation_id,
+                    "shopId": shop_id,
+                },
+                order_by={"createdAt": "desc"},
             )
-
-            interactions = result.scalars().all()
 
             # Calculate metrics
             total_views = len(
@@ -350,6 +347,16 @@ class AnalyticsTrackingService:
         """Save interaction to database"""
         try:
             db = await get_database()
+
+            # Validate shop exists before creating interaction
+            shop = await db.shop.find_unique(where={"id": interaction_data.shop_id})
+            if not shop:
+                logger.error(f"Shop not found for ID: {interaction_data.shop_id}")
+                return None
+
+            if not shop.isActive:
+                logger.error(f"Shop is inactive for ID: {interaction_data.shop_id}")
+                return None
 
             # Generate unique interaction ID
             interaction_id = f"interaction_{uuid.uuid4().hex[:16]}"

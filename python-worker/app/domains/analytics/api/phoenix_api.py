@@ -94,9 +94,24 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
     anonymous users and identified customers.
     """
     try:
+        # Resolve shop domain to shop ID if needed
+        shop_id = request.shop_id
+        if "." in request.shop_id:  # It's a domain, not an ID
+            from app.domains.analytics.services.shop_resolver import shop_resolver
+
+            resolved_shop_id = await shop_resolver.get_shop_id_from_domain(
+                request.shop_id
+            )
+            if not resolved_shop_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve shop ID for domain: {request.shop_id}",
+                )
+            shop_id = resolved_shop_id
+
         # Get or create unified session
         session = await session_service.get_or_create_session(
-            shop_id=request.shop_id,
+            shop_id=shop_id,
             customer_id=request.customer_id,
             browser_session_id=request.browser_session_id,
             user_agent=request.user_agent,
@@ -147,6 +162,21 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
     try:
         logger.info(f"Phoenix interaction tracking: {request.interaction_type}")
 
+        # Resolve shop domain to shop ID if needed
+        shop_id = request.shop_id
+        if "." in request.shop_id:  # It's a domain, not an ID
+            from app.domains.analytics.services.shop_resolver import shop_resolver
+
+            resolved_shop_id = await shop_resolver.get_shop_id_from_domain(
+                request.shop_id
+            )
+            if not resolved_shop_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve shop ID for domain: {request.shop_id}",
+                )
+            shop_id = resolved_shop_id
+
         # Add extension type to metadata
         enhanced_metadata = {
             **request.metadata,
@@ -158,7 +188,7 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
             session_id=request.session_id,
             extension_type=ExtensionType.PHOENIX,
             interaction_type=request.interaction_type,
-            shop_id=request.shop_id,
+            shop_id=shop_id,
             customer_id=request.customer_id,
             metadata=enhanced_metadata,
         )
@@ -169,7 +199,7 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
         # Fire feature computation event for incremental processing
         try:
             await analytics_service.fire_feature_computation_event(
-                shop_id=request.shop_id,
+                shop_id=shop_id,
                 trigger_source="phoenix_interaction",
                 interaction_id=interaction.id,
             )

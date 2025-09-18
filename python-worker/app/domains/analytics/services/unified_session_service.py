@@ -422,10 +422,22 @@ class UnifiedSessionService:
         try:
             db = await get_database()
 
+            # Validate shop exists before creating session
+            shop = await db.shop.find_unique(where={"id": shop_id})
+            if not shop:
+                logger.error(f"Shop not found for ID: {shop_id}")
+                raise ValueError(f"Shop not found for ID: {shop_id}")
+
+            if not shop.isActive:
+                logger.error(f"Shop is inactive for ID: {shop_id}")
+                raise ValueError(f"Shop is inactive for ID: {shop_id}")
+
             # Generate unique session ID using browser_session_id if available
+            import uuid
+
             session_id = (
                 browser_session_id
-                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}"
+                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
             )
 
             # Calculate expiration time based on user identification status
@@ -436,25 +448,42 @@ class UnifiedSessionService:
             )
             expires_at = utcnow() + duration
 
-            # Create session using Prisma
-            session_data = await db.usersession.create(
-                data={
-                    "id": session_id,
-                    "shopId": shop_id,
-                    "customerId": customer_id,
-                    "browserSessionId": browser_session_id
-                    or f"browser_{uuid.uuid4().hex[:8]}",
-                    "status": SessionStatus.ACTIVE,
-                    "createdAt": utcnow(),
-                    "lastActive": utcnow(),
-                    "expiresAt": expires_at,
-                    "userAgent": user_agent,
-                    "ipAddress": ip_address,
-                    "referrer": referrer,
-                    "extensionsUsed": [],
-                    "totalInteractions": 0,
-                }
-            )
+            # Create session using Prisma with retry logic for unique constraint failures
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    session_data = await db.usersession.create(
+                        data={
+                            "id": session_id,
+                            "shopId": shop_id,
+                            "customerId": customer_id,
+                            "browserSessionId": browser_session_id
+                            or f"browser_{uuid.uuid4().hex[:8]}",
+                            "status": SessionStatus.ACTIVE,
+                            "createdAt": utcnow(),
+                            "lastActive": utcnow(),
+                            "expiresAt": expires_at,
+                            "userAgent": user_agent,
+                            "ipAddress": ip_address,
+                            "referrer": referrer,
+                            "extensionsUsed": [],
+                            "totalInteractions": 0,
+                        }
+                    )
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if (
+                        "Unique constraint failed" in str(e)
+                        and attempt < max_retries - 1
+                    ):
+                        # Generate new session ID and retry
+                        session_id = f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
+                        logger.warning(
+                            f"Session ID collision, retrying with new ID: {session_id}"
+                        )
+                        continue
+                    else:
+                        raise e
 
             # Convert to Pydantic model
             return UserSession(

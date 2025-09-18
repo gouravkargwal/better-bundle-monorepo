@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
-
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.config.settings import settings
+from app.shared.constants.interaction_types import (
+    GorseFeedbackType,
+    map_to_gorse_feedback_type,
+)
 
 logger = get_logger(__name__)
 gorse_client = GorseApiClient(
@@ -490,7 +493,7 @@ class HybridRecommendationService:
         # Create a base feedback object for the session
         base_feedback = {
             "Comment": f"session_{session_id}",
-            "FeedbackType": "view",  # Default feedback type
+            "FeedbackType": GorseFeedbackType.VIEW,  # Default feedback type
             "ItemId": "",  # Will be filled if we have cart contents
             "Timestamp": datetime.now().isoformat(),
             "UserId": user_id or "",
@@ -504,7 +507,7 @@ class HybridRecommendationService:
                     cart_feedback["ItemId"] = (
                         f"shop_{shop_id}_{item_id}" if shop_id else item_id
                     )
-                    cart_feedback["FeedbackType"] = "add_to_cart"
+                    cart_feedback["FeedbackType"] = GorseFeedbackType.CART_ADD
                     cart_feedback["Comment"] = f"cart_item_{item_id}"
                     feedback_objects.append(cart_feedback)
 
@@ -515,7 +518,7 @@ class HybridRecommendationService:
                     view_feedback["ItemId"] = (
                         f"shop_{shop_id}_{item_id}" if shop_id else item_id
                     )
-                    view_feedback["FeedbackType"] = "view"
+                    view_feedback["FeedbackType"] = GorseFeedbackType.VIEW
                     view_feedback["Comment"] = f"recent_view_{item_id}"
                     feedback_objects.append(view_feedback)
 
@@ -539,7 +542,7 @@ class HybridRecommendationService:
                         cart_feedback["ItemId"] = (
                             f"shop_{shop_id}_{product_id}" if shop_id else product_id
                         )
-                        cart_feedback["FeedbackType"] = "add_to_cart"
+                        cart_feedback["FeedbackType"] = GorseFeedbackType.CART_ADD
                         cart_feedback["Comment"] = f"cart_product_{product_id}"
                         feedback_objects.append(cart_feedback)
 

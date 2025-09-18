@@ -13,6 +13,10 @@ class AnalyticsApiClient {
     this.baseUrl = "https://d242bda5e5c7.ngrok-free.app"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
+
+    // Deduplication tracking to prevent duplicate events
+    this.trackedEvents = new Map();
+    this.deduplicationWindow = 5000; // 5 seconds
   }
 
   /**
@@ -103,10 +107,34 @@ class AnalyticsApiClient {
   }
 
   /**
+   * Check if an event should be deduplicated
+   */
+  shouldDeduplicateEvent(eventKey) {
+    const now = Date.now();
+    const lastTracked = this.trackedEvents.get(eventKey);
+
+    if (lastTracked && (now - lastTracked) < this.deduplicationWindow) {
+      console.log(`🔄 Deduplicating event: ${eventKey} (tracked ${now - lastTracked}ms ago)`);
+      return true;
+    }
+
+    this.trackedEvents.set(eventKey, now);
+    return false;
+  }
+
+  /**
    * Track interaction using unified analytics
    */
   async trackUnifiedInteraction(request) {
     try {
+      // Create deduplication key
+      const eventKey = `${request.interaction_type}_${request.context}_${request.shop_id}_${request.customer_id || 'anon'}`;
+
+      // Check for deduplication
+      if (this.shouldDeduplicateEvent(eventKey)) {
+        return true; // Return success but don't actually track
+      }
+
       // Get or create session first
       const sessionId = await this.getOrCreateSession(request.shop_id, request.customer_id ? String(request.customer_id) : undefined);
 
@@ -146,34 +174,6 @@ class AnalyticsApiClient {
     }
   }
 
-  /**
-   * Track Phoenix recommendation carousel view (unique to Phoenix)
-   */
-  async trackRecommendationCarouselView(shopId, customerId, productIds, metadata = {}) {
-    try {
-      const request = {
-        session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
-        context: "cart_page",
-        interaction_type: "recommendation_viewed", // Use custom recommendation event
-        customer_id: customerId ? String(customerId) : undefined,
-        page_url: window.location.href,
-        referrer: document.referrer,
-        metadata: {
-          ...metadata,
-          extension_type: "phoenix",
-          source: "phoenix_theme_extension",
-          recommendation_count: productIds?.length || 0,
-          recommendation_ids: productIds || [],
-        },
-      };
-
-      return await this.trackUnifiedInteraction(request);
-    } catch (error) {
-      console.error("Failed to track Phoenix carousel view:", error);
-      return false;
-    }
-  }
 
   /**
    * Track recommendation view (when recommendations are displayed)
@@ -183,8 +183,8 @@ class AnalyticsApiClient {
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
         shop_id: shopId,
-        context: context,
-        interaction_type: "recommendation_viewed", // Use custom recommendation event
+        context: context, // Use consistent context (cart)
+        interaction_type: "recommendation_viewed",
         customer_id: customerId ? String(customerId) : undefined,
         page_url: window.location.href,
         referrer: document.referrer,

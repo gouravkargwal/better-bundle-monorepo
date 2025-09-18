@@ -51,34 +51,27 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
-      // Track Phoenix carousel view (unique to Phoenix, not tracked by Atlas)
-      await this.analyticsApi.trackRecommendationCarouselView(
-        this.config.shopDomain?.replace('.myshopify.com', '') || '',
-        this.config.customerId,
-        this.config.productIds,
-        {
-          source: 'phoenix_initialization',
-          cart_product_count: this.config.productIds?.length || 0
-        }
-      );
-
-      // Fetch recommendations
+      // Fetch recommendations first
       const recommendations = await this.api.fetchRecommendations(
         this.config.productIds,
-        this.config.customerId,
+        this.config.customerId ? String(this.config.customerId) : undefined,
         this.config.limit
       );
 
       if (recommendations && recommendations.length > 0) {
-        // Track recommendation view using unified analytics
+        // Track recommendation view using unified analytics (single tracking event)
         const productIds = recommendations.map((product) => product.id);
 
         await this.analyticsApi.trackRecommendationView(
-          this.config.shopDomain?.replace('.myshopify.com', '') || '',
+          this.config.shopDomain || '',
           this.config.context,
-          this.config.customerId,
+          this.config.customerId ? String(this.config.customerId) : undefined,
           productIds,
-          { source: `${this.config.context}_page` }
+          {
+            source: 'phoenix_theme_extension',
+            cart_product_count: this.config.productIds?.length || 0,
+            recommendation_count: productIds.length
+          }
         );
 
         // Update product cards with real recommendations and analytics tracking
