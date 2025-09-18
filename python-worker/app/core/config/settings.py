@@ -20,7 +20,6 @@ from app.shared.constants.app import (
     DEFAULT_ERROR_SLEEP_SECONDS,
 )
 from app.shared.constants.redis import (
-    DATA_JOB_STREAM,
     ML_TRAINING_STREAM,
     ANALYSIS_RESULTS_STREAM,
     USER_NOTIFICATIONS_STREAM,
@@ -34,7 +33,6 @@ from app.shared.constants.redis import (
     COMPLETION_EVENTS_STREAM,
     BEHAVIORAL_EVENTS_STREAM,
     GORSE_SYNC_STREAM,
-    DATA_PROCESSOR_GROUP,
     MAIN_TABLE_PROCESSOR_GROUP,
     FEATURES_CONSUMER_GROUP,
     ML_TRAINING_GROUP,
@@ -69,7 +67,6 @@ class RedisSettings(BaseSettings):
     REDIS_TLS: bool = Field(default=DEFAULT_REDIS_TLS, env="REDIS_TLS")
 
     # Redis Stream Names
-    DATA_JOB_STREAM: str = Field(default=DATA_JOB_STREAM, env="DATA_JOB_STREAM")
     ML_TRAINING_STREAM: str = Field(
         default=ML_TRAINING_STREAM, env="ML_TRAINING_STREAM"
     )
@@ -91,9 +88,6 @@ class RedisSettings(BaseSettings):
     GORSE_SYNC_STREAM: str = Field(default=GORSE_SYNC_STREAM, env="GORSE_SYNC_STREAM")
 
     # Consumer Group Names
-    DATA_PROCESSOR_GROUP: str = Field(
-        default=DATA_PROCESSOR_GROUP, env="DATA_PROCESSOR_GROUP"
-    )
     MAIN_TABLE_PROCESSOR_GROUP: str = Field(
         default=MAIN_TABLE_PROCESSOR_GROUP, env="MAIN_TABLE_PROCESSOR_GROUP"
     )
@@ -290,10 +284,6 @@ class Settings(BaseSettings):
         return self.redis.REDIS_TLS
 
     # Redis Stream Names (Direct access for backward compatibility)
-    @property
-    def DATA_JOB_STREAM(self) -> str:
-        return self.redis.DATA_JOB_STREAM
-
     @property
     def ML_TRAINING_STREAM(self) -> str:
         return self.redis.ML_TRAINING_STREAM

@@ -84,9 +84,7 @@ class ProductCardManager {
     // RecommendationAPI is loaded globally from api.js
     this.api =
       window.recommendationApi ||
-      (typeof RecommendationAPI !== "undefined"
-        ? new RecommendationAPI()
-        : null);
+      (window.RecommendationAPI ? new window.RecommendationAPI() : null);
   }
 
   // Update product cards with real recommendations
@@ -192,10 +190,10 @@ class ProductCardManager {
           <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
             ${product.variants
           .map((variant, i) => {
-            const isSelected = variant.id === defaultVariant?.id;
+            const isSelected = variant.variantId === defaultVariant?.variantId;
             const variantTitle =
               variant.title || variant.option1 || `Option ${i + 1}`;
-            return `<option value="${variant.id}" ${isSelected ? "selected" : ""}>
+            return `<option value="${variant.variantId}" ${isSelected ? "selected" : ""}>
                 ${variantTitle}
               </option>`;
           })
@@ -225,7 +223,7 @@ class ProductCardManager {
             </div>
           </div>
           <button class="product-card__btn" type="button" 
-            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.id || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
+            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variantId || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
             Add to cart
           </button>
         </div>
@@ -242,7 +240,7 @@ class ProductCardManager {
 
     if (productData && productData.variants) {
       const selectedVariant = productData.variants.find(
-        (v) => v.id === selectedVariantId,
+        (v) => v.variantId === selectedVariantId,
       );
       if (selectedVariant) {
         const priceElement = document.querySelector(
@@ -366,6 +364,12 @@ class ProductCardManager {
     const selectedVariantId = variantSelect ? variantSelect.value : variantId;
     const selectedQuantity = qtyInput ? parseInt(qtyInput.value) : 1;
 
+    // Validate variant ID
+    if (!selectedVariantId || selectedVariantId === '') {
+      console.error('No valid variant ID found:', { selectedVariantId, variantId, variantSelect });
+      throw new Error('No valid variant ID found');
+    }
+
     // Show loading state
     const addToCartButton = productCard.querySelector(".product-card__btn");
     const originalButtonText = addToCartButton.textContent;
@@ -376,10 +380,24 @@ class ProductCardManager {
       addToCartButton.innerHTML =
         '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>';
 
-      // Add to cart via Shopify API
+      // Build per-item attribution properties (hidden from customer display)
+      const itemProperties = {
+        "_bb_rec_session_id": sessionId || "",
+        "_bb_rec_product_id": productId || "",
+        "_bb_rec_extension": "phoenix",
+        "_bb_rec_context": context || "cart",
+        "_bb_rec_position": String(position || ""),
+        "_bb_rec_timestamp": new Date().toISOString(),
+        "_bb_rec_source": "betterbundle",
+      };
+
+      console.log('Adding to cart:', { selectedVariantId, selectedQuantity, itemProperties });
+
+      // Add to cart via Shopify API with line item properties
       const response = await this.api.addToCart(
         selectedVariantId,
         selectedQuantity,
+        itemProperties,
       );
 
       // Track add to cart interaction using unified analytics
@@ -401,13 +419,7 @@ class ProductCardManager {
           }
         );
 
-        // Store attribution data in cart attributes for order processing
-        await window.analyticsApi.storeCartAttribution(
-          sessionId,
-          productId,
-          context,
-          position
-        );
+        // We now attach attribution at line-item level; no order-level cart attributes needed
       }
 
       // Restore button state

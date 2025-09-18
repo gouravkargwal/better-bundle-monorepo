@@ -43,6 +43,7 @@ from app.webhooks.repository import WebhookRepository
 
 # from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer  # Removed - using unified analytics
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
+from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
 
 # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 from app.core.database.simple_db_client import get_database, close_database
@@ -150,7 +151,8 @@ async def initialize_services():
         # Initialize customer linking consumer
         services["customer_linking_consumer"] = CustomerLinkingConsumer()
 
-        # ShopifyEventsConsumer removed - replaced by NormalizationConsumer
+        # Initialize Shopify events consumer
+        services["shopify_events_consumer"] = ShopifyEventsConsumer()
 
         # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
 
@@ -164,8 +166,8 @@ async def initialize_services():
             normalization_consumer=services["normalization_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             customer_linking_consumer=services["customer_linking_consumer"],
+            shopify_events_consumer=services["shopify_events_consumer"],
             # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
-            # Note: ShopifyEventsConsumer removed - replaced by NormalizationConsumer
             # Note: BehavioralEventsConsumer removed - using unified analytics system
         )
 

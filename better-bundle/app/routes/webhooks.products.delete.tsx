@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getRedisStreamService } from "../services/redis-stream.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("🚀 Webhook request received - products/delete");
@@ -72,6 +73,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(
       `✅ Product ${productId} deletion event stored in raw table for shop ${shop}`,
     );
+
+    // Publish deletion event to Redis stream
+    try {
+      const eventData = {
+        event_type: "product_deleted",
+        shop_id: shopRecord.id,
+        shopify_id: productId,
+        timestamp: new Date().toISOString(),
+        payload: product,
+      };
+
+      const redisStreamService = await getRedisStreamService();
+      await redisStreamService.publishShopifyEvent(eventData);
+      console.log(`📤 Product deletion event published to Redis stream`);
+    } catch (redisError) {
+      console.error(
+        "❌ Failed to publish deletion event to Redis:",
+        redisError,
+      );
+      // Don't fail the webhook if Redis publishing fails
+    }
 
     return json({
       success: true,

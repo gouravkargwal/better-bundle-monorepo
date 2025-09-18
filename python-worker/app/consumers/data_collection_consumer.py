@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.consumers.base_consumer import BaseConsumer
-from app.shared.constants.redis import DATA_JOB_STREAM, DATA_PROCESSOR_GROUP
+from app.shared.constants.redis import DATA_COLLECTION_STREAM, DATA_COLLECTION_GROUP
 from app.domains.shopify.services import ShopifyDataCollectionService
 from app.core.logging import get_logger
 
@@ -18,8 +18,8 @@ class DataCollectionConsumer(BaseConsumer):
 
     def __init__(self, shopify_service: ShopifyDataCollectionService):
         super().__init__(
-            stream_name=DATA_JOB_STREAM,
-            consumer_group=DATA_PROCESSOR_GROUP,
+            stream_name=DATA_COLLECTION_STREAM,
+            consumer_group=DATA_COLLECTION_GROUP,
             consumer_name="data-collection-consumer",
             batch_size=5,  # Process fewer jobs at once for data collection
             poll_timeout=2000,  # 2 second timeout

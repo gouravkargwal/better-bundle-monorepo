@@ -197,6 +197,7 @@ model LineItemData {
   title       String?
   quantity    Int
   price       Float
+  properties  Json?
 
   // Establish the relation back to the OrderData table
   order       OrderData @relation(fields: [orderId], references: [id])
@@ -373,6 +374,10 @@ model Shop {
   userSessions        UserSession[]
   userInteractions    UserInteraction[]
   purchaseAttributions PurchaseAttribution[]
+
+  // Refund system
+  refundData          RefundData[]
+  refundAttributionAdjustments RefundAttributionAdjustment[]
 
   @@index([shopDomain])
   @@index([isActive])
@@ -976,7 +981,76 @@ model PurchaseAttribution {
   @@index([purchaseAt])
   @@index([shopId, purchaseAt])
   @@index([shopId, customerId, purchaseAt])
+  @@unique([shopId, orderId])
   @@map("purchase_attributions")
+}
+
+// ============= REFUND SYSTEM TABLES =============
+
+model RefundData {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  orderId          String   @map("order_id") @db.VarChar(255)
+  refundId         String   @map("refund_id") @db.VarChar(255)
+  refundedAt       DateTime @map("refunded_at") @db.Timestamptz
+  note             String?  @default("") @db.Text
+  restock          Boolean  @default(false)
+  totalRefundAmount Decimal @map("total_refund_amount") @db.Decimal(10, 2)
+  currencyCode     String   @default("USD") @map("currency_code") @db.VarChar(10)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  lineItems        RefundLineItemData[]
+  adjustments      RefundAttributionAdjustment[]
+  shop             Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, refundId])
+  @@index([shopId, orderId])
+  @@index([refundedAt])
+  @@map("refund_data")
+}
+
+model RefundLineItemData {
+  id          String   @id @default(cuid())
+  refundId    String   @map("refund_id")
+  orderId     String   @map("order_id") @db.VarChar(255)
+  productId   String?  @map("product_id") @db.VarChar(255)
+  variantId   String?  @map("variant_id") @db.VarChar(255)
+  quantity    Int
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  refundAmount Decimal @map("refund_amount") @db.Decimal(10, 2)
+  properties  Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  refund      RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+  @@index([orderId])
+  @@index([productId])
+  @@map("refund_line_item_data")
+}
+
+model RefundAttributionAdjustment {
+  id                    String   @id @default(cuid())
+  shopId                String   @map("shop_id") @db.VarChar(255)
+  orderId               String   @map("order_id") @db.VarChar(255)
+  refundId              String   @map("refund_id") @db.VarChar(255)
+  perExtensionRefund    Json     @map("per_extension_refund") @default("{}")
+  totalRefundAmount     Decimal  @map("total_refund_amount") @db.Decimal(10, 2)
+  computedAt            DateTime @map("computed_at") @db.Timestamptz
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  refund                RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  shop                  Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, refundId])
+  @@index([shopId, orderId])
+  @@index([computedAt])
+  @@map("refund_attribution_adjustments")
 }
 
 // ============= BILLING SYSTEM TABLES =============

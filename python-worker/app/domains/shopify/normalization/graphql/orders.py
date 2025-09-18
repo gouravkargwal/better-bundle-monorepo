@@ -63,6 +63,26 @@ class GraphQLOrderAdapter(BaseAdapter):
             node = edge.get("node", {})
             variant = node.get("variant", {}) or {}
             product = variant.get("product", {}) or {}
+            # Map customAttributes (array of {key, value}) into a dict for properties
+            custom_attrs = node.get("customAttributes") or []
+            props_dict: Dict[str, Any] = {}
+            try:
+                for attr in custom_attrs:
+                    k = attr.get("key") if isinstance(attr, dict) else None
+                    v = attr.get("value") if isinstance(attr, dict) else None
+                    if k is not None:
+                        # Map both old and new property names for backward compatibility
+                        if k.startswith("_bb_rec_"):
+                            # New hidden properties
+                            props_dict[str(k)] = v
+                        elif k.startswith("bb_rec_"):
+                            # Old visible properties - map to new hidden names
+                            new_key = f"_{k}"
+                            props_dict[new_key] = v
+                        else:
+                            props_dict[str(k)] = v
+            except Exception:
+                props_dict = {}
             line_items.append(
                 CanonicalLineItem(
                     productId=_extract_numeric_gid(product.get("id")),
@@ -70,6 +90,7 @@ class GraphQLOrderAdapter(BaseAdapter):
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
                     price=_to_float(variant.get("price")),
+                    properties=props_dict,
                 )
             )
 

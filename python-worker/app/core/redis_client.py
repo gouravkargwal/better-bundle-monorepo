@@ -136,10 +136,14 @@ class RedisStreamsManager:
             raise
 
     async def publish_shopify_event(self, event_data: Dict[str, Any]) -> str:
-        """Publish a Shopify normalization/processing event to the data job stream."""
+        """Publish a Shopify normalization/processing event to the appropriate stream."""
         if not self.redis:
             await self.initialize()
-        return await self.publish_event(settings.DATA_JOB_STREAM, event_data)
+
+        # Use stream manager to route to correct stream based on event type
+        from app.core.stream_manager import stream_manager
+
+        return await stream_manager.publish_by_event_type(event_data)
 
     def _clean_for_serialization(self, obj: Any) -> Any:
         """
@@ -281,7 +285,12 @@ class RedisStreamsManager:
         if data_types:
             event_data["data_types"] = data_types
 
-        return await self.publish_event(settings.DATA_JOB_STREAM, event_data)
+        # Use stream manager to route to data collection stream
+        from app.core.stream_manager import stream_manager, StreamType
+
+        return await stream_manager.publish_to_domain(
+            StreamType.DATA_COLLECTION, event_data
+        )
 
     async def publish_ml_training_event(
         self,

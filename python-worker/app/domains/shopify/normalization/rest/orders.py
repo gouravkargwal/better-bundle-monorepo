@@ -28,6 +28,26 @@ def _money_from_price_set(node: Any) -> float:
 
 
 class RestOrderAdapter(BaseAdapter):
+    def _process_line_item_properties(
+        self, raw_properties: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Process line item properties to handle both old and new naming conventions."""
+        processed_properties = {}
+
+        for key, value in raw_properties.items():
+            if key.startswith("_bb_rec_"):
+                # New hidden properties - keep as is
+                processed_properties[key] = value
+            elif key.startswith("bb_rec_"):
+                # Old visible properties - map to new hidden names
+                new_key = f"_{key}"
+                processed_properties[new_key] = value
+            else:
+                # Other properties - keep as is
+                processed_properties[key] = value
+
+        return processed_properties
+
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         order_id = str(payload.get("id")) if payload.get("id") is not None else ""
 
@@ -49,6 +69,9 @@ class RestOrderAdapter(BaseAdapter):
                     title=li.get("title"),
                     quantity=int(li.get("quantity") or 0),
                     price=_to_float(li.get("price")),
+                    properties=self._process_line_item_properties(
+                        li.get("properties") or {}
+                    ),
                 )
             )
 

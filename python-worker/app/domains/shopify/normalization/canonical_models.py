@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,7 @@ class CanonicalLineItem(BaseModel):
     title: Optional[str] = None
     quantity: int = 0
     price: float = 0.0
+    properties: Any = Field(default_factory=dict)
 
 
 class CanonicalOrder(BaseModel):
@@ -197,5 +198,5 @@ class NormalizeJob(BaseModel):
     format: str  # rest|graphql
     shop_id: str
     raw_id: Optional[str] = None
-    shopify_id: Optional[str] = None
+    shopify_id: Optional[Union[str, int]] = None  # Accept both string and integer
     timestamp: datetime

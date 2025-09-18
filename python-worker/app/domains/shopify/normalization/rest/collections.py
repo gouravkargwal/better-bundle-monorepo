@@ -27,18 +27,30 @@ class RestCollectionAdapter(BaseAdapter):
             {"id", "published_scope", "admin_graphql_api_id"}
         )
 
+        # Extract timestamps
+        created_at = _parse_iso(payload.get("created_at"))
+        updated_at = _parse_iso(payload.get("updated_at"))
+
+        # Use current time as fallback if timestamps are missing
+        if not created_at:
+            created_at = datetime.utcnow()
+        if not updated_at:
+            updated_at = datetime.utcnow()
+
         model = CanonicalCollection(
             shopId=shop_id,
-            entityId=collection_id,
+            collectionId=collection_id,  # Fixed: use collectionId instead of entityId
             originalGid=payload.get("admin_graphql_api_id"),
-            title=payload.get("title"),
-            handle=payload.get("handle"),
+            title=payload.get("title") or "",  # Provide default empty string
+            handle=payload.get("handle") or "",  # Provide default empty string
             description=payload.get("body_html"),
             templateSuffix=payload.get("template_suffix"),
             publishedAt=_parse_iso(payload.get("published_at")),
-            collectionUpdatedAt=_parse_iso(payload.get("updated_at")),
+            collectionUpdatedAt=updated_at,
             status=payload.get("published_scope"),
             isActive=not is_delete,
+            createdAt=created_at,  # Added required field
+            updatedAt=updated_at,  # Added required field
             extras={},
         )
 

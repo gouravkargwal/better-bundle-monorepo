@@ -5,7 +5,8 @@ import prisma from "../db.server";
 import { getRedisStreamService } from "../services/redis-stream.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log("🚀 Webhook request received - orders/paid");
+  const timestamp = new Date().toISOString();
+  console.log(`🚀 [${timestamp}] Webhook request received - orders/paid`);
   console.log("📋 Request method:", request.method);
   console.log("📋 Request URL:", request.url);
   console.log(
@@ -13,9 +14,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     Object.fromEntries(request.headers.entries()),
   );
 
+  // Log request body for debugging
+  try {
+    const body = await request.text();
+    console.log("📋 Request body length:", body.length);
+    console.log("📋 Request body preview:", body.substring(0, 200) + "...");
+  } catch (error) {
+    console.log("❌ Error reading request body:", error);
+  }
+
   let payload, session, topic, shop;
 
   try {
+    console.log("🔐 Starting webhook authentication...");
     const authResult = await authenticate.webhook(request);
     payload = authResult.payload;
     session = authResult.session;
@@ -24,8 +35,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("✅ Authentication successful");
     console.log("📋 Topic:", topic);
     console.log("📋 Shop:", shop);
+    console.log("📋 Session ID:", session?.id);
+    console.log("📋 Payload keys:", Object.keys(payload || {}));
   } catch (authError) {
     console.log("❌ Authentication failed:", authError);
+    console.log("❌ Auth error details:", {
+      message:
+        authError instanceof Error ? authError.message : String(authError),
+      stack: authError instanceof Error ? authError.stack : undefined,
+      name: authError instanceof Error ? authError.name : "Unknown",
+    });
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
@@ -35,7 +54,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}`);
+    console.log(`🔔 [${timestamp}] ${topic} webhook received for ${shop}`);
     console.log(`📦 Order ID: ${payload.id}`);
     console.log(`💰 Total: ${payload.total_price}`);
     console.log(`📧 Customer: ${payload.email || "Guest"}`);
@@ -46,10 +65,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(`📝 Note: ${payload.note || "No note"}`);
     console.log(`🔗 Note Attributes:`, payload.note_attributes || []);
 
+    // Log line items for attribution debugging
+    if (payload.line_items && payload.line_items.length > 0) {
+      console.log("🔍 Line items details:");
+      payload.line_items.forEach((item: any, index: number) => {
+        console.log(`  Item ${index + 1}:`, {
+          id: item.id,
+          variant_id: item.variant_id,
+          product_id: item.product_id,
+          title: item.title,
+          properties: item.properties || {},
+          quantity: item.quantity,
+          price: item.price,
+        });
+      });
+    }
+
     // ===== CUSTOMER LINKING INTEGRATION =====
     // Extract session ID from order note attributes for customer linking
     const sessionId = payload.note_attributes?.find(
-      (attr) => attr.name === "session_id",
+      (attr: any) => attr.name === "session_id",
     )?.value;
 
     if (payload.customer && payload.customer.id && sessionId) {
@@ -114,18 +149,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get shop ID from database
-    // Use findFirst to avoid depending on DB unique constraint during local/dev
+    console.log(`🔍 Looking up shop in database: ${shop}`);
     const shopRecord = await prisma.shop.findFirst({
       where: { shopDomain: shop },
       select: { id: true },
     });
 
     if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
+      console.error(`❌ Shop not found in database: ${shop}`);
+      console.error(
+        "Available shops:",
+        await prisma.shop.findMany({ select: { shopDomain: true } }),
+      );
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
+    console.log(`✅ Shop found in database: ${shopRecord.id}`);
+
     // Upsert without composite unique (shopifyId is nullable in schema)
+    console.log(`🔍 Checking if order ${orderId} already exists...`);
     const existing = await prisma.rawOrder.findFirst({
       where: { shopId: shopRecord.id, shopifyId: orderId },
       select: { id: true },
@@ -133,6 +175,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     let rawRecordId: string | null = null;
     if (existing) {
+      console.log(`⚠️ Order ${orderId} already exists, updating...`);
       const updated = await prisma.rawOrder.update({
         where: { id: existing.id },
         data: {
@@ -146,7 +189,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } as any,
       });
       rawRecordId = updated.id;
+      console.log(
+        `✅ Order ${orderId} updated successfully (ID: ${updated.id})`,
+      );
     } else {
+      console.log(`📝 Creating new order record for ${orderId}`);
       const created = await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,
@@ -164,6 +211,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } as any,
       });
       rawRecordId = created.id;
+      console.log(
+        `✅ Order ${orderId} created successfully (ID: ${created.id})`,
+      );
     }
 
     console.log(
@@ -171,8 +221,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     // Publish to Redis Stream for real-time processing (critical event - always publish)
+    console.log(`📡 Publishing order_paid event to Redis Stream...`);
     try {
       const streamService = await getRedisStreamService();
+      console.log(`✅ Redis Stream service initialized`);
 
       const streamData = {
         event_type: "order_paid",
@@ -182,6 +234,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         order_status: "paid",
       };
 
+      console.log(`📤 Publishing stream data:`, streamData);
       const messageId = await streamService.publishShopifyEvent(streamData);
 
       console.log(`📡 Published to Redis Stream:`, {

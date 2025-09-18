@@ -76,19 +76,36 @@ class RecommendationAPI {
   }
 
   // Add product to cart using Shopify's native Cart AJAX API
-  async addToCart(variantId, quantity = 1) {
+  // Supports passing line item properties for per-item attribution
+  async addToCart(variantId, quantity = 1, properties = {}) {
     try {
+      // Validate inputs
+      if (!variantId) {
+        throw new Error('Variant ID is required');
+      }
+      if (!quantity || quantity < 1) {
+        throw new Error('Valid quantity is required');
+      }
+
+      const cartPayload = {
+        items: [
+          {
+            id: variantId,
+            quantity: quantity,
+            // Attach attribution as line item properties (Shopify expects Hash format)
+            ...(properties && Object.keys(properties).length > 0
+              ? { properties }
+              : {})
+          }
+        ]
+      };
+
+      console.log('Cart API payload:', cartPayload);
+
       const response = await fetch('/cart/add.js', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: [
-            {
-              id: variantId,
-              quantity: quantity
-            }
-          ]
-        })
+        body: JSON.stringify(cartPayload)
       });
 
       if (!response.ok) {

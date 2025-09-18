@@ -50,9 +50,11 @@ class RestProductAdapter(BaseAdapter):
                     compareAtPrice=_to_float(v.get("compare_at_price")),
                     sku=v.get("sku"),
                     barcode=v.get("barcode"),
-                    inventory=int(v.get("inventory_quantity") or 0)
-                    if v.get("inventory_quantity") is not None
-                    else None,
+                    inventory=(
+                        int(v.get("inventory_quantity") or 0)
+                        if v.get("inventory_quantity") is not None
+                        else None
+                    ),
                 )
             )
 
@@ -68,25 +70,39 @@ class RestProductAdapter(BaseAdapter):
             price = variants[0].price
             compare_at = variants[0].compareAtPrice
 
+        # Parse timestamps
+        created_at = _parse_iso(payload.get("created_at")) or datetime.utcnow()
+        updated_at = _parse_iso(payload.get("updated_at")) or datetime.utcnow()
+
+        # Extract primary image URL and alt text
+        images = payload.get("images") or []
+        primary_image = images[0] if images else {}
+        image_url = primary_image.get("src") if primary_image else None
+        image_alt = primary_image.get("alt") if primary_image else None
+
         model = CanonicalProduct(
             shopId=shop_id,
-            entityId=product_id,
+            productId=product_id,  # Fixed: use productId instead of entityId
             originalGid=payload.get("admin_graphql_api_id"),
-            productCreatedAt=_parse_iso(payload.get("created_at")),
-            productUpdatedAt=_parse_iso(payload.get("updated_at")) or datetime.utcnow(),
-            title=payload.get("title"),
-            handle=payload.get("handle"),
+            productCreatedAt=created_at,
+            productUpdatedAt=updated_at,
+            createdAt=created_at,  # Required field
+            updatedAt=updated_at,  # Required field
+            title=payload.get("title") or "",  # Required field
+            handle=payload.get("handle") or "",  # Required field
             description=payload.get("body_html"),
             vendor=payload.get("vendor"),
             productType=payload.get("product_type"),
             status=payload.get("status"),
             tags=tags,
-            price=price,
+            price=price or 0.0,  # Required field with default
             compareAtPrice=compare_at,
             totalInventory=total_inventory,
+            imageUrl=image_url,  # Extract primary image URL
+            imageAlt=image_alt,  # Extract primary image alt text
             isActive=True if payload.get("status") != "archived" else False,
             variants=variants,
-            images=payload.get("images") or [],
+            images=images,  # Keep full images array
             media=payload.get("media") or [],
             options=payload.get("options") or [],
             templateSuffix=payload.get("template_suffix"),
@@ -94,5 +110,3 @@ class RestProductAdapter(BaseAdapter):
         )
 
         return model.dict()
-
-

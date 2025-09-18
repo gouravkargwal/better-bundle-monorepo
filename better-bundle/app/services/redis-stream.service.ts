@@ -27,6 +27,8 @@ export class RedisStreamService {
    */
   async publishShopifyEvent(eventData: ShopifyEventData): Promise<string> {
     try {
+      console.log(`🚀 Starting publishShopifyEvent with data:`, eventData);
+
       // Create a deduplication key
       const dedupKey = `${eventData.shop_id}_${eventData.shopify_id}_${eventData.event_type}`;
       const now = Date.now();
@@ -55,6 +57,7 @@ export class RedisStreamService {
       }
 
       const streamName = "betterbundle:shopify-events";
+      console.log(`📡 Publishing to stream: ${streamName}`);
 
       // Convert event data to Redis Stream format
       const streamFields = [
@@ -68,8 +71,23 @@ export class RedisStreamService {
         eventData.timestamp,
       ];
 
+      console.log(`📡 Stream fields:`, streamFields);
+
+      // Check if client is connected
+      if (!this.client.isOpen) {
+        console.log(`🔌 Redis client not connected, attempting to connect...`);
+        await this.client.connect();
+      }
+
+      console.log(`🔌 Redis client status:`, {
+        isOpen: this.client.isOpen,
+        isReady: this.client.isReady,
+      });
+
       // Use XADD to add event to stream
+      console.log(`📤 Calling xAdd...`);
       const messageId = await this.client.xAdd(streamName, "*", streamFields);
+      console.log(`✅ xAdd successful, messageId: ${messageId}`);
 
       console.log(`📡 Published event to Redis Stream:`, {
         streamName,
@@ -82,6 +100,11 @@ export class RedisStreamService {
       return messageId;
     } catch (error) {
       console.error("❌ Error publishing to Redis Stream:", error);
+      console.error("❌ Error details:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       throw error;
     }
   }

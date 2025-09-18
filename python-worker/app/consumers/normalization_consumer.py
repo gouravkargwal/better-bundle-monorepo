@@ -7,11 +7,13 @@ from datetime import datetime
 
 from app.consumers.base_consumer import BaseConsumer
 from app.core.logging import get_logger
-from app.shared.constants.redis import DATA_JOB_STREAM
+from app.shared.constants.redis import NORMALIZATION_STREAM, NORMALIZATION_GROUP
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
 from app.core.database.simple_db_client import get_database
 from app.core.redis_client import streams_manager
+from app.core.stream_manager import stream_manager, StreamType
+from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
 
@@ -21,8 +23,8 @@ class NormalizationConsumer(BaseConsumer):
 
     def __init__(self) -> None:
         super().__init__(
-            stream_name=DATA_JOB_STREAM,
-            consumer_group="normalization-consumer-group",
+            stream_name=NORMALIZATION_STREAM,
+            consumer_group=NORMALIZATION_GROUP,
             consumer_name="normalization-consumer",
             batch_size=50,
             poll_timeout=1000,
@@ -65,7 +67,20 @@ class NormalizationConsumer(BaseConsumer):
         job = NormalizeJob(**payload)
         db = await get_database()
 
-        # Load raw record
+        # Check if this is a deletion event by looking at the original event type
+        original_event_type = payload.get("original_event_type")
+        is_deletion_event = original_event_type in [
+            "product_deleted",
+            "collection_deleted",
+            "customer_deleted",
+        ]
+
+        if is_deletion_event:
+            # This is a confirmed deletion event
+            await self._handle_entity_deletion(job, db)
+            return
+
+        # For non-deletion events, check if raw record exists
         raw_table = {
             "orders": db.raworder,
             "products": db.rawproduct,
@@ -73,12 +88,169 @@ class NormalizationConsumer(BaseConsumer):
             "collections": db.rawcollection,
         }[job.data_type]
 
-        raw = await raw_table.find_unique(where={"id": job.raw_id})
+        raw = await raw_table.find_first(
+            where={"shopifyId": str(job.shopify_id), "shopId": job.shop_id}
+        )
+
         if not raw:
-            self.logger.warning("Raw record not found", raw_id=job.raw_id)
+            # No raw record found for non-deletion event - this is an error
+            self.logger.warning(
+                "Raw record not found for non-deletion event",
+                shopify_id=job.shopify_id,
+                shop_id=job.shop_id,
+                event_type=original_event_type,
+            )
+            return
+
+        # Load raw record by shopifyId and shopId
+        raw_table = {
+            "orders": db.raworder,
+            "products": db.rawproduct,
+            "customers": db.rawcustomer,
+            "collections": db.rawcollection,
+        }[job.data_type]
+
+        # Find by shopifyId and shopId instead of raw_id
+        raw = await raw_table.find_first(
+            where={"shopifyId": str(job.shopify_id), "shopId": job.shop_id}
+        )
+        if not raw:
+            self.logger.warning(
+                "Raw record not found", shopify_id=job.shopify_id, shop_id=job.shop_id
+            )
             return
 
         await self._normalize_single_raw_record(raw, job.shop_id, job.data_type)
+
+        # Trigger feature computation after successful normalization
+        await self._trigger_feature_computation(job.shop_id, job.data_type)
+
+    async def _trigger_feature_computation(self, shop_id: str, data_type: str):
+        """Trigger feature computation after successful normalization"""
+        try:
+            # Only trigger for certain entity types that affect recommendations
+            if data_type in ["products", "orders", "customers", "collections"]:
+                # Generate unique job ID
+                job_id = (
+                    f"webhook_feature_compute_{shop_id}_{int(now_utc().timestamp())}"
+                )
+
+                # Prepare metadata
+                metadata = {
+                    "batch_size": 100,
+                    "incremental": True,
+                    "trigger_source": "webhook_normalization",
+                    "entity_type": data_type,
+                    "timestamp": now_utc().isoformat(),
+                }
+
+                # Publish feature computation event
+                event_id = await streams_manager.publish_features_computed_event(
+                    job_id=job_id,
+                    shop_id=shop_id,
+                    features_ready=False,  # Need to compute features
+                    metadata=metadata,
+                )
+
+                self.logger.info(
+                    f"🚀 Triggered feature computation after {data_type} normalization",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                    entity_type=data_type,
+                    event_id=event_id,
+                )
+            else:
+                self.logger.debug(
+                    f"Skipping feature computation for {data_type} (not recommendation-relevant)",
+                    shop_id=shop_id,
+                )
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to trigger feature computation: {e}",
+                shop_id=shop_id,
+                entity_type=data_type,
+            )
+            # Don't fail normalization if feature computation trigger fails
+
+    async def _handle_entity_deletion(self, job: NormalizeJob, db):
+        """Handle entity deletion by marking as inactive in normalized tables."""
+        try:
+            # Map data types to their normalized tables and ID fields
+            entity_config = {
+                "products": {
+                    "table": db.productdata,
+                    "id_field": "productId",
+                    "entity_name": "Product",
+                },
+                "collections": {
+                    "table": db.collectiondata,
+                    "id_field": "collectionId",
+                    "entity_name": "Collection",
+                    "active_field": "isAutomated",  # Collections use isAutomated instead of isActive
+                },
+                "customers": {
+                    "table": db.customerdata,
+                    "id_field": "customerId",
+                    "entity_name": "Customer",
+                },
+                "orders": {
+                    "table": db.orderdata,
+                    "id_field": "orderId",
+                    "entity_name": "Order",
+                },
+            }
+
+            config = entity_config.get(job.data_type)
+            if not config:
+                self.logger.warning(
+                    f"Unknown entity type for deletion: {job.data_type}"
+                )
+                return
+
+            # Check if entity exists in normalized table
+            entity = await config["table"].find_first(
+                where={"shopId": job.shop_id, config["id_field"]: str(job.shopify_id)}
+            )
+
+            if entity:
+                # Mark entity as inactive (soft delete)
+                # Collections use isAutomated field, others use isActive
+                if job.data_type == "collections":
+                    await config["table"].update_many(
+                        where={
+                            "shopId": job.shop_id,
+                            config["id_field"]: str(job.shopify_id),
+                        },
+                        data={"isAutomated": False, "updatedAt": datetime.utcnow()},
+                    )
+                else:
+                    await config["table"].update_many(
+                        where={
+                            "shopId": job.shop_id,
+                            config["id_field"]: str(job.shopify_id),
+                        },
+                        data={"isActive": False, "updatedAt": datetime.utcnow()},
+                    )
+                self.logger.info(
+                    f"{config['entity_name']} {job.shopify_id} marked as inactive (deleted)",
+                    shop_id=job.shop_id,
+                    entity_type=job.data_type,
+                )
+
+                # Trigger feature computation after deletion
+                await self._trigger_feature_computation(job.shop_id, job.data_type)
+            else:
+                self.logger.warning(
+                    f"No normalized {config['entity_name'].lower()} found for deletion",
+                    shopify_id=job.shopify_id,
+                    shop_id=job.shop_id,
+                    entity_type=job.data_type,
+                )
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle entity deletion: {e}")
+            raise
 
     async def _handle_normalize_batch(self, payload: Dict[str, Any]):
         """Handle batch normalization with pagination."""
@@ -410,6 +582,24 @@ class NormalizationConsumer(BaseConsumer):
         if data_type == "orders" and line_items:
             await self._create_line_items(order_record_id, line_items)
 
+            # Emit event to trigger purchase attribution after order is fully written
+            try:
+                await stream_manager.publish_to_domain(
+                    StreamType.PURCHASE_ATTRIBUTION,
+                    {
+                        "event_type": "purchase_ready_for_attribution",
+                        "shop_id": shop_id,
+                        "order_id": main_data.get("orderId") or id_value,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                )
+            except Exception as e:
+                self.logger.error(
+                    "Failed to publish purchase_ready_for_attribution",
+                    error=str(e),
+                    shop_id=shop_id,
+                )
+
         # Log performance metrics (production monitoring)
         processing_time = time.time() - start_time
         if processing_time > 1.0:  # Only log slow operations
@@ -480,6 +670,7 @@ class NormalizationConsumer(BaseConsumer):
                             "title": item.get("title"),
                             "quantity": int(item.get("quantity", 0)),
                             "price": float(item.get("price", 0.0)),
+                            "properties": item.get("properties") or {},
                         }
                     else:
                         line_item_data = {
@@ -489,6 +680,7 @@ class NormalizationConsumer(BaseConsumer):
                             "title": getattr(item, "title", None),
                             "quantity": int(getattr(item, "quantity", 0)),
                             "price": float(getattr(item, "price", 0.0)),
+                            "properties": getattr(item, "properties", {}) or {},
                         }
                     bulk_data.append(line_item_data)
                 except (ValueError, TypeError) as e:
