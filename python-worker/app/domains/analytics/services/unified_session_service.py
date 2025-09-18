@@ -115,9 +115,10 @@ class UnifiedSessionService:
                 )
 
             # OPTIMIZATION: Create new session with single database call
+            # Use browser_session_id if provided, otherwise generate unified session ID
             session_id = (
                 browser_session_id
-                or f"session_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}"
+                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}"
             )
             expires_at = current_time + (
                 self.identified_session_duration
@@ -421,8 +422,11 @@ class UnifiedSessionService:
         try:
             db = await get_database()
 
-            # Generate unique session ID
-            session_id = f"unified_{uuid.uuid4().hex[:16]}"
+            # Generate unique session ID using browser_session_id if available
+            session_id = (
+                browser_session_id
+                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}"
+            )
 
             # Calculate expiration time based on user identification status
             duration = (

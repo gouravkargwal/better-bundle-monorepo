@@ -292,11 +292,29 @@ class HybridRecommendationService:
                 exclude_items=gorse_exclude_items,
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_user_recommendations",
-                }
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in result["recommendations"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_user_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ User recommendations returned only empty items for user {user_id}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_user_recommendations_empty",
+                        "error": "All recommendations were empty",
+                    }
             return result
 
         elif source == "session_recommendations":
@@ -332,15 +350,15 @@ class HybridRecommendationService:
             )
             logger.info(f"📊 Session data built: {session_data}")
 
-            if not session_data or (not session_id and not has_session_context):
+            if not session_data:
                 logger.warning(
-                    "⚠️ Skipping session_recommendations: no session_id and no session context in metadata"
+                    "⚠️ Skipping session_recommendations: no session data available"
                 )
                 return {
                     "success": False,
                     "items": [],
                     "source": "gorse_session_recommendations_skipped",
-                    "error": "No session_id or session context",
+                    "error": "No session data available",
                 }
 
             result = await self.gorse_client.get_session_recommendations(
@@ -350,13 +368,33 @@ class HybridRecommendationService:
             if result.get("success"):
                 # Check if we actually got recommendations
                 recommendations = result.get("recommendations", [])
-                if recommendations:
+
+                # Handle case where recommendations is None
+                if recommendations is None:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned None | session_data_count={len(session_data)}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_none",
+                        "error": "Gorse returned None recommendations",
+                    }
+
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in recommendations
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
                     logger.info(
-                        f"✅ Session recommendations successful | count={len(recommendations)}"
+                        f"✅ Session recommendations successful | count={len(valid_recommendations)}"
                     )
                     return {
                         "success": True,
-                        "items": recommendations,
+                        "items": valid_recommendations,
                         "source": "gorse_session_recommendations",
                     }
                 logger.warning(
@@ -378,11 +416,29 @@ class HybridRecommendationService:
                 n=limit, category=category
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular",
-                }
+                # Filter out empty or invalid recommendations
+                valid_items = [
+                    item
+                    for item in result["items"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_items:
+                    return {
+                        "success": True,
+                        "items": valid_items,
+                        "source": "gorse_popular",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Popular recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_popular_empty",
+                        "error": "All popular recommendations were empty",
+                    }
             return result
 
         elif source == "latest":

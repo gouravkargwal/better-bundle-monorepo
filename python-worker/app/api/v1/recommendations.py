@@ -78,7 +78,7 @@ async def extract_session_data_from_behavioral_events(
     try:
         db = await get_database()
 
-        # Get recent cart_viewed events (last 30 minutes)
+        # Get recent cart interactions (last 24 hours) - both cart_viewed and individual cart events
         from datetime import timezone
 
         now = datetime.now(timezone.utc)
@@ -86,49 +86,91 @@ async def extract_session_data_from_behavioral_events(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
-                "interactionType": "cart_viewed",
-                "createdAt": {"gte": now - timedelta(minutes=30)},
+                "interactionType": {
+                    "in": [
+                        "cart_viewed",
+                        "product_added_to_cart",
+                        "product_removed_from_cart",
+                    ]
+                },
+                "createdAt": {"gte": now - timedelta(hours=24)},
             },
-            take=5,
+            take=20,  # Get more events since we're including individual cart events
             order={"createdAt": "desc"},
         )
 
-        # Get recent product_viewed events (last 2 hours)
+        # Get recent product_viewed events (last 24 hours)
         recent_view_events = await db.userinteraction.find_many(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
                 "interactionType": "product_viewed",
-                "createdAt": {"gte": now - timedelta(hours=2)},
+                "createdAt": {"gte": now - timedelta(hours=24)},
             },
             take=20,
             order={"createdAt": "desc"},
         )
 
-        # Get recent add_to_cart events (last 1 hour)
+        # Get recent add_to_cart events (last 24 hours)
         recent_add_events = await db.userinteraction.find_many(
             where={
                 "customerId": user_id,
                 "shopId": shop_id,
                 "interactionType": "product_added_to_cart",
-                "createdAt": {"gte": now - timedelta(hours=1)},
+                "createdAt": {"gte": now - timedelta(hours=24)},
             },
             take=10,
             order={"createdAt": "desc"},
         )
 
-        # Extract cart contents from cart_viewed events
+        # Extract cart contents from cart events
         cart_contents = []
         cart_data = None
         for event in recent_cart_events:
             metadata = event.metadata or {}
-            if metadata.get("cart", {}).get("lines"):
+
+            # Handle cart_viewed events (full cart data)
+            if event.interactionType == "cart_viewed" and metadata.get("cart", {}).get(
+                "lines"
+            ):
                 cart_data = metadata["cart"]
                 for line in metadata["cart"]["lines"]:
                     if line.get("merchandise", {}).get("product", {}).get("id"):
                         product_id = line["merchandise"]["product"]["id"]
                         if product_id not in cart_contents:
                             cart_contents.append(product_id)
+
+            # Handle individual cart events (product_added_to_cart, product_removed_from_cart)
+            elif event.interactionType in [
+                "product_added_to_cart",
+                "product_removed_from_cart",
+            ]:
+                product_id = None
+
+                # Try different metadata structures for product ID
+                if "product_id" in metadata:
+                    product_id = metadata.get("product_id")
+                elif "data" in metadata and "cartLine" in metadata["data"]:
+                    cart_line = metadata["data"]["cartLine"]
+                    if (
+                        "merchandise" in cart_line
+                        and "product" in cart_line["merchandise"]
+                    ):
+                        product_id = cart_line["merchandise"]["product"].get("id")
+                elif "productId" in metadata:
+                    product_id = metadata.get("productId")
+
+                if product_id:
+                    if (
+                        event.interactionType == "product_added_to_cart"
+                        and product_id not in cart_contents
+                    ):
+                        cart_contents.append(product_id)
+                    elif (
+                        event.interactionType == "product_removed_from_cart"
+                        and product_id in cart_contents
+                    ):
+                        cart_contents.remove(product_id)
 
         # Extract recent views
         recent_views = []
@@ -547,20 +589,39 @@ async def execute_recommendation_level(
                 exclude_items=gorse_exclude_items,
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_user_recommendations",
-                }
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in result["recommendations"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
 
-        elif level == "session_recommendations" and session_id:
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_user_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ User recommendations returned only empty items for user {user_id}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_user_recommendations_empty",
+                        "error": "All recommendations were empty",
+                    }
+
+        elif level == "session_recommendations":
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
 
             # Build session data as array of feedback objects
             feedback_objects = []
+            effective_session_id = session_id or "auto"
             base_feedback = {
-                "Comment": f"session_{session_id}",
+                "Comment": f"session_{effective_session_id}",
                 "FeedbackType": "view",
                 "ItemId": "",
                 "Timestamp": datetime.now().isoformat(),
@@ -571,10 +632,23 @@ async def execute_recommendation_level(
             if metadata and metadata.get("cart_contents"):
                 for item_id in metadata["cart_contents"]:
                     cart_feedback = base_feedback.copy()
-                    cart_feedback["ItemId"] = item_id
+                    cart_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}"  # Apply shop prefix
+                    )
                     cart_feedback["FeedbackType"] = "add_to_cart"
                     cart_feedback["Comment"] = f"cart_item_{item_id}"
                     feedback_objects.append(cart_feedback)
+
+            # Add recent views if available
+            if metadata and metadata.get("recent_views"):
+                for item_id in metadata["recent_views"][:5]:  # Limit to 5 recent views
+                    view_feedback = base_feedback.copy()
+                    view_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}"  # Apply shop prefix
+                    )
+                    view_feedback["FeedbackType"] = "view"
+                    view_feedback["Comment"] = f"recent_view_{item_id}"
+                    feedback_objects.append(view_feedback)
 
             # If no specific items, create a general session feedback
             if not feedback_objects:
@@ -584,20 +658,69 @@ async def execute_recommendation_level(
                 session_data=feedback_objects, n=limit, category=category
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_session_recommendations",
-                }
+                # Handle case where recommendations is None
+                recommendations = result.get("recommendations", [])
+                if recommendations is None:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned None in fallback chain"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_none",
+                        "error": "Gorse returned None recommendations",
+                    }
+
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in recommendations
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_session_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_empty",
+                        "error": "All session recommendations were empty",
+                    }
 
         elif level == "popular":
             result = await gorse_client.get_popular_items(n=limit, category=category)
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular",
-                }
+                # Filter out empty or invalid recommendations
+                valid_items = [
+                    item
+                    for item in result["items"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_items:
+                    return {
+                        "success": True,
+                        "items": valid_items,
+                        "source": "gorse_popular",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Popular recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_popular_empty",
+                        "error": "All popular recommendations were empty",
+                    }
 
         elif level == "latest":
             result = await gorse_client.get_latest_items(n=limit, category=category)

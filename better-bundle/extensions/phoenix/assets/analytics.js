@@ -19,8 +19,8 @@ class AnalyticsApiClient {
    * Get or create a session for Phoenix tracking - OPTIMIZED WITH SESSION STORAGE
    */
   async getOrCreateSession(shopId, customerId) {
-    const sessionKey = `phoenix_session_${shopId}_${customerId || 'anon'}`;
-    const expiryKey = `phoenix_session_expiry_${shopId}_${customerId || 'anon'}`;
+    const sessionKey = `unified_session_${shopId}_${customerId || 'anon'}`;
+    const expiryKey = `unified_session_expiry_${shopId}_${customerId || 'anon'}`;
 
     // OPTIMIZATION: Check session storage first (fastest)
     try {
@@ -264,13 +264,14 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Get browser session ID (fallback if no session exists)
+   * Get unified browser session ID (shared across all extensions)
    */
   getBrowserSessionId() {
-    let sessionId = sessionStorage.getItem("phoenix_session_id");
+    // Use unified session ID that all extensions share
+    let sessionId = sessionStorage.getItem("unified_browser_session_id");
     if (!sessionId) {
-      sessionId = "phoenix_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("phoenix_session_id", sessionId);
+      sessionId = "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem("unified_browser_session_id", sessionId);
     }
     return sessionId;
   }

@@ -314,14 +314,14 @@ class ApolloAnalyticsClient {
   }
 
   /**
-   * Get browser session ID (fallback if no session exists)
+   * Get unified browser session ID (shared across all extensions)
    */
   private getBrowserSessionId(): string {
-    let sessionId = sessionStorage.getItem("apollo_session_id");
+    let sessionId = sessionStorage.getItem("unified_browser_session_id");
     if (!sessionId) {
       sessionId =
-        "apollo_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("apollo_session_id", sessionId);
+        "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem("unified_browser_session_id", sessionId);
     }
     return sessionId;
   }

@@ -128,14 +128,14 @@ export const trackInteraction = async (
 };
 
 /**
- * Get browser session ID (fallback if no session exists)
+ * Get unified browser session ID (shared across all extensions)
  */
 const getBrowserSessionId = async (sessionStorage: any): Promise<string> => {
-  let sessionId = await sessionStorage.getItem("atlas_session_id");
+  let sessionId = await sessionStorage.getItem("unified_browser_session_id");
   if (!sessionId) {
     sessionId =
-      "atlas_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    await sessionStorage.setItem("atlas_session_id", sessionId);
+      "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    await sessionStorage.setItem("unified_browser_session_id", sessionId);
   }
   return sessionId;
 };
