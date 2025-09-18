@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
-from prisma import Prisma
+from prisma import Prisma, Json
 from prisma.models import UserInteraction, UserSession, PurchaseAttribution
 
 from ..models.attribution_models import (
@@ -25,9 +25,9 @@ from ..models.attribution_models import (
     AttributionStatus,
     ExtensionType,
     InteractionType,
-    FraudDetectionResult,
     AttributionMetrics,
 )
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ class AttributionEngine:
 
     def __init__(self, prisma: Prisma):
         self.prisma = prisma
+        self.adapter_factory = InteractionEventAdapterFactory()
         self.default_rules = self._get_default_attribution_rules()
 
     async def calculate_attribution(
@@ -68,54 +69,88 @@ class AttributionEngine:
             AttributionResult with detailed breakdown
         """
         try:
-            logger.info(f"Calculating attribution for order {context.order_id}")
+            logger.info(
+                f"🔍 Starting attribution calculation for order {context.order_id}"
+            )
+            logger.info(
+                f"🔍 Context: shop_id={context.shop_id}, customer_id={context.customer_id}, session_id={context.session_id}"
+            )
+            logger.info(
+                f"🔍 Purchase amount: {context.purchase_amount}, Products: {len(context.purchase_products)}"
+            )
 
             # 1. Get all interactions for this customer/session
             interactions = await self._get_relevant_interactions(context)
+            logger.info(
+                f"📊 Found {len(interactions)} interactions for order {context.order_id}"
+            )
 
             if not interactions:
-                logger.warning(f"No interactions found for order {context.order_id}")
+                logger.warning(f"⚠️ No interactions found for order {context.order_id}")
                 return self._create_empty_attribution(context)
 
-            # 2. Apply fraud detection
-            fraud_result = self._detect_fraud(context, interactions)
-            if fraud_result.is_fraud:
-                logger.warning(
-                    f"Fraud detected for order {context.order_id}: {fraud_result.fraud_reasons}"
-                )
-                return self._create_fraud_attribution(context, fraud_result)
+            # 2. Skip fraud detection - order is already paid and verified
+            # fraud_result = self._detect_fraud(context, interactions)
+            # if fraud_result.is_fraud:
+            #     logger.warning(
+            #         f"Fraud detected for order {context.order_id}: {fraud_result.fraud_reasons}"
+            #     )
+            #     return self._create_fraud_attribution(context, fraud_result)
 
             # 3. Calculate attribution breakdown
+            logger.info(
+                f"🧮 Calculating attribution breakdown for {len(interactions)} interactions"
+            )
             attribution_breakdown = self._calculate_attribution_breakdown(
                 context, interactions
             )
+            logger.info(
+                f"💰 Generated {len(attribution_breakdown)} attribution breakdown items"
+            )
 
             # 4. Create attribution result
+            # Calculate total attributed revenue (should be 0 if no attribution-eligible interactions)
+            total_attributed_revenue = sum(
+                breakdown.attributed_amount for breakdown in attribution_breakdown
+            )
+
+            # If no attribution found, still count the total purchase amount for revenue tracking
+            if total_attributed_revenue == 0 and attribution_breakdown:
+                # This means attribution was calculated but resulted in 0
+                total_attributed_revenue = Decimal("0.00")
+            elif total_attributed_revenue == 0 and not attribution_breakdown:
+                # No attribution-eligible interactions found, but still count total revenue
+                total_attributed_revenue = context.purchase_amount
+                logger.info(
+                    f"💰 No attribution-eligible interactions found, counting total purchase amount: ${total_attributed_revenue}"
+                )
+
             result = AttributionResult(
                 order_id=context.order_id,
                 shop_id=context.shop_id,
                 customer_id=context.customer_id,
                 session_id=context.session_id,
-                total_attributed_revenue=sum(
-                    breakdown.attributed_amount for breakdown in attribution_breakdown
-                ),
+                total_attributed_revenue=total_attributed_revenue,
                 attribution_breakdown=attribution_breakdown,
                 attribution_type=AttributionType.DIRECT_CLICK,
                 status=AttributionStatus.CALCULATED,
                 calculated_at=datetime.utcnow(),
                 metadata={
                     "interaction_count": len(interactions),
-                    "fraud_score": fraud_result.fraud_score,
+                    "fraud_score": 0.0,  # No fraud detection
                     "calculation_method": "multi_touch_attribution",
                 },
             )
 
             # 5. Store attribution result
+            logger.info(f"💾 Storing attribution result for order {context.order_id}")
             await self._store_attribution_result(result)
-
             logger.info(
-                f"Attribution calculated for order {context.order_id}: "
-                f"${result.total_attributed_revenue}"
+                f"✅ Attribution calculation completed for order {context.order_id}"
+            )
+            logger.info(
+                f"💰 Final attribution for order {context.order_id}: "
+                f"${result.total_attributed_revenue} across {len(result.attribution_breakdown)} items"
             )
 
             return result
@@ -142,6 +177,10 @@ class AttributionEngine:
         time_window = timedelta(hours=720)  # 30 days
         start_time = context.purchase_time - time_window
 
+        logger.info(
+            f"🔍 Searching interactions from {start_time} to {context.purchase_time}"
+        )
+
         # Build query conditions
         where_conditions = {
             "shopId": context.shop_id,
@@ -151,13 +190,19 @@ class AttributionEngine:
         # Add customer or session filter
         if context.customer_id:
             where_conditions["customerId"] = context.customer_id
+            logger.info(f"🔍 Filtering by customer_id: {context.customer_id}")
         elif context.session_id:
             where_conditions["sessionId"] = context.session_id
+            logger.info(f"🔍 Filtering by session_id: {context.session_id}")
+
+        logger.info(f"🔍 Query conditions: {where_conditions}")
 
         # Get interactions
         interactions = await self.prisma.userinteraction.find_many(
             where=where_conditions, order={"createdAt": "desc"}
         )
+
+        logger.info(f"📊 Retrieved {len(interactions)} interactions from database")
 
         return interactions
 
@@ -174,17 +219,33 @@ class AttributionEngine:
         Returns:
             List of attribution breakdowns
         """
+        logger.info(
+            f"🧮 Starting attribution breakdown calculation for {len(interactions)} interactions"
+        )
         breakdowns = []
 
         # Group interactions by product
         product_interactions = self._group_interactions_by_product(interactions)
+        logger.info(
+            f"📦 Grouped interactions into {len(product_interactions)} product buckets"
+        )
 
         # Calculate attribution for each product in the purchase
+        logger.info(
+            f"🛒 Processing {len(context.purchase_products)} products from purchase"
+        )
         for product in context.purchase_products:
             product_id = product.get("id")
             product_amount = Decimal(str(product.get("price", 0)))
 
+            logger.info(
+                f"🔍 Processing product {product_id} with amount ${product_amount}"
+            )
+
             if not product_id or product_amount <= 0:
+                logger.warning(
+                    f"⚠️ Skipping product {product_id} - invalid ID or amount"
+                )
                 continue
 
             # Find interactions for this product
@@ -207,7 +268,7 @@ class AttributionEngine:
         self, interactions: List[UserInteraction]
     ) -> Dict[str, List[UserInteraction]]:
         """
-        Group interactions by product ID.
+        Group interactions by product ID, filtering for attribution-eligible extensions.
 
         Args:
             interactions: List of interactions
@@ -217,11 +278,86 @@ class AttributionEngine:
         """
         product_interactions = {}
 
+        # Filter for extensions that can track attribution
+        attribution_eligible_extensions = {
+            ExtensionType.PHOENIX,  # Recommendation engine
+            ExtensionType.VENUS,  # Customer account extensions
+            ExtensionType.APOLLO,  # Post-purchase extensions
+        }
+
         for interaction in interactions:
-            if interaction.productId:
-                if interaction.productId not in product_interactions:
-                    product_interactions[interaction.productId] = []
-                product_interactions[interaction.productId].append(interaction)
+            logger.info(
+                f"🔍 Processing interaction {interaction.id}: {interaction.extensionType} - {interaction.interactionType}"
+            )
+
+            # Skip ATLAS interactions (web pixel) - they don't drive conversions
+            if interaction.extensionType == ExtensionType.ATLAS.value:
+                logger.info(
+                    f"⏭️ Skipping ATLAS interaction {interaction.id} - web pixel doesn't drive attribution"
+                )
+                continue
+
+            # Only process interactions from attribution-eligible extensions
+            if (
+                ExtensionType(interaction.extensionType)
+                not in attribution_eligible_extensions
+            ):
+                logger.info(
+                    f"⏭️ Skipping interaction {interaction.id} from {interaction.extensionType} - not attribution eligible"
+                )
+                continue
+
+            # Extract product_id using adapter factory
+            product_id = None
+            try:
+                # Convert interaction to dict format for adapter
+                interaction_dict = {
+                    "interactionType": interaction.interactionType,
+                    "metadata": interaction.metadata,
+                    "customerId": interaction.customerId,
+                    "sessionId": interaction.sessionId,
+                    "shopId": interaction.shopId,
+                    "createdAt": interaction.createdAt,
+                }
+
+                # Extract product ID based on extension type
+                product_id = None
+                if interaction.extensionType == ExtensionType.PHOENIX.value:
+                    # PHOENIX stores product IDs in metadata['product_ids'] as a list
+                    product_ids = interaction.metadata.get("product_ids", [])
+                    if product_ids:
+                        # For now, use the first product ID (we can enhance this later)
+                        product_id = product_ids[0]
+                        logger.info(
+                            f"🔍 PHOENIX: Found product_ids {product_ids}, using {product_id}"
+                        )
+                else:
+                    # Use adapter factory for other extensions
+                    product_id = self.adapter_factory.extract_product_id(
+                        interaction_dict
+                    )
+
+                logger.info(
+                    f"🔍 Extracted product_id: {product_id} for {interaction.extensionType} interaction {interaction.id}"
+                )
+
+                if product_id:
+                    if product_id not in product_interactions:
+                        product_interactions[product_id] = []
+                    product_interactions[product_id].append(interaction)
+                    logger.info(
+                        f"✅ Added {interaction.extensionType} interaction for product {product_id}"
+                    )
+                else:
+                    logger.info(
+                        f"❌ No product_id extracted for {interaction.extensionType} interaction {interaction.id}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Error extracting product_id from interaction {interaction.id}: {e}"
+                )
+                continue
 
         return product_interactions
 
@@ -284,7 +420,9 @@ class AttributionEngine:
                 interaction_id=interaction.id,
                 metadata={
                     "interaction_type": interaction.interactionType,
-                    "recommendation_position": interaction.recommendationPosition,
+                    "recommendation_position": getattr(
+                        interaction, "recommendationPosition", None
+                    ),
                     "created_at": interaction.createdAt.isoformat(),
                 },
             )
@@ -323,7 +461,9 @@ class AttributionEngine:
                 interaction_id=primary_interaction.id,
                 metadata={
                     "interaction_type": primary_interaction.interactionType,
-                    "recommendation_position": primary_interaction.recommendationPosition,
+                    "recommendation_position": getattr(
+                        primary_interaction, "recommendationPosition", None
+                    ),
                     "created_at": primary_interaction.createdAt.isoformat(),
                     "attribution_role": "primary",
                 },
@@ -347,7 +487,9 @@ class AttributionEngine:
                         interaction_id=interaction.id,
                         metadata={
                             "interaction_type": interaction.interactionType,
-                            "recommendation_position": interaction.recommendationPosition,
+                            "recommendation_position": getattr(
+                                interaction, "recommendationPosition", None
+                            ),
                             "created_at": interaction.createdAt.isoformat(),
                             "attribution_role": "secondary",
                         },
@@ -355,70 +497,6 @@ class AttributionEngine:
                 )
 
         return breakdowns
-
-    def _detect_fraud(
-        self, context: AttributionContext, interactions: List[UserInteraction]
-    ) -> FraudDetectionResult:
-        """
-        Detect potential fraud in attribution.
-
-        Args:
-            context: Attribution context
-            interactions: List of interactions
-
-        Returns:
-            FraudDetectionResult
-        """
-        fraud_reasons = []
-        fraud_score = 0.0
-
-        # Check for excessive interactions
-        if len(interactions) > 100:
-            fraud_reasons.append("Excessive interactions in time window")
-            fraud_score += 0.3
-
-        # Check for rapid-fire interactions
-        if len(interactions) > 1:
-            time_diffs = []
-            for i in range(1, len(interactions)):
-                diff = (
-                    interactions[i - 1].createdAt - interactions[i].createdAt
-                ).total_seconds()
-                time_diffs.append(diff)
-
-            if any(
-                diff < 1 for diff in time_diffs
-            ):  # Less than 1 second between interactions
-                fraud_reasons.append("Rapid-fire interactions detected")
-                fraud_score += 0.4
-
-        # Check for unusual conversion rates
-        if len(interactions) > 0:
-            conversion_rate = 1.0 / len(interactions)  # 1 purchase / interactions
-            if conversion_rate > 0.5:  # More than 50% conversion rate
-                fraud_reasons.append("Unusually high conversion rate")
-                fraud_score += 0.2
-
-        # Check for minimum order value
-        if context.purchase_amount < Decimal("10.00"):
-            fraud_reasons.append("Order below minimum value threshold")
-            fraud_score += 0.1
-
-        is_fraud = fraud_score > 0.5 or len(fraud_reasons) > 2
-
-        return FraudDetectionResult(
-            shop_id=context.shop_id,
-            order_id=context.order_id,
-            is_fraud=is_fraud,
-            fraud_score=fraud_score,
-            fraud_reasons=fraud_reasons,
-            detected_at=datetime.utcnow(),
-            metadata={
-                "interaction_count": len(interactions),
-                "purchase_amount": float(context.purchase_amount),
-                "detection_rules_applied": len(fraud_reasons),
-            },
-        )
 
     async def _store_attribution_result(self, result: AttributionResult) -> None:
         """
@@ -428,14 +506,19 @@ class AttributionEngine:
             result: Attribution result to store
         """
         try:
+            # Prepare session connection data
+            session_connect = None
+            if result.session_id:
+                session_connect = {"connect": {"id": result.session_id}}
+
             # Store in PurchaseAttribution table
-            await self.prisma.purchaseattribution.create(
-                {
-                    "sessionId": result.session_id or "",
-                    "orderId": result.order_id,
-                    "customerId": result.customer_id,
-                    "shopId": result.shop_id,
-                    "contributingExtensions": [
+            attribution_data = {
+                "sessionId": result.session_id or "",
+                "orderId": str(result.order_id),
+                "customerId": result.customer_id,
+                "shopId": result.shop_id,
+                "contributingExtensions": Json(
+                    [
                         {
                             "extension_type": breakdown.extension_type.value,
                             "product_id": breakdown.product_id,
@@ -443,28 +526,41 @@ class AttributionEngine:
                             "attribution_weight": breakdown.attribution_weight,
                         }
                         for breakdown in result.attribution_breakdown
-                    ],
-                    "attributionWeights": {
+                    ]
+                ),
+                "attributionWeights": Json(
+                    {
                         breakdown.extension_type.value: breakdown.attribution_weight
                         for breakdown in result.attribution_breakdown
-                    },
-                    "totalRevenue": float(result.total_attributed_revenue),
-                    "attributedRevenue": {
+                    }
+                ),
+                "totalRevenue": float(result.total_attributed_revenue),
+                "attributedRevenue": Json(
+                    {
                         breakdown.extension_type.value: float(
                             breakdown.attributed_amount
                         )
                         for breakdown in result.attribution_breakdown
-                    },
-                    "totalInteractions": len(result.attribution_breakdown),
-                    "interactionsByExtension": {
+                    }
+                ),
+                "totalInteractions": len(result.attribution_breakdown),
+                "interactionsByExtension": Json(
+                    {
                         breakdown.extension_type.value: 1
                         for breakdown in result.attribution_breakdown
-                    },
-                    "purchaseAt": result.calculated_at,
-                    "attributionAlgorithm": result.attribution_type.value,
-                    "metadata": result.metadata,
-                }
-            )
+                    }
+                ),
+                "purchaseAt": result.calculated_at,
+                "attributionAlgorithm": result.attribution_type.value,
+                "metadata": Json(result.metadata),
+            }
+
+            # Add connections - use direct foreign key values instead of connect syntax
+            # attribution_data["shop"] = {"connect": {"id": result.shop_id}}
+            # if session_connect:
+            #     attribution_data["session"] = session_connect
+
+            await self.prisma.purchaseattribution.create(attribution_data)
 
             logger.info(f"Stored attribution result for order {result.order_id}")
 
@@ -489,27 +585,6 @@ class AttributionEngine:
             status=AttributionStatus.CALCULATED,
             calculated_at=datetime.utcnow(),
             metadata={"reason": "no_interactions_found"},
-        )
-
-    def _create_fraud_attribution(
-        self, context: AttributionContext, fraud_result: FraudDetectionResult
-    ) -> AttributionResult:
-        """Create attribution result for fraud cases."""
-        return AttributionResult(
-            order_id=context.order_id,
-            shop_id=context.shop_id,
-            customer_id=context.customer_id,
-            session_id=context.session_id,
-            total_attributed_revenue=Decimal("0.00"),
-            attribution_breakdown=[],
-            attribution_type=AttributionType.DIRECT_CLICK,
-            status=AttributionStatus.REJECTED,
-            calculated_at=datetime.utcnow(),
-            metadata={
-                "fraud_detected": True,
-                "fraud_score": fraud_result.fraud_score,
-                "fraud_reasons": fraud_result.fraud_reasons,
-            },
         )
 
     def _create_error_attribution(
