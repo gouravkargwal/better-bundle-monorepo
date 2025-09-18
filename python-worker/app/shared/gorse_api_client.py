@@ -563,13 +563,16 @@ class GorseApiClient:
             return {"success": False, "error": str(e), "neighbors": []}
 
     async def get_session_recommendations(
-        self, session_data: Dict[str, Any], n: int = 10, category: Optional[str] = None
+        self,
+        session_data: List[Dict[str, Any]],
+        n: int = 10,
+        category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get session-based recommendations from Gorse
 
         Args:
-            session_data: Session data including user interactions
+            session_data: List of feedback objects for the session
             n: Number of recommendations to return
             category: Optional category filter
 

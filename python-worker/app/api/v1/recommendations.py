@@ -333,35 +333,18 @@ def _apply_time_decay_filtering(
             # Count total interactions for this product
             interaction_count = len(interactions)
 
-            # Apply time decay logic
+            # Apply industry-standard time decay logic
+            # Industry best practice: Only exclude items currently in cart or very recently purchased
             should_exclude = False
             reason = ""
 
-            if hours_ago < 2:
-                # Very recent (last 2 hours) - always exclude
+            # Industry standard: Only exclude items that are currently in cart (very recent)
+            if hours_ago < 0.01:  # Last ~36 seconds - likely current cart item
                 should_exclude = True
-                reason = f"very_recent_{hours_ago:.1f}h"
-            elif hours_ago < 6:
-                # Recent (last 6 hours) - usually exclude
-                should_exclude = True
-                reason = f"recent_{hours_ago:.1f}h"
-            elif hours_ago < 24:
-                # Yesterday - exclude if multiple interactions
-                if interaction_count >= 2:
-                    should_exclude = True
-                    reason = f"yesterday_multiple_{interaction_count}times"
-                else:
-                    reason = f"yesterday_single_{hours_ago:.1f}h"
-            elif hours_ago < 48:
-                # Day before - exclude only if many interactions
-                if interaction_count >= 3:
-                    should_exclude = True
-                    reason = f"day_before_many_{interaction_count}times"
-                else:
-                    reason = f"day_before_few_{hours_ago:.1f}h"
+                reason = f"current_cart_item_{hours_ago:.1f}h"
             else:
-                # Too old - don't exclude
-                reason = f"too_old_{hours_ago:.1f}h"
+                # Don't exclude recently interacted items; handle recency in ranking, not filtering
+                reason = f"included_{hours_ago:.1f}h"
 
             if should_exclude:
                 excluded_products.append(product_id)

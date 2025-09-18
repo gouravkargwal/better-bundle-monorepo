@@ -32,10 +32,10 @@ class HybridRecommendationService:
             "popular": 0.4,  # 40% popular items
         },
         "cart": {
-            "session_recommendations": 0.4,  # 40% session-based
+            "session_recommendations": 0.5,  # 50% session-based
             "user_recommendations": 0.3,  # 30% personalized
             "popular": 0.2,  # 20% popular items
-            "user_neighbors": 0.1,  # 10% neighbor-based
+            "user_neighbors": 0.0,  # 0% neighbor-based (often fails)
         },
         "profile": {
             "user_recommendations": 0.5,  # 50% personalized
