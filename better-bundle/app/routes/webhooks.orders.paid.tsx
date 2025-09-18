@@ -14,15 +14,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     Object.fromEntries(request.headers.entries()),
   );
 
-  // Log request body for debugging
-  try {
-    const body = await request.text();
-    console.log("📋 Request body length:", body.length);
-    console.log("📋 Request body preview:", body.substring(0, 200) + "...");
-  } catch (error) {
-    console.log("❌ Error reading request body:", error);
-  }
-
   let payload, session, topic, shop;
 
   try {
@@ -37,6 +28,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("📋 Shop:", shop);
     console.log("📋 Session ID:", session?.id);
     console.log("📋 Payload keys:", Object.keys(payload || {}));
+    console.log("📋 Request body length:", JSON.stringify(payload).length);
+    console.log(
+      "📋 Request body preview:",
+      JSON.stringify(payload).substring(0, 200) + "...",
+    );
   } catch (authError) {
     console.log("❌ Authentication failed:", authError);
     console.log("❌ Auth error details:", {

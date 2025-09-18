@@ -36,7 +36,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Store raw customer update data immediately
     const created = await prisma.rawCustomer.create({
-      data: ({
+      data: {
         shopId: shopRecord.id,
         payload: customer,
         shopifyId: customerId,
@@ -49,7 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         source: "webhook",
         format: "rest",
         receivedAt: new Date(),
-      }) as any,
+      } as any,
     });
 
     console.log(

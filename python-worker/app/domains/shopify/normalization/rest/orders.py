@@ -28,11 +28,18 @@ def _money_from_price_set(node: Any) -> float:
 
 
 class RestOrderAdapter(BaseAdapter):
-    def _process_line_item_properties(
-        self, raw_properties: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _process_line_item_properties(self, raw_properties: Any) -> Dict[str, Any]:
         """Process line item properties to handle both old and new naming conventions."""
         processed_properties = {}
+
+        # Handle case where properties might be a list instead of dict
+        if not isinstance(raw_properties, dict):
+            if isinstance(raw_properties, list):
+                # Convert list to dict if it's a list of key-value pairs
+                for item in raw_properties:
+                    if isinstance(item, dict) and "name" in item and "value" in item:
+                        processed_properties[item["name"]] = item["value"]
+            return processed_properties
 
         for key, value in raw_properties.items():
             if key.startswith("_bb_rec_"):
@@ -95,9 +102,14 @@ class RestOrderAdapter(BaseAdapter):
 
         model = CanonicalOrder(
             shopId=shop_id,
-            entityId=order_id,
+            orderId=order_id,
             originalGid=None,
-            shopifyUpdatedAt=(
+            createdAt=(
+                datetime.fromisoformat(payload.get("created_at"))
+                if payload.get("created_at")
+                else datetime.utcnow()
+            ),
+            updatedAt=(
                 datetime.fromisoformat(payload.get("updated_at"))
                 if payload.get("updated_at")
                 else datetime.utcnow()

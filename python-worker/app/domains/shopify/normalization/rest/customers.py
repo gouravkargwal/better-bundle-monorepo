@@ -30,23 +30,33 @@ class RestCustomerAdapter(BaseAdapter):
         # tags can be CSV on REST in some cases; default empty here
         tags: List[str] = []
 
+        # Get timestamps for required fields
+        created_at = _parse_iso(payload.get("created_at")) or datetime.utcnow()
+        updated_at = _parse_iso(payload.get("updated_at")) or datetime.utcnow()
+
         model = CanonicalCustomer(
             shopId=shop_id,
-            entityId=customer_id,
+            customerId=customer_id,  # Fixed: was entityId
             originalGid=payload.get("admin_graphql_api_id"),
-            customerCreatedAt=_parse_iso(payload.get("created_at")),
-            customerUpdatedAt=_parse_iso(payload.get("updated_at"))
-            or datetime.utcnow(),
+            customerCreatedAt=created_at,
+            customerUpdatedAt=updated_at,
             email=payload.get("email"),
-            phone=payload.get("phone"),
             firstName=payload.get("first_name"),
             lastName=payload.get("last_name"),
+            totalSpent=float(payload.get("total_spent", 0)),
+            orderCount=int(payload.get("orders_count", 0)),
+            lastOrderDate=_parse_iso(payload.get("last_order_date")),
+            lastOrderId=payload.get("last_order_id"),
             state=payload.get("state"),
-            verifiedEmail=payload.get("verified_email"),
-            defaultAddress=payload.get("default_address"),
+            verifiedEmail=payload.get("verified_email", False),
+            taxExempt=payload.get("tax_exempt", False),
+            defaultAddress=payload.get("default_address") or {},
             addresses=payload.get("addresses") or [],
             tags=tags,
-            currency=payload.get("currency"),
+            currencyCode=payload.get("currency", "USD"),  # Fixed: was currency
+            customerLocale=payload.get("locale", "en"),
+            createdAt=created_at,  # Required field
+            updatedAt=updated_at,  # Required field
             isActive=not is_delete,
             extras={},
         )

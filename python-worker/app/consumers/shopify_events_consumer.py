@@ -101,6 +101,7 @@ class ShopifyEventsConsumer(BaseConsumer):
             "refund_created": "refunds",
             "customer_created": "customers",
             "customer_updated": "customers",
+            "customer_redacted": "customers",
             "collection_created": "collections",
             "collection_updated": "collections",
             "collection_deleted": "collections",

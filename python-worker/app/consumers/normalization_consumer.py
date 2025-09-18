@@ -72,7 +72,7 @@ class NormalizationConsumer(BaseConsumer):
         is_deletion_event = original_event_type in [
             "product_deleted",
             "collection_deleted",
-            "customer_deleted",
+            "customer_redacted",
         ]
 
         if is_deletion_event:
@@ -120,10 +120,22 @@ class NormalizationConsumer(BaseConsumer):
             )
             return
 
-        await self._normalize_single_raw_record(raw, job.shop_id, job.data_type)
+        try:
+            await self._normalize_single_raw_record(raw, job.shop_id, job.data_type)
 
-        # Trigger feature computation after successful normalization
-        await self._trigger_feature_computation(job.shop_id, job.data_type)
+            # Only trigger feature computation after SUCCESSFUL normalization
+            await self._trigger_feature_computation(job.shop_id, job.data_type)
+
+        except Exception as e:
+            self.logger.error(
+                "Normalization failed - skipping feature computation",
+                error=str(e),
+                shop_id=job.shop_id,
+                data_type=job.data_type,
+                shopify_id=job.shopify_id,
+            )
+            # Don't trigger feature computation if normalization failed
+            raise
 
     async def _trigger_feature_computation(self, shop_id: str, data_type: str):
         """Trigger feature computation after successful normalization"""
@@ -187,7 +199,6 @@ class NormalizationConsumer(BaseConsumer):
                     "table": db.collectiondata,
                     "id_field": "collectionId",
                     "entity_name": "Collection",
-                    "active_field": "isAutomated",  # Collections use isAutomated instead of isActive
                 },
                 "customers": {
                     "table": db.customerdata,
@@ -215,23 +226,13 @@ class NormalizationConsumer(BaseConsumer):
 
             if entity:
                 # Mark entity as inactive (soft delete)
-                # Collections use isAutomated field, others use isActive
-                if job.data_type == "collections":
-                    await config["table"].update_many(
-                        where={
-                            "shopId": job.shop_id,
-                            config["id_field"]: str(job.shopify_id),
-                        },
-                        data={"isAutomated": False, "updatedAt": datetime.utcnow()},
-                    )
-                else:
-                    await config["table"].update_many(
-                        where={
-                            "shopId": job.shop_id,
-                            config["id_field"]: str(job.shopify_id),
-                        },
-                        data={"isActive": False, "updatedAt": datetime.utcnow()},
-                    )
+                await config["table"].update_many(
+                    where={
+                        "shopId": job.shop_id,
+                        config["id_field"]: str(job.shopify_id),
+                    },
+                    data={"isActive": False, "updatedAt": datetime.utcnow()},
+                )
                 self.logger.info(
                     f"{config['entity_name']} {job.shopify_id} marked as inactive (deleted)",
                     shop_id=job.shop_id,
