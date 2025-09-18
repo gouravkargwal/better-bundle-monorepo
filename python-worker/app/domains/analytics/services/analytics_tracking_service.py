@@ -211,7 +211,7 @@ class AnalyticsTrackingService:
                     "recommendationId": recommendation_id,
                     "shopId": shop_id,
                 },
-                order_by={"createdAt": "desc"},
+                order={"createdAt": "desc"},
             )
 
             # Calculate metrics

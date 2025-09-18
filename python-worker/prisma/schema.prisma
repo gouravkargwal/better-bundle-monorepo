@@ -191,16 +191,18 @@ model OrderData {
 
 model LineItemData {
   id          String   @id @default(cuid())
-  orderId     String
-  productId   String?
-  variantId   String?
+  orderId     String   @map("order_id")
+  productId   String?  @map("product_id")
+  variantId   String?  @map("variant_id")
   title       String?
   quantity    Int
   price       Float
-  properties  Json?
+  properties  Json?    @default("{}")
 
   // Establish the relation back to the OrderData table
   order       OrderData @relation(fields: [orderId], references: [id])
+
+  @@map("line_item_data")
 }
 
 model ProductData {

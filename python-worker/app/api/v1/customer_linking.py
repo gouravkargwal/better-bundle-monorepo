@@ -174,7 +174,7 @@ async def get_customer_link_stats(shop_id: str) -> CustomerLinkStats:
 
         # Get last backfill time (we'll use the most recent link creation time as proxy)
         last_link = await db.useridentitylink.find_first(
-            where={"shopId": shop_id}, order_by={"linkedAt": "desc"}
+            where={"shopId": shop_id}, order={"linkedAt": "desc"}
         )
         last_backfill_at = last_link.linkedAt if last_link else None
 
@@ -219,7 +219,7 @@ async def get_customer_links(
             where={"shopId": shop_id},
             take=limit,
             skip=offset,
-            order_by={"linkedAt": "desc"},
+            order={"linkedAt": "desc"},
         )
 
         # Enrich with additional information

@@ -92,7 +92,7 @@ class BillingRepository:
         try:
             plan = await self.prisma.billingplan.find_first(
                 where={"shopId": shop_id, "status": "active"},
-                order_by={"effectiveFrom": "desc"},
+                order={"effectiveFrom": "desc"},
             )
             return plan
         except Exception as e:
@@ -358,7 +358,7 @@ class BillingRepository:
         try:
             invoices = await self.prisma.billinginvoice.find_many(
                 where={"shopId": shop_id},
-                order_by={"createdAt": "desc"},
+                order={"createdAt": "desc"},
                 take=limit,
                 skip=offset,
             )
@@ -410,7 +410,7 @@ class BillingRepository:
 
             events = await self.prisma.billingevent.find_many(
                 where=where_conditions,
-                order_by={"occurredAt": "desc"},
+                order={"occurredAt": "desc"},
                 take=limit,
                 skip=offset,
             )

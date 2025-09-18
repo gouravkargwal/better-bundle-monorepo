@@ -68,7 +68,7 @@ class BillingService:
             )
 
             # Calculate attribution
-            attribution_result = self.attribution_engine.calculate_attribution(context)
+            attribution_result = await self.attribution_engine.calculate_attribution(context)
 
             logger.info(
                 f"Attribution processed for purchase {purchase_event.order_id}: "

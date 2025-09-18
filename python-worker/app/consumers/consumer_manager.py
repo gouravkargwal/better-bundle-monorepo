@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from app.consumers.base_consumer import BaseConsumer
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.normalization_consumer import NormalizationConsumer
+from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsumer
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
@@ -45,6 +46,7 @@ class ConsumerManager:
         self,
         data_collection_consumer: Optional[DataCollectionConsumer] = None,
         normalization_consumer: Optional[NormalizationConsumer] = None,
+        purchase_attribution_consumer: Optional[PurchaseAttributionConsumer] = None,
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         customer_linking_consumer: Optional[CustomerLinkingConsumer] = None,
         shopify_events_consumer: Optional[ShopifyEventsConsumer] = None,
@@ -54,6 +56,8 @@ class ConsumerManager:
             self.consumers["data_collection"] = data_collection_consumer
         if normalization_consumer:
             self.consumers["normalization"] = normalization_consumer
+        if purchase_attribution_consumer:
+            self.consumers["purchase_attribution"] = purchase_attribution_consumer
         if feature_computation_consumer:
             self.consumers["feature_computation"] = feature_computation_consumer
         if customer_linking_consumer:

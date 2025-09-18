@@ -71,7 +71,7 @@ class UserInteraction(BaseModel):
 class PurchaseEvent(BaseModel):
     """Purchase event data"""
 
-    order_id: str
+    order_id: int
     customer_id: Optional[str]
     shop_id: str
     session_id: Optional[str]
@@ -79,25 +79,6 @@ class PurchaseEvent(BaseModel):
     currency: str
     products: List[Dict[str, Any]]
     created_at: datetime
-    metadata: Dict[str, Any]
-
-
-class AttributionResult(BaseModel):
-    """Result of attribution calculation"""
-
-    order_id: str
-    shop_id: str
-    customer_id: Optional[str]
-    session_id: Optional[str]
-
-    # Attribution breakdown
-    total_attributed_revenue: Decimal
-    attribution_breakdown: List[AttributionBreakdown]
-
-    # Metadata
-    attribution_type: AttributionType
-    status: AttributionStatus
-    calculated_at: datetime
     metadata: Dict[str, Any]
 
 
@@ -110,6 +91,25 @@ class AttributionBreakdown(BaseModel):
     attribution_weight: float  # 0.0 to 1.0
     attribution_type: AttributionType
     interaction_id: Optional[str]
+    metadata: Dict[str, Any]
+
+
+class AttributionResult(BaseModel):
+    """Result of attribution calculation"""
+
+    order_id: int
+    shop_id: str
+    customer_id: Optional[str]
+    session_id: Optional[str]
+
+    # Attribution breakdown
+    total_attributed_revenue: Decimal
+    attribution_breakdown: List[AttributionBreakdown]
+
+    # Metadata
+    attribution_type: AttributionType
+    status: AttributionStatus
+    calculated_at: datetime
     metadata: Dict[str, Any]
 
 
@@ -179,7 +179,7 @@ class FraudDetectionResult(BaseModel):
     """Result of fraud detection"""
 
     shop_id: str
-    order_id: str
+    order_id: int
     is_fraud: bool
     fraud_score: float  # 0.0 to 1.0
     fraud_reasons: List[str]
@@ -192,7 +192,7 @@ class AttributionEvent(BaseModel):
 
     event_type: str
     shop_id: str
-    order_id: str
+    order_id: int
     customer_id: Optional[str]
     session_id: Optional[str]
     data: Dict[str, Any]

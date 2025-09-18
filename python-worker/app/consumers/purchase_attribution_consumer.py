@@ -56,7 +56,7 @@ class PurchaseAttributionConsumer(BaseConsumer):
 
             # Load normalized order and line items
             order = await db.orderdata.find_first(
-                where={"shopId": shop_id, "orderId": order_id}
+                where={"shopId": shop_id, "orderId": str(order_id)}
             )
             if not order:
                 self.logger.warning(

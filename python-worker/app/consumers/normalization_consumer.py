@@ -14,6 +14,7 @@ from app.core.database.simple_db_client import get_database
 from app.core.redis_client import streams_manager
 from app.core.stream_manager import stream_manager, StreamType
 from app.shared.helpers import now_utc
+from prisma import Json
 
 logger = get_logger(__name__)
 
@@ -664,6 +665,15 @@ class NormalizationConsumer(BaseConsumer):
             for item in line_items:
                 try:
                     if isinstance(item, dict):
+                        # Always wrap properties in Json() for Prisma
+                        raw_properties = item.get("properties")
+                        if raw_properties:
+                            properties_value = Json(raw_properties)
+                        else:
+                            properties_value = Json({})
+                        self.logger.info(
+                            f"🔍 DEBUG: Dict item properties - original: {raw_properties}, final: {properties_value}, type: {type(properties_value)}"
+                        )
                         line_item_data = {
                             "orderId": order_record_id,
                             "productId": item.get("productId"),
@@ -671,9 +681,18 @@ class NormalizationConsumer(BaseConsumer):
                             "title": item.get("title"),
                             "quantity": int(item.get("quantity", 0)),
                             "price": float(item.get("price", 0.0)),
-                            "properties": item.get("properties") or {},
+                            "properties": properties_value,  # Always use Json() wrapper
                         }
                     else:
+                        # Always wrap properties in Json() for Prisma
+                        raw_properties = getattr(item, "properties", None)
+                        if raw_properties:
+                            properties_value = Json(raw_properties)
+                        else:
+                            properties_value = Json({})
+                        self.logger.info(
+                            f"🔍 DEBUG: Object item properties - original: {raw_properties}, final: {properties_value}, type: {type(properties_value)}"
+                        )
                         line_item_data = {
                             "orderId": order_record_id,
                             "productId": getattr(item, "productId", None),
@@ -681,7 +700,7 @@ class NormalizationConsumer(BaseConsumer):
                             "title": getattr(item, "title", None),
                             "quantity": int(getattr(item, "quantity", 0)),
                             "price": float(getattr(item, "price", 0.0)),
-                            "properties": getattr(item, "properties", {}) or {},
+                            "properties": properties_value,  # Always use Json() wrapper
                         }
                     bulk_data.append(line_item_data)
                 except (ValueError, TypeError) as e:
@@ -690,9 +709,15 @@ class NormalizationConsumer(BaseConsumer):
 
             # Bulk create all line items in one operation
             if bulk_data:
+                self.logger.info(
+                    f"🔍 DEBUG: About to create {len(bulk_data)} line items for order {order_record_id}"
+                )
+                self.logger.info(
+                    f"🔍 DEBUG: First line item data: {bulk_data[0] if bulk_data else 'None'}"
+                )
                 await db.lineitemdata.create_many(data=bulk_data)
-                self.logger.debug(
-                    f"Created {len(bulk_data)} line items for order {order_record_id}"
+                self.logger.info(
+                    f"✅ Created {len(bulk_data)} line items for order {order_record_id}"
                 )
 
         except Exception as e:
@@ -700,3 +725,4 @@ class NormalizationConsumer(BaseConsumer):
                 f"Failed to create line items for order {order_record_id}: {e}"
             )
             # Don't raise - let the order still be processed even if line items fail
+            # This is a non-critical operation that shouldn't block the main flow

@@ -33,6 +33,7 @@ from app.domains.ml.services import (
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.normalization_consumer import NormalizationConsumer
+from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsumer
 
 # AnalyticsConsumer removed - was using deleted analytics services
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
@@ -143,6 +144,9 @@ async def initialize_services():
         # Initialize normalization consumer
         services["normalization_consumer"] = NormalizationConsumer()
 
+        # Initialize purchase attribution consumer
+        services["purchase_attribution_consumer"] = PurchaseAttributionConsumer()
+
         # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
 
@@ -164,6 +168,7 @@ async def initialize_services():
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
             normalization_consumer=services["normalization_consumer"],
+            purchase_attribution_consumer=services["purchase_attribution_consumer"],
             feature_computation_consumer=services["feature_computation_consumer"],
             customer_linking_consumer=services["customer_linking_consumer"],
             shopify_events_consumer=services["shopify_events_consumer"],

@@ -55,7 +55,9 @@ class AttributionEngine:
         self.prisma = prisma
         self.default_rules = self._get_default_attribution_rules()
 
-    def calculate_attribution(self, context: AttributionContext) -> AttributionResult:
+    async def calculate_attribution(
+        self, context: AttributionContext
+    ) -> AttributionResult:
         """
         Calculate attribution for a purchase event.
 
@@ -69,7 +71,7 @@ class AttributionEngine:
             logger.info(f"Calculating attribution for order {context.order_id}")
 
             # 1. Get all interactions for this customer/session
-            interactions = self._get_relevant_interactions(context)
+            interactions = await self._get_relevant_interactions(context)
 
             if not interactions:
                 logger.warning(f"No interactions found for order {context.order_id}")
@@ -154,7 +156,7 @@ class AttributionEngine:
 
         # Get interactions
         interactions = await self.prisma.userinteraction.find_many(
-            where=where_conditions, order_by={"createdAt": "desc"}
+            where=where_conditions, order={"createdAt": "desc"}
         )
 
         return interactions
