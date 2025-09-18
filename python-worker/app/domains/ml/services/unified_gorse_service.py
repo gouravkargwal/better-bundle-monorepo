@@ -510,8 +510,28 @@ class UnifiedGorseService:
     ) -> Dict[str, Any]:
         """Process a single item (can be run in parallel)"""
         try:
+            # Validate product ID
+            if not product.productId or str(product.productId).strip() == "":
+                logger.error(
+                    f"Product has empty or None productId: {product.productId} | Product: {product}"
+                )
+                raise ValueError(
+                    f"Product has empty or None productId: {product.productId}"
+                )
+
             # Apply shop prefix for multi-tenancy
             prefixed_item_id = f"shop_{shop_id}_{product.productId}"
+
+            # Validate the constructed item ID
+            if (
+                not prefixed_item_id
+                or prefixed_item_id == f"shop_{shop_id}_"
+                or prefixed_item_id == f"shop_{shop_id}_None"
+            ):
+                logger.error(
+                    f"Constructed empty item ID: '{prefixed_item_id}' for product: {product.productId}"
+                )
+                raise ValueError(f"Constructed empty item ID: '{prefixed_item_id}'")
 
             # Get product data
             product_info = product_data_map.get(product.productId, {})
@@ -1171,11 +1191,21 @@ class UnifiedGorseService:
     def _should_hide_product(self, product) -> bool:
         """Determine if product should be hidden in Gorse"""
         # Simple logic - can be enhanced
-        return (
-            product.viewCount30d == 0
-            and product.purchaseCount30d == 0
-            and product.overallConversionRate == 0
-        )
+        try:
+            # Handle both Prisma models and dictionaries
+            if hasattr(product, "viewCount30d"):
+                view_count = product.viewCount30d
+                purchase_count = product.purchaseCount30d
+                conversion_rate = product.overallConversionRate
+            else:
+                view_count = product.get("viewCount30d", 0)
+                purchase_count = product.get("purchaseCount30d", 0)
+                conversion_rate = product.get("overallConversionRate", 0)
+
+            return view_count == 0 and purchase_count == 0 and conversion_rate == 0
+        except Exception as e:
+            logger.error(f"Error in _should_hide_product: {e}")
+            return False
 
     async def get_training_status(self, shop_id: str) -> Dict[str, Any]:
         """Get current training status for a shop"""
