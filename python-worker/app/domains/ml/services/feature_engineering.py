@@ -418,46 +418,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             return {}
 
-    async def generate_session_features_from_events(
-        self,
-        user_interactions: List[Dict[str, Any]],
-        shop: Dict[str, Any],
-        order_data: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Dict[str, Any]]:
-        """Generate session features by grouping user interactions into sessions"""
-        try:
-            results = {}
-
-            # Group interactions by session/customer
-            sessions = self._group_events_into_sessions(user_interactions)
-
-            context = {
-                "shop": shop,
-                "order_data": order_data or [],
-            }
-
-            for session_id, session_info in sessions.items():
-                session_data = {
-                    "sessionId": session_id,
-                    "customerId": session_info.get("customerId"),
-                    "events": session_info.get("events", []),
-                }
-
-                features = await self._compute_feature_safely(
-                    self.session_generator,
-                    session_data,
-                    context,
-                    entity_id=session_id,
-                    feature_type="session",
-                )
-
-                if features:
-                    results[session_id] = features
-
-            return results
-        except Exception as e:
-            logger.error(f"Failed to generate session features from events: {str(e)}")
-            return {}
+    # REMOVED: generate_session_features_from_events - Legacy method, not used anywhere
 
     def _group_events_into_sessions(
         self, events: List[Dict[str, Any]], session_timeout_minutes: int = 30
@@ -893,20 +854,45 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
                     # Handle cart_viewed events specially - extract all products from cart
                     if event_type == "cart_viewed":
-                        product_ids = self._extract_all_product_ids_from_cart_event(
-                            event
+                        # Use adapter pattern to extract product IDs from cart
+                        from app.domains.ml.adapters.adapter_factory import (
+                            InteractionEventAdapterFactory,
                         )
-                        for product_id in product_ids:
-                            # Map behavioral event product ID to ProductData product ID
-                            mapped_product_id = product_id_mapping.get(
-                                product_id, product_id
-                            )
-                            # Only add if both IDs are valid
-                            if customer_id and mapped_product_id:
-                                interaction_pairs.add((customer_id, mapped_product_id))
+
+                        adapter_factory = InteractionEventAdapterFactory()
+                        cart_adapter = adapter_factory.get_adapter("cart_viewed")
+
+                        if cart_adapter:
+                            # Extract all product IDs from cart metadata
+                            metadata = event.get("metadata", {})
+                            cart_items = metadata.get("cartItems", [])
+                            product_ids = []
+
+                            for item in cart_items:
+                                if isinstance(item, dict) and "productId" in item:
+                                    product_ids.append(item["productId"])
+                                elif isinstance(item, str):
+                                    product_ids.append(item)
+
+                            for product_id in product_ids:
+                                # Map behavioral event product ID to ProductData product ID
+                                mapped_product_id = product_id_mapping.get(
+                                    product_id, product_id
+                                )
+                                # Only add if both IDs are valid
+                                if customer_id and mapped_product_id:
+                                    interaction_pairs.add(
+                                        (customer_id, mapped_product_id)
+                                    )
                     else:
-                        # Handle other event types normally
-                        event_product_id = self._extract_product_id_from_event(event)
+                        # Handle other event types normally using adapter pattern
+                        from app.domains.ml.adapters.adapter_factory import (
+                            InteractionEventAdapterFactory,
+                        )
+
+                        adapter_factory = InteractionEventAdapterFactory()
+                        event_product_id = adapter_factory.extract_product_id(event)
+
                         if event_product_id:
                             # Map behavioral event product ID to ProductData product ID
                             mapped_product_id = product_id_mapping.get(
@@ -1063,7 +1049,13 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Find search events followed by product views within 24 hours
             for i, event in enumerate(all_events):
                 if event.get("interactionType") == "search_submitted":
-                    search_query = self._extract_search_query_from_event(event)
+                    # Use adapter pattern to extract search query
+                    from app.domains.ml.adapters.adapter_factory import (
+                        InteractionEventAdapterFactory,
+                    )
+
+                    adapter_factory = InteractionEventAdapterFactory()
+                    search_query = adapter_factory.extract_search_query(event)
                     if search_query:
                         search_time = event.get("createdAt")
                         search_customer = event.get("customerId") or "anonymous"
@@ -1100,8 +1092,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                                 and later_customer == "anonymous"
                                             )
                                         ):
+                                            # Use adapter pattern to extract product ID
                                             product_id = (
-                                                self._extract_product_id_from_event(
+                                                adapter_factory.extract_product_id(
                                                     later_event
                                                 )
                                             )
@@ -1300,118 +1293,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 }
             }
 
-    def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from event data (IDs are already normalized)"""
-        try:
-            event_type = event.get("interactionType")
-            metadata = event.get("metadata", {})
-
-            # Handle string metadata
-            if isinstance(metadata, str):
-                try:
-                    import json
-
-                    metadata = json.loads(metadata)
-                except:
-                    return None
-
-            if event_type == "product_viewed":
-                # Handle nested data structure: metadata.data.productVariant.product
-                if "data" in metadata:
-                    product_variant = metadata.get("data", {}).get("productVariant", {})
-                else:
-                    product_variant = metadata.get("productVariant", {})
-                product = product_variant.get("product", {})
-                return product.get("id", "")
-
-            elif event_type == "product_added_to_cart":
-                # Handle nested data structure: metadata.data.cartLine.merchandise.product
-                if "data" in metadata:
-                    cart_line = metadata.get("data", {}).get("cartLine", {})
-                else:
-                    cart_line = metadata.get("cartLine", {})
-                merchandise = cart_line.get("merchandise", {})
-                product = merchandise.get("product", {})
-                return product.get("id", "")
-
-            elif event_type == "product_removed_from_cart":
-                cart_line = metadata.get("data", {}).get(
-                    "cartLine", {}
-                ) or metadata.get("cartLine", {})
-                merchandise = cart_line.get("merchandise", {})
-                product = merchandise.get("product", {})
-                return product.get("id", "")
-
-            elif event_type == "cart_viewed":
-                # Handle cart_viewed events - extract all product IDs from cart lines
-                # For cart_viewed, we return the first product ID found
-                # The interaction features will handle multiple products in the cart
-                if "data" in metadata:
-                    cart_data = metadata.get("data", {}).get("cart", {})
-                else:
-                    cart_data = metadata.get("cart", {})
-
-                lines = cart_data.get("lines", [])
-                if lines and len(lines) > 0:
-                    # Return the first product ID from the cart
-                    first_line = lines[0]
-                    merchandise = first_line.get("merchandise", {})
-                    product = merchandise.get("product", {})
-                    return product.get("id", "")
-
-                return None
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error extracting product ID from event: {str(e)}")
-            return None
-
-    def _extract_all_product_ids_from_cart_event(
-        self, event: Dict[str, Any]
-    ) -> List[str]:
-        """Extract all product IDs from cart_viewed event data"""
-        try:
-            metadata = event.get("metadata", {})
-            product_ids = []
-
-            # Handle string metadata
-            if isinstance(metadata, str):
-                try:
-                    import json
-
-                    metadata = json.loads(metadata)
-                except:
-                    return product_ids
-
-            # Ensure metadata is not None
-            if not metadata:
-                return product_ids
-
-            # Extract cart data
-            if "data" in metadata:
-                data = metadata.get("data")
-                if data:
-                    cart_data = data.get("cart", {})
-                else:
-                    cart_data = {}
-            else:
-                cart_data = metadata.get("cart", {})
-
-            lines = cart_data.get("lines", []) if cart_data else []
-            for line in lines:
-                merchandise = line.get("merchandise", {})
-                product = merchandise.get("product", {})
-                product_id = product.get("id", "")
-                if product_id:
-                    product_ids.append(product_id)
-
-            return product_ids
-
-        except Exception as e:
-            logger.error(f"Error extracting product IDs from cart event: {str(e)}")
-            return []
-
     def _create_product_id_mapping(
         self, user_interactions: List[Dict[str, Any]], products: List[Dict[str, Any]]
     ) -> Dict[str, str]:
@@ -1485,37 +1366,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                 break
 
         return mapping
-
-    def _extract_search_query_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract search query from search event"""
-        try:
-            metadata = event.get("metadata")
-            if metadata and isinstance(metadata, dict):
-                # Check for searchResult.query first (Shopify format)
-                if "searchResult" in metadata and isinstance(
-                    metadata["searchResult"], dict
-                ):
-                    query = metadata["searchResult"].get("query")
-                    if query:
-                        return query
-
-                # Check for direct query field in metadata
-                query = metadata.get("query")
-                if query:
-                    return query
-
-                # Fallback to other possible query fields
-                query = (
-                    metadata.get("searchQuery")
-                    or metadata.get("q")
-                    or metadata.get("search_term")
-                    or metadata.get("searchTerm")
-                )
-                return query
-            return None
-        except Exception as e:
-            logger.error(f"Error extracting search query: {e}")
-            return None
 
     def _convert_variant_to_product_id(self, variant_id: str) -> Optional[str]:
         """Convert ProductVariant ID to Product ID"""

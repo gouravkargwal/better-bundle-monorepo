@@ -108,6 +108,31 @@ class InteractionEventAdapterFactory:
             logger.error(f"Error extracting customer ID from event: {str(e)}")
             return None
 
+    def extract_search_query(self, event: Dict[str, Any]) -> Optional[str]:
+        """Extract search query from event using appropriate adapter"""
+        try:
+            event_type = event.get("interactionType", event.get("eventType", ""))
+
+            # Only search events have search queries
+            if event_type != "search_submitted":
+                return None
+
+            adapter = self.get_adapter(event_type)
+
+            if not adapter:
+                return None
+
+            # Extract search query from metadata
+            metadata = event.get("metadata", {})
+            data = metadata.get("data", {})
+            search_query = data.get("query", "")
+
+            return search_query if search_query else None
+
+        except Exception as e:
+            logger.error(f"Error extracting search query from event: {str(e)}")
+            return None
+
     def is_product_event(self, event: Dict[str, Any]) -> bool:
         """Check if event is related to a product"""
         event_type = event.get("interactionType", event.get("eventType", ""))
