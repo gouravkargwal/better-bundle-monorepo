@@ -875,43 +875,6 @@ model FeatureComputation {
   @@map("FeatureComputation")
 }
 
-// ============= GORSE TABLES =============
-
-model GorseFeedback {
-  feedbackType String   @map("feedback_type") @db.VarChar(256)
-  userId       String   @map("user_id") @db.VarChar(256)
-  itemId       String   @map("item_id") @db.VarChar(256)
-  timeStamp    DateTime @map("time_stamp") @db.Timestamptz
-  comment      String   @default("") @db.Text
-
-  @@id([feedbackType, userId, itemId])
-  @@index([feedbackType, timeStamp])
-  @@index([userId, timeStamp])
-  @@map("feedback")
-}
-
-model GorseItems {
-  itemId     String   @map("item_id") @id @db.VarChar(256)
-  isHidden   Boolean  @map("is_hidden") @default(false)
-  categories Json     @default("[]")
-  timeStamp  DateTime @map("time_stamp") @db.Timestamptz
-  labels     Json     @default("[]")
-  comment    String   @default("") @db.Text
-
-  @@index([isHidden])
-  @@index([timeStamp])
-  @@map("items")
-}
-
-model GorseUsers {
-  userId    String @map("user_id") @id @db.VarChar(256)
-  labels    Json   @default("[]")
-  subscribe Json   @default("[]")
-  comment   String @default("") @db.Text
-
-  @@map("users")
-}
-
 // ============= UNIFIED ANALYTICS TABLES =============
 
 model UserSession {

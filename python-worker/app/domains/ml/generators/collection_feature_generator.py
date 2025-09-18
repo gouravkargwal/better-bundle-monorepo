@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from prisma import Json
 
 from app.core.logging import get_logger
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -16,6 +17,10 @@ logger = get_logger(__name__)
 
 class CollectionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for Shopify collections"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self, collection: Dict[str, Any], context: Dict[str, Any]
@@ -136,9 +141,12 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 ):
                     collection_events.append(event)
 
-        # Calculate metrics
+        # Calculate metrics using adapter pattern
         view_events = [
-            e for e in collection_events if e.get("eventType") == "collection_view"
+            e
+            for e in collection_events
+            if self.adapter_factory.is_view_event(e)
+            and e.get("eventType") == "collection_viewed"
         ]
         click_events = [
             e

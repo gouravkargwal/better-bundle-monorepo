@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -18,6 +19,10 @@ logger = get_logger(__name__)
 
 class InteractionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for customer-product interactions"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self,
@@ -157,41 +162,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return filtered_events
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from behavioral event"""
-        event_type = event.get("interactionType", event.get("eventType", ""))
-        event_data = event.get("metadata", event.get("eventData", {}))
-
-        if event_type == "product_viewed":
-            # Handle both nested and direct structures
-            product_variant = event_data.get("data", {}).get(
-                "productVariant", {}
-            ) or event_data.get("productVariant", {})
-            product = product_variant.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "product_added_to_cart":
-            # Handle both nested and direct structures
-            cart_line = event_data.get("data", {}).get(
-                "cartLine", {}
-            ) or event_data.get("cartLine", {})
-            merchandise = cart_line.get("merchandise", {})
-            product = merchandise.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "checkout_completed":
-            # For checkout, we'd need to check all line items
-            checkout = event_data.get("data", {}).get("checkout", {}) or event_data.get(
-                "checkout", {}
-            )
-            line_items = checkout.get("lineItems", [])
-            for item in line_items:
-                variant = item.get("variant", {})
-                product = variant.get("product", {})
-                product_id = product.get("id", "")
-                if product_id:
-                    return product_id
-
-        return None
+        """Extract product ID from behavioral event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _get_product_purchases(
         self,
@@ -212,6 +184,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
             # Check line items for this product
             line_items = order.get("lineItems", [])
+            if line_items is None:
+                line_items = []
             for item in line_items:
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure

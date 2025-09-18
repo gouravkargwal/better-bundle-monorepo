@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import json
 from app.core.logging import get_logger
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from app.shared.helpers import now_utc
 from .base_feature_generator import BaseFeatureGenerator
@@ -15,6 +16,10 @@ logger = get_logger(__name__)
 
 class SessionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for individual user sessions to match SessionFeatures schema"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self, session_data: Dict[str, Any], context: Dict[str, Any]
@@ -155,7 +160,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         }
 
     def _compute_event_counts(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Compute event count features"""
+        """Compute event count features using adapter pattern"""
         event_count = len(events)
         page_view_count = 0
         product_view_count = 0
@@ -166,22 +171,32 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         cart_remove_count = 0
 
         for event in events:
-            event_type = event.get("eventType", "")
+            # Use adapter factory for event classification
+            if self.adapter_factory.is_view_event(event):
+                if event.get("eventType", "") in ["page_viewed"]:
+                    page_view_count += 1
+                elif event.get("eventType", "") in ["product_viewed"]:
+                    product_view_count += 1
+                elif event.get("eventType", "") in ["collection_viewed"]:
+                    collection_view_count += 1
+                elif event.get("eventType", "") in ["recommendation_viewed"]:
+                    product_view_count += (
+                        1  # Count recommendation views as product views
+                    )
 
-            if event_type in ["page_viewed", "page_view"]:
-                page_view_count += 1
-            elif event_type in ["product_viewed", "product_view"]:
-                product_view_count += 1
-            elif event_type in ["collection_viewed", "collection_view"]:
-                collection_view_count += 1
-            elif event_type in ["search_submitted", "search"]:
+            elif self.adapter_factory.is_cart_event(event):
+                if event.get("eventType", "") in [
+                    "product_added_to_cart",
+                    "recommendation_add_to_cart",
+                ]:
+                    cart_add_count += 1
+                elif event.get("eventType", "") in ["cart_viewed"]:
+                    cart_view_count += 1
+                elif event.get("eventType", "") in ["product_removed_from_cart"]:
+                    cart_remove_count += 1
+
+            elif self.adapter_factory.is_search_event(event):
                 search_count += 1
-            elif event_type in ["product_added_to_cart", "cart_add"]:
-                cart_add_count += 1
-            elif event_type in ["cart_viewed"]:
-                cart_view_count += 1
-            elif event_type in ["product_removed_from_cart"]:
-                cart_remove_count += 1
 
         return {
             "eventCount": event_count,
@@ -197,21 +212,26 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
     def _compute_conversion_metrics(
         self, events: List[Dict[str, Any]], order_data: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Compute conversion-related features"""
+        """Compute conversion-related features using adapter pattern"""
         checkout_started = False
         checkout_completed = False
         order_value = None
         cart_viewed = False
         cart_abandoned = False
 
-        # Check for checkout and cart events
+        # Check for checkout and cart events using adapter pattern
         for event in events:
             event_type = event.get("eventType", "")
+
+            # Use adapter factory for event classification
             if event_type in ["checkout_started", "checkout_begin"]:
                 checkout_started = True
-            elif event_type in ["checkout_completed", "purchase", "order_completed"]:
+            elif self.adapter_factory.is_purchase_event(event):
                 checkout_completed = True
-            elif event_type in ["cart_viewed"]:
+            elif (
+                self.adapter_factory.is_cart_event(event)
+                and event_type == "cart_viewed"
+            ):
                 cart_viewed = True
 
         # Find order value if checkout was completed

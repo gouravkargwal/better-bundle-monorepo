@@ -9,6 +9,7 @@ import statistics
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -16,6 +17,10 @@ logger = get_logger(__name__)
 
 class SearchProductFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for search query + product performance to match SearchProductFeatures schema"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self, search_product_data: Dict[str, Any], context: Dict[str, Any]
@@ -314,19 +319,8 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         return query.lower().strip() if query else None
 
     def _extract_product_id(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from event"""
-        event_data = event.get("eventData", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
-
-        return (
-            event_data.get("productId")
-            or event_data.get("product_id")
-            or event_data.get("id")
-        )
+        """Extract product ID from event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _extract_search_position(self, event: Dict[str, Any]) -> Optional[int]:
         """Extract search result position from event"""

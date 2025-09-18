@@ -10,6 +10,7 @@ from collections import defaultdict
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -21,6 +22,10 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
     Feature generator for product-pair co-occurrence, designed for
     market basket analysis and identifying product relationships.
     """
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self,
@@ -71,7 +76,11 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             # 3. Calculate Advanced Metrics (Support, Lift)
             # These are typically based on purchases
             metrics = self._calculate_association_metrics(
-                orders, co_purchase_count, product_id1, product_id2, variant_to_product_map
+                orders,
+                co_purchase_count,
+                product_id1,
+                product_id2,
+                variant_to_product_map,
             )
             support_score = metrics.get("support", 0.0)
             lift_score = metrics.get("lift", 0.0)
@@ -113,7 +122,11 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             return self._get_default_features(shop_id, product_id1, product_id2)
 
     def _calculate_co_purchases(
-        self, orders: List[Dict[str, Any]], product_id1: str, product_id2: str, variant_to_product_map: Optional[Dict[str, str]] = None
+        self,
+        orders: List[Dict[str, Any]],
+        product_id1: str,
+        product_id2: str,
+        variant_to_product_map: Optional[Dict[str, str]] = None,
     ) -> Tuple[int, Optional[datetime.datetime]]:
         """Counts how many orders contain both products."""
         count = 0
@@ -123,7 +136,8 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         for order in orders:
             line_items = order.get("lineItems", [])
             product_ids_in_order = {
-                self._extract_product_id_from_line_item(item, variant_to_product_map) for item in line_items
+                self._extract_product_id_from_line_item(item, variant_to_product_map)
+                for item in line_items
             }
 
             if target_ids.issubset(product_ids_in_order):
@@ -248,30 +262,19 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
     # --- Utility Methods (reused from your example) ---
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        event_type = event.get("eventType", "")
-        event_data = event.get("eventData", {})
+        """Extract product ID from behavioral event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
-        if event_type == "product_viewed":
-            product = (
-                event_data.get("data", {}).get("productVariant", {}).get("product", {})
-            )
-            return product.get("id", "")
-        elif event_type == "product_added_to_cart":
-            product = (
-                event_data.get("data", {})
-                .get("cartLine", {})
-                .get("merchandise", {})
-                .get("product", {})
-            )
-            return product.get("id", "")
-        return None
-
-    def _extract_product_id_from_line_item(self, line_item: Dict[str, Any], variant_to_product_map: Optional[Dict[str, str]] = None) -> str:
+    def _extract_product_id_from_line_item(
+        self,
+        line_item: Dict[str, Any],
+        variant_to_product_map: Optional[Dict[str, str]] = None,
+    ) -> str:
         """Extract product ID from order line item using variant-to-product mapping"""
         # Direct product ID
         if "productId" in line_item:
             return str(line_item["productId"])
-        
+
         # From variant structure
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             variant = line_item["variant"]
@@ -282,7 +285,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             elif "id" in variant and variant_to_product_map:
                 variant_id = variant["id"]
                 return variant_to_product_map.get(variant_id, "")
-        
+
         return ""
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:

@@ -22,20 +22,57 @@ meta_timeout = "60s"  # Increased for large datasets
 default_n = 20
 api_key = "secure_random_key_123"  # Set a secure API key
 cache_expire = "1h"  # Extended for stable product catalog
-auto_insert_user = false
-auto_insert_item = false
+auto_insert_user = true  # CRITICAL: Allow auto-insert for feedback to work
+auto_insert_item = true  # CRITICAL: Allow auto-insert for feedback to work
 
 [recommend]
-cache_size = 20000  # Increased for larger catalogs
-cache_expire = "1h"
-active_user_ttl = 0 
+# Industry-standard caching for e-commerce
+cache_size = 50000  # Increased for larger product catalogs
+cache_expire = "2h"  # Longer cache for stable product catalogs
+active_user_ttl = 0
+
+# E-commerce specific recommendation settings
+enable_hot_recommend = true      # Enable trending/popular items
+enable_latest_recommend = true   # Enable newest items
+enable_user_based_recommend = true  # Enable collaborative filtering
+enable_item_based_recommend = true  # Enable item similarity
+enable_collaborative_recommend = true  # Enable matrix factorization 
 
 [recommend.data_source]
-# Match your actual feedback types from sync pipeline
-positive_feedback_types = ["purchase", "cart_add", "checkout_start"]
-read_feedback_types = ["view", "search", "collection_view"]
+# ACTUAL feedback types being sent by our system
+# POSITIVE FEEDBACK (High intent/commitment signals)
+positive_feedback_types = [
+    "purchase",    # Highest value - actual conversion
+    "cart_add"     # Medium-high intent - user interested
+]
+
+# READ FEEDBACK (Engagement/interest signals)  
+read_feedback_types = [
+    "view",         # Basic interest
+    "cart_view"     # Shopping intent - user viewing cart
+]
+
+# NEGATIVE FEEDBACK (Negative signals)
+negative_feedback_types = [
+    "cart_remove"   # User removed item - negative signal
+]
+
 positive_feedback_ttl = 0
 item_ttl = 0
+
+# Feedback weights for ACTUAL feedback types we send
+# Higher weights = stronger signals for recommendations
+[recommend.feedback_weights]
+# POSITIVE FEEDBACK WEIGHTS (Industry Standard)
+purchase = 10.0              # Highest weight - actual conversion
+cart_add = 5.0               # High - clear purchase intent
+
+# READ FEEDBACK WEIGHTS (Engagement signals)
+view = 1.0                   # Base weight - basic interest
+cart_view = 2.0              # Higher - shopping intent
+
+# NEGATIVE FEEDBACK WEIGHTS (Penalty signals)
+cart_remove = -2.0           # Negative weight - user rejected item
 
 [recommend.popular]
 popular_window = "168h"  # 7 days for trending
@@ -71,8 +108,8 @@ column = "user.Labels.preferred_category"  # From CustomerBehaviorFeatures
 enable_index = true
 index_recall = 0.8
 index_fit_epoch = 10
-model_fit_period = "5m"  # Reduced from 60m to trigger more frequently
-model_search_period = "10m"  # Reduced from 360m to trigger more frequently
+model_fit_period = "30m"  # Industry standard: 30-60 minutes
+model_search_period = "2h"  # Industry standard: 2-6 hours
 model_search_epoch = 50
 model_search_trials = 20
 enable_model_size_search = true
@@ -85,8 +122,8 @@ learning_rate = 0.005  # Learning rate
 reg = 0.02  # Regularization to prevent overfitting
 enable_user_features = true  # Use GorseUsers.labels (e.g., engagementScore, topCategories)
 enable_item_features = true  # Use GorseItems.labels (e.g., popularityScore, trendingScore)
-fit_period = "5m"  # Update ranking model more frequently
-search_period = "10m"  # Hyperparameter search more frequently
+fit_period = "30m"  # Industry standard: 30-60 minutes
+search_period = "2h"  # Industry standard: 2-6 hours
 search_trials = 20  # Number of hyperparameter trials
 search_epoch = 20  # Epochs for hyperparameter search
 
@@ -96,8 +133,8 @@ positive_replacement_decay = 0.85  # Slightly faster decay
 read_replacement_decay = 0.7
 
 [recommend.offline]
-check_recommend_period = "5m"  # Faster checks for real-time updates
-refresh_recommend_period = "6h"
+check_recommend_period = "15m"  # Industry standard: 15-30 minutes
+refresh_recommend_period = "6h"  # Industry standard: 6-24 hours
 enable_latest_recommend = true
 enable_popular_recommend = true
 enable_user_based_recommend = true
@@ -107,8 +144,21 @@ enable_click_through_prediction = true
 explore_recommend = { popular = 0.1, latest = 0.3 }  # Increased latest for new products
 
 [recommend.online]
-fallback_recommend = ["item_based", "collaborative", "popular", "latest"]
+# Industry-standard fallback chain for e-commerce
+# Order matters: try most personalized first, fall back to general
+fallback_recommend = [
+    "collaborative",      # 1st: Personalized based on similar users
+    "item_based",         # 2nd: Similar products to what user likes
+    "popular",            # 3rd: Popular items in user's categories
+    "latest"              # 4th: Newest items as last resort
+]
 num_feedback_fallback_item_based = 10
+
+# E-commerce specific online recommendation settings
+enable_realtime_recommend = true
+enable_session_recommend = true
+session_recommend_cache_size = 1000
+session_recommend_cache_expire = "30m"
 
 [tracing]
 enable_tracing = false

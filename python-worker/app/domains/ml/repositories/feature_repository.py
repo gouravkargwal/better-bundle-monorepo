@@ -170,12 +170,6 @@ class FeatureRepository(IFeatureRepository):
 
             # Use proper upsert approach with unique constraints
             try:
-                logger.info(
-                    f"🔍 About to upsert {len(batch_data)} records in {table_name}"
-                )
-                logger.info(
-                    f"🔍 Sample data: {batch_data[0] if batch_data else 'No data'}"
-                )
 
                 upserted_count = 0
                 for record in batch_data:
@@ -207,9 +201,6 @@ class FeatureRepository(IFeatureRepository):
                         )
                         continue
 
-                logger.info(
-                    f"Successfully upserted {upserted_count}/{len(batch_data)} records in {table_name}"
-                )
                 return upserted_count
             except Exception as upsert_error:
                 logger.error(f"{table_name} upsert failed: {str(upsert_error)}")
@@ -397,7 +388,17 @@ class FeatureRepository(IFeatureRepository):
                 skip=offset,
                 include={"lineItems": True},
             )
-            return [dict(row) for row in result] if result else []
+            
+            # Convert Prisma objects to dictionaries, including nested lineItems
+            orders = []
+            for order in result:
+                order_dict = dict(order)
+                # Convert lineItems from Prisma objects to dictionaries
+                if order_dict.get("lineItems"):
+                    order_dict["lineItems"] = [dict(line_item) for line_item in order_dict["lineItems"]]
+                orders.append(order_dict)
+            
+            return orders
         except Exception as e:
             logger.error(f"Failed to get orders batch for shop {shop_id}: {str(e)}")
             return []
@@ -479,16 +480,7 @@ class FeatureRepository(IFeatureRepository):
 
             if latest_timestamp:
                 result_timestamp = latest_timestamp.isoformat()
-                logger.info(
-                    f"Last feature computation time for shop {shop_id}: {result_timestamp}"
-                )
                 return result_timestamp
-            else:
-                # Return a very old timestamp for first run
-                logger.info(
-                    f"No previous feature computation found for shop {shop_id}, using 1970-01-01T00:00:00Z"
-                )
-                return "1970-01-01T00:00:00Z"
 
         except Exception as e:
             logger.error(
@@ -529,7 +521,6 @@ class FeatureRepository(IFeatureRepository):
         """Get products modified since a specific timestamp for incremental processing"""
         try:
             db = await self._get_database()
-            logger.info(f"Querying products since {since_timestamp} for shop {shop_id}")
 
             # Use Prisma's native find_many with where conditions
             result = await db.productdata.find_many(
@@ -539,9 +530,6 @@ class FeatureRepository(IFeatureRepository):
                 skip=offset,
             )
 
-            logger.info(
-                f"Found {len(result)} products modified since {since_timestamp}"
-            )
             return [dict(row) for row in result] if result else []
         except Exception as e:
             logger.error(
@@ -658,13 +646,9 @@ class FeatureRepository(IFeatureRepository):
             db = await self._get_database()
 
             # Debug logging
-            logger.info(
-                f"Querying user interactions since {since_timestamp} for shop {shop_id}"
-            )
 
             # Check total user interactions for this shop
             total_count = await db.userinteraction.count(where={"shopId": shop_id})
-            logger.info(f"Total user interactions for shop {shop_id}: {total_count}")
 
             result = await db.userinteraction.find_many(
                 where={"shopId": shop_id, "createdAt": {"gt": since_timestamp}},
@@ -674,18 +658,10 @@ class FeatureRepository(IFeatureRepository):
             )
 
             # Debug logging
-            logger.info(
-                f"Found {len(result) if result else 0} user interactions since {since_timestamp}"
-            )
 
             # Debug: Show sample interaction data
             if result and len(result) > 0:
                 sample_interaction = result[0]
-                logger.info(f"Sample interaction data: {sample_interaction}")
-                logger.info(
-                    f"Sample interactionType: {sample_interaction.interactionType}"
-                )
-                logger.info(f"Sample metadata: {sample_interaction.metadata}")
 
             return [dict(row) for row in result] if result else []
         except Exception as e:

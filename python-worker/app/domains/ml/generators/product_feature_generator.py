@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -18,6 +19,10 @@ logger = get_logger(__name__)
 
 class ProductFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for product features"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self,
@@ -531,30 +536,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             return "luxury"
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from behavioral event"""
-        event_type = event.get("eventType", "")
-        event_data = event.get("eventData", {})
-
-        if event_type == "product_viewed":
-            # Handle nested data structure: eventData.data.productVariant.product
-            if "data" in event_data:
-                product_variant = event_data.get("data", {}).get("productVariant", {})
-            else:
-                product_variant = event_data.get("productVariant", {})
-            product = product_variant.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "product_added_to_cart":
-            # Handle nested data structure: eventData.data.cartLine.merchandise.product
-            if "data" in event_data:
-                cart_line = event_data.get("data", {}).get("cartLine", {})
-            else:
-                cart_line = event_data.get("cartLine", {})
-            merchandise = cart_line.get("merchandise", {})
-            product = merchandise.get("product", {})
-            return product.get("id", "")
-
-        return None
+        """Extract product ID from behavioral event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""

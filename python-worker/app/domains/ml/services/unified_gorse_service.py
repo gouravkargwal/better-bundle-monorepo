@@ -590,40 +590,115 @@ class UnifiedGorseService:
                 # Convert interaction features to feedback
                 feedback_batch = []
                 for interaction in interactions:
-                    # Create feedback based on interaction counts
-                    if interaction.viewCount > 0:
+                    # Create multiple feedback records based on actual interaction counts
+                    # This ensures Gorse gets the full picture of user behavior
+
+                    # Create view feedback records (one for each view)
+                    # Use slightly different timestamps to avoid Gorse unique constraint issues
+                    base_timestamp = interaction.lastComputedAt
+                    for i in range(interaction.viewCount):
+                        # Add microsecond offset to make each record truly unique
+                        timestamp_offset = timedelta(
+                            microseconds=i * 1000
+                        )  # 1ms per record
                         feedback_batch.append(
                             {
                                 "feedbackType": "view",
                                 "userId": f"shop_{shop_id}_{interaction.customerId}",
                                 "itemId": f"shop_{shop_id}_{interaction.productId}",
-                                "timestamp": interaction.lastComputedAt.isoformat(),
+                                "timestamp": (
+                                    base_timestamp + timestamp_offset
+                                ).isoformat(),
                             }
                         )
 
-                    if interaction.cartAddCount > 0:
+                    # Create cart_add feedback records (one for each cart add)
+                    for i in range(interaction.cartAddCount):
+                        # Add microsecond offset to make each record truly unique
+                        timestamp_offset = timedelta(
+                            microseconds=(i + interaction.viewCount) * 1000
+                        )
                         feedback_batch.append(
                             {
                                 "feedbackType": "cart_add",
                                 "userId": f"shop_{shop_id}_{interaction.customerId}",
                                 "itemId": f"shop_{shop_id}_{interaction.productId}",
-                                "timestamp": interaction.lastComputedAt.isoformat(),
+                                "timestamp": (
+                                    base_timestamp + timestamp_offset
+                                ).isoformat(),
                             }
                         )
 
-                    # Add purchase feedback - this is the most important feedback type
-                    if interaction.purchaseCount > 0:
+                    # Create cart_view feedback records (one for each cart view)
+                    for i in range(interaction.cartViewCount):
+                        timestamp_offset = timedelta(
+                            microseconds=(
+                                i + interaction.viewCount + interaction.cartAddCount
+                            )
+                            * 1000
+                        )
+                        feedback_batch.append(
+                            {
+                                "feedbackType": "cart_view",
+                                "userId": f"shop_{shop_id}_{interaction.customerId}",
+                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "timestamp": (
+                                    base_timestamp + timestamp_offset
+                                ).isoformat(),
+                            }
+                        )
+
+                    # Create cart_remove feedback records (one for each cart remove)
+                    for i in range(interaction.cartRemoveCount):
+                        timestamp_offset = timedelta(
+                            microseconds=(
+                                i
+                                + interaction.viewCount
+                                + interaction.cartAddCount
+                                + interaction.cartViewCount
+                            )
+                            * 1000
+                        )
+                        feedback_batch.append(
+                            {
+                                "feedbackType": "cart_remove",
+                                "userId": f"shop_{shop_id}_{interaction.customerId}",
+                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "timestamp": (
+                                    base_timestamp + timestamp_offset
+                                ).isoformat(),
+                            }
+                        )
+
+                    # Create purchase feedback records (one for each purchase)
+                    # This is the most important feedback type
+                    for i in range(interaction.purchaseCount):
+                        timestamp_offset = timedelta(
+                            microseconds=(
+                                i
+                                + interaction.viewCount
+                                + interaction.cartAddCount
+                                + interaction.cartViewCount
+                                + interaction.cartRemoveCount
+                            )
+                            * 1000
+                        )
                         feedback_batch.append(
                             {
                                 "feedbackType": "purchase",
                                 "userId": f"shop_{shop_id}_{interaction.customerId}",
                                 "itemId": f"shop_{shop_id}_{interaction.productId}",
-                                "timestamp": interaction.lastComputedAt.isoformat(),
+                                "timestamp": (
+                                    base_timestamp + timestamp_offset
+                                ).isoformat(),
                             }
                         )
 
                 # Push feedback to Gorse API
                 if feedback_batch:
+                    logger.info(
+                        f"📊 Creating {len(feedback_batch)} feedback records from {len(interactions)} interactions"
+                    )
                     await self.gorse_client.insert_feedback_batch(feedback_batch)
                     total_synced += len(feedback_batch)
 

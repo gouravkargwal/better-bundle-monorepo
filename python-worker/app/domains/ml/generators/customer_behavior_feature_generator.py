@@ -11,6 +11,7 @@ from collections import Counter
 from prisma import Json
 
 from app.core.logging import get_logger
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -18,6 +19,10 @@ logger = get_logger(__name__)
 
 class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for customer behavioral patterns to match CustomerBehaviorFeatures schema"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self, customer: Dict[str, Any], context: Dict[str, Any]
@@ -213,41 +218,36 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             if extension_type in extension_counts:
                 extension_counts[extension_type] += 1
 
-            # Map interaction types to traditional event types
-            if interaction_type in ["product_viewed", "view"]:
-                # Check metadata for context
-                metadata = interaction.get("metadata", {})
-                if metadata.get("product_id"):
+            # Use adapter factory for event classification
+            if self.adapter_factory.is_view_event(interaction):
+                if interaction_type in ["product_viewed", "view"]:
                     counts["product_view"] += 1
-                elif metadata.get("collection_id"):
+                elif interaction_type in ["collection_viewed", "collection_view"]:
                     counts["collection_view"] += 1
+                elif interaction_type in ["recommendation_viewed"]:
+                    counts["recommendation_view"] += 1
 
-            elif interaction_type in ["product_added_to_cart", "add_to_cart", "click"]:
-                metadata = interaction.get("metadata", {})
-                if metadata.get("interaction_type") == "add_to_cart":
+            elif self.adapter_factory.is_cart_event(interaction):
+                if interaction_type in ["product_added_to_cart", "add_to_cart"]:
                     counts["cart_add"] += 1
-                elif metadata.get("product_id"):
-                    counts["product_view"] += 1  # Click on product = view
+                elif interaction_type in ["cart_viewed"]:
+                    counts["cart_view"] += 1
+                elif interaction_type in [
+                    "product_removed_from_cart",
+                    "remove_from_cart",
+                ]:
+                    counts["cart_remove"] += 1
 
-            elif interaction_type == "cart_viewed":
-                counts["cart_view"] += 1
-
-            elif interaction_type in ["product_removed_from_cart", "remove_from_cart"]:
-                counts["cart_remove"] += 1
-
-            elif interaction_type in ["search_submitted", "search"]:
+            elif self.adapter_factory.is_search_event(interaction):
                 counts["search"] += 1
+
+            elif self.adapter_factory.is_purchase_event(interaction):
+                counts["purchase"] += 1
 
             elif interaction_type in ["checkout_started", "checkout_begin"]:
                 counts["checkout_start"] += 1
 
-            elif interaction_type in ["purchase", "checkout_completed", "add_to_order"]:
-                counts["purchase"] += 1
-
-            elif interaction_type == "recommendation_viewed":
-                counts["recommendation_view"] += 1
-
-            elif interaction_type == "recommendation_clicked":
+            elif interaction_type in ["recommendation_clicked"]:
                 counts["recommendation_click"] += 1
 
         return {

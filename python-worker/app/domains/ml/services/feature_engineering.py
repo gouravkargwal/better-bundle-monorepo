@@ -688,16 +688,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     shop_id, "purchase_attributions", batch_size, chunk_size=100
                 )
 
-            # Debug logging for data being passed to feature computation
-            logger.info(f"Data for feature computation - shop_id: {shop_id}")
-            logger.info(f"  - products: {len(products)}")
-            logger.info(f"  - orders: {len(orders)}")
-            logger.info(f"  - customers: {len(customers)}")
-            logger.info(f"  - collections: {len(collections)}")
-            logger.info(f"  - user_interactions: {len(user_interactions)}")
-            logger.info(f"  - user_sessions: {len(user_sessions)}")
-            logger.info(f"  - purchase_attributions: {len(purchase_attributions)}")
-
             # Compute all features using unified analytics data
             all_features = await self.compute_all_features_for_shop(
                 shop=shop_data,
@@ -853,10 +843,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             all_features["collections"] = collection_features
 
-            # 4. Customer Behavior Features (using unified analytics)
-            logger.info(
-                f"Computing customer behavior features - customers: {len(customers)}, interactions: {len(user_interactions)}"
-            )
             behavior_features = await self.compute_all_customer_behavior_features(
                 customers,
                 shop,
@@ -864,17 +850,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 user_sessions=user_sessions,
                 purchase_attributions=purchase_attributions,
             )
-            logger.info(f"Customer behavior features result: {behavior_features}")
             all_features["customer_behaviors"] = behavior_features
 
             # 5. Session Features (from unified analytics)
-            logger.info(
-                f"Computing session features - interactions: {len(user_interactions)}, sessions: {len(user_sessions)}"
-            )
             session_features = await self.generate_session_features_from_interactions(
                 user_interactions, user_sessions, shop, orders
             )
-            logger.info(f"Session features result: {session_features}")
             all_features["sessions"] = session_features
 
             # 6. Interaction Features (sample of customer-product pairs)
@@ -952,9 +933,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if variant_id and variant_id in variant_to_product_map:
                                 product_id = variant_to_product_map[variant_id]
 
-                        # Fallback: try direct product_id field
-                        if not product_id and "product_id" in line_item:
-                            product_id = line_item.get("product_id")
+                        # Fallback: try direct productId field (camelCase)
+                        if not product_id and "productId" in line_item:
+                            product_id = line_item.get("productId")
 
                         # Fallback: try variant.product.id structure
                         if (
@@ -1398,6 +1379,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             if isinstance(metadata, str):
                 try:
                     import json
+
                     metadata = json.loads(metadata)
                 except:
                     return product_ids
@@ -1558,12 +1540,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Initialize unified Gorse service
             gorse_service = UnifiedGorseService()
 
-            logger.info(
-                f"Starting unified Gorse sync after feature computation",
-                shop_id=shop_id,
-                feature_results=save_results,
-            )
-
             # Run unified sync and training
             # If we have new features, use incremental sync, otherwise skip
             total_new_features = sum(
@@ -1598,24 +1574,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     "training_triggered": False,
                     "errors": [],
                 }
-
-            logger.info(
-                f"Unified Gorse sync completed after feature computation",
-                shop_id=shop_id,
-                gorse_success=len(result.get("errors", [])) == 0,
-                gorse_job_id=result.get("job_id"),
-                training_triggered=result.get("training_triggered", False),
-                sync_results={
-                    "users_synced": result.get("users_synced", 0),
-                    "items_synced": result.get("items_synced", 0),
-                    "feedback_synced": result.get("feedback_synced", 0),
-                    "sessions_synced": result.get("sessions_synced", 0),
-                    "customer_behaviors_synced": result.get(
-                        "customer_behaviors_synced", 0
-                    ),
-                    "collections_synced": result.get("collections_synced", 0),
-                },
-            )
 
         except Exception as e:
             logger.error(
@@ -1722,7 +1680,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     if session_features:
                         features[session_id] = session_features
 
-            logger.info(f"Generated session features for {len(features)} sessions")
             return features
 
         except Exception as e:
