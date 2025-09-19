@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { getShopByDomain } from "../services/widget-config.service";
+import prisma from "../db.server";
 
 // Helper function to generate recommendation reasons
 function getRecommendationReason(index: number, context: string): string {
@@ -72,7 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     // Get shop information from database
-    const shop = await getShopByDomain(shopDomain);
+    const shop = await prisma.shop.findUnique({ where: { shopDomain } });
     if (!shop) {
       console.log("⚠️ Shop not found for domain:", shopDomain);
       return json(

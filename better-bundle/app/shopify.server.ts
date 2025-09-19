@@ -6,7 +6,7 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
-import { createDefaultConfiguration } from "./services/widget-config.service";
+// Widget configuration removed - using Shopify native approach
 
 /**
  * Activates the Atlas web pixel extension for the shop
@@ -222,10 +222,8 @@ const shopify = shopifyApp({
         });
 
         console.log(
-          "⚙️ Creating default widget configuration for:",
-          myshopifyDomain,
+          "⚙️ Widget configuration no longer needed - using Shopify native approach",
         );
-        await createDefaultConfiguration(myshopifyDomain);
 
         // Activate Atlas web pixel extension
         console.log("🎯 Activating Atlas web pixel for:", myshopifyDomain);
