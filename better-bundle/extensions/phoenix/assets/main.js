@@ -2,8 +2,9 @@
 
 // Extension Activity Tracker
 class PhoenixExtensionTracker {
-  constructor(shopDomain) {
+  constructor(shopDomain, baseUrl) {
     this.shopDomain = shopDomain;
+    this.baseUrl = baseUrl;
     this.extensionUid = 'ebf2bbf3-ac07-95dc-4552-0633f958c425ea14e806';
     this.lastReported = localStorage.getItem(`ext_${this.extensionUid}_last_reported`);
   }
@@ -47,7 +48,7 @@ class PhoenixExtensionTracker {
       if (!lastReported || hoursSinceLastReport > 24) {
         const timeText = lastReported ? `${hoursSinceLastReport.toFixed(2)} hours ago` : 'never';
         console.log(`[Phoenix Tracker] Reporting activity (last report was ${timeText})`);
-        await this.reportToAPI();
+        await this.reportToAPI(this.shopDomain);
         localStorage.setItem(lastReportedKey, now.toString());
         console.log(`[Phoenix Tracker] Updated last reported timestamp:`, {
           key: lastReportedKey,
@@ -69,22 +70,17 @@ class PhoenixExtensionTracker {
 
   async reportToAPI() {
     try {
-      const apiBaseUrl = this.getApiBaseUrl();
       const requestBody = {
         extension_type: 'phoenix',
         extension_uid: this.extensionUid,
         page_url: window.location?.href || 'unknown',
         app_block_target: 'theme_app_extension',
-        app_block_location: 'Theme Extension'
+        app_block_location: 'Theme Extension',
+        shop_domain: this.shopDomain
       };
 
-      console.log(`[Phoenix Tracker] Sending API request:`, {
-        url: `${apiBaseUrl}/extension-activity/${this.shopDomain}/track-load`,
-        requestBody,
-        timestamp: new Date().toISOString()
-      });
 
-      const response = await fetch(`${apiBaseUrl}/extension-activity/${this.shopDomain}/track-load`, {
+      const response = await fetch(`${this.baseUrl}/extension-activity/track-load`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,19 +104,10 @@ class PhoenixExtensionTracker {
       const responseData = await response.json();
       console.log(`[Phoenix Tracker] Successfully tracked activity:`, responseData);
     } catch (error) {
-      console.error(`[Phoenix Tracker] Failed to track activity:`, {
-        error: error.message,
-        stack: error.stack,
-        shopDomain: this.shopDomain,
-        extensionUid: this.extensionUid
-      });
+      throw error;
     }
   }
 
-  getApiBaseUrl() {
-    // Use environment variable or default
-    return window.PYTHON_WORKER_URL || 'https://your-api-domain.com/api/v1';
-  }
 }
 
 // Import classes (they will be available globally after script loading)
@@ -164,7 +151,7 @@ class RecommendationCarousel {
     try {
       // Track extension activity
       if (this.config.shopDomain) {
-        const tracker = new PhoenixExtensionTracker(this.config.shopDomain);
+        const tracker = new PhoenixExtensionTracker(this.config.shopDomain, this.analyticsApi?.baseUrl);
         tracker.trackLoad().catch((error) => {
           console.warn('Failed to track Phoenix extension activity:', error);
         });

@@ -328,7 +328,7 @@ class ProductCardManager {
   handleProductClick(productId, position, productUrl, sessionId) {
     if (window.analyticsApi && sessionId) {
       // Track click interaction using unified analytics
-      const shopDomain = window.shopDomain?.replace('.myshopify.com', '') || '';
+      const shopDomain = window.shopDomain;
       const customerId = window.customerId;
 
       window.analyticsApi
