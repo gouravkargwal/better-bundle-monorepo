@@ -124,7 +124,7 @@ register(({ analytics, init, browser }) => {
 
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
-    // Track extension activity (only once per session)
+    // Track extension activity (only once per session, but check localStorage for throttling)
     if (!extensionTracked && shopDomain) {
       extensionTracked = true;
       trackLoad(shopDomain, browser?.localStorage, pageUrl).catch((error) => {

@@ -9,27 +9,61 @@ class PhoenixExtensionTracker {
   }
 
   async trackLoad() {
-    const now = Date.now();
-    const lastReported = this.lastReported ? parseInt(this.lastReported) : null;
-    const hoursSinceLastReport = lastReported ? (now - lastReported) / (1000 * 60 * 60) : Infinity;
+    try {
+      const now = Date.now();
+      const lastReportedKey = `ext_${this.extensionUid}_last_reported`;
+      const lastReportedValue = localStorage.getItem(lastReportedKey);
+      const lastReported = lastReportedValue ? parseInt(lastReportedValue) : null;
 
-    console.log(`[Phoenix Tracker] Checking activity tracking:`, {
-      shopDomain: this.shopDomain,
-      extensionUid: this.extensionUid,
-      lastReported: lastReported ? new Date(lastReported).toISOString() : 'Never',
-      hoursSinceLastReport: lastReported ? hoursSinceLastReport.toFixed(2) : 'Never reported',
-      shouldReport: !lastReported || hoursSinceLastReport > 24
-    });
+      console.log(`[Phoenix Tracker] localStorage debug:`, {
+        key: lastReportedKey,
+        rawValue: lastReportedValue,
+        parsedValue: lastReported,
+        allKeys: Object.keys(localStorage)
+      });
 
-    // Only call API if haven't reported in last 24 hours
-    if (!lastReported || hoursSinceLastReport > 24) {
-      const timeText = lastReported ? `${hoursSinceLastReport.toFixed(2)} hours ago` : 'never';
-      console.log(`[Phoenix Tracker] Reporting activity (last report was ${timeText})`);
-      await this.reportToAPI();
-      localStorage.setItem(`ext_${this.extensionUid}_last_reported`, now.toString());
-      console.log(`[Phoenix Tracker] Updated last reported timestamp`);
-    } else {
-      console.log(`[Phoenix Tracker] Skipping report (reported ${hoursSinceLastReport.toFixed(2)} hours ago)`);
+      const hoursSinceLastReport = lastReported ? (now - lastReported) / (1000 * 60 * 60) : Infinity;
+
+      console.log(`[Phoenix Tracker] Time comparison debug:`, {
+        currentTime: now,
+        currentTimeISO: new Date(now).toISOString(),
+        lastReportedTime: lastReported,
+        lastReportedISO: lastReported ? new Date(lastReported).toISOString() : "Never",
+        timeDifference: lastReported ? now - lastReported : "N/A",
+        timeDifferenceHours: lastReported ? (now - lastReported) / (1000 * 60 * 60) : "N/A",
+        hoursSinceLastReport: lastReported ? hoursSinceLastReport.toFixed(2) : "Never reported",
+        shouldReport: !lastReported || hoursSinceLastReport > 24,
+      });
+
+      console.log(`[Phoenix Tracker] Checking activity tracking:`, {
+        shopDomain: this.shopDomain,
+        extensionUid: this.extensionUid,
+        lastReported: lastReported ? new Date(lastReported).toISOString() : 'Never',
+        hoursSinceLastReport: lastReported ? hoursSinceLastReport.toFixed(2) : 'Never reported',
+        shouldReport: !lastReported || hoursSinceLastReport > 24
+      });
+
+      // Only call API if haven't reported in last 24 hours
+      if (!lastReported || hoursSinceLastReport > 24) {
+        const timeText = lastReported ? `${hoursSinceLastReport.toFixed(2)} hours ago` : 'never';
+        console.log(`[Phoenix Tracker] Reporting activity (last report was ${timeText})`);
+        await this.reportToAPI();
+        localStorage.setItem(lastReportedKey, now.toString());
+        console.log(`[Phoenix Tracker] Updated last reported timestamp:`, {
+          key: lastReportedKey,
+          value: now.toString(),
+          timestamp: new Date(now).toISOString()
+        });
+
+        // Verify the save worked
+        const savedValue = localStorage.getItem(lastReportedKey);
+        console.log(`[Phoenix Tracker] Verification - saved value:`, savedValue);
+      } else {
+        console.log(`[Phoenix Tracker] Skipping report (reported ${hoursSinceLastReport.toFixed(2)} hours ago)`);
+      }
+    } catch (error) {
+      console.error(`[Phoenix Tracker] Error in trackLoad:`, error);
+      throw error;
     }
   }
 
@@ -98,13 +132,17 @@ class RecommendationCarousel {
     this.cardManager = window.productCardManager; // Use global instance
     this.analyticsApi = window.analyticsApi;
     this.config = this.getConfig();
-    this.sessionId = this.generateSessionId();
+    this.sessionId = window.sessionId; // Use session ID from Liquid template
+
+    console.log('🔧 Phoenix RecommendationCarousel initialized:', {
+      hasApi: !!this.api,
+      hasCardManager: !!this.cardManager,
+      hasAnalyticsApi: !!this.analyticsApi,
+      hasSessionId: !!this.sessionId,
+      config: this.config
+    });
   }
 
-  // Generate unique session ID for analytics tracking
-  generateSessionId() {
-    return `phoenix_cart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
 
   // Get configuration from Liquid template
   getConfig() {
@@ -124,14 +162,6 @@ class RecommendationCarousel {
   // Initialize the recommendation carousel
   async init() {
     try {
-      console.log('🚀 Initializing recommendation carousel with config:', this.config);
-      console.log('🔍 Debug - Global variables:', {
-        shopDomain: window.shopDomain,
-        customerId: window.customerId,
-        cartProductIds: window.cartProductIds,
-        designMode: window.designMode
-      });
-
       // Track extension activity
       if (this.config.shopDomain) {
         const tracker = new PhoenixExtensionTracker(this.config.shopDomain);
@@ -148,6 +178,31 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
+      // Show skeleton only when API call starts
+      this.showSkeleton();
+
+      // Get or create session ID from analytics API
+      let sessionId;
+      if (this.analyticsApi && this.config.shopDomain) {
+        try {
+          sessionId = await this.analyticsApi.getOrCreateSession(
+            this.config.shopDomain,
+            this.config.customerId ? String(this.config.customerId) : undefined
+          );
+          console.log('✅ Phoenix: Session ID obtained from analytics API:', sessionId);
+        } catch (error) {
+          console.error('❌ Phoenix: Failed to get session from analytics API:', error);
+          this.hideSkeleton();
+          this.hideCarousel();
+          return;
+        }
+      } else {
+        console.error('❌ Phoenix: Analytics API not available');
+        this.hideSkeleton();
+        this.hideCarousel();
+        return;
+      }
+
       // Fetch recommendations first
       const recommendations = await this.api.fetchRecommendations(
         this.config.productIds,
@@ -156,33 +211,52 @@ class RecommendationCarousel {
       );
 
       if (recommendations && recommendations.length > 0) {
-        // Track recommendation view using unified analytics (single tracking event)
         const productIds = recommendations.map((product) => product.id);
-
-        await this.analyticsApi.trackRecommendationView(
-          this.config.shopDomain || '',
-          this.config.context,
-          this.config.customerId ? String(this.config.customerId) : undefined,
-          productIds,
-          {
-            source: 'phoenix_theme_extension',
-            cart_product_count: this.config.productIds?.length || 0,
-            recommendation_count: productIds.length
+        if (this.analyticsApi) {
+          try {
+            await this.analyticsApi.trackRecommendationView(
+              this.config.shopDomain || '',
+              this.config.context,
+              this.config.customerId ? String(this.config.customerId) : undefined,
+              productIds,
+              {
+                source: 'phoenix_theme_extension',
+                cart_product_count: this.config.productIds?.length || 0,
+                recommendation_count: productIds.length
+              }
+            );
+          } catch (error) {
+            console.error('❌ Phoenix: Failed to track recommendation view:', error);
           }
-        );
+        } else {
+          console.warn('⚠️ Phoenix: Analytics API not available, skipping recommendation tracking');
+        }
 
         // Update product cards with real recommendations and analytics tracking
-        this.cardManager.updateProductCards(recommendations, this.analyticsApi, this.sessionId, this.config.context);
+        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
       } else {
-        console.log('No recommendations available, hiding carousel');
-        // Hide the entire carousel if no recommendations
+        this.hideSkeleton();
         this.hideCarousel();
       }
     } catch (error) {
-      console.error('Error initializing recommendation carousel:', error);
-      console.log('API failed, hiding carousel');
-      // Hide the entire carousel if API fails
+      this.hideSkeleton();
       this.hideCarousel();
+    }
+  }
+
+  // Show skeleton loading state
+  showSkeleton() {
+    const skeletonContainer = document.querySelector('.skeleton-container');
+    if (skeletonContainer) {
+      skeletonContainer.style.display = 'block';
+    }
+  }
+
+  // Hide skeleton loading state
+  hideSkeleton() {
+    const skeletonContainer = document.querySelector('.skeleton-container');
+    if (skeletonContainer) {
+      skeletonContainer.style.display = 'none';
     }
   }
 
@@ -191,7 +265,6 @@ class RecommendationCarousel {
     const carouselContainer = document.querySelector('.shopify-app-block');
     if (carouselContainer) {
       carouselContainer.style.display = 'none';
-      console.log('Carousel hidden due to API failure or no recommendations');
     }
   }
 }

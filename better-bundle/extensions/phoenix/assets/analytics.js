@@ -20,19 +20,28 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Get or create a session for Phoenix tracking - OPTIMIZED WITH SESSION STORAGE
+   * Get unified browser session ID (shared across all extensions)
    */
-  async getOrCreateSession(shopId, customerId) {
-    const sessionKey = `unified_session_${shopId}_${customerId || 'anon'}`;
-    const expiryKey = `unified_session_expiry_${shopId}_${customerId || 'anon'}`;
+  async getBrowserSessionId() {
+    let sessionId = sessionStorage.getItem("unified_browser_session_id");
+    if (!sessionId) {
+      sessionId = "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem("unified_browser_session_id", sessionId);
+    }
+    return sessionId;
+  }
 
-    // OPTIMIZATION: Check session storage first (fastest)
+  /**
+   * Get or create a session for Phoenix tracking - WITH UNIFIED SESSION STORAGE
+   */
+  async getOrCreateSession(shopDomain, customerId) {
+    // Check unified session storage first (shared across all extensions)
     try {
-      const cachedSessionId = sessionStorage.getItem(sessionKey);
-      const cachedExpiry = sessionStorage.getItem(expiryKey);
+      const cachedSessionId = sessionStorage.getItem("unified_session_id");
+      const cachedExpiry = sessionStorage.getItem("unified_session_expires_at");
 
       if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-        console.log("⚡ Phoenix session loaded from cache:", cachedSessionId);
+        console.log("⚡ Phoenix session loaded from unified sessionStorage:", cachedSessionId);
         this.currentSessionId = cachedSessionId;
         this.sessionExpiresAt = parseInt(cachedExpiry);
         return cachedSessionId;
@@ -41,25 +50,25 @@ class AnalyticsApiClient {
       console.warn("Failed to read from session storage:", error);
     }
 
-    // OPTIMIZATION: Check in-memory cache second
+    // Check if we have a valid session in memory
     if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
-      console.log("⚡ Phoenix session loaded from memory:", this.currentSessionId);
       return this.currentSessionId;
     }
 
-    // OPTIMIZATION: Only make API call if no valid cached session
     try {
       const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
 
       const payload = {
-        shop_id: shopId,
+        shop_domain: shopDomain,
         customer_id: customerId ? String(customerId) : undefined,
-        browser_session_id: this.getBrowserSessionId(),
+        browser_session_id: await this.getBrowserSessionId(),
         user_agent: navigator.userAgent,
-        ip_address: undefined, // Will be detected server-side
+        ip_address: null, // Will be detected server-side
         referrer: document.referrer,
         page_url: window.location.href,
       };
+
+      console.log('🔍 Phoenix session request:', { url, payload });
 
       const response = await fetch(url, {
         method: "POST",
@@ -80,29 +89,26 @@ class AnalyticsApiClient {
         const sessionId = result.data.session_id;
         const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
 
-        // OPTIMIZATION: Store in both memory and session storage
+        // Store in memory
         this.currentSessionId = sessionId;
         this.sessionExpiresAt = expiresAt;
 
+        // Store in unified session storage for persistence (shared across all extensions)
         try {
-          sessionStorage.setItem(sessionKey, sessionId);
-          sessionStorage.setItem(expiryKey, expiresAt.toString());
+          sessionStorage.setItem("unified_session_id", sessionId);
+          sessionStorage.setItem("unified_session_expires_at", expiresAt.toString());
+          console.log("💾 Phoenix session saved to unified sessionStorage:", sessionId);
         } catch (error) {
           console.warn("Failed to store session in session storage:", error);
         }
 
-        console.log("🔄 Phoenix session created/retrieved from API:", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
       console.error("💥 Phoenix session creation error:", error);
-
-      // OPTIMIZATION: Fallback to browser session ID if API fails
-      const fallbackSessionId = this.getBrowserSessionId();
-      console.log("🔄 Using fallback session ID:", fallbackSessionId);
-      return fallbackSessionId;
+      throw error;
     }
   }
 
@@ -114,7 +120,6 @@ class AnalyticsApiClient {
     const lastTracked = this.trackedEvents.get(eventKey);
 
     if (lastTracked && (now - lastTracked) < this.deduplicationWindow) {
-      console.log(`🔄 Deduplicating event: ${eventKey} (tracked ${now - lastTracked}ms ago)`);
       return true;
     }
 
@@ -127,8 +132,9 @@ class AnalyticsApiClient {
    */
   async trackUnifiedInteraction(request) {
     try {
+
       // Create deduplication key
-      const eventKey = `${request.interaction_type}_${request.context}_${request.shop_id}_${request.customer_id || 'anon'}`;
+      const eventKey = `${request.interaction_type}_${request.context}_${request.shop_domain}_${request.customer_id || 'anon'}`;
 
       // Check for deduplication
       if (this.shouldDeduplicateEvent(eventKey)) {
@@ -136,7 +142,7 @@ class AnalyticsApiClient {
       }
 
       // Get or create session first
-      const sessionId = await this.getOrCreateSession(request.shop_id, request.customer_id ? String(request.customer_id) : undefined);
+      const sessionId = await this.getOrCreateSession(request.shop_domain, request.customer_id ? String(request.customer_id) : undefined);
 
       // Update request with session ID
       const interactionData = {
@@ -147,6 +153,8 @@ class AnalyticsApiClient {
       // Send to unified analytics endpoint
       const url = `${this.baseUrl}/api/phoenix/track-interaction`;
 
+      console.log('📊 Phoenix track-interaction request:', { url, interactionData });
+
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -156,6 +164,13 @@ class AnalyticsApiClient {
         keepalive: true,
       });
 
+      console.log('📊 Phoenix track-interaction response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
+
       if (!response.ok) {
         throw new Error(`Interaction tracking failed: ${response.status}`);
       }
@@ -163,7 +178,6 @@ class AnalyticsApiClient {
       const result = await response.json();
 
       if (result.success) {
-        console.log("✅ Phoenix interaction tracked:", result.data?.interaction_id);
         return true;
       } else {
         throw new Error(result.message || "Failed to track interaction");
@@ -178,11 +192,12 @@ class AnalyticsApiClient {
   /**
    * Track recommendation view (when recommendations are displayed)
    */
-  async trackRecommendationView(shopId, context, customerId, productIds, metadata) {
+  async trackRecommendationView(shopDomain, context, customerId, productIds, metadata) {
     try {
+
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context: context, // Use consistent context (cart)
         interaction_type: "recommendation_viewed",
         customer_id: customerId ? String(customerId) : undefined,
@@ -197,7 +212,8 @@ class AnalyticsApiClient {
         },
       };
 
-      return await this.trackUnifiedInteraction(request);
+      const result = await this.trackUnifiedInteraction(request);
+      return result;
     } catch (error) {
       console.error("Failed to track recommendation view:", error);
       return false;
@@ -207,11 +223,11 @@ class AnalyticsApiClient {
   /**
    * Track recommendation click (when user clicks on a recommendation)
    */
-  async trackRecommendationClick(shopId, context, productId, position, customerId, metadata) {
+  async trackRecommendationClick(shopDomain, context, productId, position, customerId, metadata) {
     try {
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context: context,
         interaction_type: "recommendation_clicked", // Use custom recommendation event
         customer_id: customerId ? String(customerId) : undefined,
@@ -236,11 +252,11 @@ class AnalyticsApiClient {
   /**
    * Track add to cart action
    */
-  async trackAddToCart(shopId, context, productId, variantId, position, customerId, metadata) {
+  async trackAddToCart(shopDomain, context, productId, variantId, position, customerId, metadata) {
     try {
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context: context,
         interaction_type: "recommendation_add_to_cart", // Use custom recommendation event
         customer_id: customerId ? String(customerId) : undefined,
@@ -263,18 +279,6 @@ class AnalyticsApiClient {
     }
   }
 
-  /**
-   * Get unified browser session ID (shared across all extensions)
-   */
-  getBrowserSessionId() {
-    // Use unified session ID that all extensions share
-    let sessionId = sessionStorage.getItem("unified_browser_session_id");
-    if (!sessionId) {
-      sessionId = "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("unified_browser_session_id", sessionId);
-    }
-    return sessionId;
-  }
 
 
   /**

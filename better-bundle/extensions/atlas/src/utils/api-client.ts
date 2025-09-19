@@ -1,10 +1,6 @@
 // Unified Analytics API endpoints
 const UNIFIED_ANALYTICS_BASE_URL = "https://d242bda5e5c7.ngrok-free.app";
 
-// Session management
-let currentSessionId: string | null = null;
-let sessionExpiresAt: number | null = null;
-
 /**
  * Get or create a session for Atlas tracking
  */
@@ -16,9 +12,18 @@ export const getOrCreateSession = async (
   referrer: string,
   sessionStorage: any,
 ): Promise<string> => {
-  // Check if we have a valid session
-  if (currentSessionId && sessionExpiresAt && Date.now() < sessionExpiresAt) {
-    return currentSessionId;
+  // Check if we have a valid session in sessionStorage (unified across all extensions)
+  const storedSessionId = await sessionStorage.getItem("unified_session_id");
+  const storedExpiresAt = await sessionStorage.getItem(
+    "unified_session_expires_at",
+  );
+
+  if (
+    storedSessionId &&
+    storedExpiresAt &&
+    Date.now() < parseInt(storedExpiresAt)
+  ) {
+    return storedSessionId;
   }
 
   try {
@@ -51,9 +56,14 @@ export const getOrCreateSession = async (
 
     if (result.success && result.data && result.data.session_id) {
       const sessionId = result.data.session_id;
-      currentSessionId = sessionId;
-      // Set session to expire 30 minutes from now (server handles actual expiration)
-      sessionExpiresAt = Date.now() + 30 * 60 * 1000;
+      const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
+
+      // Store session data in sessionStorage for persistence (unified across all extensions)
+      await sessionStorage.setItem("unified_session_id", sessionId);
+      await sessionStorage.setItem(
+        "unified_session_expires_at",
+        expiresAt.toString(),
+      );
 
       return sessionId;
     } else {
@@ -140,22 +150,23 @@ export const trackLoad = async (
   try {
     const extensionUid = "atlas-web-pixel-001";
     const now = Date.now();
-    const lastReported = localStorage.getItem(
-      `ext_${extensionUid}_last_reported`,
-    )
-      ? parseInt(localStorage.getItem(`ext_${extensionUid}_last_reported`))
-      : null;
+    const lastReportedKey = `ext_${extensionUid}_last_reported`;
+
+    // Handle async localStorage
+    const lastReportedValue = await localStorage.getItem(lastReportedKey);
+    const lastReported = lastReportedValue ? parseInt(lastReportedValue) : null;
 
     const hoursSinceLastReport = lastReported
       ? (now - lastReported) / (1000 * 60 * 60)
       : Infinity;
 
-    // Only call API if haven't reported in last 24 hours
-    if (!lastReported || hoursSinceLastReport > 24) {
+    // Only call API if haven't reported in last 1 hour
+    if (!lastReported || hoursSinceLastReport > 1) {
       await reportToAPI(shopDomain, extensionUid, pageUrl);
-      localStorage.setItem(`ext_${extensionUid}_last_reported`, now.toString());
+      await localStorage.setItem(lastReportedKey, now.toString());
     }
   } catch (error) {
+    console.error(`[Atlas Tracker] Error in trackLoad:`, error);
     throw error;
   }
 };

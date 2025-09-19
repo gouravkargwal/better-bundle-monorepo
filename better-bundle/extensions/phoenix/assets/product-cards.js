@@ -91,11 +91,18 @@ class ProductCardManager {
   updateProductCards(
     recommendations,
     analyticsApi = null,
-    sessionId = null,
+    sessionId,
     context = "cart",
   ) {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
     if (!swiperWrapper) return;
+
+    // Hide skeleton container when real content is loaded
+    const skeletonContainer = document.querySelector('.skeleton-container');
+    if (skeletonContainer) {
+      skeletonContainer.style.display = 'none';
+      console.log('✅ Hiding skeleton - real content loaded');
+    }
 
     // Add fade-out transition to existing skeleton slides
     const existingSlides = swiperWrapper.querySelectorAll('.swiper-slide');
@@ -145,7 +152,7 @@ class ProductCardManager {
     product,
     index,
     analyticsApi = null,
-    sessionId = null,
+    sessionId,
     context = "cart",
   ) {
     const slide = document.createElement("div");
@@ -393,19 +400,15 @@ class ProductCardManager {
 
       console.log('Adding to cart:', { selectedVariantId, selectedQuantity, itemProperties });
 
-      // Add to cart via Shopify API with line item properties
-      const response = await this.api.addToCart(
-        selectedVariantId,
-        selectedQuantity,
-        itemProperties,
-      );
 
-      // Track add to cart interaction using unified analytics
       if (window.analyticsApi && sessionId) {
-        const shopDomain = window.shopDomain?.replace('.myshopify.com', '') || '';
+        const shopDomain = window.shopDomain;
         const customerId = window.customerId;
 
-        await window.analyticsApi.trackAddToCart(
+        console.log('🔄 Tracking add to cart BEFORE cart API call to prevent cancellation');
+
+        // Use sendBeacon for reliable delivery even during page navigation
+        const trackingPromise = window.analyticsApi.trackAddToCart(
           shopDomain,
           context,
           productId,
@@ -419,8 +422,18 @@ class ProductCardManager {
           }
         );
 
-        // We now attach attribution at line-item level; no order-level cart attributes needed
+        // Don't await the tracking - let it complete in background
+        trackingPromise.catch((error) => {
+          console.warn('Analytics tracking failed (non-blocking):', error);
+        });
       }
+
+      // Add to cart via Shopify API with line item properties
+      const response = await this.api.addToCart(
+        selectedVariantId,
+        selectedQuantity,
+        itemProperties,
+      );
 
       // Restore button state
       addToCartButton.disabled = false;
