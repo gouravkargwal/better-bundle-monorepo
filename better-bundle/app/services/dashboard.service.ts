@@ -21,18 +21,6 @@ export interface DashboardOverview {
   customers_change: number | null;
 }
 
-export interface ContextPerformanceData {
-  context: string;
-  extension_type: string;
-  revenue: number;
-  conversion_rate: number;
-  clicks: number;
-  recommendations_shown: number;
-  currency_code: string;
-  // SIMPLIFIED: Only show actionable metrics
-  customers: number;
-}
-
 export interface TopProductData {
   product_id: string;
   title: string;
@@ -67,22 +55,20 @@ export interface RecentActivityData {
   currency_code: string;
 }
 
-// SIMPLIFIED: Extension Performance - what store owners care about
-export interface ExtensionPerformanceData {
-  extension_type: string;
-  revenue: number;
-  conversion_rate: number;
-  customers: number;
+export interface AttributedMetrics {
+  attributed_revenue: number;
+  attributed_refunds: number;
+  net_attributed_revenue: number;
+  attribution_rate: number;
+  refund_rate: number;
   currency_code: string;
 }
 
 export interface DashboardData {
   overview: DashboardOverview;
-  contextPerformance: ContextPerformanceData[];
   topProducts: TopProductData[];
   recentActivity: RecentActivityData;
-  // SIMPLIFIED: Only extension performance (actionable for store owners)
-  extensionPerformance: ExtensionPerformanceData[];
+  attributedMetrics: AttributedMetrics;
 }
 
 async function getShopInfo(shopDomain: string): Promise<{
@@ -160,53 +146,41 @@ export async function getDashboardOverview(
     cacheKey,
     async () => {
       // Execute all queries in parallel for maximum performance
-      const [
-        overview,
-        contextPerformance,
-        topProducts,
-        recentActivity,
-        extensionPerformance,
-      ] = await Promise.all([
-        getOverviewMetrics(
-          shopInfo.id,
-          startDate,
-          endDate,
-          shopInfo.currencyCode,
-          shopInfo.moneyFormat,
-        ),
-        getContextPerformance(
-          shopInfo.id,
-          startDate,
-          endDate,
-          shopInfo.currencyCode,
-        ),
-        getTopProducts(
-          shopInfo.id,
-          startDate,
-          endDate,
-          10,
-          shopInfo.currencyCode,
-        ),
-        getRecentActivity(
-          shopInfo.id,
-          startDate,
-          endDate,
-          shopInfo.currencyCode,
-        ),
-        getExtensionPerformance(
-          shopInfo.id,
-          startDate,
-          endDate,
-          shopInfo.currencyCode,
-        ),
-      ]);
+      const [overview, topProducts, recentActivity, attributedMetrics] =
+        await Promise.all([
+          getOverviewMetrics(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currencyCode,
+            shopInfo.moneyFormat,
+          ),
+          getTopProducts(
+            shopInfo.id,
+            startDate,
+            endDate,
+            10,
+            shopInfo.currencyCode,
+          ),
+          getRecentActivity(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currencyCode,
+          ),
+          getAttributedMetrics(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currencyCode,
+          ),
+        ]);
 
       return {
         overview,
-        contextPerformance,
         topProducts,
         recentActivity,
-        extensionPerformance,
+        attributedMetrics,
       };
     },
     CacheTTL.DASHBOARD,
@@ -437,240 +411,6 @@ async function getOverviewMetrics(
   );
 }
 
-async function getContextPerformance(
-  shopId: string,
-  startDate: Date,
-  endDate: Date,
-  currencyCode: string,
-): Promise<ContextPerformanceData[]> {
-  const cache = await getCacheService();
-  const cacheKey = CacheKeys.context(
-    shopId,
-    startDate.toISOString(),
-    endDate.toISOString(),
-  );
-
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      const contexts = ["profile", "order_status", "order_history"];
-
-      // Get data from unified analytics tables
-      const [
-        recommendationsByContext,
-        clicksByContext,
-        revenueByContext,
-        customersByContext,
-      ] = await Promise.all([
-        prisma.userInteraction.groupBy({
-          by: ["context"],
-          where: {
-            shopId,
-            createdAt: { gte: startDate, lte: endDate },
-            interactionType: "view",
-            context: { in: contexts },
-          },
-          _count: { _all: true },
-        }),
-        prisma.userInteraction.groupBy({
-          by: ["context"],
-          where: {
-            shopId,
-            createdAt: { gte: startDate, lte: endDate },
-            interactionType: { in: ["click", "add_to_cart"] },
-            context: { in: contexts },
-          },
-          _count: { _all: true },
-        }),
-        prisma.purchaseAttribution.groupBy({
-          by: ["orderId"],
-          where: {
-            shopId,
-            purchaseAt: { gte: startDate, lte: endDate },
-          },
-          _sum: { totalRevenue: true },
-        }),
-        prisma.userInteraction
-          .groupBy({
-            by: ["context", "customerId"],
-            where: {
-              shopId,
-              createdAt: { gte: startDate, lte: endDate },
-              context: { in: contexts },
-              customerId: { not: null },
-            },
-          })
-          .then((result) => {
-            const contextCounts = new Map<string, number>();
-            result.forEach((item) => {
-              const count = contextCounts.get(item.context) || 0;
-              contextCounts.set(item.context, count + 1);
-            });
-            return Array.from(contextCounts.entries()).map(
-              ([context, count]) => ({
-                context,
-                _count: { customerId: count },
-              }),
-            );
-          }),
-      ]);
-
-      // Create maps for efficient lookup
-      const recommendationsMap = new Map(
-        recommendationsByContext.map((item) => [
-          item.context,
-          item._count._all,
-        ]),
-      );
-      const clicksMap = new Map(
-        clicksByContext.map((item) => [item.context, item._count._all]),
-      );
-      const customersMap = new Map(
-        customersByContext.map((item) => [
-          item.context,
-          item._count.customerId,
-        ]),
-      );
-
-      // Calculate total revenue (simplified - we'll get this from purchase attributions)
-      const totalRevenue = Number(
-        revenueByContext.reduce(
-          (sum, item) => sum + Number(item._sum.totalRevenue || 0),
-          0,
-        ),
-      );
-
-      // Merge data for all contexts
-      return contexts.map((context) => {
-        const recommendationsShown = recommendationsMap.get(context) || 0;
-        const clicks = clicksMap.get(context) || 0;
-        const customers = customersMap.get(context) || 0;
-        const conversionRate =
-          recommendationsShown > 0 ? (clicks / recommendationsShown) * 100 : 0;
-
-        return {
-          context,
-          extension_type: "venus", // Default to venus for customer account contexts
-          revenue: totalRevenue / contexts.length, // Distribute revenue evenly for now
-          conversion_rate: Math.round(conversionRate * 100) / 100,
-          clicks,
-          recommendations_shown: recommendationsShown,
-          currency_code: currencyCode,
-          customers,
-        };
-      });
-    },
-    CacheTTL.CONTEXT,
-  );
-}
-
-async function getExtensionPerformance(
-  shopId: string,
-  startDate: Date,
-  endDate: Date,
-  currencyCode: string,
-): Promise<ExtensionPerformanceData[]> {
-  const cache = await getCacheService();
-  const cacheKey =
-    CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString()) +
-    ":extensions";
-
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      const extensionTypes = ["venus", "phoenix", "apollo", "atlas"];
-
-      // Get extension performance data
-      const [
-        interactionsByExtension,
-        revenueByExtension,
-        customersByExtension,
-      ] = await Promise.all([
-        prisma.userInteraction.groupBy({
-          by: ["extensionType"],
-          where: {
-            shopId,
-            createdAt: { gte: startDate, lte: endDate },
-            extensionType: { in: extensionTypes },
-          },
-          _count: { _all: true },
-        }),
-        prisma.purchaseAttribution.groupBy({
-          by: ["orderId"],
-          where: {
-            shopId,
-            purchaseAt: { gte: startDate, lte: endDate },
-          },
-          _sum: { totalRevenue: true },
-        }),
-        prisma.userInteraction
-          .groupBy({
-            by: ["extensionType", "customerId"],
-            where: {
-              shopId,
-              createdAt: { gte: startDate, lte: endDate },
-              extensionType: { in: extensionTypes },
-              customerId: { not: null },
-            },
-          })
-          .then((result) => {
-            const extensionCounts = new Map<string, number>();
-            result.forEach((item) => {
-              const count = extensionCounts.get(item.extensionType) || 0;
-              extensionCounts.set(item.extensionType, count + 1);
-            });
-            return Array.from(extensionCounts.entries()).map(
-              ([extensionType, count]) => ({
-                extensionType,
-                _count: { customerId: count },
-              }),
-            );
-          }),
-      ]);
-
-      // Create maps for efficient lookup
-      const interactionsMap = new Map(
-        interactionsByExtension.map((item) => [
-          item.extensionType,
-          item._count._all,
-        ]),
-      );
-      const customersMap = new Map(
-        customersByExtension.map((item) => [
-          item.extensionType,
-          item._count.customerId,
-        ]),
-      );
-
-      // Calculate total revenue
-      const totalRevenue = Number(
-        revenueByExtension.reduce(
-          (sum, item) => sum + Number(item._sum.totalRevenue || 0),
-          0,
-        ),
-      );
-
-      // Return extension performance data
-      return extensionTypes.map((extensionType) => {
-        const interactions = interactionsMap.get(extensionType) || 0;
-        const customers = customersMap.get(extensionType) || 0;
-        const revenue = totalRevenue / extensionTypes.length; // Distribute evenly for now
-        const conversionRate =
-          interactions > 0 ? (customers / interactions) * 100 : 0;
-
-        return {
-          extension_type: extensionType,
-          revenue,
-          conversion_rate: Math.round(conversionRate * 100) / 100,
-          customers,
-          currency_code: currencyCode,
-        };
-      });
-    },
-    CacheTTL.CONTEXT,
-  );
-}
-
 async function getTopProducts(
   shopId: string,
   startDate: Date,
@@ -678,26 +418,71 @@ async function getTopProducts(
   limit: number = 10,
   currencyCode: string,
 ): Promise<TopProductData[]> {
-  // Optimized: Get top products by clicks first, then fetch related data
-  const topProductClicks = await prisma.userInteraction.groupBy({
-    by: ["productId"],
+  // Get all interactions for the period
+  const allInteractions = await prisma.userInteraction.findMany({
     where: {
       shopId,
       createdAt: {
         gte: startDate,
         lte: endDate,
       },
-      interactionType: { in: ["click", "add_to_cart"] },
-      productId: { not: null },
+      interactionType: { in: ["click", "add_to_cart", "view"] },
     },
-    _count: true,
-    orderBy: {
-      _count: {
-        productId: "desc",
-      },
+    select: {
+      interactionType: true,
+      metadata: true,
     },
-    take: limit,
   });
+
+  // Process interactions to extract product data
+  const productStats = new Map<
+    string,
+    {
+      clicks: number;
+      views: number;
+      customers: Set<string>;
+    }
+  >();
+
+  allInteractions.forEach((interaction) => {
+    const metadata = interaction.metadata as any;
+    const productId = metadata?.productId;
+    // Only process interactions that have product data
+    if (!productId || typeof productId !== "string") return;
+
+    if (!productStats.has(productId)) {
+      productStats.set(productId, {
+        clicks: 0,
+        views: 0,
+        customers: new Set(),
+      });
+    }
+
+    const stats = productStats.get(productId)!;
+
+    if (interaction.interactionType === "view") {
+      stats.views++;
+    } else if (["click", "add_to_cart"].includes(interaction.interactionType)) {
+      stats.clicks++;
+    }
+
+    // Extract customer ID from metadata if available
+    const customerId = metadata?.customerId;
+    if (customerId) {
+      stats.customers.add(customerId);
+    }
+  });
+
+  // Sort by clicks and take top products
+  const topProductClicks = Array.from(productStats.entries())
+    .map(([productId, stats]) => ({
+      productId,
+      clicks: stats.clicks,
+      views: stats.views,
+      customers: stats.customers.size,
+    }))
+    .sort((a, b) => b.clicks - a.clicks)
+    .slice(0, limit);
 
   if (topProductClicks.length === 0) {
     return [];
@@ -707,86 +492,28 @@ async function getTopProducts(
     .map((item) => item.productId)
     .filter(Boolean);
 
-  // Fetch views, revenue, and customer data only for top products
-  const [productViews, productRevenue, productCustomers] = await Promise.all([
-    prisma.userInteraction.groupBy({
-      by: ["productId"],
-      where: {
-        shopId,
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-        interactionType: "view",
-        productId: { in: topProductIds },
+  // Get revenue data for the period
+  const revenueData = await prisma.purchaseAttribution.aggregate({
+    where: {
+      shopId,
+      purchaseAt: {
+        gte: startDate,
+        lte: endDate,
       },
-      _count: true,
-    }),
-    prisma.purchaseAttribution.groupBy({
-      by: ["orderId"],
-      where: {
-        shopId,
-        purchaseAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-      _sum: {
-        totalRevenue: true,
-      },
-    }),
-    prisma.userInteraction
-      .groupBy({
-        by: ["productId", "customerId"],
-        where: {
-          shopId,
-          createdAt: {
-            gte: startDate,
-            lte: endDate,
-          },
-          productId: { in: topProductIds },
-          customerId: { not: null },
-        },
-      })
-      .then((result) => {
-        const productCounts = new Map<string, number>();
-        result.forEach((item) => {
-          if (item.productId) {
-            const count = productCounts.get(item.productId) || 0;
-            productCounts.set(item.productId, count + 1);
-          }
-        });
-        return Array.from(productCounts.entries()).map(
-          ([productId, count]) => ({
-            productId,
-            _count: { customerId: count },
-          }),
-        );
-      }),
-  ]);
+    },
+    _sum: {
+      totalRevenue: true,
+    },
+  });
 
-  // Create maps for efficient lookup
-  const viewsMap = new Map(
-    productViews.map((item) => [item.productId, item._count]),
-  );
-  const customersMap = new Map(
-    productCustomers.map((item) => [item.productId, item._count.customerId]),
-  );
-
-  // Calculate total revenue (simplified - distribute evenly for now)
-  const totalRevenue = Number(
-    productRevenue.reduce(
-      (sum, item) => sum + Number(item._sum.totalRevenue || 0),
-      0,
-    ),
-  );
+  const totalRevenue = Number(revenueData._sum.totalRevenue || 0);
 
   // Combine data maintaining the order from topProductClicks
   const result = topProductClicks.map((item) => ({
     product_id: item.productId,
-    clicks: item._count,
-    recommendations_shown: viewsMap.get(item.productId) || 0,
-    customers: customersMap.get(item.productId) || 0,
+    clicks: item.clicks,
+    recommendations_shown: item.views,
+    customers: item.customers,
     revenue: totalRevenue / topProductClicks.length, // Distribute evenly for now
   }));
 
@@ -992,6 +719,94 @@ export async function invalidateDashboardCache(
 export async function invalidateShopCache(shopDomain: string): Promise<void> {
   const cache = await getCacheService();
   await cache.invalidateShop(shopDomain);
+}
+
+async function getAttributedMetrics(
+  shopId: string,
+  startDate: Date,
+  endDate: Date,
+  currencyCode: string,
+): Promise<AttributedMetrics> {
+  const cache = await getCacheService();
+  const cacheKey =
+    CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString()) +
+    ":attributed";
+
+  return await cache.getOrSet(
+    cacheKey,
+    async () => {
+      // Get attributed revenue from purchase attributions
+      const attributedRevenueData = await prisma.purchaseAttribution.aggregate({
+        where: {
+          shopId,
+          purchaseAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        _sum: {
+          totalRevenue: true,
+        },
+      });
+
+      // Get total revenue for attribution rate calculation
+      const totalRevenueData = await prisma.orderData.aggregate({
+        where: {
+          shopId,
+          orderDate: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        _sum: {
+          totalAmount: true,
+        },
+      });
+
+      // Get attributed refunds from RefundAttributionAdjustment table
+      // Using raw query since the Prisma client might not be updated
+      const attributedRefundsResult = (await prisma.$queryRaw`
+        SELECT COALESCE(SUM(total_refund_amount), 0) as total_refund_amount
+        FROM refund_attribution_adjustments 
+        WHERE shop_id = ${shopId} 
+        AND computed_at >= ${startDate} 
+        AND computed_at <= ${endDate}
+      `) as Array<{ total_refund_amount: number }>;
+
+      const attributedRefundsData = {
+        _sum: {
+          totalRefundAmount:
+            attributedRefundsResult[0]?.total_refund_amount || 0,
+        },
+      };
+
+      const attributedRevenue = Number(
+        attributedRevenueData._sum.totalRevenue || 0,
+      );
+      const totalRevenue = Number(totalRevenueData._sum.totalAmount || 0);
+      const attributedRefunds = Number(
+        attributedRefundsData._sum.totalRefundAmount || 0,
+      );
+
+      const netAttributedRevenue = attributedRevenue - attributedRefunds;
+      const attributionRate =
+        totalRevenue > 0 ? (attributedRevenue / totalRevenue) * 100 : 0;
+      const refundRate =
+        attributedRevenue > 0
+          ? (attributedRefunds / attributedRevenue) * 100
+          : 0;
+
+      return {
+        attributed_revenue: attributedRevenue,
+        attributed_refunds: attributedRefunds,
+        net_attributed_revenue: netAttributedRevenue,
+        attribution_rate: Math.round(attributionRate * 100) / 100,
+        refund_rate: Math.round(refundRate * 100) / 100,
+        currency_code: currencyCode,
+      };
+    },
+    CacheTTL.CONTEXT,
+  );
 }
 
 // Utility function to clear all caches (useful for testing)

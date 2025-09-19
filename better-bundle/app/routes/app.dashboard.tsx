@@ -4,43 +4,36 @@ import {
   Page,
   Layout,
   Text,
-  Card,
   BlockStack,
   Spinner,
   Banner,
+  Tabs,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
+import { useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import { getDashboardOverview } from "../services/dashboard.service";
-import { getExtensionStatus } from "../services/extension.service";
-import { KPICards } from "../components/dashboard/KPICards";
-import { ContextPerformance } from "../components/dashboard/ContextPerformance";
+import {
+  RevenueKPICards,
+  PerformanceKPICards,
+} from "../components/dashboard/KPICards";
 import { TopProductsTable } from "../components/dashboard/TopProductsTable";
 import { RecentActivity } from "../components/dashboard/RecentActivity";
-import { ExtensionPerformance } from "../components/dashboard/ExtensionPerformance";
-import { PerformanceCharts } from "../components/dashboard/PerformanceCharts";
-import { StatusOverview } from "../components/dashboard/StatusOverview";
-import { QuickActions } from "../components/dashboard/QuickActions";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
   try {
-    const [dashboardData, extensionStatus] = await Promise.all([
-      getDashboardOverview(session.shop),
-      getExtensionStatus(session.shop),
-    ]);
+    const dashboardData = await getDashboardOverview(session.shop);
 
     return {
       dashboardData,
-      extensionStatus,
       shop: session.shop,
     };
   } catch (error) {
     console.error("Dashboard loader error:", error);
     return {
       dashboardData: null,
-      extensionStatus: null,
       shop: session.shop,
       error: "Failed to load dashboard data",
     };
@@ -48,8 +41,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Dashboard() {
-  const { dashboardData, extensionStatus, shop, error } =
-    useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
+  const { dashboardData } = loaderData;
+  const error = "error" in loaderData ? loaderData.error : undefined;
+  const [selectedTab, setSelectedTab] = useState(0);
+
+  const handleTabChange = useCallback((selectedTabIndex: number) => {
+    setSelectedTab(selectedTabIndex);
+  }, []);
 
   if (error) {
     return (
@@ -70,116 +69,97 @@ export default function Dashboard() {
     return (
       <Page>
         <TitleBar title="Analytics Dashboard" />
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack align="center" gap="400">
-                <Spinner size="large" />
-                <Text as="p" variant="bodyMd">
-                  Loading dashboard data...
+        <BlockStack gap="500">
+          <div
+            style={{
+              padding: "48px",
+              textAlign: "center",
+              backgroundColor: "#F8FAFC",
+              borderRadius: "16px",
+              border: "1px solid #E2E8F0",
+            }}
+          >
+            <Spinner size="large" />
+            <div style={{ marginTop: "24px" }}>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd" fontWeight="bold">
+                  Loading your analytics...
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  We're gathering your extension performance data
                 </Text>
               </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+            </div>
+          </div>
+        </BlockStack>
       </Page>
     );
   }
 
+  const tabs = [
+    {
+      id: "revenue",
+      content: "💰 Revenue",
+      panelID: "revenue-panel",
+    },
+    {
+      id: "performance",
+      content: "📊 Performance",
+      panelID: "performance-panel",
+    },
+    {
+      id: "products",
+      content: "🏆 Top Products",
+      panelID: "products-panel",
+    },
+    {
+      id: "activity",
+      content: "⚡ Recent Activity",
+      panelID: "activity-panel",
+    },
+  ];
+
+  const renderTabContent = () => {
+    switch (selectedTab) {
+      case 0: // Revenue
+        return (
+          <BlockStack gap="500">
+            <RevenueKPICards
+              data={dashboardData.overview}
+              attributedMetrics={dashboardData.attributedMetrics}
+            />
+          </BlockStack>
+        );
+      case 1: // Performance
+        return (
+          <BlockStack gap="500">
+            <PerformanceKPICards data={dashboardData.overview} />
+          </BlockStack>
+        );
+      case 2: // Top Products
+        return (
+          <BlockStack gap="500">
+            <TopProductsTable data={dashboardData.topProducts} />
+          </BlockStack>
+        );
+      case 3: // Recent Activity
+        return (
+          <BlockStack gap="500">
+            <RecentActivity data={dashboardData.recentActivity} />
+          </BlockStack>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <Page>
       <TitleBar title="Analytics Dashboard" />
-      <BlockStack gap="500">
-        <Layout>
-          {/* KPI Cards */}
-          <Layout.Section>
-            <KPICards data={dashboardData.overview} />
-          </Layout.Section>
-
-          {/* Quick Actions */}
-          <Layout.Section variant="oneThird">
-            <QuickActions />
-          </Layout.Section>
-
-          {/* System Status */}
-          <Layout.Section variant="twoThirds">
-            <StatusOverview
-              data={{
-                system_health: extensionStatus?.overallStatus || "critical",
-                extensions_status: extensionStatus
-                  ? Object.values(extensionStatus.extensions).map((ext) => ({
-                      name: ext.name,
-                      status: ext.status,
-                      last_activity:
-                        ext.last_activity || new Date().toISOString(),
-                    }))
-                  : [],
-                data_sync_status: {
-                  last_sync: new Date().toISOString(),
-                  sync_frequency: "Real-time",
-                  status: "synced",
-                },
-                performance_metrics: {
-                  response_time: 150,
-                  uptime: 99.9,
-                  error_rate: 0.1,
-                },
-              }}
-            />
-          </Layout.Section>
-
-          {/* Performance Charts */}
-          <Layout.Section>
-            <PerformanceCharts
-              data={{
-                revenue_trend: [
-                  { date: "2024-01-01", value: 1200 },
-                  { date: "2024-01-02", value: 1350 },
-                  { date: "2024-01-03", value: 1100 },
-                  { date: "2024-01-04", value: 1450 },
-                  { date: "2024-01-05", value: 1600 },
-                  { date: "2024-01-06", value: 1400 },
-                  { date: "2024-01-07", value: 1700 },
-                ],
-                conversion_trend: [
-                  { date: "2024-01-01", value: 3.2 },
-                  { date: "2024-01-02", value: 3.5 },
-                  { date: "2024-01-03", value: 2.8 },
-                  { date: "2024-01-04", value: 4.1 },
-                  { date: "2024-01-05", value: 4.3 },
-                  { date: "2024-01-06", value: 3.9 },
-                  { date: "2024-01-07", value: 4.5 },
-                ],
-                top_performing_extensions: [
-                  { name: "Atlas", revenue: 850, conversion_rate: 4.2 },
-                  { name: "Phoenix", revenue: 620, conversion_rate: 3.8 },
-                  { name: "Venus", revenue: 480, conversion_rate: 3.5 },
-                  { name: "Apollo", revenue: 320, conversion_rate: 3.1 },
-                ],
-              }}
-              currency_code={dashboardData.overview.currency_code}
-            />
-          </Layout.Section>
-
-          {/* Extension Performance */}
-          <Layout.Section>
-            <ExtensionPerformance data={dashboardData.extensionPerformance} />
-          </Layout.Section>
-
-          {/* Context Performance */}
-          <Layout.Section>
-            <ContextPerformance data={dashboardData.contextPerformance} />
-          </Layout.Section>
-
-          {/* Top Products and Recent Activity */}
-          <Layout.Section variant="oneHalf">
-            <TopProductsTable data={dashboardData.topProducts} />
-          </Layout.Section>
-
-          <Layout.Section variant="oneHalf">
-            <RecentActivity data={dashboardData.recentActivity} />
-          </Layout.Section>
-        </Layout>
+      <BlockStack gap="400">
+        <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange}>
+          {renderTabContent()}
+        </Tabs>
       </BlockStack>
     </Page>
   );
