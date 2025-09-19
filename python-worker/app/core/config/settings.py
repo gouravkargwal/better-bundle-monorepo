@@ -352,12 +352,19 @@ class Settings(BaseSettings):
     )  # Increased from 1.0 to 2.0
     RETRY_BACKOFF: float = Field(default=2.0, env="RETRY_BACKOFF")
 
-    # Database Timeout Configuration
-    DATABASE_CONNECT_TIMEOUT: int = Field(default=30, env="DATABASE_CONNECT_TIMEOUT")
+    # Database Timeout Configuration - Industry Standard
+    DATABASE_CONNECT_TIMEOUT: int = Field(
+        default=10, env="DATABASE_CONNECT_TIMEOUT"
+    )  # Reduced from 30
     DATABASE_QUERY_TIMEOUT: int = Field(
-        default=60, env="DATABASE_QUERY_TIMEOUT"
-    )  # Long timeout for heavy queries
-    DATABASE_POOL_TIMEOUT: int = Field(default=30, env="DATABASE_POOL_TIMEOUT")
+        default=30, env="DATABASE_QUERY_TIMEOUT"
+    )  # Reduced from 60
+    DATABASE_POOL_TIMEOUT: int = Field(
+        default=10, env="DATABASE_POOL_TIMEOUT"
+    )  # Reduced from 30
+    DATABASE_HEALTH_CHECK_INTERVAL: int = Field(
+        default=300, env="DATABASE_HEALTH_CHECK_INTERVAL"
+    )  # 5 minutes
 
     # Health Check Configuration
     HEALTH_CHECK_TIMEOUT: int = Field(

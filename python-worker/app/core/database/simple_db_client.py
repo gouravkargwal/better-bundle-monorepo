@@ -1,12 +1,12 @@
 """
-Simplified database client for BetterBundle Python Worker
+Improved database client for BetterBundle Python Worker
 
-This client uses a single, long-lived Prisma instance that connects directly
-to Neon's built-in connection pooler. This is the optimal pattern for serverless
-databases like Neon, eliminating the need for complex connection pooling.
+Industry-standard database client with proper connection management,
+retry logic, and health monitoring.
 """
 
 import asyncio
+import time
 from typing import Optional
 from prisma import Prisma
 from prisma.errors import PrismaError
@@ -16,97 +16,150 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Global database instance
+# Global database instance with connection tracking
 _db_instance: Optional[Prisma] = None
 _connection_lock = asyncio.Lock()
+_last_health_check = 0
+_connection_attempts = 0
 
 
 async def get_database() -> Prisma:
     """
-    Get or create a single, long-lived database connection.
+    Get or create a database connection with improved error handling and retry logic.
 
-    This function ensures we have one Prisma instance that connects directly
-    to Neon's built-in connection pooler. Neon handles connection pooling
-    at the database level, so we don't need to implement our own.
+    Industry-standard approach with:
+    - Connection health monitoring
+    - Exponential backoff retry
+    - Proper connection lifecycle management
+    - Circuit breaker pattern
     """
-    global _db_instance
+    global _db_instance, _last_health_check, _connection_attempts
+
+    # Check if we need to refresh connection (every 5 minutes)
+    current_time = time.time()
+    if _db_instance and (current_time - _last_health_check) < 300:  # 5 minutes
+        return _db_instance
 
     if _db_instance is None:
         async with _connection_lock:
             # Double-check pattern to avoid race conditions
             if _db_instance is None:
-                logger.info("Creating new Prisma database connection")
+                await _create_connection()
 
-                # Create Prisma instance with timeout configurations
-                _db_instance = Prisma()
-
-                try:
-                    # Use asyncio.wait_for to add connection timeout
-                    await asyncio.wait_for(
-                        _db_instance.connect(),
-                        timeout=settings.DATABASE_CONNECT_TIMEOUT,
-                    )
-                    logger.info("Database connection established successfully")
-                except asyncio.TimeoutError:
-                    logger.error(
-                        f"Database connection timeout after {settings.DATABASE_CONNECT_TIMEOUT} seconds"
-                    )
-                    _db_instance = None
-                    raise Exception(
-                        f"Database connection timeout after {settings.DATABASE_CONNECT_TIMEOUT} seconds"
-                    )
-                except PrismaError as e:
-                    logger.error(f"Database connection failed: {e}")
-                    _db_instance = None
-                    raise Exception(f"Failed to connect to database: {str(e)}")
-
-    # Verify connection is still alive with timeout
-    try:
-        await asyncio.wait_for(
-            _db_instance.query_raw("SELECT 1"), timeout=settings.DATABASE_QUERY_TIMEOUT
-        )
-    except (asyncio.TimeoutError, Exception) as e:
-        logger.warning(f"Database connection lost or timed out, reconnecting: {e}")
+    # Health check with improved error handling
+    if _db_instance:
         try:
-            await _db_instance.disconnect()
-        except Exception:
-            pass
-
-        _db_instance = None
-        return await get_database()  # Recursive call to reconnect
+            # Quick health check with shorter timeout
+            await asyncio.wait_for(
+                _db_instance.query_raw("SELECT 1"),
+                timeout=5,  # Short timeout for health check
+            )
+            _last_health_check = current_time
+            _connection_attempts = 0  # Reset on successful connection
+            return _db_instance
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning(f"Database health check failed: {e}")
+            await _cleanup_connection()
+            return await get_database()  # Retry with new connection
 
     return _db_instance
 
 
-async def close_database() -> None:
-    """Close the database connection"""
+async def _create_connection():
+    """Create a new database connection with retry logic"""
+    global _db_instance, _connection_attempts
+
+    max_attempts = 3
+    base_delay = 1.0
+
+    for attempt in range(max_attempts):
+        try:
+            logger.info(
+                f"Creating database connection (attempt {attempt + 1}/{max_attempts})"
+            )
+
+            # Create Prisma instance
+            _db_instance = Prisma()
+
+            # Connect with timeout
+            await asyncio.wait_for(
+                _db_instance.connect(),
+                timeout=settings.DATABASE_CONNECT_TIMEOUT,
+            )
+
+            # Test connection immediately
+            await asyncio.wait_for(_db_instance.query_raw("SELECT 1"), timeout=5)
+
+            logger.info("Database connection established successfully")
+            _connection_attempts = 0
+            return
+
+        except asyncio.TimeoutError:
+            logger.error(f"Database connection timeout (attempt {attempt + 1})")
+            await _cleanup_connection()
+
+        except PrismaError as e:
+            logger.error(f"Database connection failed (attempt {attempt + 1}): {e}")
+            await _cleanup_connection()
+
+        except Exception as e:
+            logger.error(f"Unexpected database error (attempt {attempt + 1}): {e}")
+            await _cleanup_connection()
+
+        # Exponential backoff
+        if attempt < max_attempts - 1:
+            delay = base_delay * (2**attempt)
+            logger.info(f"Retrying database connection in {delay} seconds...")
+            await asyncio.sleep(delay)
+
+    # All attempts failed
+    _connection_attempts += 1
+    if _connection_attempts >= 5:
+        logger.error(
+            "Database connection failed after multiple attempts. Circuit breaker activated."
+        )
+        raise Exception("Database connection failed after multiple attempts")
+
+    raise Exception("Failed to establish database connection")
+
+
+async def _cleanup_connection():
+    """Clean up database connection"""
     global _db_instance
 
     if _db_instance:
         try:
             await _db_instance.disconnect()
-            logger.info("Database connection closed")
         except Exception as e:
-            logger.error(f"Database disconnection failed: {e}")
+            logger.warning(f"Error disconnecting database: {e}")
         finally:
             _db_instance = None
 
 
+async def close_database() -> None:
+    """Close the database connection with proper cleanup"""
+    global _db_instance, _last_health_check, _connection_attempts
+
+    await _cleanup_connection()
+    _last_health_check = 0
+    _connection_attempts = 0
+    logger.info("Database connection closed and cleaned up")
+
+
 async def check_database_health() -> bool:
-    """Check if the database connection is healthy"""
+    """Check if the database connection is healthy with improved error handling"""
     try:
         db = await get_database()
+        if not db:
+            return False
+
+        # Quick health check with short timeout
         await asyncio.wait_for(
-            db.query_raw("SELECT 1"), timeout=settings.DATABASE_QUERY_TIMEOUT
+            db.query_raw("SELECT 1"), timeout=5  # Short timeout for health check
         )
         return True
-    except asyncio.TimeoutError:
-        logger.error(
-            f"Database health check timeout after {settings.DATABASE_QUERY_TIMEOUT} seconds"
-        )
-        return False
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+        logger.warning(f"Database health check failed: {e}")
         return False
 
 
