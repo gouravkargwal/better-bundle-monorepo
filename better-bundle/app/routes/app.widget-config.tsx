@@ -10,17 +10,89 @@ import {
   InlineGrid,
 } from "@shopify/polaris";
 import { ExtensionManager } from "../components/Extensions/ExtensionManager";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  return json({
-    shopDomain: session.shop,
-  });
+  try {
+    // Get shop ID from database
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain: session.shop },
+    });
+
+    let extensions: Record<string, any> = {};
+    if (shop) {
+      // Get active extensions (last 24 hours)
+      const cutoffTime = new Date();
+      cutoffTime.setHours(cutoffTime.getHours() - 24);
+
+      const results = await (prisma as any).extensionActivity.findMany({
+        where: {
+          shopId: shop.id,
+          lastSeen: {
+            gt: cutoffTime,
+          },
+          extensionType: {
+            in: ["apollo", "phoenix", "venus"],
+          },
+        },
+        orderBy: {
+          lastSeen: "desc",
+        },
+      });
+
+      // Group by extension type
+      for (const result of results) {
+        const extType = result.extensionType;
+
+        if (!extensions[extType]) {
+          extensions[extType] = {
+            active: true,
+            last_seen: result.lastSeen.toISOString(),
+            app_blocks: [],
+          };
+        }
+
+        // Add app block info if available
+        if (result.appBlockTarget && result.appBlockLocation) {
+          extensions[extType].app_blocks.push({
+            target: result.appBlockTarget,
+            location: result.appBlockLocation,
+            page_url: result.pageUrl,
+            extension_uid: result.extensionUid,
+          });
+        }
+      }
+
+      // Ensure all extension types are represented
+      const allTypes = ["apollo", "phoenix", "venus"];
+      for (const extType of allTypes) {
+        if (!extensions[extType]) {
+          extensions[extType] = {
+            active: false,
+            last_seen: null,
+            app_blocks: [],
+          };
+        }
+      }
+    }
+
+    return json({
+      shopDomain: session.shop,
+      extensions,
+    });
+  } catch (error) {
+    console.error("Failed to fetch extension activity:", error);
+    return json({
+      shopDomain: session.shop,
+      extensions: {},
+    });
+  }
 };
 
 export default function WidgetConfig() {
-  const { shopDomain } = useLoaderData<typeof loader>();
+  const { shopDomain, extensions } = useLoaderData<typeof loader>();
 
   return (
     <Page>
@@ -50,7 +122,7 @@ export default function WidgetConfig() {
             </div>
 
             {/* Extension Manager */}
-            <ExtensionManager />
+            <ExtensionManager extensions={extensions} />
 
             {/* Theme Integration Help */}
             <div

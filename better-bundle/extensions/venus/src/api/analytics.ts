@@ -21,24 +21,24 @@ export type ExtensionContext =
   | "order_history";
 
 export type InteractionType =
-  | "page_view"
-  | "product_view"
-  | "add_to_cart"
-  | "remove_from_cart"
-  | "search"
-  | "purchase"
+  | "page_viewed"
+  | "product_viewed"
+  | "product_added_to_cart"
+  | "product_removed_from_cart"
+  | "cart_viewed"
+  | "collection_viewed"
+  | "search_submitted"
+  | "checkout_started"
+  | "checkout_completed"
   | "customer_linked"
-  | "submit"
-  | "click"
-  | "view"
-  | "shop_now"
-  | "buy_now"
-  | "other";
+  | "recommendation_viewed"
+  | "recommendation_clicked"
+  | "recommendation_add_to_cart";
 
 // Unified Analytics Request Types
 export interface UnifiedInteractionRequest {
   session_id: string;
-  shop_id: string;
+  shop_domain: string;
   context: ExtensionContext;
   interaction_type: InteractionType;
   customer_id?: string;
@@ -53,7 +53,7 @@ export interface UnifiedInteractionRequest {
 }
 
 export interface UnifiedSessionRequest {
-  shop_id: string;
+  shop_domain: string;
   customer_id?: string;
   browser_session_id?: string;
   user_agent?: string;
@@ -91,7 +91,7 @@ class AnalyticsApiClient {
    * Get or create a session for Venus tracking
    */
   async getOrCreateSession(
-    shopId: string,
+    shopDomain: string,
     customerId?: string,
   ): Promise<string> {
     // Check if we have a valid session
@@ -107,13 +107,13 @@ class AnalyticsApiClient {
       const url = `${this.baseUrl}/api/venus/get-or-create-session`;
 
       const payload: UnifiedSessionRequest = {
-        shop_id: shopId,
+        shop_domain: shopDomain,
         customer_id: customerId || null,
-        browser_session_id: this.getBrowserSessionId(),
+        browser_session_id: null,
         user_agent: navigator.userAgent,
         ip_address: null, // Will be detected server-side
-        referrer: document.referrer,
-        page_url: window.location.href,
+        referrer: null,
+        page_url: null,
       };
 
       const response = await fetch(url, {
@@ -159,7 +159,7 @@ class AnalyticsApiClient {
     try {
       // Get or create session first
       const sessionId = await this.getOrCreateSession(
-        request.shop_id,
+        request.shop_domain,
         request.customer_id,
       );
 
@@ -203,23 +203,10 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Get unified browser session ID (shared across all extensions)
-   */
-  private getBrowserSessionId(): string {
-    let sessionId = sessionStorage.getItem("unified_browser_session_id");
-    if (!sessionId) {
-      sessionId =
-        "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("unified_browser_session_id", sessionId);
-    }
-    return sessionId;
-  }
-
-  /**
    * Track recommendation view (when recommendations are displayed)
    */
   async trackRecommendationView(
-    shopId: string,
+    shopDomain: string,
     context: ExtensionContext,
     customerId?: string,
     productIds?: string[],
@@ -228,12 +215,12 @@ class AnalyticsApiClient {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context,
-        interaction_type: "view",
+        interaction_type: "recommendation_viewed",
         customer_id: customerId,
-        page_url: window.location.href,
-        referrer: document.referrer,
+        page_url: null,
+        referrer: null,
         metadata: {
           ...metadata,
           extension_type: "venus",
@@ -254,7 +241,7 @@ class AnalyticsApiClient {
    * Track recommendation click (when user clicks on a recommendation)
    */
   async trackRecommendationClick(
-    shopId: string,
+    shopDomain: string,
     context: ExtensionContext,
     productId: string,
     position: number,
@@ -264,19 +251,19 @@ class AnalyticsApiClient {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context,
-        interaction_type: "click",
+        interaction_type: "recommendation_clicked",
         customer_id: customerId,
         product_id: productId,
-        page_url: window.location.href,
-        referrer: document.referrer,
+        page_url: null,
+        referrer: null,
         metadata: {
           ...metadata,
           extension_type: "venus",
           position,
           source: "venus_recommendation",
-          interaction_type: "recommendation_click",
+          interaction_type: "recommendation_clicked",
         },
       };
 
@@ -291,7 +278,7 @@ class AnalyticsApiClient {
    * Track shop now action (when user clicks "Shop Now" button)
    */
   async trackShopNow(
-    shopId: string,
+    shopDomain: string,
     context: ExtensionContext,
     productId: string,
     position: number,
@@ -301,19 +288,19 @@ class AnalyticsApiClient {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
+        shop_domain: shopDomain,
         context,
-        interaction_type: "shop_now",
+        interaction_type: "recommendation_clicked",
         customer_id: customerId,
         product_id: productId,
-        page_url: window.location.href,
-        referrer: document.referrer,
+        page_url: null,
+        referrer: null,
         metadata: {
           ...metadata,
           extension_type: "venus",
           position,
           source: "venus_recommendation",
-          interaction_type: "shop_now",
+          interaction_type: "recommendation_clicked",
         },
       };
 
@@ -355,6 +342,137 @@ class AnalyticsApiClient {
       console.error("Failed to store cart attribution:", error);
       return false;
     }
+  }
+
+  /**
+   * Track extension activity (load events)
+   * Note: No localStorage throttling in extensions - backend handles throttling
+   */
+  async trackExtensionLoad(
+    shopDomainOrCustomerId: string,
+    appBlockTarget: string,
+    pageUrl: string,
+  ): Promise<boolean> {
+    const extensionUid = "883039ef-d1b1-d011-d986-bea48c7c43777e121c7c";
+
+    console.log(`[Venus Tracker] Tracking extension activity:`, {
+      shopDomainOrCustomerId,
+      extensionUid,
+      appBlockTarget,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Always call the API - backend handles throttling (1 hour window)
+    const success = await this.reportExtensionActivity(
+      shopDomainOrCustomerId,
+      appBlockTarget,
+      extensionUid,
+      pageUrl,
+    );
+
+    if (success) {
+      console.log(`[Venus Tracker] Successfully tracked extension activity`);
+    } else {
+      console.warn(`[Venus Tracker] Failed to track extension activity`);
+    }
+
+    return success;
+  }
+
+  /**
+   * Report extension activity to the API
+   * Handles both shop domain and customer ID scenarios
+   */
+  private async reportExtensionActivity(
+    shopDomainOrCustomerId: string,
+    appBlockTarget: string,
+    extensionUid: string,
+    pageUrl: string,
+  ): Promise<boolean> {
+    try {
+      // Determine if we have a shop domain (contains .myshopify.com) or customer ID
+      const isShopDomain =
+        shopDomainOrCustomerId.includes(".myshopify.com") ||
+        shopDomainOrCustomerId.includes(".myshopify.com");
+
+      const requestBody = {
+        extension_type: "venus",
+        extension_uid: extensionUid,
+        page_url: pageUrl,
+        app_block_target: appBlockTarget,
+        app_block_location: this.getAppBlockLocation(appBlockTarget),
+        // Include both shop_domain and customer_id, backend will use what's available
+        shop_domain: isShopDomain ? shopDomainOrCustomerId : null,
+        customer_id: !isShopDomain ? shopDomainOrCustomerId : null,
+      };
+
+      // Use a generic endpoint that can handle both scenarios
+      const endpoint = `${this.baseUrl}/extension-activity/track-load`;
+
+      console.log(`[Venus Tracker] Sending API request:`, {
+        url: endpoint,
+        requestBody,
+        timestamp: new Date().toISOString(),
+        isShopDomain,
+      });
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      console.log(`[Venus Tracker] API response:`, {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Venus Tracker] API error response:`, errorText);
+        throw new Error(
+          `HTTP error! status: ${response.status}, body: ${errorText}`,
+        );
+      }
+
+      const responseData = await response.json();
+      console.log(
+        `[Venus Tracker] Successfully tracked activity:`,
+        responseData,
+      );
+
+      return true;
+    } catch (error) {
+      console.error(`[Venus Tracker] Failed to track activity:`, {
+        error: error.message,
+        stack: error.stack,
+        shopDomainOrCustomerId,
+        extensionUid,
+        appBlockTarget,
+        pageUrl,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Get app block location description
+   */
+  private getAppBlockLocation(appBlockTarget: string): string {
+    const locationMap = {
+      customer_account_order_status_block_render: "Order Status Page",
+      customer_account_order_index_block_render: "Order History Page",
+      customer_account_profile_block_render: "Profile Page",
+      checkout_post_purchase: "Checkout Page",
+      theme_app_extension: "Theme Extension",
+      web_pixel_extension: "Web Pixel",
+    };
+
+    return locationMap[appBlockTarget] || "Unknown Location";
   }
 }
 

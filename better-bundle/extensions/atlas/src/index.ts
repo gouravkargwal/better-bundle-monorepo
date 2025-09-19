@@ -1,6 +1,6 @@
 import { register } from "@shopify/web-pixels-extension";
 import { SUBSCRIBABLE_EVENTS } from "./config/constants";
-import { trackInteraction } from "./utils/api-client";
+import { trackInteraction, trackLoad } from "./utils/api-client";
 
 register(({ analytics, init, browser }) => {
   const customerId = init?.data?.customer?.id || null;
@@ -119,8 +119,19 @@ register(({ analytics, init, browser }) => {
     };
   };
 
+  // Track extension activity on first page view
+  let extensionTracked = false;
+
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
+    // Track extension activity (only once per session)
+    if (!extensionTracked && shopDomain) {
+      extensionTracked = true;
+      trackLoad(shopDomain, browser?.localStorage, pageUrl).catch((error) => {
+        console.warn("Failed to track Atlas extension activity:", error);
+      });
+    }
+
     // Extract and store attribution from URL parameters
     await extractAndStoreAttribution(event);
 

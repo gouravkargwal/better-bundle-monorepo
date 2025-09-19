@@ -1,3 +1,4 @@
+import React from "react";
 import {
   BlockStack,
   reactExtension,
@@ -11,6 +12,7 @@ import {
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
 import { useRecommendations } from "./hooks/useRecommendations";
+import { analyticsApi } from "./api/analytics";
 
 export default reactExtension(
   "customer-account.order-status.block.render",
@@ -21,6 +23,21 @@ function OrderStatusWithRecommendations() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { myshopifyDomain } = useShop();
   const { navigate } = useNavigation();
+
+  // Track extension activity when component mounts
+  React.useEffect(() => {
+    if (myshopifyDomain) {
+      analyticsApi
+        .trackExtensionLoad(
+          myshopifyDomain,
+          "customer_account_order_status_block_render",
+          "order-status-page",
+        )
+        .catch((error) => {
+          console.warn("Failed to track Venus extension activity:", error);
+        });
+    }
+  }, [myshopifyDomain]);
 
   const { loading, products, error, trackRecommendationClick, columnConfig } =
     useRecommendations({
@@ -37,12 +54,12 @@ function OrderStatusWithRecommendations() {
     });
 
   // Override trackRecommendationClick to include navigation
-  const handleShopNow = (
+  const handleShopNow = async (
     productId: string,
     position: number,
     productUrl: string,
   ) => {
-    const urlWithAttribution = trackRecommendationClick(
+    const urlWithAttribution = await trackRecommendationClick(
       productId,
       position,
       productUrl,

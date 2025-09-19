@@ -16,6 +16,7 @@ from app.domains.analytics.services.analytics_tracking_service import (
     AnalyticsTrackingService,
 )
 from app.core.logging.logger import get_logger
+from app.domains.analytics.services.shop_resolver import shop_resolver
 
 logger = get_logger(__name__)
 
@@ -30,7 +31,7 @@ analytics_service = AnalyticsTrackingService()
 class VenusSessionRequest(BaseModel):
     """Request model for Venus session creation"""
 
-    shop_id: str = Field(..., description="Shop identifier")
+    shop_domain: str = Field(..., description="Shop domain")
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
@@ -45,7 +46,7 @@ class VenusInteractionRequest(BaseModel):
     """Request model for Venus interaction tracking"""
 
     session_id: str = Field(..., description="Unified session identifier")
-    shop_id: str = Field(..., description="Shop identifier")
+    shop_domain: str = Field(..., description="Shop domain")
     interaction_type: InteractionType = Field(..., description="Type of interaction")
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     metadata: Dict[str, Any] = Field(
@@ -70,9 +71,13 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
     but also supports anonymous sessions.
     """
     try:
+        shop_id = await shop_resolver.get_shop_id_from_customer_id(request.customer_id)
+        if not shop_id:
+            raise HTTPException(status_code=404, detail="Shop not found for customer")
+
         # Get or create unified session
         session = await session_service.get_or_create_session(
-            shop_id=request.shop_id,
+            shop_id=shop_id,
             customer_id=request.customer_id,
             browser_session_id=request.browser_session_id,
             user_agent=request.user_agent,
@@ -130,12 +135,18 @@ async def track_venus_interaction(request: VenusInteractionRequest):
             "extension_type": "venus",
         }
 
+        # Resolve shop_id from domain
+        shop_id = await shop_resolver.get_shop_id_from_customer_id(request.customer_id)
+
+        if not shop_id:
+            raise HTTPException(status_code=404, detail="Shop not found for customer")
+
         # Track interaction using unified analytics
         interaction = await analytics_service.track_interaction(
             session_id=request.session_id,
             extension_type=ExtensionType.VENUS,
             interaction_type=request.interaction_type,
-            shop_id=request.shop_id,
+            shop_id=shop_id,
             customer_id=request.customer_id,
             metadata=enhanced_metadata,
         )
@@ -146,7 +157,7 @@ async def track_venus_interaction(request: VenusInteractionRequest):
         # Fire feature computation event for incremental processing
         try:
             await analytics_service.fire_feature_computation_event(
-                shop_id=request.shop_id,
+                shop_id=shop_id,
                 trigger_source="venus_interaction",
                 interaction_id=interaction.id,
             )
@@ -175,103 +186,106 @@ async def track_venus_interaction(request: VenusInteractionRequest):
         )
 
 
-@router.get("/session/{session_id}/interactions", response_model=VenusResponse)
-async def get_venus_session_interactions(session_id: str):
-    """Get all interactions for a Venus session"""
-    try:
-        interactions = await analytics_service.get_session_interactions(session_id)
+# @router.get("/session/{session_id}/interactions", response_model=VenusResponse)
+# async def get_venus_session_interactions(session_id: str):
+#     """Get all interactions for a Venus session"""
+#     try:
+#         interactions = await analytics_service.get_session_interactions(session_id)
 
-        # Filter for Venus interactions only
-        venus_interactions = [
-            i for i in interactions if i.extension_type == ExtensionType.VENUS
-        ]
+#         # Filter for Venus interactions only
+#         venus_interactions = [
+#             i for i in interactions if i.extension_type == ExtensionType.VENUS
+#         ]
 
-        return VenusResponse(
-            success=True,
-            message="Venus interactions retrieved successfully",
-            data={
-                "session_id": session_id,
-                "total_interactions": len(venus_interactions),
-                "interactions": [
-                    {
-                        "id": i.id,
-                        "interaction_type": i.interaction_type,
-                        "context": i.context,
-                        "product_id": i.product_id,
-                        "order_id": i.order_id,
-                        "timestamp": i.created_at.isoformat(),
-                        "metadata": i.metadata,
-                    }
-                    for i in venus_interactions
-                ],
-            },
-        )
+#         return VenusResponse(
+#             success=True,
+#             message="Venus interactions retrieved successfully",
+#             data={
+#                 "session_id": session_id,
+#                 "total_interactions": len(venus_interactions),
+#                 "interactions": [
+#                     {
+#                         "id": i.id,
+#                         "interaction_type": i.interaction_type,
+#                         "context": i.context,
+#                         "product_id": i.product_id,
+#                         "order_id": i.order_id,
+#                         "timestamp": i.created_at.isoformat(),
+#                         "metadata": i.metadata,
+#                     }
+#                     for i in venus_interactions
+#                 ],
+#             },
+#         )
 
-    except Exception as e:
-        logger.error(f"Error getting Venus session interactions: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get interactions: {str(e)}"
-        )
-
-
-@router.get("/customer/{customer_id}/interactions", response_model=VenusResponse)
-async def get_venus_customer_interactions(customer_id: str, shop_id: str):
-    """Get all Venus interactions for a specific customer"""
-    try:
-        interactions = await analytics_service.get_customer_interactions(
-            customer_id=customer_id, shop_id=shop_id
-        )
-
-        # Filter for Venus interactions only
-        venus_interactions = [
-            i for i in interactions if i.extension_type == ExtensionType.VENUS
-        ]
-
-        return VenusResponse(
-            success=True,
-            message="Customer Venus interactions retrieved successfully",
-            data={
-                "customer_id": customer_id,
-                "shop_id": shop_id,
-                "total_interactions": len(venus_interactions),
-                "interactions": [
-                    {
-                        "id": i.id,
-                        "interaction_type": i.interaction_type,
-                        "context": i.context,
-                        "product_id": i.product_id,
-                        "order_id": i.order_id,
-                        "timestamp": i.created_at.isoformat(),
-                        "metadata": i.metadata,
-                    }
-                    for i in venus_interactions
-                ],
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Error getting customer Venus interactions: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get customer interactions: {str(e)}"
-        )
+#     except Exception as e:
+#         logger.error(f"Error getting Venus session interactions: {str(e)}")
+#         raise HTTPException(
+#             status_code=500, detail=f"Failed to get interactions: {str(e)}"
+#         )
 
 
-@router.get("/performance", response_model=VenusResponse)
-async def get_venus_performance(shop_id: str, days: int = 30):
-    """Get Venus extension performance metrics"""
-    try:
-        performance = await analytics_service.get_extension_performance(
-            extension_type=ExtensionType.VENUS, shop_id=shop_id, days=days
-        )
+# @router.get("/customer/{customer_id}/interactions", response_model=VenusResponse)
+# async def get_venus_customer_interactions(customer_id: str, shop_id: str):
+#     """Get all Venus interactions for a specific customer"""
+#     try:
+#         interactions = await analytics_service.get_customer_interactions(
+#             customer_id=customer_id, shop_id=shop_id
+#         )
 
-        return VenusResponse(
-            success=True,
-            message="Venus performance metrics retrieved successfully",
-            data=performance,
-        )
+#         if not interactions:
+#             raise HTTPException(status_code=404, detail="No interactions found")
 
-    except Exception as e:
-        logger.error(f"Error getting Venus performance: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get performance metrics: {str(e)}"
-        )
+#         # Filter for Venus interactions only
+#         venus_interactions = [
+#             i for i in interactions if i.extension_type == ExtensionType.VENUS
+#         ]
+
+#         return VenusResponse(
+#             success=True,
+#             message="Customer Venus interactions retrieved successfully",
+#             data={
+#                 "customer_id": customer_id,
+#                 "shop_id": shop_id,
+#                 "total_interactions": len(venus_interactions),
+#                 "interactions": [
+#                     {
+#                         "id": i.id,
+#                         "interaction_type": i.interaction_type,
+#                         "context": i.context,
+#                         "product_id": i.product_id,
+#                         "order_id": i.order_id,
+#                         "timestamp": i.created_at.isoformat(),
+#                         "metadata": i.metadata,
+#                     }
+#                     for i in venus_interactions
+#                 ],
+#             },
+#         )
+
+#     except Exception as e:
+#         logger.error(f"Error getting customer Venus interactions: {str(e)}")
+#         raise HTTPException(
+#             status_code=500, detail=f"Failed to get customer interactions: {str(e)}"
+#         )
+
+
+# @router.get("/performance", response_model=VenusResponse)
+# async def get_venus_performance(shop_domain: str, days: int = 30):
+#     """Get Venus extension performance metrics"""
+#     try:
+#         performance = await analytics_service.get_extension_performance(
+#             extension_type=ExtensionType.VENUS, shop_domain=shop_domain, days=days
+#         )
+
+#         return VenusResponse(
+#             success=True,
+#             message="Venus performance metrics retrieved successfully",
+#             data=performance,
+#         )
+
+#     except Exception as e:
+#         logger.error(f"Error getting Venus performance: {str(e)}")
+#         raise HTTPException(
+#             status_code=500, detail=f"Failed to get performance metrics: {str(e)}"
+#         )

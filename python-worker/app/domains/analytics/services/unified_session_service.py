@@ -115,10 +115,10 @@ class UnifiedSessionService:
                 )
 
             # OPTIMIZATION: Create new session with single database call
-            # Use browser_session_id if provided, otherwise generate unified session ID
+            # Use browser_session_id if provided, otherwise generate unique session ID
             session_id = (
                 browser_session_id
-                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}"
+                or f"unified_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}_{uuid.uuid4().hex[:8]}"
             )
             expires_at = current_time + (
                 self.identified_session_duration
@@ -126,21 +126,61 @@ class UnifiedSessionService:
                 else self.anonymous_session_duration
             )
 
-            new_session_data = await db.usersession.create(
-                data={
-                    "id": session_id,
-                    "shopId": shop_id,
-                    "customerId": customer_id,
-                    "browserSessionId": browser_session_id,
-                    "status": SessionStatus.ACTIVE,
-                    "userAgent": user_agent,
-                    "ipAddress": ip_address,
-                    "referrer": referrer,
-                    "createdAt": current_time,
-                    "lastActive": current_time,
-                    "expiresAt": expires_at,
-                }
-            )
+            # Use try-catch to handle potential race conditions
+            try:
+                new_session_data = await db.usersession.create(
+                    data={
+                        "id": session_id,
+                        "shopId": shop_id,
+                        "customerId": customer_id,
+                        "browserSessionId": browser_session_id,
+                        "status": SessionStatus.ACTIVE,
+                        "userAgent": user_agent,
+                        "ipAddress": ip_address,
+                        "referrer": referrer,
+                        "createdAt": current_time,
+                        "lastActive": current_time,
+                        "expiresAt": expires_at,
+                    }
+                )
+            except Exception as e:
+                # Handle race condition - if session creation fails due to unique constraint,
+                # try to find the existing session that was created by another request
+                if "Unique constraint failed" in str(
+                    e
+                ) or "UniqueViolationError" in str(e):
+                    logger.warning(
+                        f"Session creation race condition detected, attempting to find existing session: {session_id}"
+                    )
+
+                    # Try to find the session that was created by another concurrent request
+                    existing_session = await db.usersession.find_unique(
+                        where={"id": session_id}
+                    )
+
+                    if existing_session:
+                        logger.info(
+                            f"Found existing session created by concurrent request: {existing_session.id}"
+                        )
+                        return UserSession(
+                            id=existing_session.id,
+                            shop_id=existing_session.shopId,
+                            customer_id=existing_session.customerId,
+                            browser_session_id=existing_session.browserSessionId,
+                            status=SessionStatus(existing_session.status),
+                            created_at=existing_session.createdAt,
+                            last_active=existing_session.lastActive,
+                            expires_at=existing_session.expiresAt,
+                            user_agent=existing_session.userAgent,
+                            ip_address=existing_session.ipAddress,
+                            referrer=existing_session.referrer,
+                        )
+                    else:
+                        # If we can't find the session, re-raise the original error
+                        raise e
+                else:
+                    # Re-raise non-unique constraint errors
+                    raise e
 
             logger.info(f"Created new session: {new_session_data.id}")
             return UserSession(

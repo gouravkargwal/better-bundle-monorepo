@@ -55,13 +55,11 @@ export const getOrCreateSession = async (
       // Set session to expire 30 minutes from now (server handles actual expiration)
       sessionExpiresAt = Date.now() + 30 * 60 * 1000;
 
-      console.log("🔄 Atlas session created/retrieved:", sessionId);
       return sessionId;
     } else {
       throw new Error(result.message || "Failed to create session");
     }
   } catch (error) {
-    console.error("💥 Session creation error:", error);
     throw error;
   }
 };
@@ -115,14 +113,8 @@ export const trackInteraction = async (
     if (!response.ok) {
       throw new Error(`Interaction tracking failed: ${response.status}`);
     }
-    const result = await response.json();
-    if (result.success) {
-      console.log("✅ Atlas interaction tracked:", result.data?.interaction_id);
-    } else {
-      throw new Error(result.message || "Failed to track interaction");
-    }
+    await response.json();
   } catch (error) {
-    console.error("💥 Atlas interaction tracking error:", error);
     throw error;
   }
 };
@@ -138,4 +130,71 @@ const getBrowserSessionId = async (sessionStorage: any): Promise<string> => {
     await sessionStorage.setItem("unified_browser_session_id", sessionId);
   }
   return sessionId;
+};
+
+export const trackLoad = async (
+  shopDomain: string,
+  localStorage: any,
+  pageUrl: string,
+) => {
+  try {
+    const extensionUid = "atlas-web-pixel-001";
+    const now = Date.now();
+    const lastReported = localStorage.getItem(
+      `ext_${extensionUid}_last_reported`,
+    )
+      ? parseInt(localStorage.getItem(`ext_${extensionUid}_last_reported`))
+      : null;
+
+    const hoursSinceLastReport = lastReported
+      ? (now - lastReported) / (1000 * 60 * 60)
+      : Infinity;
+
+    // Only call API if haven't reported in last 24 hours
+    if (!lastReported || hoursSinceLastReport > 24) {
+      await reportToAPI(shopDomain, extensionUid, pageUrl);
+      localStorage.setItem(`ext_${extensionUid}_last_reported`, now.toString());
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+const reportToAPI = async (
+  shopDomain: string,
+  extensionUid: string,
+  pageUrl: string,
+) => {
+  try {
+    const requestBody = {
+      extension_type: "atlas",
+      extension_uid: extensionUid,
+      page_url: pageUrl,
+      app_block_target: null,
+      app_block_location: null,
+      shop_domain: shopDomain,
+    };
+
+    const response = await fetch(
+      `${UNIFIED_ANALYTICS_BASE_URL}/extension-activity/track-load`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP error! status: ${response.status}, body: ${errorText}`,
+      );
+    }
+
+    await response.json();
+  } catch (error: any) {
+    throw error;
+  }
 };

@@ -361,6 +361,8 @@ model Shop {
   refundData                   RefundData[]
   userInteractions             UserInteraction[]
   userSessions                 UserSession[]
+  extensionActivities          ExtensionActivity[]
+
 
   @@index([shopDomain])
   @@index([isActive])
@@ -979,16 +981,6 @@ model BillingEvent {
   @@map("billing_events")
 }
 
-enum RawSourceType {
-  webhook
-  backfill
-}
-
-enum RawDataFormat {
-  rest
-  graphql
-}
-
 enum BillingPlanType {
   revenue_share
   performance_tier
@@ -1028,4 +1020,44 @@ enum BillingEventType {
   refund_processed
   billing_suspended
   billing_reactivated
+}
+
+enum ExtensionType {
+  apollo
+  atlas
+  phoenix
+  venus
+}
+
+enum AppBlockTarget {
+  customer_account_order_status_block_render
+  customer_account_order_index_block_render
+  customer_account_profile_block_render
+  checkout_post_purchase
+  theme_app_extension
+  web_pixel_extension
+}
+
+model ExtensionActivity {
+  id                String           @id @default(cuid())
+  shopId            String
+  extensionType     ExtensionType
+  extensionUid      String           @db.VarChar(255)
+  extensionName     String           @db.VarChar(100)
+  appBlockTarget    AppBlockTarget?  // For Venus app blocks, null for other extensions
+  pageUrl           String?          @db.VarChar(500) // Track which page the extension loaded on
+  appBlockLocation  String?          @db.VarChar(100) // User-friendly location name
+  lastSeen          DateTime         @default(now())
+  isActive          Boolean          @default(true) // Derived from lastSeen (last 24 hours)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  shop              Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, extensionType, extensionUid])
+  @@index([shopId])
+  @@index([extensionType])
+  @@index([lastSeen])
+  @@index([shopId, lastSeen])
+  @@index([extensionType, lastSeen])
+  @@map("ExtensionActivity")
 }
