@@ -121,8 +121,29 @@ class RefundNormalizationConsumer(BaseConsumer):
                 )
                 return
 
+            # PRE-CHECK: Only process refunds from orders with extension interactions
+            if not await self._has_extension_interactions_for_order(
+                db, shop_id, order_id
+            ):
+                self.logger.info(
+                    f"⏭️ Skipping refund normalization for order {order_id} - no extension interactions found",
+                    shop_id=shop_id,
+                    order_id=order_id,
+                )
+                return
+
             # Process refund within a transaction
             async with db.tx() as transaction:
+                # Get currency from original order data
+                order_data = await transaction.orderdata.find_first(
+                    where={"shopId": shop_id, "orderId": order_id}
+                )
+                currency_code = "USD"  # Default fallback
+                if order_data and order_data.currencyCode:
+                    currency_code = order_data.currencyCode
+                elif order_data and order_data.presentmentCurrencyCode:
+                    currency_code = order_data.presentmentCurrencyCode
+
                 # Create RefundData
                 refunded_at = datetime.utcnow()
                 if refund_obj.get("created_at"):
@@ -152,7 +173,7 @@ class RefundNormalizationConsumer(BaseConsumer):
                         "note": refund_obj.get("note") or "",
                         "restock": refund_obj.get("restock", False),
                         "totalRefundAmount": Decimal(str(final_refund_amount)),
-                        "currencyCode": refund_obj.get("currency") or "USD",
+                        "currencyCode": currency_code,
                     }
                 )
 
@@ -212,3 +233,79 @@ class RefundNormalizationConsumer(BaseConsumer):
         except Exception as e:
             self.logger.error("Failed to normalize refund", error=str(e))
             raise
+
+    async def _has_extension_interactions_for_order(
+        self, db, shop_id: str, order_id: str
+    ) -> bool:
+        """
+        Check if the original order had any extension interactions that could drive attribution.
+        Only processes refunds from orders that had extension interactions.
+        """
+        try:
+            # First, get the order data to find customer_id
+            order = await db.orderdata.find_first(
+                where={"shopId": shop_id, "orderId": order_id}
+            )
+            if not order:
+                self.logger.warning(
+                    f"Order not found for refund interaction check",
+                    shop_id=shop_id,
+                    order_id=order_id,
+                )
+                return False
+
+            customer_id = getattr(order, "customerId", None)
+            if not customer_id:
+                self.logger.info(
+                    f"No customer_id for order {order_id} - skipping refund processing",
+                    shop_id=shop_id,
+                    order_id=order_id,
+                )
+                return False
+
+            # Check for interactions in the last 30 days
+            from datetime import timedelta
+
+            cutoff_time = datetime.utcnow() - timedelta(days=30)
+
+            # Check for any interactions from attribution-eligible extensions
+            # (Phoenix, Venus, Apollo - excluding Atlas web pixel tracking)
+            interactions = await db.userinteraction.find_many(
+                where={
+                    "shopId": shop_id,
+                    "customerId": customer_id,
+                    "createdAt": {"gte": cutoff_time},
+                    "extensionType": {
+                        "in": [
+                            "phoenix",
+                            "venus",
+                            "apollo",
+                        ]  # Attribution-eligible extensions
+                    },
+                },
+                take=1,  # We only need to know if any exist
+            )
+
+            has_interactions = len(interactions) > 0
+
+            if has_interactions:
+                self.logger.info(
+                    f"✅ Found {len(interactions)} extension interactions for order {order_id}",
+                    shop_id=shop_id,
+                    order_id=order_id,
+                    customer_id=customer_id,
+                )
+            else:
+                self.logger.info(
+                    f"❌ No extension interactions found for order {order_id}",
+                    shop_id=shop_id,
+                    order_id=order_id,
+                    customer_id=customer_id,
+                )
+
+            return has_interactions
+
+        except Exception as e:
+            self.logger.error(f"Error checking extension interactions for order: {e}")
+            # If we can't check, err on the side of processing to avoid missing refunds
+            return True

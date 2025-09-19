@@ -97,6 +97,17 @@ class PurchaseAttributionConsumer(BaseConsumer):
                     order={"createdAt": "desc"},
                 )
 
+            # PRE-CHECK: Only process if customer has extension interactions
+            if not await self._has_extension_interactions(
+                db, shop_id, customer_id, session
+            ):
+                self.logger.info(
+                    f"⏭️ Skipping attribution for order {order_id} - no extension interactions found",
+                    shop_id=shop_id,
+                    customer_id=customer_id,
+                )
+                return
+
             purchase_event = PurchaseEvent(
                 order_id=order_id,
                 customer_id=customer_id,
@@ -126,3 +137,66 @@ class PurchaseAttributionConsumer(BaseConsumer):
         except Exception as e:
             self.logger.error("Failed to process purchase attribution", error=str(e))
             raise
+
+    async def _has_extension_interactions(
+        self, db, shop_id: str, customer_id: str, session
+    ) -> bool:
+        """
+        Check if customer has any extension interactions that could drive attribution.
+        Only processes orders from customers who have interacted with our extensions.
+        """
+        try:
+            # Check for interactions in the last 30 days
+            from datetime import timedelta
+
+            cutoff_time = datetime.utcnow() - timedelta(days=30)
+
+            # Build query conditions
+            where_conditions = {
+                "shopId": shop_id,
+                "createdAt": {"gte": cutoff_time},
+            }
+
+            # Add customer or session filter
+            if customer_id:
+                where_conditions["customerId"] = customer_id
+            elif session and hasattr(session, "id"):
+                where_conditions["sessionId"] = session.id
+
+            # Check for any interactions from attribution-eligible extensions
+            # (Phoenix, Venus, Apollo - excluding Atlas web pixel tracking)
+            interactions = await db.userinteraction.find_many(
+                where={
+                    **where_conditions,
+                    "extensionType": {
+                        "in": [
+                            "phoenix",
+                            "venus",
+                            "apollo",
+                        ]  # Attribution-eligible extensions
+                    },
+                },
+                take=1,  # We only need to know if any exist
+            )
+
+            has_interactions = len(interactions) > 0
+
+            if has_interactions:
+                self.logger.info(
+                    f"✅ Found {len(interactions)} extension interactions for customer {customer_id}",
+                    shop_id=shop_id,
+                    customer_id=customer_id,
+                )
+            else:
+                self.logger.info(
+                    f"❌ No extension interactions found for customer {customer_id}",
+                    shop_id=shop_id,
+                    customer_id=customer_id,
+                )
+
+            return has_interactions
+
+        except Exception as e:
+            self.logger.error(f"Error checking extension interactions: {e}")
+            # If we can't check, err on the side of processing to avoid missing attributions
+            return True
