@@ -7,29 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Ingestion metadata enums
-enum RawSourceType {
-  webhook
-  backfill
-}
-
-enum RawDataFormat {
-  rest
-  graphql
-}
-
 model RawOrder {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   shopId           String
   payload          Json
-  extractedAt      DateTime  @default(now())
-  shopifyId        String?   @db.VarChar(100) // Shopify order ID for efficient lookups
-  shopifyCreatedAt DateTime? // Shopify creation timestamp
-  shopifyUpdatedAt DateTime? // Shopify update timestamp
-  // New ingestion metadata
+  extractedAt      DateTime       @default(now())
+  shopifyId        String?        @db.VarChar(100)
+  shopifyCreatedAt DateTime?
+  shopifyUpdatedAt DateTime?
   source           RawSourceType? @default(webhook)
   format           RawDataFormat? @default(rest)
-  receivedAt       DateTime?       @default(now())
+  receivedAt       DateTime?      @default(now())
 
   @@unique([shopId, shopifyId], name: "shopId_shopifyId")
   @@index([shopId])
@@ -42,17 +30,16 @@ model RawOrder {
 }
 
 model RawProduct {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   shopId           String
   payload          Json
-  extractedAt      DateTime  @default(now())
-  shopifyId        String?   @db.VarChar(100) // Shopify product ID for efficient lookups
-  shopifyCreatedAt DateTime? // Shopify creation timestamp
-  shopifyUpdatedAt DateTime? // Shopify update timestamp
-  // New ingestion metadata
+  extractedAt      DateTime       @default(now())
+  shopifyId        String?        @db.VarChar(100)
+  shopifyCreatedAt DateTime?
+  shopifyUpdatedAt DateTime?
   source           RawSourceType? @default(webhook)
   format           RawDataFormat? @default(rest)
-  receivedAt       DateTime?       @default(now())
+  receivedAt       DateTime?      @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -64,17 +51,16 @@ model RawProduct {
 }
 
 model RawCustomer {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   shopId           String
   payload          Json
-  extractedAt      DateTime  @default(now())
-  shopifyId        String?   @db.VarChar(100) // Shopify customer ID for efficient lookups
-  shopifyCreatedAt DateTime? // Shopify creation timestamp
-  shopifyUpdatedAt DateTime? // Shopify update timestamp
-  // New ingestion metadata
+  extractedAt      DateTime       @default(now())
+  shopifyId        String?        @db.VarChar(100)
+  shopifyCreatedAt DateTime?
+  shopifyUpdatedAt DateTime?
   source           RawSourceType? @default(webhook)
   format           RawDataFormat? @default(rest)
-  receivedAt       DateTime?       @default(now())
+  receivedAt       DateTime?      @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -86,17 +72,16 @@ model RawCustomer {
 }
 
 model RawCollection {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   shopId           String
   payload          Json
-  extractedAt      DateTime  @default(now())
-  shopifyId        String?   @db.VarChar(100) // Shopify collection ID for efficient lookups
-  shopifyCreatedAt DateTime? // Shopify creation timestamp
-  shopifyUpdatedAt DateTime? // Shopify update timestamp
-  // New ingestion metadata
+  extractedAt      DateTime       @default(now())
+  shopifyId        String?        @db.VarChar(100)
+  shopifyCreatedAt DateTime?
+  shopifyUpdatedAt DateTime?
   source           RawSourceType? @default(webhook)
   format           RawDataFormat? @default(rest)
-  receivedAt       DateTime?       @default(now())
+  receivedAt       DateTime?      @default(now())
 
   @@index([shopId])
   @@index([shopId, shopifyId])
@@ -107,16 +92,10 @@ model RawCollection {
   @@map("RawCollection")
 }
 
-
-// ===================== STAGING LAYER =====================
-
-// Staging tables removed - data flows directly from Raw to Main tables
-// Raw → NormalizationConsumer → Main (canonical format)
-
 model NormalizationWatermark {
   id               String   @id @default(cuid())
   shopId           String
-  dataType         String   @db.VarChar(50) // orders, products, customers, collections
+  dataType         String   @db.VarChar(50)
   lastNormalizedAt DateTime
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -127,51 +106,51 @@ model NormalizationWatermark {
 }
 
 model OrderData {
-  id                      String    @id @default(cuid())
+  id                      String         @id @default(cuid())
   shopId                  String
   orderId                 String
-  orderName               String?   @db.VarChar(100) // Shopify order name (e.g., "#1001")
-  customerId              String?   @db.VarChar(100)
-  customerEmail           String?   @db.VarChar(255)
-  customerPhone           String?   @db.VarChar(50)
-  customerDisplayName     String?   @db.VarChar(255)
-  customerState           String?   @db.VarChar(50)
-  customerVerifiedEmail   Boolean?  @default(false)
+  orderName               String?        @db.VarChar(100)
+  customerId              String?        @db.VarChar(100)
+  customerEmail           String?        @db.VarChar(255)
+  customerPhone           String?        @db.VarChar(50)
+  customerDisplayName     String?        @db.VarChar(255)
+  customerState           String?        @db.VarChar(50)
+  customerVerifiedEmail   Boolean?       @default(false)
   customerCreatedAt       DateTime?
   customerUpdatedAt       DateTime?
-  customerDefaultAddress  Json?     @default("{}")
-  totalAmount             Float     @default(0.0)
-  subtotalAmount          Float?    @default(0.0)
-  totalTaxAmount          Float?    @default(0.0)
-  totalShippingAmount     Float?    @default(0.0)
-  totalRefundedAmount     Float?    @default(0.0)
-  totalOutstandingAmount  Float?    @default(0.0)
+  customerDefaultAddress  Json?          @default("{}")
+  totalAmount             Float          @default(0.0)
+  subtotalAmount          Float?         @default(0.0)
+  totalTaxAmount          Float?         @default(0.0)
+  totalShippingAmount     Float?         @default(0.0)
+  totalRefundedAmount     Float?         @default(0.0)
+  totalOutstandingAmount  Float?         @default(0.0)
   orderDate               DateTime
   processedAt             DateTime?
   cancelledAt             DateTime?
-  cancelReason            String?   @default("") @db.VarChar(500)
-  orderLocale             String?   @default("en") @db.VarChar(10)
-  currencyCode            String?   @default("USD") @db.VarChar(10)
-  presentmentCurrencyCode String?   @default("USD") @db.VarChar(10)
-  confirmed               Boolean   @default(false)
-  test                    Boolean   @default(false)
-  financialStatus         String?   @db.VarChar(50) // paid, pending, partially_paid, refunded, voided
-  fulfillmentStatus       String?   @db.VarChar(50) // fulfilled, partial, restocked, null
-  orderStatus             String?   @db.VarChar(50) // open, closed, cancelled, any
-  tags                    Json?     @default("[]")
-  note                    String?   @default("") @db.Text
-  noteAttributes          Json?     @default("[]")
+  cancelReason            String?        @default("") @db.VarChar(500)
+  orderLocale             String?        @default("en") @db.VarChar(10)
+  currencyCode            String?        @default("USD") @db.VarChar(10)
+  presentmentCurrencyCode String?        @default("USD") @db.VarChar(10)
+  confirmed               Boolean        @default(false)
+  test                    Boolean        @default(false)
+  financialStatus         String?        @db.VarChar(50)
+  fulfillmentStatus       String?        @db.VarChar(50)
+  orderStatus             String?        @db.VarChar(50)
+  tags                    Json?          @default("[]")
+  note                    String?        @default("")
+  noteAttributes          Json?          @default("[]")
+  shippingAddress         Json?          @default("{}")
+  billingAddress          Json?          @default("{}")
+  discountApplications    Json?          @default("[]")
+  metafields              Json?          @default("[]")
+  fulfillments            Json?          @default("[]")
+  transactions            Json?          @default("[]")
+  extras                  Json?          @default("{}")
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  shop                    Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   lineItems               LineItemData[]
-  shippingAddress         Json?     @default("{}")
-  billingAddress          Json?     @default("{}")
-  discountApplications    Json?     @default("[]")
-  metafields              Json?     @default("[]")
-  fulfillments            Json?     @default("[]")
-  transactions            Json?     @default("[]")
-  extras                  Json?     @default("{}")  // Preserve unknown fields from raw payloads
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
-  shop                    Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, orderId])
   @@index([shopId, orderDate])
@@ -188,57 +167,55 @@ model OrderData {
 }
 
 model LineItemData {
-  id          String   @id @default(cuid())
-  orderId     String   @map("order_id")
-  productId   String?  @map("product_id")
-  variantId   String?  @map("variant_id")
-  title       String?
-  quantity    Int
-  price       Float
-  properties  Json?    @default("{}")
-
-  // Establish the relation back to the OrderData table
-  order       OrderData @relation(fields: [orderId], references: [id])
+  id         String    @id @default(cuid())
+  orderId    String    @map("order_id")
+  productId  String?   @map("product_id")
+  variantId  String?   @map("variant_id")
+  title      String?
+  quantity   Int
+  price      Float
+  properties Json?     @default("{}")
+  order      OrderData @relation(fields: [orderId], references: [id])
 
   @@map("line_item_data")
 }
 
 model ProductData {
-  id                    String         @id @default(cuid())
+  id                    String    @id @default(cuid())
   shopId                String
   productId             String
-  title                 String         @db.VarChar(500)
-  handle                String         @db.VarChar(255)
-  description           String?        @db.Text
-  descriptionHtml       String?        @db.Text
-  productType           String?        @default("") @db.VarChar(100)
-  vendor                String?        @default("") @db.VarChar(255)
-  tags                  Json?          @default("[]")
-  status                String?        @default("ACTIVE")
-  totalInventory        Int?           @default(0)
-  price                 Float          @default(0.0)
-  compareAtPrice        Float?         @default(0.0)
-  inventory             Int?           @default(0)
-  imageUrl              String?        @db.VarChar(1000)
-  imageAlt              String?        @db.VarChar(500)
+  title                 String    @db.VarChar(500)
+  handle                String    @db.VarChar(255)
+  description           String?
+  descriptionHtml       String?
+  productType           String?   @default("") @db.VarChar(100)
+  vendor                String?   @default("") @db.VarChar(255)
+  tags                  Json?     @default("[]")
+  status                String?   @default("ACTIVE")
+  totalInventory        Int?      @default(0)
+  price                 Float     @default(0.0)
+  compareAtPrice        Float?    @default(0.0)
+  inventory             Int?      @default(0)
+  imageUrl              String?   @db.VarChar(1000)
+  imageAlt              String?   @db.VarChar(500)
   productCreatedAt      DateTime?
   productUpdatedAt      DateTime?
-  onlineStoreUrl        String?        @db.VarChar(1000)
-  onlineStorePreviewUrl String?        @db.VarChar(1000)
-  seoTitle              String?        @db.VarChar(500)
-  seoDescription        String?        @db.Text
-  templateSuffix        String?        @db.VarChar(100)
-  variants              Json?          @default("[]")
-  images                Json?          @default("[]")
-  media                 Json?          @default("[]")
-  options               Json?          @default("[]")
-  collections           Json?          @default("[]")
-  metafields            Json?          @default("[]")
-  extras                Json?          @default("{}")  // Preserve unknown fields from raw payloads
-  isActive              Boolean        @default(true)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  shop                  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  onlineStoreUrl        String?   @db.VarChar(1000)
+  onlineStorePreviewUrl String?   @db.VarChar(1000)
+  seoTitle              String?   @db.VarChar(500)
+  seoDescription        String?
+  templateSuffix        String?   @db.VarChar(100)
+  variants              Json?     @default("[]")
+  images                Json?     @default("[]")
+  media                 Json?     @default("[]")
+  options               Json?     @default("[]")
+  collections           Json?     @default("[]")
+  metafields            Json?     @default("[]")
+  extras                Json?     @default("{}")
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  shop                  Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
   @@index([shopId, productType])
@@ -274,8 +251,8 @@ model CustomerData {
   addresses        Json?     @default("[]")
   currencyCode     String?   @default("USD") @db.VarChar(10)
   customerLocale   String?   @default("en") @db.VarChar(10)
-  isActive         Boolean   @default(true)  // For soft delete
-  extras           Json?     @default("{}")  // Preserve unknown fields from raw payloads
+  isActive         Boolean   @default(true)
+  extras           Json?     @default("{}")
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -296,17 +273,17 @@ model CollectionData {
   collectionId   String
   title          String   @db.VarChar(500)
   handle         String   @db.VarChar(255)
-  description    String?  @default("") @db.Text
+  description    String?  @default("")
   templateSuffix String?  @default("") @db.VarChar(100)
   seoTitle       String?  @default("") @db.VarChar(500)
-  seoDescription String?  @default("") @db.Text
+  seoDescription String?  @default("")
   imageUrl       String?  @db.VarChar(1000)
   imageAlt       String?  @db.VarChar(500)
   productCount   Int      @default(0)
   isAutomated    Boolean  @default(false)
-  isActive       Boolean  @default(true)  // For soft delete
+  isActive       Boolean  @default(true)
   metafields     Json?    @default("[]")
-  extras         Json?    @default("{}")  // Preserve unknown fields from raw payloads
+  extras         Json?    @default("{}")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -318,7 +295,6 @@ model CollectionData {
   @@index([shopId, productCount])
   @@map("CollectionData")
 }
-
 
 model Session {
   id            String    @id
@@ -343,43 +319,36 @@ model Session {
 }
 
 model Shop {
-  id                   String                   @id @default(cuid())
-  shopDomain           String                   @unique @db.VarChar(255)
-  customDomain         String?                  @db.VarChar(255)
-  accessToken          String                   @db.VarChar(1000)
-  planType             String                   @default("Free") @db.VarChar(50)
-  currencyCode         String?                  @db.VarChar(10)
-  moneyFormat          String?                  @db.VarChar(100)
-  isActive             Boolean                  @default(true)
-  email                String?                  @db.VarChar(255)
-  createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
-  lastAnalysisAt       DateTime?
-  orderData            OrderData[]
-  productData          ProductData[]
-  customerData         CustomerData[]
-  collectionData       CollectionData[]
-  featureComputations  FeatureComputation[]
-  userFeatures         UserFeatures[]
-  productFeatures      ProductFeatures[]
-  interactionFeatures  InteractionFeatures[]
-
-  // Enhanced feature models
-  collectionFeatures        CollectionFeatures[]
-  customerBehaviorFeatures  CustomerBehaviorFeatures[]
-  sessionFeatures           SessionFeatures[]
-  productPairFeatures       ProductPairFeatures[]
-  searchProductFeatures     SearchProductFeatures[]
-
-  
-  // Unified analytics
-  userSessions        UserSession[]
-  userInteractions    UserInteraction[]
-  purchaseAttributions PurchaseAttribution[]
-
-  // Refund system
-  refundData          RefundData[]
+  id                           String                        @id @default(cuid())
+  shopDomain                   String                        @unique @db.VarChar(255)
+  customDomain                 String?                       @db.VarChar(255)
+  accessToken                  String                        @db.VarChar(1000)
+  planType                     String                        @default("Free") @db.VarChar(50)
+  currencyCode                 String?                       @db.VarChar(10)
+  moneyFormat                  String?                       @db.VarChar(100)
+  isActive                     Boolean                       @default(true)
+  email                        String?                       @db.VarChar(255)
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+  lastAnalysisAt               DateTime?
+  collectionData               CollectionData[]
+  collectionFeatures           CollectionFeatures[]
+  customerBehaviorFeatures     CustomerBehaviorFeatures[]
+  customerData                 CustomerData[]
+  featureComputations          FeatureComputation[]
+  interactionFeatures          InteractionFeatures[]
+  orderData                    OrderData[]
+  productData                  ProductData[]
+  productFeatures              ProductFeatures[]
+  productPairFeatures          ProductPairFeatures[]
+  searchProductFeatures        SearchProductFeatures[]
+  sessionFeatures              SessionFeatures[]
+  userFeatures                 UserFeatures[]
+  purchaseAttributions         PurchaseAttribution[]
   refundAttributionAdjustments RefundAttributionAdjustment[]
+  refundData                   RefundData[]
+  userInteractions             UserInteraction[]
+  userSessions                 UserSession[]
 
   @@index([shopDomain])
   @@index([isActive])
@@ -388,58 +357,41 @@ model Shop {
   @@map("Shop")
 }
 
-// ============= USER/CUSTOMER FEATURES =============
-
 model UserFeatures {
-  id         String @id @default(cuid())
-  shopId     String
-  customerId String
-
-  // Purchase Metrics
-  totalPurchases Int   @default(0)
-  totalSpent     Float @default(0)
-  avgOrderValue  Float @default(0)
-  lifetimeValue  Float @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Time-based Metrics
-  daysSinceFirstOrder    Int?
-  daysSinceLastOrder     Int?
-  avgDaysBetweenOrders   Float?
-  orderFrequencyPerMonth Float?
-
-  // Product Preferences
-  distinctProductsPurchased   Int     @default(0)
-  distinctCategoriesPurchased Int     @default(0)
-  preferredCategory           String? @db.VarChar(100)
-  preferredVendor             String? @db.VarChar(255)
-  pricePointPreference        String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"
-
-  // Discount Behavior
-  ordersWithDiscountCount Int    @default(0)
-  discountSensitivity     Float? // % of orders with discounts
-  avgDiscountAmount       Float?
-
-  // Enhanced Customer Features (from Order API)
-  customerState        String? @db.VarChar(50)  // "ENABLED", "DISABLED", etc.
-  isVerifiedEmail      Boolean @default(false)  // Email verification status
-  customerAge          Int?                     // Days since customer creation
-  hasDefaultAddress    Boolean @default(false)  // Has default address
-  geographicRegion     String? @db.VarChar(100) // Geographic region from address
-  currencyPreference   String? @db.VarChar(10)  // Preferred currency
-  customerHealthScore  Int     @default(0)      // 0-100 customer health score
-
-  // Refund Metrics (NEW)
-  refundedOrders       Int     @default(0)      // Number of refunded orders
-  refundRate           Float   @default(0.0)    // Percentage of orders refunded
-  totalRefundedAmount  Float   @default(0.0)    // Total amount refunded
-  netLifetimeValue     Float   @default(0.0)    // Lifetime value minus refunds
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                          String   @id @default(cuid())
+  shopId                      String
+  customerId                  String
+  totalPurchases              Int      @default(0)
+  totalSpent                  Float    @default(0)
+  avgOrderValue               Float    @default(0)
+  lifetimeValue               Float    @default(0)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  daysSinceFirstOrder         Int?
+  daysSinceLastOrder          Int?
+  avgDaysBetweenOrders        Float?
+  orderFrequencyPerMonth      Float?
+  distinctProductsPurchased   Int      @default(0)
+  distinctCategoriesPurchased Int      @default(0)
+  preferredCategory           String?  @db.VarChar(100)
+  preferredVendor             String?  @db.VarChar(255)
+  pricePointPreference        String?  @db.VarChar(20)
+  ordersWithDiscountCount     Int      @default(0)
+  discountSensitivity         Float?
+  avgDiscountAmount           Float?
+  customerState               String?  @db.VarChar(50)
+  isVerifiedEmail             Boolean  @default(false)
+  customerAge                 Int?
+  hasDefaultAddress           Boolean  @default(false)
+  geographicRegion            String?  @db.VarChar(100)
+  currencyPreference          String?  @db.VarChar(10)
+  customerHealthScore         Int      @default(0)
+  refundedOrders              Int      @default(0)
+  refundRate                  Float    @default(0.0)
+  totalRefundedAmount         Float    @default(0.0)
+  netLifetimeValue            Float    @default(0.0)
+  lastComputedAt              DateTime @default(now())
+  shop                        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId])
   @@index([shopId, totalSpent])
@@ -450,80 +402,59 @@ model UserFeatures {
   @@map("UserFeatures")
 }
 
-// ============= PRODUCT FEATURES =============
-
 model ProductFeatures {
-  id        String @id @default(cuid())
-  shopId    String
-  productId String
-
-  // View & Engagement Metrics (30-day window)
-  viewCount30d        Int @default(0)
-  uniqueViewers30d    Int @default(0)
-  cartAddCount30d     Int @default(0)
-  cartViewCount30d    Int @default(0)
-  cartRemoveCount30d  Int @default(0)
-  purchaseCount30d    Int @default(0)
-  uniquePurchasers30d Int @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Conversion Metrics
-  viewToCartRate        Float? // cartAdds / views
-  cartToPurchaseRate    Float? // purchases / cartAdds
-  overallConversionRate Float? // purchases / views
-  cartAbandonmentRate   Float? // cart views without purchase
-  cartModificationRate  Float? // cart removes / cart adds
-  cartViewToPurchaseRate Float? // purchases / cart views
-
-  // Temporal Metrics
+  id                     String    @id @default(cuid())
+  shopId                 String
+  productId              String
+  viewCount30d           Int       @default(0)
+  uniqueViewers30d       Int       @default(0)
+  cartAddCount30d        Int       @default(0)
+  cartViewCount30d       Int       @default(0)
+  cartRemoveCount30d     Int       @default(0)
+  purchaseCount30d       Int       @default(0)
+  uniquePurchasers30d    Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  viewToCartRate         Float?
+  cartToPurchaseRate     Float?
+  overallConversionRate  Float?
+  cartAbandonmentRate    Float?
+  cartModificationRate   Float?
+  cartViewToPurchaseRate Float?
   lastViewedAt           DateTime?
   lastPurchasedAt        DateTime?
   firstPurchasedAt       DateTime?
   daysSinceFirstPurchase Int?
   daysSinceLastPurchase  Int?
-
-  // Price & Inventory
-  avgSellingPrice   Float? // Actual price from orders
-  priceVariance     Float? // Price consistency
-  totalInventory    Int?   // Total inventory from ProductData
-  inventoryTurnover Float? // Sales rate vs stock
-  stockVelocity     Float? // Units sold per day
-  priceTier         String? @db.VarChar(20) // "budget", "mid", "premium", "luxury"
-
-  // Product Metadata Scores (existing fields)
-  variantComplexity    Float? // 0-1 normalized
-  imageRichness        Float? // 0-1 normalized  
-  tagDiversity         Float? // 0-1 normalized
-  metafieldUtilization Float? // 0-1 normalized
-
-  // Enhanced Features (from new Shopify data)
-  mediaRichness        Float?  // 0-100 score based on media content
-  seoOptimization      Float?  // 0-100 SEO optimization score
-  seoTitleLength       Int?    // Length of SEO title
-  seoDescriptionLength Int?    // Length of SEO description
-  hasVideoContent      Boolean @default(false) // Has video media
-  has3DContent         Boolean @default(false) // Has 3D model media
-  mediaCount           Int     @default(0)     // Total media items
-  hasOnlineStoreUrl    Boolean @default(false) // Has online store URL
-  hasPreviewUrl        Boolean @default(false) // Has preview URL
-  hasCustomTemplate    Boolean @default(false) // Has custom template
-
-  // Computed Scores
-  popularityScore Float @default(0) // Normalized 0-1
-  trendingScore   Float @default(0) // Velocity change
-
-  // Refund Metrics (NEW)
-  refundedOrders      Int   @default(0)   // Number of refunded orders for this product
-  refundRate          Float @default(0.0) // Percentage of orders refunded
-  totalRefundedAmount Float @default(0.0) // Total amount refunded for this product
-  netRevenue          Float @default(0.0) // Revenue minus refunds
-  refundRiskScore     Float @default(0.0) // Risk score based on refund rate (0-100)
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  avgSellingPrice        Float?
+  priceVariance          Float?
+  totalInventory         Int?
+  inventoryTurnover      Float?
+  stockVelocity          Float?
+  priceTier              String?   @db.VarChar(20)
+  variantComplexity      Float?
+  imageRichness          Float?
+  tagDiversity           Float?
+  metafieldUtilization   Float?
+  mediaRichness          Float?
+  seoOptimization        Float?
+  seoTitleLength         Int?
+  seoDescriptionLength   Int?
+  hasVideoContent        Boolean   @default(false)
+  has3DContent           Boolean   @default(false)
+  mediaCount             Int       @default(0)
+  hasOnlineStoreUrl      Boolean   @default(false)
+  hasPreviewUrl          Boolean   @default(false)
+  hasCustomTemplate      Boolean   @default(false)
+  popularityScore        Float     @default(0)
+  trendingScore          Float     @default(0)
+  refundedOrders         Int       @default(0)
+  refundRate             Float     @default(0.0)
+  totalRefundedAmount    Float     @default(0.0)
+  netRevenue             Float     @default(0.0)
+  refundRiskScore        Float     @default(0.0)
+  lastComputedAt         DateTime  @default(now())
+  shop                   Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId])
   @@index([shopId, popularityScore])
@@ -537,47 +468,32 @@ model ProductFeatures {
   @@map("ProductFeatures")
 }
 
-// ============= COLLECTION FEATURES =============
-
 model CollectionFeatures {
-  id           String @id @default(cuid())
-  shopId       String
-  collectionId String
-
-  // Basic Metrics
-  productCount Int     @default(0)
-  isAutomated  Boolean @default(false)
-
-  // Engagement Metrics (30-day window)
-  viewCount30d     Int    @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  uniqueViewers30d Int    @default(0)
-  clickThroughRate Float? // Product clicks / collection views
-  bounceRate       Float? // Single page visits / total visits
-
-  // Product Metrics
-  avgProductPrice Float?
-  minProductPrice Float?
-  maxProductPrice Float?
-  priceRange      Float? // max - min
-  priceVariance   Float? // Standard deviation
-
-  // Performance
-  conversionRate      Float? // Purchases from collection / views
-  revenueContribution Float? // % of total store revenue
-  topProducts         Json @default("[]") // Array of top 5 product IDs
-  topVendors          Json @default("[]") // Array of main vendors
-
-  // Scores
-  performanceScore Float @default(0)
-  seoScore         Int   @default(0)
-  imageScore       Int   @default(0)
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  shopId              String
+  collectionId        String
+  productCount        Int      @default(0)
+  isAutomated         Boolean  @default(false)
+  viewCount30d        Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  uniqueViewers30d    Int      @default(0)
+  clickThroughRate    Float?
+  bounceRate          Float?
+  avgProductPrice     Float?
+  minProductPrice     Float?
+  maxProductPrice     Float?
+  priceRange          Float?
+  priceVariance       Float?
+  conversionRate      Float?
+  revenueContribution Float?
+  topProducts         Json     @default("[]")
+  topVendors          Json     @default("[]")
+  performanceScore    Float    @default(0)
+  seoScore            Int      @default(0)
+  imageScore          Int      @default(0)
+  lastComputedAt      DateTime @default(now())
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, collectionId])
   @@index([shopId, productCount])
@@ -586,86 +502,60 @@ model CollectionFeatures {
   @@map("CollectionFeatures")
 }
 
-// ============= CUSTOMER BEHAVIOR FEATURES =============
-
 model CustomerBehaviorFeatures {
-  id         String @id @default(cuid())
-  shopId     String
-  customerId String
-
-  // Session Metrics
-  sessionCount        Int    @default(0)
-  avgEventsPerSession Float?
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Event Counts
-  totalEventCount     Int @default(0)
-  productViewCount    Int @default(0)
-  collectionViewCount Int @default(0)
-  cartAddCount        Int @default(0)
-  cartViewCount       Int @default(0)
-  cartRemoveCount     Int @default(0)
-  searchCount         Int @default(0)
-  checkoutStartCount  Int @default(0)
-  purchaseCount       Int @default(0)
-
-  // Temporal Patterns
-  daysSinceFirstEvent Int  @default(0)
-  daysSinceLastEvent  Int  @default(0)
-  mostActiveHour      Int? // 0-23
-  mostActiveDay       Int? // 0-6 (Sun-Sat)
-
-  // Behavior Patterns
-  uniqueProductsViewed    Int     @default(0)
-  uniqueCollectionsViewed Int     @default(0)
-  searchTerms             Json @default("[]") // Array of search queries
-  topCategories           Json @default("[]") // Top 3 preferred categories
-  deviceType              String? @db.VarChar(20) // "mobile", "desktop", "tablet"
-  primaryReferrer         String? @db.VarChar(255)
-
-  // Conversion Metrics
-  browseToCartRate     Float? // Cart adds / product views
-  cartToPurchaseRate   Float? // Purchases / cart adds
-  searchToPurchaseRate Float? // Purchases after search / searches
-
-  // Computed Scores (0-1 normalized)
-  engagementScore Float @default(0)
-  recencyScore    Float @default(0)
-  diversityScore  Float @default(0)
-  behavioralScore Float @default(0)
-
-  // NEW: Enhanced features from unified analytics
-  // Cross-session features
-  totalUnifiedSessions    Int   @default(0)
-  crossSessionSpanDays    Int   @default(0)
-  sessionFrequencyScore   Float @default(0)
-  deviceDiversity         Int   @default(0)
-  avgSessionDuration      Float? // Enhanced session duration from unified analytics
-
-  // Extension-specific features
-  phoenixInteractionCount    Int   @default(0)
-  apolloInteractionCount     Int   @default(0)
-  venusInteractionCount      Int   @default(0)
-  atlasInteractionCount      Int   @default(0)
-  extensionEngagementScore   Float @default(0)
-  recommendationClickRate    Float @default(0)
-  upsellInteractionCount     Int   @default(0)
-
-  // Enhanced session metrics
-  totalInteractionsInSessions Int   @default(0)
-  avgInteractionsPerSession   Float @default(0)
-  sessionEngagementScore      Float @default(0)
-
-  // Attribution features
-  multiTouchAttributionScore Float @default(0)
-  attributionRevenue         Float @default(0)
-  conversionPathLength       Int   @default(0)
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                          String   @id @default(cuid())
+  shopId                      String
+  customerId                  String
+  sessionCount                Int      @default(0)
+  avgEventsPerSession         Float?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  totalEventCount             Int      @default(0)
+  productViewCount            Int      @default(0)
+  collectionViewCount         Int      @default(0)
+  cartAddCount                Int      @default(0)
+  cartViewCount               Int      @default(0)
+  cartRemoveCount             Int      @default(0)
+  searchCount                 Int      @default(0)
+  checkoutStartCount          Int      @default(0)
+  purchaseCount               Int      @default(0)
+  daysSinceFirstEvent         Int      @default(0)
+  daysSinceLastEvent          Int      @default(0)
+  mostActiveHour              Int?
+  mostActiveDay               Int?
+  uniqueProductsViewed        Int      @default(0)
+  uniqueCollectionsViewed     Int      @default(0)
+  searchTerms                 Json     @default("[]")
+  topCategories               Json     @default("[]")
+  deviceType                  String?  @db.VarChar(20)
+  primaryReferrer             String?  @db.VarChar(255)
+  browseToCartRate            Float?
+  cartToPurchaseRate          Float?
+  searchToPurchaseRate        Float?
+  engagementScore             Float    @default(0)
+  recencyScore                Float    @default(0)
+  diversityScore              Float    @default(0)
+  behavioralScore             Float    @default(0)
+  totalUnifiedSessions        Int      @default(0)
+  crossSessionSpanDays        Int      @default(0)
+  sessionFrequencyScore       Float    @default(0)
+  deviceDiversity             Int      @default(0)
+  avgSessionDuration          Float?
+  phoenixInteractionCount     Int      @default(0)
+  apolloInteractionCount      Int      @default(0)
+  venusInteractionCount       Int      @default(0)
+  atlasInteractionCount       Int      @default(0)
+  extensionEngagementScore    Float    @default(0)
+  recommendationClickRate     Float    @default(0)
+  upsellInteractionCount      Int      @default(0)
+  totalInteractionsInSessions Int      @default(0)
+  avgInteractionsPerSession   Float    @default(0)
+  sessionEngagementScore      Float    @default(0)
+  multiTouchAttributionScore  Float    @default(0)
+  attributionRevenue          Float    @default(0)
+  conversionPathLength        Int      @default(0)
+  lastComputedAt              DateTime @default(now())
+  shop                        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId])
   @@index([shopId, engagementScore])
@@ -678,48 +568,33 @@ model CustomerBehaviorFeatures {
   @@map("CustomerBehaviorFeatures")
 }
 
-// ============= INTERACTION FEATURES =============
-
 model InteractionFeatures {
-  id         String @id @default(cuid())
-  shopId     String
-  customerId String
-  productId  String
-
-  // Event Counts
-  viewCount     Int @default(0)
-  cartAddCount  Int @default(0)
-  cartViewCount Int @default(0)
-  cartRemoveCount Int @default(0)
-  purchaseCount Int @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Temporal Data
-  firstViewDate     DateTime?
-  lastViewDate      DateTime?
-  firstPurchaseDate DateTime?
-  lastPurchaseDate  DateTime?
-
-  // Conversion Metrics
-  viewToPurchaseDays  Int? // Days between first view and purchase
-  interactionSpanDays Int? // Days between first and last interaction
-
-  // Computed Scores
-  interactionScore Float  @default(0) // Weighted: views*1 + cart*3 + purchase*7
-  affinityScore    Float? // Normalized 0-1
-
-  // Refund Metrics (NEW)
-  refundedPurchases   Int   @default(0)   // Number of refunded purchases for this interaction
-  refundRate          Float @default(0.0) // Percentage of purchases refunded
-  totalRefundedAmount Float @default(0.0) // Total amount refunded for this interaction
-  netPurchaseValue    Float @default(0.0) // Purchase value minus refunds
-  refundRiskScore     Float @default(0.0) // Risk score based on refund rate (0-100)
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  shopId              String
+  customerId          String
+  productId           String
+  viewCount           Int       @default(0)
+  cartAddCount        Int       @default(0)
+  cartViewCount       Int       @default(0)
+  cartRemoveCount     Int       @default(0)
+  purchaseCount       Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  firstViewDate       DateTime?
+  lastViewDate        DateTime?
+  firstPurchaseDate   DateTime?
+  lastPurchaseDate    DateTime?
+  viewToPurchaseDays  Int?
+  interactionSpanDays Int?
+  interactionScore    Float     @default(0)
+  affinityScore       Float?
+  refundedPurchases   Int       @default(0)
+  refundRate          Float     @default(0.0)
+  totalRefundedAmount Float     @default(0.0)
+  netPurchaseValue    Float     @default(0.0)
+  refundRiskScore     Float     @default(0.0)
+  lastComputedAt      DateTime  @default(now())
+  shop                Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId, productId])
   @@index([shopId, customerId])
@@ -732,48 +607,35 @@ model InteractionFeatures {
   @@map("InteractionFeatures")
 }
 
-// ============= SESSION FEATURES =============
-
 model SessionFeatures {
-  id         String  @id @default(cuid())
-  shopId     String
-  sessionId  String // From clientId
-  customerId String? // Null if anonymous
-
-  // Session Timing
-  startTime       DateTime
-  endTime         DateTime
-  durationSeconds Int
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Event Counts
-  eventCount          Int @default(0)
-  pageViewCount       Int @default(0)
-  productViewCount    Int @default(0)
-  collectionViewCount Int @default(0)
-  searchCount         Int @default(0)
-  cartAddCount        Int @default(0)
-  cartViewCount       Int @default(0)
-  cartRemoveCount     Int @default(0)
-
-  // Conversion
-  checkoutStarted   Boolean @default(false)
-  checkoutCompleted Boolean @default(false)
-  orderValue        Float?
-  cartViewed        Boolean @default(false)
-  cartAbandoned     Boolean @default(false)
-
-  // Context
-  deviceType     String? @db.VarChar(20)
-  referrerDomain String? @db.VarChar(255)
-  landingPage    String? @db.VarChar(500)
-  exitPage       String? @db.VarChar(500)
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  shopId              String
+  sessionId           String
+  customerId          String?
+  startTime           DateTime
+  endTime             DateTime
+  durationSeconds     Int
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  eventCount          Int      @default(0)
+  pageViewCount       Int      @default(0)
+  productViewCount    Int      @default(0)
+  collectionViewCount Int      @default(0)
+  searchCount         Int      @default(0)
+  cartAddCount        Int      @default(0)
+  cartViewCount       Int      @default(0)
+  cartRemoveCount     Int      @default(0)
+  checkoutStarted     Boolean  @default(false)
+  checkoutCompleted   Boolean  @default(false)
+  orderValue          Float?
+  cartViewed          Boolean  @default(false)
+  cartAbandoned       Boolean  @default(false)
+  deviceType          String?  @db.VarChar(20)
+  referrerDomain      String?  @db.VarChar(255)
+  landingPage         String?  @db.VarChar(500)
+  exitPage            String?  @db.VarChar(500)
+  lastComputedAt      DateTime @default(now())
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, sessionId])
   @@index([shopId, customerId])
@@ -783,32 +645,23 @@ model SessionFeatures {
   @@map("SessionFeatures")
 }
 
-// ============= PRODUCT PAIR FEATURES =============
-
 model ProductPairFeatures {
-  id         String @id @default(cuid())
-  shopId     String
-  productId1 String
-  productId2 String
-
-  // Co-occurrence Counts
-  coPurchaseCount Int @default(0) // Same order
-  coViewCount     Int @default(0) // Same session
-  coCartCount     Int @default(0) // Same cart
-  coCartViews     Int @default(0) // Same cart view session
-  coCartRemoves   Int @default(0) // Same cart remove session
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Metrics
-  supportScore     Float? // Confidence metric
-  liftScore        Float? // Correlation strength
+  id               String    @id @default(cuid())
+  shopId           String
+  productId1       String
+  productId2       String
+  coPurchaseCount  Int       @default(0)
+  coViewCount      Int       @default(0)
+  coCartCount      Int       @default(0)
+  coCartViews      Int       @default(0)
+  coCartRemoves    Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  supportScore     Float?
+  liftScore        Float?
   lastCoOccurrence DateTime?
-
-  lastComputedAt DateTime @default(now())
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lastComputedAt   DateTime  @default(now())
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, productId1, productId2])
   @@index([shopId, productId1])
@@ -818,31 +671,22 @@ model ProductPairFeatures {
   @@map("ProductPairFeatures")
 }
 
-// ============= SEARCH PRODUCT FEATURES =============
-
 model SearchProductFeatures {
-  id          String @id @default(cuid())
-  shopId      String
-  searchQuery String @db.VarChar(500)
-  productId   String
-
-  // Metrics
-  impressionCount Int    @default(0) // Times shown in results
-  clickCount      Int    @default(0) // Times clicked
-  purchaseCount   Int    @default(0) // Times purchased after search
-  avgPosition     Float? // Average position in results
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Rates
-  clickThroughRate Float? // Clicks / impressions
-  conversionRate   Float? // Purchases / clicks
-
-  lastOccurrence DateTime?
-  lastComputedAt DateTime  @default(now())
-  shop           Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id               String    @id @default(cuid())
+  shopId           String
+  searchQuery      String    @db.VarChar(500)
+  productId        String
+  impressionCount  Int       @default(0)
+  clickCount       Int       @default(0)
+  purchaseCount    Int       @default(0)
+  avgPosition      Float?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  clickThroughRate Float?
+  conversionRate   Float?
+  lastOccurrence   DateTime?
+  lastComputedAt   DateTime  @default(now())
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, searchQuery, productId])
   @@index([shopId, searchQuery])
@@ -855,8 +699,8 @@ model SearchProductFeatures {
 model UserIdentityLink {
   id         String   @id @default(cuid())
   shopId     String
-  clientId   String // Anonymous session/client ID
-  customerId String // Permanent customer ID
+  clientId   String
+  customerId String
   linkedAt   DateTime @default(now())
 
   @@unique([shopId, clientId, customerId])
@@ -869,7 +713,7 @@ model FeatureComputation {
   id           String    @id @default(cuid())
   shopId       String
   jobId        String
-  status       String    @default("pending") // "pending", "computing", "completed", "failed"
+  status       String    @default("pending")
   featureCount Int       @default(0)
   metadata     Json?
   createdAt    DateTime  @default(now())
@@ -882,33 +726,23 @@ model FeatureComputation {
   @@map("FeatureComputation")
 }
 
-// ============= UNIFIED ANALYTICS TABLES =============
-
 model UserSession {
-  id                String   @id @default(cuid())
-  shopId            String   @map("shop_id") @db.VarChar(255)
-  customerId        String?  @map("customer_id") @db.VarChar(255)
-  browserSessionId  String   @map("browser_session_id") @db.VarChar(255)
-  status            String   @default("active") @db.VarChar(50)
-
-  // Timestamps
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  lastActive        DateTime @default(now()) @map("last_active") @db.Timestamptz
-  expiresAt         DateTime? @map("expires_at") @db.Timestamptz
-
-  // Metadata
-  userAgent         String?  @map("user_agent") @db.Text
-  ipAddress         String?  @map("ip_address") @db.VarChar(45)
-  referrer          String?  @db.Text
-
-  // Extension tracking
-  extensionsUsed    Json     @default("[]") @map("extensions_used")
-  totalInteractions Int      @default(0) @map("total_interactions")
-
-  // Relations
-  interactions      UserInteraction[]
+  id                String                @id @default(cuid())
+  shopId            String                @map("shop_id") @db.VarChar(255)
+  customerId        String?               @map("customer_id") @db.VarChar(255)
+  browserSessionId  String                @map("browser_session_id") @db.VarChar(255)
+  status            String                @default("active") @db.VarChar(50)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActive        DateTime              @default(now()) @map("last_active") @db.Timestamptz(6)
+  expiresAt         DateTime?             @map("expires_at") @db.Timestamptz(6)
+  userAgent         String?               @map("user_agent")
+  ipAddress         String?               @map("ip_address") @db.VarChar(45)
+  referrer          String?
+  extensionsUsed    Json                  @default("[]") @map("extensions_used")
+  totalInteractions Int                   @default(0) @map("total_interactions")
   attributions      PurchaseAttribution[]
-  shop              Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  interactions      UserInteraction[]
+  shop              Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, customerId, browserSessionId])
   @@index([shopId])
@@ -921,18 +755,17 @@ model UserSession {
 }
 
 model UserInteraction {
-  id                      String   @id @default(cuid())
-  sessionId               String   @map("session_id") @db.VarChar(255)
-  extensionType           String   @map("extension_type") @db.VarChar(50)
-  interactionType         String   @map("interaction_type") @db.VarChar(50)
-  customerId              String?  @map("customer_id") @db.VarChar(255)
-  shopId                  String   @map("shop_id") @db.VarChar(255)
-  metadata                Json     @default("{}")
-  // Timestamps
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-  // Relations
-  session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id              String      @id @default(cuid())
+  sessionId       String      @map("session_id") @db.VarChar(255)
+  extensionType   String      @map("extension_type") @db.VarChar(50)
+  interactionType String      @map("interaction_type") @db.VarChar(50)
+  customerId      String?     @map("customer_id") @db.VarChar(255)
+  shopId          String      @map("shop_id") @db.VarChar(255)
+  metadata        Json        @default("{}")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  session         UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  shop            Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
   @@index([sessionId])
   @@index([customerId])
   @@index([shopId])
@@ -946,36 +779,25 @@ model UserInteraction {
 }
 
 model PurchaseAttribution {
-  id                      String   @id @default(cuid())
-  sessionId               String   @map("session_id") @db.VarChar(255)
-  orderId                 String   @map("order_id") @db.VarChar(255)
-  customerId              String?  @map("customer_id") @db.VarChar(255)
-  shopId                  String   @map("shop_id") @db.VarChar(255)
-
-  // Attribution details
-  contributingExtensions  Json     @map("contributing_extensions")
-  attributionWeights      Json     @map("attribution_weights")
-
-  // Revenue tracking
-  totalRevenue            Decimal  @map("total_revenue") @db.Decimal(10, 2)
-  attributedRevenue       Json     @map("attributed_revenue")
-
-  // Interaction tracking
-  totalInteractions       Int      @map("total_interactions")
-  interactionsByExtension Json     @map("interactions_by_extension")
-
-  // Timestamps
-  purchaseAt              DateTime @map("purchase_at") @db.Timestamptz
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Metadata
-  attributionAlgorithm    String   @default("multi_touch") @map("attribution_algorithm") @db.VarChar(50)
-  metadata                Json     @default("{}")
-
-  // Relations
+  id                      String      @id @default(cuid())
+  sessionId               String      @map("session_id") @db.VarChar(255)
+  orderId                 String      @map("order_id") @db.VarChar(255)
+  customerId              String?     @map("customer_id") @db.VarChar(255)
+  shopId                  String      @map("shop_id") @db.VarChar(255)
+  contributingExtensions  Json        @map("contributing_extensions")
+  attributionWeights      Json        @map("attribution_weights")
+  totalRevenue            Decimal     @map("total_revenue") @db.Decimal(10, 2)
+  attributedRevenue       Json        @map("attributed_revenue")
+  totalInteractions       Int         @map("total_interactions")
+  interactionsByExtension Json        @map("interactions_by_extension")
+  purchaseAt              DateTime    @map("purchase_at") @db.Timestamptz(6)
+  createdAt               DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  attributionAlgorithm    String      @default("multi_touch") @map("attribution_algorithm") @db.VarChar(50)
+  metadata                Json        @default("{}")
   session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop                    Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
+  @@unique([shopId, orderId])
   @@index([sessionId])
   @@index([orderId])
   @@index([customerId])
@@ -983,29 +805,24 @@ model PurchaseAttribution {
   @@index([purchaseAt])
   @@index([shopId, purchaseAt])
   @@index([shopId, customerId, purchaseAt])
-  @@unique([shopId, orderId])
   @@map("purchase_attributions")
 }
 
-// ============= REFUND SYSTEM TABLES =============
-
 model RefundData {
-  id               String   @id @default(cuid())
-  shopId           String   @map("shop_id") @db.VarChar(255)
-  orderId          BigInt   @map("order_id")
-  refundId         String   @map("refund_id") @db.VarChar(255)
-  refundedAt       DateTime @map("refunded_at") @db.Timestamptz
-  note             String?  @default("") @db.Text
-  restock          Boolean  @default(false)
-  totalRefundAmount Decimal @map("total_refund_amount") @db.Decimal(10, 2)
-  currencyCode     String   @default("USD") @map("currency_code") @db.VarChar(10)
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  lineItems        RefundLineItemData[]
-  adjustments      RefundAttributionAdjustment[]
-  shop             Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                String                        @id @default(cuid())
+  shopId            String                        @map("shop_id") @db.VarChar(255)
+  orderId           BigInt                        @map("order_id")
+  refundId          String                        @map("refund_id") @db.VarChar(255)
+  refundedAt        DateTime                      @map("refunded_at") @db.Timestamptz(6)
+  note              String?                       @default("")
+  restock           Boolean                       @default(false)
+  totalRefundAmount Decimal                       @map("total_refund_amount") @db.Decimal(10, 2)
+  currencyCode      String                        @default("USD") @map("currency_code") @db.VarChar(10)
+  createdAt         DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  adjustments       RefundAttributionAdjustment[]
+  shop              Shop                          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lineItems         RefundLineItemData[]
 
   @@unique([shopId, refundId])
   @@index([shopId, orderId])
@@ -1014,19 +831,17 @@ model RefundData {
 }
 
 model RefundLineItemData {
-  id          String   @id @default(cuid())
-  refundId    String   @map("refund_id")
-  orderId     BigInt   @map("order_id")
-  productId   String?  @map("product_id") @db.VarChar(255)
-  variantId   String?  @map("variant_id") @db.VarChar(255)
-  quantity    Int
-  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
-  refundAmount Decimal @map("refund_amount") @db.Decimal(10, 2)
-  properties  Json?    @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  refund      RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  id           String     @id @default(cuid())
+  refundId     String     @map("refund_id")
+  orderId      BigInt     @map("order_id")
+  productId    String?    @map("product_id") @db.VarChar(255)
+  variantId    String?    @map("variant_id") @db.VarChar(255)
+  quantity     Int
+  unitPrice    Decimal    @map("unit_price") @db.Decimal(10, 2)
+  refundAmount Decimal    @map("refund_amount") @db.Decimal(10, 2)
+  properties   Json?      @default("{}")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  refund       RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
 
   @@index([refundId])
   @@index([orderId])
@@ -1035,19 +850,17 @@ model RefundLineItemData {
 }
 
 model RefundAttributionAdjustment {
-  id                    String   @id @default(cuid())
-  shopId                String   @map("shop_id") @db.VarChar(255)
-  orderId               BigInt   @map("order_id")
-  refundId              String   @map("refund_id") @db.VarChar(255)
-  perExtensionRefund    Json     @map("per_extension_refund") @default("{}")
-  totalRefundAmount     Decimal  @map("total_refund_amount") @db.Decimal(10, 2)
-  computedAt            DateTime @map("computed_at") @db.Timestamptz
-  metadata              Json     @default("{}")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  refund                RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
-  shop                  Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                 String     @id @default(cuid())
+  shopId             String     @map("shop_id") @db.VarChar(255)
+  orderId            BigInt     @map("order_id")
+  refundId           String     @map("refund_id") @db.VarChar(255)
+  perExtensionRefund Json       @default("{}") @map("per_extension_refund")
+  totalRefundAmount  Decimal    @map("total_refund_amount") @db.Decimal(10, 2)
+  computedAt         DateTime   @map("computed_at") @db.Timestamptz(6)
+  metadata           Json       @default("{}")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  refund             RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  shop               Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, refundId])
   @@index([shopId, orderId])
@@ -1055,33 +868,22 @@ model RefundAttributionAdjustment {
   @@map("refund_attribution_adjustments")
 }
 
-// ============= BILLING SYSTEM TABLES =============
-
 model BillingPlan {
-  id               String   @id @default(cuid())
-  shopId           String   @map("shop_id") @db.VarChar(255)
-  shopDomain       String   @map("shop_domain") @db.VarChar(255)
-  
-  // Plan Configuration
-  name             String   @db.VarChar(100)
-  type             BillingPlanType
-  status           BillingPlanStatus @default(active)
-  
-  // Plan Settings
-  configuration    Json     @default("{}")
-  
-  // Timestamps
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  effectiveFrom    DateTime @map("effective_from") @db.Timestamptz
-  effectiveUntil   DateTime? @map("effective_until") @db.Timestamptz
-  
-  // Relations
-  invoices         BillingInvoice[]
-  metrics          BillingMetrics[]
-  events           BillingEvent[]
-  
-  @@unique([shopId])
+  id             String            @id @default(cuid())
+  shopId         String            @unique @map("shop_id") @db.VarChar(255)
+  shopDomain     String            @map("shop_domain") @db.VarChar(255)
+  name           String            @db.VarChar(100)
+  type           BillingPlanType
+  status         BillingPlanStatus @default(active)
+  configuration  Json              @default("{}")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  effectiveFrom  DateTime          @map("effective_from") @db.Timestamptz(6)
+  effectiveUntil DateTime?         @map("effective_until") @db.Timestamptz(6)
+  events         BillingEvent[]
+  invoices       BillingInvoice[]
+  metrics        BillingMetrics[]
+
   @@index([shopDomain])
   @@index([status])
   @@index([effectiveFrom])
@@ -1089,41 +891,27 @@ model BillingPlan {
 }
 
 model BillingMetrics {
-  id               String   @id @default(cuid())
-  shopId           String   @map("shop_id") @db.VarChar(255)
-  planId           String   @map("plan_id") @db.VarChar(255)
-  
-  // Period
-  periodStart      DateTime @map("period_start") @db.Timestamptz
-  periodEnd        DateTime @map("period_end") @db.Timestamptz
-  cycle            BillingCycle
-  
-  // Revenue Metrics
-  totalRevenue     Decimal  @map("total_revenue") @db.Decimal(12, 2)
-  attributedRevenue Decimal @map("attributed_revenue") @db.Decimal(12, 2)
-  billableRevenue  Decimal  @map("billable_revenue") @db.Decimal(12, 2)
-  
-  // Performance Metrics
-  totalInteractions Int     @map("total_interactions")
-  totalConversions  Int     @map("total_conversions")
-  conversionRate    Float   @map("conversion_rate")
-  averageOrderValue Decimal @map("average_order_value") @db.Decimal(10, 2)
-  
-  // Extension Performance
-  extensionMetrics  Json    @map("extension_metrics") @default("[]")
-  
-  // Calculated Billing
-  calculatedFee     Decimal @map("calculated_fee") @db.Decimal(10, 2)
-  appliedDiscounts  Decimal @map("applied_discounts") @db.Decimal(10, 2)
-  finalFee          Decimal @map("final_fee") @db.Decimal(10, 2)
-  
-  // Timestamps
-  calculatedAt      DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-  billedAt          DateTime? @map("billed_at") @db.Timestamptz
-  
-  // Relations
-  plan              BillingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  
+  id                String       @id @default(cuid())
+  shopId            String       @map("shop_id") @db.VarChar(255)
+  planId            String       @map("plan_id") @db.VarChar(255)
+  periodStart       DateTime     @map("period_start") @db.Timestamptz(6)
+  periodEnd         DateTime     @map("period_end") @db.Timestamptz(6)
+  cycle             BillingCycle
+  totalRevenue      Decimal      @map("total_revenue") @db.Decimal(12, 2)
+  attributedRevenue Decimal      @map("attributed_revenue") @db.Decimal(12, 2)
+  billableRevenue   Decimal      @map("billable_revenue") @db.Decimal(12, 2)
+  totalInteractions Int          @map("total_interactions")
+  totalConversions  Int          @map("total_conversions")
+  conversionRate    Float        @map("conversion_rate")
+  averageOrderValue Decimal      @map("average_order_value") @db.Decimal(10, 2)
+  extensionMetrics  Json         @default("[]") @map("extension_metrics")
+  calculatedFee     Decimal      @map("calculated_fee") @db.Decimal(10, 2)
+  appliedDiscounts  Decimal      @map("applied_discounts") @db.Decimal(10, 2)
+  finalFee          Decimal      @map("final_fee") @db.Decimal(10, 2)
+  calculatedAt      DateTime     @default(now()) @map("calculated_at") @db.Timestamptz(6)
+  billedAt          DateTime?    @map("billed_at") @db.Timestamptz(6)
+  plan              BillingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+
   @@unique([shopId, periodStart, periodEnd])
   @@index([shopId])
   @@index([planId])
@@ -1133,40 +921,27 @@ model BillingMetrics {
 }
 
 model BillingInvoice {
-  id               String   @id @default(cuid())
-  shopId           String   @map("shop_id") @db.VarChar(255)
-  planId           String   @map("plan_id") @db.VarChar(255)
-  
-  // Invoice Details
-  invoiceNumber    String   @map("invoice_number") @db.VarChar(50)
+  id               String        @id @default(cuid())
+  shopId           String        @map("shop_id") @db.VarChar(255)
+  planId           String        @map("plan_id") @db.VarChar(255)
+  invoiceNumber    String        @unique @map("invoice_number") @db.VarChar(50)
   status           InvoiceStatus @default(pending)
-  
-  // Financial Details
-  subtotal         Decimal  @db.Decimal(10, 2)
-  taxes            Decimal  @db.Decimal(10, 2)
-  discounts        Decimal  @db.Decimal(10, 2)
-  total            Decimal  @db.Decimal(10, 2)
-  currency         String   @db.VarChar(3)
-  
-  // Period and Metrics
-  periodStart      DateTime @map("period_start") @db.Timestamptz
-  periodEnd        DateTime @map("period_end") @db.Timestamptz
-  metricsId        String   @map("metrics_id") @db.VarChar(255)
-  
-  // Payment
-  dueDate          DateTime @map("due_date") @db.Timestamptz
-  paidAt           DateTime? @map("paid_at") @db.Timestamptz
-  paymentMethod    String?  @map("payment_method") @db.VarChar(50)
-  paymentReference String?  @map("payment_reference") @db.VarChar(255)
-  
-  // Timestamps
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  
-  // Relations
-  plan             BillingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  
-  @@unique([invoiceNumber])
+  subtotal         Decimal       @db.Decimal(10, 2)
+  taxes            Decimal       @db.Decimal(10, 2)
+  discounts        Decimal       @db.Decimal(10, 2)
+  total            Decimal       @db.Decimal(10, 2)
+  currency         String        @db.VarChar(3)
+  periodStart      DateTime      @map("period_start") @db.Timestamptz(6)
+  periodEnd        DateTime      @map("period_end") @db.Timestamptz(6)
+  metricsId        String        @map("metrics_id") @db.VarChar(255)
+  dueDate          DateTime      @map("due_date") @db.Timestamptz(6)
+  paidAt           DateTime?     @map("paid_at") @db.Timestamptz(6)
+  paymentMethod    String?       @map("payment_method") @db.VarChar(50)
+  paymentReference String?       @map("payment_reference") @db.VarChar(255)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  plan             BillingPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
   @@index([shopId])
   @@index([planId])
   @@index([status])
@@ -1176,21 +951,15 @@ model BillingInvoice {
 }
 
 model BillingEvent {
-  id               String   @id @default(cuid())
-  shopId           String   @map("shop_id") @db.VarChar(255)
-  type             BillingEventType
-  
-  // Event Data
-  data             Json     @default("{}")
-  metadata         Json     @default("{}")
-  
-  // Timestamps
-  occurredAt       DateTime @map("occurred_at") @db.Timestamptz
-  processedAt      DateTime @default(now()) @map("processed_at") @db.Timestamptz
-  
-  // Relations
-  plan             BillingPlan @relation(fields: [shopId], references: [shopId], onDelete: Cascade)
-  
+  id          String           @id @default(cuid())
+  shopId      String           @map("shop_id") @db.VarChar(255)
+  type        BillingEventType
+  data        Json             @default("{}")
+  metadata    Json             @default("{}")
+  occurredAt  DateTime         @map("occurred_at") @db.Timestamptz(6)
+  processedAt DateTime         @default(now()) @map("processed_at") @db.Timestamptz(6)
+  plan        BillingPlan      @relation(fields: [shopId], references: [shopId], onDelete: Cascade)
+
   @@index([shopId])
   @@index([type])
   @@index([occurredAt])
@@ -1198,7 +967,16 @@ model BillingEvent {
   @@map("billing_events")
 }
 
-// Billing Enums
+enum RawSourceType {
+  webhook
+  backfill
+}
+
+enum RawDataFormat {
+  rest
+  graphql
+}
+
 enum BillingPlanType {
   revenue_share
   performance_tier

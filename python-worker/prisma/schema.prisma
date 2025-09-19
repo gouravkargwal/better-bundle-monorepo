@@ -9,6 +9,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RawSourceType {
+  webhook
+  backfill
+}
+
+enum RawDataFormat {
+  rest
+  graphql
+}
+
 model RawOrder {
   id               String         @id @default(cuid())
   shopId           String
