@@ -49,13 +49,19 @@ class ShopifyEventsConsumer(BaseConsumer):
             if event_type == "normalize_entity":
                 return
 
+            # Skip refund_created events - they are now handled directly by webhook
+            if event_type == "refund_created":
+                self.logger.info(
+                    f"⏭️ Skipping {event_type} - handled directly by webhook"
+                )
+                return
+
             # Only process original Shopify webhook events, not our own forwarded messages
-            if event_type in [
+            elif event_type in [
                 "product_updated",
                 "product_created",
                 "product_deleted",
                 "order_paid",
-                "refund_created",
                 "customer_created",
                 "customer_updated",
                 "collection_created",
@@ -92,7 +98,6 @@ class ShopifyEventsConsumer(BaseConsumer):
             "product_created": "products",
             "product_deleted": "products",
             "order_paid": "orders",
-            "refund_created": "refunds",
             "customer_created": "customers",
             "customer_updated": "customers",
             "customer_redacted": "customers",

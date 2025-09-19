@@ -589,6 +589,14 @@ class NormalizationConsumer(BaseConsumer):
                     shop_id=shop_id,
                 )
 
+        # Process refunds from orders
+        if (
+            data_type == "orders"
+            and hasattr(canonical, "refunds")
+            and canonical.refunds
+        ):
+            await self._process_order_refunds(canonical, shop_id, order_record_id)
+
         # Log performance metrics (production monitoring)
         processing_time = time.time() - start_time
         if processing_time > 1.0:  # Only log slow operations
@@ -598,6 +606,80 @@ class NormalizationConsumer(BaseConsumer):
                 processing_time_seconds=round(processing_time, 3),
                 shop_id=shop_id,
             )
+
+    async def _process_order_refunds(
+        self, canonical_order, shop_id: str, order_record_id: str
+    ):
+        """Process refunds from a canonical order and create RefundData records."""
+        if not hasattr(canonical_order, "refunds") or not canonical_order.refunds:
+            return
+
+        db = await get_database()
+
+        for refund in canonical_order.refunds:
+            try:
+                # Create RefundData record
+                refund_data = await db.refunddata.create(
+                    data={
+                        "shopId": shop_id,
+                        "orderId": int(
+                            canonical_order.orderId
+                        ),  # Convert to int for BigInt field
+                        "refundId": refund.refundId,
+                        "refundedAt": refund.refundedAt,
+                        "note": refund.note or "",
+                        "restock": refund.restock,
+                        "totalRefundAmount": refund.totalRefundAmount,
+                        "currencyCode": refund.currencyCode,
+                    }
+                )
+
+                # Create RefundLineItemData records
+                for refund_line_item in refund.refundLineItems:
+                    await db.refundlineitemdata.create(
+                        data={
+                            "refundId": refund_data.id,
+                            "orderId": int(canonical_order.orderId),
+                            "productId": refund_line_item.productId,
+                            "variantId": refund_line_item.variantId,
+                            "quantity": refund_line_item.quantity,
+                            "unitPrice": refund_line_item.unitPrice,
+                            "refundAmount": refund_line_item.refundAmount,
+                            "properties": Json(refund_line_item.properties),
+                        }
+                    )
+
+                self.logger.info(
+                    f"✅ Created refund {refund.refundId} with {len(refund.refundLineItems)} line items",
+                    shop_id=shop_id,
+                    order_id=canonical_order.orderId,
+                )
+
+                # Trigger refund attribution
+                try:
+                    await stream_manager.publish_to_domain(
+                        StreamType.REFUND_ATTRIBUTION,
+                        {
+                            "event_type": "refund_ready_for_attribution",
+                            "shop_id": shop_id,
+                            "order_id": canonical_order.orderId,
+                            "refund_id": refund.refundId,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        "Failed to publish refund_ready_for_attribution",
+                        error=str(e),
+                        shop_id=shop_id,
+                    )
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to process refund {refund.refundId}",
+                    error=str(e),
+                    shop_id=shop_id,
+                )
 
     def _serialize_json_fields(self, main_data: Dict[str, Any]):
         """Convert JSON fields to proper JSON strings for Prisma."""

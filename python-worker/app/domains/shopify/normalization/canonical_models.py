@@ -65,6 +65,9 @@ class CanonicalOrder(BaseModel):
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
     fulfillments: Any = Field(default_factory=list)  # fulfillments (JSON)
     transactions: Any = Field(default_factory=list)  # transactions (JSON)
+    refunds: List[Dict[str, Any]] = Field(
+        default_factory=list
+    )  # refunds from GraphQL orders
 
     # Internal fields
     createdAt: datetime  # Used for orderDate
@@ -187,6 +190,45 @@ class CanonicalCustomer(BaseModel):
     createdAt: datetime  # Used for createdAt
     updatedAt: datetime  # Used for updatedAt
     isActive: bool = True  # For soft deletes
+
+    # Preserve unknown fields from raw payloads
+    extras: Any = Field(default_factory=dict)
+
+
+class CanonicalRefundLineItem(BaseModel):
+    """Canonical refund line item model"""
+
+    refundId: str
+    orderId: str
+    productId: Optional[str] = None
+    variantId: Optional[str] = None
+    quantity: int
+    unitPrice: float
+    refundAmount: float
+    properties: Any = Field(default_factory=dict)
+
+
+class CanonicalRefund(BaseModel):
+    """Canonical refund model - matches RefundData table structure exactly"""
+
+    shopId: str
+    orderId: str  # Maps to orderId (BigInt)
+    refundId: str  # Maps to refundId
+    originalGid: Optional[str] = None  # Shopify GraphQL ID
+
+    # Exact field mapping to RefundData table
+    refundedAt: datetime  # refundedAt
+    note: Optional[str] = ""  # note
+    restock: bool = False  # restock
+    totalRefundAmount: float  # totalRefundAmount
+    currencyCode: str = "USD"  # currencyCode
+
+    # Line items for RefundLineItemData records
+    refundLineItems: List[CanonicalRefundLineItem] = Field(default_factory=list)
+
+    # Internal fields
+    createdAt: datetime
+    updatedAt: datetime
 
     # Preserve unknown fields from raw payloads
     extras: Any = Field(default_factory=dict)

@@ -7,10 +7,12 @@ from .rest.orders import RestOrderAdapter
 from .rest.products import RestProductAdapter
 from .rest.collections import RestCollectionAdapter
 from .rest.customers import RestCustomerAdapter
+from .rest.refunds import RestRefundAdapter
 from .graphql.orders import GraphQLOrderAdapter
 from .graphql.products import GraphQLProductAdapter
 from .graphql.collections import GraphQLCollectionAdapter
 from .graphql.customers import GraphQLCustomerAdapter
+from .graphql.refunds import GraphQLRefundAdapter
 
 
 _REGISTRY: Dict[Tuple[str, str], Type[BaseAdapter]] = {
@@ -22,6 +24,8 @@ _REGISTRY: Dict[Tuple[str, str], Type[BaseAdapter]] = {
     ("graphql", "collections"): GraphQLCollectionAdapter,
     ("rest", "customers"): RestCustomerAdapter,
     ("graphql", "customers"): GraphQLCustomerAdapter,
+    ("rest", "refunds"): RestRefundAdapter,
+    ("graphql", "refunds"): GraphQLRefundAdapter,
 }
 
 

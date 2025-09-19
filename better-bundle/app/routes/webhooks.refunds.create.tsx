@@ -70,7 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Store refund data in RawOrder table (wrapping the full refund payload)
+    // Store refund data in RawOrder table (only if order exists)
     const existing = await prisma.rawOrder.findFirst({
       where: { shopId: shopRecord.id, shopifyId: orderId },
       select: { id: true, payload: true },
@@ -100,11 +100,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       rawRecordId = updated.id;
     } else {
-      // Create new order record with refund data
+      // Order doesn't exist yet - refund webhook called before order webhook
+      // This is normal in Shopify's webhook order, create minimal record with refund data
+      console.log(
+        `⚠️ Order ${orderId} not found in RawOrder table. Creating minimal record with refund data.`,
+      );
+
+      // Create minimal RawOrder record with refund data to prevent data loss
       const created = await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,
-          payload: { refunds: [refund] },
+          payload: {
+            refunds: [refund],
+            // Add minimal order data to prevent consumer errors
+            id: orderId,
+            created_at: refund.created_at || new Date().toISOString(),
+            line_items: [], // Empty array to prevent consumer errors
+            total_price: "0.00",
+            currency: "USD",
+          },
           shopifyId: orderId,
           shopifyCreatedAt: refund.created_at
             ? new Date(refund.created_at)
@@ -112,12 +126,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shopifyUpdatedAt: refund.created_at
             ? new Date(refund.created_at)
             : new Date(),
-          source: "webhook",
-          format: "rest",
-          receivedAt: new Date(),
+          source: "webhook" as any,
+          format: "rest" as any,
+          receivedAt: new Date() as any,
         } as any,
       });
       rawRecordId = created.id;
+
+      console.log(
+        `✅ Created minimal RawOrder record for order ${orderId} with refund data`,
+      );
     }
 
     console.log(
@@ -128,33 +146,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const streamService = await getRedisStreamService();
 
-      const totalRefundAmount =
-        refund.transactions?.reduce(
-          (sum: number, t: any) => sum + parseFloat(t.amount || 0),
-          0,
-        ) || 0;
-
-      const streamData = {
+      const refundMessage = {
         event_type: "refund_created",
         shop_id: shopRecord.id,
         shopify_id: orderId,
-        refund_id: refundId,
+        raw_record_id: rawRecordId, // Send the RawOrder record ID
         timestamp: new Date().toISOString(),
-        refund_amount: totalRefundAmount,
-        refund_note: refund.note || "",
-        refund_restock: refund.restock || false,
       };
 
-      const messageId = await streamService.publishShopifyEvent(streamData);
-
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-        refundId: streamData.refund_id,
-        refundAmount: streamData.refund_amount,
-      });
+      // Publish directly to refund normalization stream
+      await streamService.publishToStream(
+        "betterbundle:refund-normalization-jobs",
+        refundMessage,
+      );
 
       // Also publish a normalize job for canonical staging of orders (refund update)
       if (rawRecordId) {

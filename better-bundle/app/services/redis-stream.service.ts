@@ -137,6 +137,25 @@ export class RedisStreamService {
   }
 
   /**
+   * Publish message directly to a specific stream
+   */
+  async publishToStream(streamName: string, messageData: any): Promise<string> {
+    try {
+      console.log(`📤 Publishing to stream: ${streamName}`, messageData);
+
+      // Convert message to Redis Stream format (key-value pairs as array)
+      const streamFields = Object.entries(messageData).flat();
+      const messageId = await this.client.xAdd(streamName, "*", streamFields);
+
+      console.log(`✅ Published to ${streamName} with ID: ${messageId}`);
+      return messageId;
+    } catch (error) {
+      console.error(`❌ Error publishing to stream ${streamName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get stream info
    */
   async getStreamInfo(streamName: string): Promise<any> {

@@ -136,11 +136,11 @@ class GraphQLOrderAdapter(BaseAdapter):
             totalShippingAmount=total_shipping_amount,
             totalRefundedAmount=total_refunded_amount,
             totalOutstandingAmount=total_outstanding_amount,
-            orderDate=_parse_iso(payload.get("createdAt")),
+            orderDate=_parse_iso(payload.get("createdAt")) or created_at,
             processedAt=_parse_iso(payload.get("processedAt")),
             cancelledAt=_parse_iso(payload.get("cancelledAt")),
-            confirmed=payload.get("confirmed"),
-            test=payload.get("test"),
+            confirmed=payload.get("confirmed", False),
+            test=payload.get("test", False),
             orderName=payload.get("name"),
             note=payload.get("note"),
             customerEmail=payload.get("email"),
@@ -160,7 +160,73 @@ class GraphQLOrderAdapter(BaseAdapter):
             ),
             metafields=(payload.get("metafields", {}) or {}).get("edges", []),
             transactions=payload.get("transactions") or [],
+            refunds=self._extract_refunds(payload, shop_id),
             extras={},
         )
 
         return model.dict()
+
+    def _extract_refunds(
+        self, payload: Dict[str, Any], shop_id: str
+    ) -> List[Dict[str, Any]]:
+        """Extract refunds from GraphQL order payload."""
+        refunds = []
+        raw_refunds = payload.get("refunds", [])
+
+        for refund in raw_refunds:
+            try:
+                # Calculate total refund amount from transactions
+                total_refund_amount = 0.0
+                currency_code = "USD"
+
+                transactions = refund.get("transactions", [])
+                if transactions:
+                    for transaction in transactions:
+                        if transaction.get("kind") == "refund":
+                            amount = float(transaction.get("amount", 0))
+                            total_refund_amount += amount
+                            currency_code = transaction.get("currency", "USD")
+
+                # Process refund line items
+                refund_line_items = []
+                raw_line_items = refund.get("refund_line_items", [])
+
+                for rli in raw_line_items:
+                    line_item = rli.get("line_item", {})
+
+                    refund_line_item = {
+                        "refundId": str(refund.get("id", "")),
+                        "orderId": str(payload.get("id", "")),
+                        "productId": str(line_item.get("product_id", "")),
+                        "variantId": str(line_item.get("variant_id", "")),
+                        "quantity": int(rli.get("quantity", 0)),
+                        "unitPrice": float(rli.get("subtotal", 0)),
+                        "refundAmount": float(rli.get("subtotal", 0)),
+                        "properties": line_item.get("properties", []),
+                    }
+                    refund_line_items.append(refund_line_item)
+
+                # Create refund data
+                refund_data = {
+                    "shopId": shop_id,
+                    "orderId": str(payload.get("id", "")),
+                    "refundId": str(refund.get("id", "")),
+                    "originalGid": refund.get("admin_graphql_api_id"),
+                    "refundedAt": self._parse_iso(refund.get("created_at")),
+                    "note": refund.get("note", ""),
+                    "restock": refund.get("restock", False),
+                    "totalRefundAmount": total_refund_amount,
+                    "currencyCode": currency_code,
+                    "refundLineItems": refund_line_items,
+                    "createdAt": self._parse_iso(refund.get("created_at")),
+                    "updatedAt": self._parse_iso(refund.get("processed_at")),
+                    "extras": refund,
+                }
+
+                refunds.append(refund_data)
+
+            except Exception as e:
+                self.logger.warning(f"Failed to extract refund: {e}")
+                continue
+
+        return refunds

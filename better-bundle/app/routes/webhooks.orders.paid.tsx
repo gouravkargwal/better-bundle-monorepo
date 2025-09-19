@@ -127,15 +127,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Upsert without composite unique (shopifyId is nullable in schema)
     const existing = await prisma.rawOrder.findFirst({
       where: { shopId: shopRecord.id, shopifyId: orderId },
-      select: { id: true },
+      select: { id: true, payload: true },
     });
 
     let rawRecordId: string | null = null;
     if (existing) {
+      // Update existing order, preserving any existing refunds
+      const existingPayload = existing.payload as any;
+      const updatedPayload = {
+        ...order,
+        refunds: existingPayload.refunds || [], // Preserve existing refunds
+      };
+
       const updated = await prisma.rawOrder.update({
         where: { id: existing.id },
         data: {
-          payload: order,
+          payload: updatedPayload,
           shopifyUpdatedAt: order.updated_at
             ? new Date(order.updated_at)
             : new Date(),
@@ -145,7 +152,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } as any,
       });
       rawRecordId = updated.id;
+
+      // Log if we found existing refunds (refund webhook arrived first)
+      if (existingPayload.refunds && existingPayload.refunds.length > 0) {
+        console.log(
+          `✅ Updated order ${orderId} with ${existingPayload.refunds.length} existing refunds`,
+        );
+      }
     } else {
+      // Create new order record
       const created = await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,

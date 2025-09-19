@@ -13,6 +13,8 @@ from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsu
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
+from app.consumers.refund_normalization_consumer import RefundNormalizationConsumer
+from app.consumers.refund_attribution_consumer import RefundAttributionConsumer
 from app.core.logging import get_logger
 
 
@@ -50,6 +52,8 @@ class ConsumerManager:
         feature_computation_consumer: Optional[FeatureComputationConsumer] = None,
         customer_linking_consumer: Optional[CustomerLinkingConsumer] = None,
         shopify_events_consumer: Optional[ShopifyEventsConsumer] = None,
+        refund_normalization_consumer: Optional[RefundNormalizationConsumer] = None,
+        refund_attribution_consumer: Optional[RefundAttributionConsumer] = None,
     ):
         """Register consumers with the manager (all parameters are optional)"""
         if data_collection_consumer:
@@ -64,6 +68,10 @@ class ConsumerManager:
             self.consumers["customer_linking"] = customer_linking_consumer
         if shopify_events_consumer:
             self.consumers["shopify_events"] = shopify_events_consumer
+        if refund_normalization_consumer:
+            self.consumers["refund_normalization"] = refund_normalization_consumer
+        if refund_attribution_consumer:
+            self.consumers["refund_attribution"] = refund_attribution_consumer
 
     async def start_all_consumers(self):
         """Start all registered consumers"""

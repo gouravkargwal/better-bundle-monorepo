@@ -37,30 +37,40 @@ class RefundAttributionConsumer(BaseConsumer):
 
     async def _process_single_message(self, message: Dict[str, Any]):
         try:
-            payload = message.get("data") or message
-            if isinstance(payload, str):
-                import json as _json
+            self.logger.info(f"🔄 Processing refund attribution message: {message}")
 
-                try:
-                    payload = _json.loads(payload)
-                except Exception:
-                    pass
+            # The message format is: {'event_type': 'refund_created', 'shop_id': '...', 'shopify_id': '...', 'raw_record_id': '...'}
+            # We use raw_record_id to fetch the complete refund data from the database
+            event_type = message.get("event_type")
+            shop_id = message.get("shop_id")
+            order_id = message.get("shopify_id")
+            raw_record_id = message.get("raw_record_id")
 
-            if payload.get("event_type") != "refund_created":
+            if not raw_record_id:
+                self.logger.warning(
+                    f"⚠️ No raw_record_id found in message, skipping refund attribution"
+                )
                 return
 
-            shop_id = payload.get("shop_id")
-            order_id = payload.get("shopify_id")
-            refund_id = payload.get("refund_id")
+            self.logger.info(
+                f"📋 Extracted data: event_type={event_type}, shop_id={shop_id}, order_id={order_id}, raw_record_id={raw_record_id}"
+            )
+
+            if event_type != "refund_created":
+                self.logger.warning(f"⚠️ Skipping non-refund event: {event_type}")
+                return
 
             if not shop_id or not order_id or not refund_id:
                 self.logger.error(
-                    "Invalid refund_created payload",
-                    payload=payload,
+                    "❌ Invalid refund_created payload - missing required fields",
+                    message=message,
                 )
                 return
 
             db = await get_database()
+            self.logger.info(
+                f"🔍 Checking if refund attribution adjustment already exists: shop_id={shop_id}, refund_id={refund_id}"
+            )
 
             # Check if adjustment already exists
             existing_adjustment = await db.refundattributionadjustment.find_first(
@@ -68,11 +78,13 @@ class RefundAttributionConsumer(BaseConsumer):
             )
             if existing_adjustment:
                 self.logger.info(
-                    "Refund attribution adjustment already exists",
+                    f"✅ Refund attribution adjustment already exists - skipping",
                     shop_id=shop_id,
                     refund_id=refund_id,
                 )
                 return
+
+            self.logger.info(f"🆕 Processing new refund attribution: {refund_id}")
 
             # Load normalized refund data
             refund_data = await db.refunddata.find_first(
@@ -155,26 +167,29 @@ class RefundAttributionConsumer(BaseConsumer):
                     }
                 )
 
-            # Create RefundAttributionAdjustment
-            await db.refundattributionadjustment.create(
-                data={
-                    "shopId": shop_id,
-                    "orderId": order_id,
-                    "refundId": refund_id,
-                    "perExtensionRefund": per_extension_refund,
-                    "totalRefundAmount": Decimal(str(refund_data.totalRefundAmount)),
-                    "computedAt": datetime.utcnow(),
-                    "metadata": {
-                        "items_breakdown": items_breakdown,
-                        "computation_method": "item_level_mapping",
-                        "refund_note": refund_data.note,
-                        "refund_restock": refund_data.restock,
-                    },
-                }
-            )
+            # Create RefundAttributionAdjustment within a transaction
+            async with db.tx() as transaction:
+                await transaction.refundattributionadjustment.create(
+                    data={
+                        "shopId": shop_id,
+                        "orderId": order_id,
+                        "refundId": refund_id,
+                        "perExtensionRefund": per_extension_refund,
+                        "totalRefundAmount": Decimal(
+                            str(refund_data.totalRefundAmount)
+                        ),
+                        "computedAt": datetime.utcnow(),
+                        "metadata": {
+                            "items_breakdown": items_breakdown,
+                            "computation_method": "item_level_mapping",
+                            "refund_note": refund_data.note,
+                            "refund_restock": refund_data.restock,
+                        },
+                    }
+                )
 
             self.logger.info(
-                "Refund attribution adjustment created",
+                f"✅ Refund attribution adjustment created successfully",
                 shop_id=shop_id,
                 order_id=order_id,
                 refund_id=refund_id,

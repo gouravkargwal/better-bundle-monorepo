@@ -11,6 +11,7 @@ from app.shared.constants.redis import (
     REFUND_NORMALIZATION_STREAM,
     REFUND_NORMALIZATION_GROUP,
 )
+from prisma import Json
 
 
 class RefundNormalizationConsumer(BaseConsumer):
@@ -30,50 +31,46 @@ class RefundNormalizationConsumer(BaseConsumer):
 
     async def _process_single_message(self, message: Dict[str, Any]):
         try:
-            payload = message.get("data") or message
-            if isinstance(payload, str):
-                import json as _json
+            self.logger.info(f"🔄 Processing refund normalization message: {message}")
 
-                try:
-                    payload = _json.loads(payload)
-                except Exception:
-                    pass
+            # Handle both string keys and numbered keys from Redis Stream
+            # String keys: {'event_type': 'refund_created', 'shop_id': '...', ...}
+            # Numbered keys: {'0': 'event_type', '1': 'refund_created', '2': 'shop_id', ...}
+            if "event_type" in message:
+                # String keys format
+                event_type = message.get("event_type")
+                shop_id = message.get("shop_id")
+                order_id = message.get("shopify_id")
+                raw_record_id = message.get("raw_record_id")
+            else:
+                # Numbered keys format - convert to string keys
+                event_type = message.get("1")  # '1' contains the event_type value
+                shop_id = message.get("3")  # '3' contains the shop_id value
+                order_id = message.get("5")  # '5' contains the shopify_id value
+                raw_record_id = message.get("7")  # '7' contains the raw_record_id value
 
-            if payload.get("event_type") != "refund_created":
+            self.logger.info(
+                f"📋 Extracted data: event_type={event_type}, shop_id={shop_id}, order_id={order_id}, raw_record_id={raw_record_id}"
+            )
+
+            if event_type != "refund_created":
+                self.logger.warning(f"⚠️ Skipping non-refund event: {event_type}")
                 return
 
-            shop_id = payload.get("shop_id")
-            order_id = payload.get("shopify_id")
-            refund_id = payload.get("refund_id")
-            refund_amount = float(payload.get("refund_amount") or 0.0)
-            refund_note = payload.get("refund_note", "")
-            refund_restock = bool(payload.get("refund_restock") or False)
-
-            if not shop_id or not order_id or not refund_id:
+            if not shop_id or not order_id or not raw_record_id:
                 self.logger.error(
-                    "Invalid refund_created payload",
-                    payload=payload,
+                    "❌ Invalid refund_created payload - missing required fields",
+                    message=message,
                 )
                 return
 
             db = await get_database()
-
-            # Check if refund already exists
-            existing_refund = await db.refunddata.find_first(
-                where={"shopId": shop_id, "refundId": refund_id}
+            self.logger.info(
+                f"🔍 Fetching RawOrder data using raw_record_id: {raw_record_id}"
             )
-            if existing_refund:
-                self.logger.info(
-                    "Refund already normalized",
-                    shop_id=shop_id,
-                    refund_id=refund_id,
-                )
-                return
 
-            # Load raw refund data from RawOrder
-            raw_order = await db.raworder.find_first(
-                where={"shopId": shop_id, "shopifyId": order_id}
-            )
+            # Load raw refund data from RawOrder using the raw_record_id
+            raw_order = await db.raworder.find_unique(where={"id": raw_record_id})
             if not raw_order or not getattr(raw_order, "payload", None):
                 self.logger.warning(
                     "RawOrder not found for refund normalization",
@@ -83,19 +80,33 @@ class RefundNormalizationConsumer(BaseConsumer):
                 return
 
             # Extract refund from payload
-            refund_obj = None
-            try:
-                payload_data = (
-                    raw_order.payload if isinstance(raw_order.payload, dict) else {}
+            payload_data = (
+                raw_order.payload if isinstance(raw_order.payload, dict) else {}
+            )
+
+            # Check if this is a minimal record created by refund webhook (order webhook hasn't arrived yet)
+            if "refunds" in payload_data and not payload_data.get("line_items"):
+                self.logger.info(
+                    "Order data incomplete - refund webhook arrived before order webhook",
+                    shop_id=shop_id,
+                    order_id=order_id,
                 )
+                # This is normal - the order webhook will update this record with complete data
+                # For now, we can still process the refund with minimal data
+
+            # Extract refund from payload
+            refund_obj = None
+            refund_id = None
+            try:
                 refunds = payload_data.get("refunds") or []
-                for r in refunds:
-                    if str(r.get("id")) == str(refund_id):
-                        refund_obj = r
-                        break
-                # fallback to last refund if id not matched
-                if refund_obj is None and refunds:
+                if refunds:
+                    # Get the most recent refund (last one in the array)
                     refund_obj = refunds[-1]
+                    refund_id = str(refund_obj.get("id", ""))
+                    self.logger.info(f"📋 Processing refund ID: {refund_id}")
+                else:
+                    self.logger.warning("No refunds found in payload")
+                    return
             except Exception as e:
                 self.logger.error(
                     "Failed to extract refund from raw payload", error=str(e)
@@ -106,64 +117,81 @@ class RefundNormalizationConsumer(BaseConsumer):
                 self.logger.warning(
                     "Refund object not found in raw payload",
                     shop_id=shop_id,
-                    refund_id=refund_id,
+                    order_id=order_id,
                 )
                 return
 
-            # Create RefundData
-            refunded_at = datetime.utcnow()
-            if refund_obj.get("created_at"):
-                try:
-                    refunded_at = datetime.fromisoformat(
-                        refund_obj["created_at"].replace("Z", "+00:00")
+            # Process refund within a transaction
+            async with db.tx() as transaction:
+                # Create RefundData
+                refunded_at = datetime.utcnow()
+                if refund_obj.get("created_at"):
+                    try:
+                        refunded_at = datetime.fromisoformat(
+                            refund_obj["created_at"].replace("Z", "+00:00")
+                        )
+                    except Exception:
+                        pass
+
+                # Calculate refund amount from Shopify data
+                shopify_refund_amount = 0.0
+                if refund_obj.get("transactions"):
+                    shopify_refund_amount = sum(
+                        float(t.get("amount", 0)) for t in refund_obj["transactions"]
                     )
-                except Exception:
-                    pass
 
-            refund_data = await db.refunddata.create(
-                data={
-                    "shopId": shop_id,
-                    "orderId": order_id,
-                    "refundId": refund_id,
-                    "refundedAt": refunded_at,
-                    "note": refund_obj.get("note") or refund_note,
-                    "restock": refund_obj.get("restock") or refund_restock,
-                    "totalRefundAmount": Decimal(str(refund_amount)),
-                    "currencyCode": refund_obj.get("currency") or "USD",
-                }
-            )
+                # Use Shopify refund amount
+                final_refund_amount = shopify_refund_amount
 
-            # Create RefundLineItemData from refund_line_items
-            refund_line_items = refund_obj.get("refund_line_items") or []
-            for rli in refund_line_items:
-                line_item = rli.get("line_item") or {}
-                quantity = int(rli.get("quantity") or line_item.get("quantity") or 0)
-                if quantity <= 0:
-                    continue
-
-                unit_price = float(line_item.get("price") or 0.0)
-                refund_amount_item = unit_price * quantity
-
-                await db.refundlineitemdata.create(
+                refund_data = await transaction.refunddata.create(
                     data={
-                        "refundId": refund_data.id,
+                        "shopId": shop_id,
                         "orderId": order_id,
-                        "productId": (
-                            str(line_item.get("product_id"))
-                            if line_item.get("product_id")
-                            else None
-                        ),
-                        "variantId": (
-                            str(line_item.get("variant_id"))
-                            if line_item.get("variant_id")
-                            else None
-                        ),
-                        "quantity": quantity,
-                        "unitPrice": Decimal(str(unit_price)),
-                        "refundAmount": Decimal(str(refund_amount_item)),
-                        "properties": {},  # Will be populated by attribution consumer
+                        "refundId": refund_id,
+                        "refundedAt": refunded_at,
+                        "note": refund_obj.get("note") or "",
+                        "restock": refund_obj.get("restock", False),
+                        "totalRefundAmount": Decimal(str(final_refund_amount)),
+                        "currencyCode": refund_obj.get("currency") or "USD",
                     }
                 )
+
+                # Create RefundLineItemData from refund_line_items
+                refund_line_items = refund_obj.get("refund_line_items") or []
+                for rli in refund_line_items:
+                    line_item = rli.get("line_item") or {}
+                    quantity = int(
+                        rli.get("quantity") or line_item.get("quantity") or 0
+                    )
+                    if quantity <= 0:
+                        continue
+
+                    # Use subtotal from refund_line_item (more accurate than calculating)
+                    refund_amount_item = float(rli.get("subtotal") or 0.0)
+                    unit_price = refund_amount_item / quantity if quantity > 0 else 0.0
+
+                    await transaction.refundlineitemdata.create(
+                        data={
+                            "refundId": refund_data.id,
+                            "orderId": order_id,
+                            "productId": (
+                                str(line_item.get("product_id"))
+                                if line_item.get("product_id")
+                                else None
+                            ),
+                            "variantId": (
+                                str(line_item.get("variant_id"))
+                                if line_item.get("variant_id")
+                                else None
+                            ),
+                            "quantity": quantity,
+                            "unitPrice": Decimal(str(unit_price)),
+                            "refundAmount": Decimal(str(refund_amount_item)),
+                            "properties": Json(
+                                {}
+                            ),  # Will be populated by attribution consumer
+                        }
+                    )
 
             self.logger.info(
                 "Refund normalized successfully",
@@ -172,6 +200,14 @@ class RefundNormalizationConsumer(BaseConsumer):
                 refund_id=refund_id,
                 line_items=len(refund_line_items),
             )
+
+            # Trigger refund attribution after successful normalization
+            from app.core.stream_manager import stream_manager, StreamType
+
+            await stream_manager.publish_to_domain(
+                StreamType.REFUND_ATTRIBUTION, message
+            )
+            self.logger.info("📤 Triggered refund attribution after normalization")
 
         except Exception as e:
             self.logger.error("Failed to normalize refund", error=str(e))

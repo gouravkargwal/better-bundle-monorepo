@@ -107,18 +107,6 @@ model RawCollection {
   @@map("RawCollection")
 }
 
-model RawBehavioralEvents {
-  id         String   @id @default(cuid())
-  shopId     String
-  payload    Json
-  receivedAt DateTime @default(now())
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId])
-  @@index([shopId, receivedAt])
-  @@map("RawBehavioralEvents")
-}
 
 // ===================== STAGING LAYER =====================
 
@@ -173,7 +161,7 @@ model OrderData {
   tags                    Json?     @default("[]")
   note                    String?   @default("") @db.Text
   noteAttributes          Json?     @default("[]")
-  lineItems               Json      @default("[]")
+  lineItems               LineItemData[]
   shippingAddress         Json?     @default("{}")
   billingAddress          Json?     @default("{}")
   discountApplications    Json?     @default("[]")
@@ -197,6 +185,22 @@ model OrderData {
   @@index([shopId, totalAmount])
   @@index([shopId, orderDate, financialStatus])
   @@map("OrderData")
+}
+
+model LineItemData {
+  id          String   @id @default(cuid())
+  orderId     String   @map("order_id")
+  productId   String?  @map("product_id")
+  variantId   String?  @map("variant_id")
+  title       String?
+  quantity    Int
+  price       Float
+  properties  Json?    @default("{}")
+
+  // Establish the relation back to the OrderData table
+  order       OrderData @relation(fields: [orderId], references: [id])
+
+  @@map("line_item_data")
 }
 
 model ProductData {
@@ -270,6 +274,7 @@ model CustomerData {
   addresses        Json?     @default("[]")
   currencyCode     String?   @default("USD") @db.VarChar(10)
   customerLocale   String?   @default("en") @db.VarChar(10)
+  isActive         Boolean   @default(true)  // For soft delete
   extras           Json?     @default("{}")  // Preserve unknown fields from raw payloads
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -299,6 +304,7 @@ model CollectionData {
   imageAlt       String?  @db.VarChar(500)
   productCount   Int      @default(0)
   isAutomated    Boolean  @default(false)
+  isActive       Boolean  @default(true)  // For soft delete
   metafields     Json?    @default("[]")
   extras         Json?    @default("{}")  // Preserve unknown fields from raw payloads
   createdAt      DateTime @default(now())
@@ -313,24 +319,6 @@ model CollectionData {
   @@map("CollectionData")
 }
 
-model BehavioralEvents {
-  eventId    String   @id
-  shopId     String
-  customerId String?  @db.VarChar(100)
-  clientId   String?  @db.VarChar(100) // Session identifier from Shopify Web Pixels
-  eventType  String   @db.VarChar(100)
-  timestamp DateTime
-  eventData  Json?
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, eventType])
-  @@index([shopId, timestamp])
-  @@index([shopId, customerId])
-  @@index([shopId, clientId])
-  @@index([shopId, eventType, timestamp])
-  @@map("BehavioralEvents")
-}
 
 model Session {
   id            String    @id
@@ -383,14 +371,15 @@ model Shop {
   productPairFeatures       ProductPairFeatures[]
   searchProductFeatures     SearchProductFeatures[]
 
-  // Behavioral events
-  rawBehavioralEvents RawBehavioralEvents[]
-  behavioralEvents    BehavioralEvents[]
   
   // Unified analytics
   userSessions        UserSession[]
   userInteractions    UserInteraction[]
   purchaseAttributions PurchaseAttribution[]
+
+  // Refund system
+  refundData          RefundData[]
+  refundAttributionAdjustments RefundAttributionAdjustment[]
 
   @@index([shopDomain])
   @@index([isActive])
@@ -893,43 +882,6 @@ model FeatureComputation {
   @@map("FeatureComputation")
 }
 
-// ============= GORSE TABLES =============
-
-model GorseFeedback {
-  feedbackType String   @map("feedback_type") @db.VarChar(256)
-  userId       String   @map("user_id") @db.VarChar(256)
-  itemId       String   @map("item_id") @db.VarChar(256)
-  timeStamp    DateTime @map("time_stamp") @db.Timestamptz
-  comment      String   @default("") @db.Text
-
-  @@id([feedbackType, userId, itemId])
-  @@index([feedbackType, timeStamp])
-  @@index([userId, timeStamp])
-  @@map("feedback")
-}
-
-model GorseItems {
-  itemId     String   @map("item_id") @id @db.VarChar(256)
-  isHidden   Boolean  @map("is_hidden") @default(false)
-  categories Json     @default("[]")
-  timeStamp  DateTime @map("time_stamp") @db.Timestamptz
-  labels     Json     @default("[]")
-  comment    String   @default("") @db.Text
-
-  @@index([isHidden])
-  @@index([timeStamp])
-  @@map("items")
-}
-
-model GorseUsers {
-  userId    String @map("user_id") @id @db.VarChar(256)
-  labels    Json   @default("[]")
-  subscribe Json   @default("[]")
-  comment   String @default("") @db.Text
-
-  @@map("users")
-}
-
 // ============= UNIFIED ANALYTICS TABLES =============
 
 model UserSession {
@@ -972,41 +924,20 @@ model UserInteraction {
   id                      String   @id @default(cuid())
   sessionId               String   @map("session_id") @db.VarChar(255)
   extensionType           String   @map("extension_type") @db.VarChar(50)
-  context                 String   @db.VarChar(50)
   interactionType         String   @map("interaction_type") @db.VarChar(50)
-
-  // User and session info
   customerId              String?  @map("customer_id") @db.VarChar(255)
   shopId                  String   @map("shop_id") @db.VarChar(255)
-
-  // Interaction details
-  productId               String?  @map("product_id") @db.VarChar(255)
-  collectionId            String?  @map("collection_id") @db.VarChar(255)
-  orderId                 String?  @map("order_id") @db.VarChar(255)
-
-  // Recommendation specific
-  recommendationId        String?  @map("recommendation_id") @db.VarChar(255)
-  recommendationPosition  Int?     @map("recommendation_position")
-  recommendationAlgorithm String?  @map("recommendation_algorithm") @db.VarChar(100)
-
-  // Interaction metadata
-  value                   Float?
-  quantity                Int?
   metadata                Json     @default("{}")
-
   // Timestamps
   createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-
   // Relations
   session                 UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   shop                    Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
   @@index([sessionId])
   @@index([customerId])
   @@index([shopId])
   @@index([extensionType])
   @@index([interactionType])
-  @@index([productId])
   @@index([createdAt])
   @@index([shopId, extensionType])
   @@index([shopId, interactionType])
@@ -1052,7 +983,76 @@ model PurchaseAttribution {
   @@index([purchaseAt])
   @@index([shopId, purchaseAt])
   @@index([shopId, customerId, purchaseAt])
+  @@unique([shopId, orderId])
   @@map("purchase_attributions")
+}
+
+// ============= REFUND SYSTEM TABLES =============
+
+model RefundData {
+  id               String   @id @default(cuid())
+  shopId           String   @map("shop_id") @db.VarChar(255)
+  orderId          BigInt   @map("order_id")
+  refundId         String   @map("refund_id") @db.VarChar(255)
+  refundedAt       DateTime @map("refunded_at") @db.Timestamptz
+  note             String?  @default("") @db.Text
+  restock          Boolean  @default(false)
+  totalRefundAmount Decimal @map("total_refund_amount") @db.Decimal(10, 2)
+  currencyCode     String   @default("USD") @map("currency_code") @db.VarChar(10)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  lineItems        RefundLineItemData[]
+  adjustments      RefundAttributionAdjustment[]
+  shop             Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, refundId])
+  @@index([shopId, orderId])
+  @@index([refundedAt])
+  @@map("refund_data")
+}
+
+model RefundLineItemData {
+  id          String   @id @default(cuid())
+  refundId    String   @map("refund_id")
+  orderId     BigInt   @map("order_id")
+  productId   String?  @map("product_id") @db.VarChar(255)
+  variantId   String?  @map("variant_id") @db.VarChar(255)
+  quantity    Int
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  refundAmount Decimal @map("refund_amount") @db.Decimal(10, 2)
+  properties  Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  refund      RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+  @@index([orderId])
+  @@index([productId])
+  @@map("refund_line_item_data")
+}
+
+model RefundAttributionAdjustment {
+  id                    String   @id @default(cuid())
+  shopId                String   @map("shop_id") @db.VarChar(255)
+  orderId               BigInt   @map("order_id")
+  refundId              String   @map("refund_id") @db.VarChar(255)
+  perExtensionRefund    Json     @map("per_extension_refund") @default("{}")
+  totalRefundAmount     Decimal  @map("total_refund_amount") @db.Decimal(10, 2)
+  computedAt            DateTime @map("computed_at") @db.Timestamptz
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  refund                RefundData @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  shop                  Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, refundId])
+  @@index([shopId, orderId])
+  @@index([computedAt])
+  @@map("refund_attribution_adjustments")
 }
 
 // ============= BILLING SYSTEM TABLES =============
