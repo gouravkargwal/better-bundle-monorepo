@@ -47,9 +47,6 @@ class ShopifyEventsConsumer(BaseConsumer):
 
             # Skip normalize_entity events (these are our own forwarded messages)
             if event_type == "normalize_entity":
-                self.logger.info(
-                    "⏭️ Skipping normalize_entity event (our own forwarded message)"
-                )
                 return
 
             # Only process original Shopify webhook events, not our own forwarded messages
@@ -77,13 +74,10 @@ class ShopifyEventsConsumer(BaseConsumer):
                 }
 
                 # Publish to normalization stream using stream manager
-                message_id = await stream_manager.publish_to_domain(
+                await stream_manager.publish_to_domain(
                     StreamType.NORMALIZATION, normalize_job
                 )
 
-                self.logger.info(
-                    f"📤 Forwarded {event_type} to normalization stream: {message_id}"
-                )
             else:
                 self.logger.warning(f"⚠️ Unknown event type: {event_type}")
 

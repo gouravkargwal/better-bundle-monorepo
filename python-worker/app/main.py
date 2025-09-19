@@ -356,14 +356,6 @@ async def trigger_main_table_processing(
             job_type="main_table_processing",
         )
 
-        logger.info(
-            f"Triggered main table processing",
-            job_id=job_id,
-            shop_id=shop_id,
-            shop_domain=shop_domain,
-            event_id=event_id,
-        )
-
         return {
             "message": "Main table processing triggered",
             "job_id": job_id,
@@ -463,14 +455,6 @@ async def compute_features(
             shop_id=shop_id,
             features_ready=features_ready,
             metadata=metadata,
-        )
-
-        logger.info(
-            f"Triggered feature computation consumer",
-            job_id=job_id,
-            shop_id=shop_id,
-            batch_size=batch_size,
-            event_id=event_id,
         )
 
         return {
@@ -594,14 +578,6 @@ async def trigger_data_collection_consumer(
             shop_domain=shop_domain,
             access_token=access_token,
             job_type=job_type,
-        )
-
-        logger.info(
-            f"Triggered data collection consumer",
-            job_id=job_id,
-            shop_id=shop_id,
-            shop_domain=shop_domain,
-            event_id=event_id,
         )
 
         return {

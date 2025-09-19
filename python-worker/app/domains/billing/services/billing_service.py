@@ -57,6 +57,7 @@ class BillingService:
             )
 
             # Create attribution context
+            logger.info(f"🔍 Purchase event products: {purchase_event.products}")
             context = AttributionContext(
                 shop_id=purchase_event.shop_id,
                 customer_id=purchase_event.customer_id,
@@ -68,7 +69,9 @@ class BillingService:
             )
 
             # Calculate attribution
-            attribution_result = await self.attribution_engine.calculate_attribution(context)
+            attribution_result = await self.attribution_engine.calculate_attribution(
+                context
+            )
 
             logger.info(
                 f"Attribution processed for purchase {purchase_event.order_id}: "
@@ -122,15 +125,17 @@ class BillingService:
             fraud_result = await self.fraud_detection_service.analyze_shop_fraud_risk(
                 shop_id, period.start_date, period.end_date
             )
-            
+
             # Adjust billing based on fraud detection
             if fraud_result.risk_level.value in ["high", "critical"]:
-                logger.warning(f"High fraud risk detected for shop {shop_id}: {fraud_result.risk_level.value}")
+                logger.warning(
+                    f"High fraud risk detected for shop {shop_id}: {fraud_result.risk_level.value}"
+                )
                 # Reduce or suspend billing for high-risk shops
                 metrics_data["fraud_adjustment"] = 0.5  # 50% reduction
                 metrics_data["fraud_risk_level"] = fraud_result.risk_level.value
                 metrics_data["fraud_confidence"] = fraud_result.confidence_score
-                
+
                 # Send fraud alert notification
                 await self._send_fraud_alert_notification(shop_id, fraud_result)
 
@@ -492,26 +497,21 @@ class BillingService:
         except Exception as e:
             logger.error(f"Error getting billing summary for shop {shop_id}: {e}")
             return {"error": str(e)}
-    
+
     # ============= NOTIFICATION HELPERS =============
-    
-    async def _send_fraud_alert_notification(
-        self,
-        shop_id: str,
-        fraud_result
-    ) -> None:
+
+    async def _send_fraud_alert_notification(self, shop_id: str, fraud_result) -> None:
         """Send fraud alert notification."""
         try:
             # Get shop contact email
             shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id},
-                select={"email": True, "domain": True}
+                where={"id": shop_id}, select={"email": True, "domain": True}
             )
-            
+
             if not shop or not shop.email:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
-            
+
             # Prepare fraud data
             fraud_data = {
                 "shop_id": shop_id,
@@ -519,92 +519,86 @@ class BillingService:
                 "fraud_types": [ft.value for ft in fraud_result.fraud_types],
                 "confidence_score": fraud_result.confidence_score,
                 "recommendations": fraud_result.recommendations,
-                "suspicious_metrics": fraud_result.suspicious_metrics
+                "suspicious_metrics": fraud_result.suspicious_metrics,
             }
-            
+
             # Send notification
             await self.notification_service.send_fraud_alert(
                 shop_id, fraud_data, shop.email
             )
-            
+
         except Exception as e:
-            logger.error(f"Error sending fraud alert notification for shop {shop_id}: {e}")
-    
+            logger.error(
+                f"Error sending fraud alert notification for shop {shop_id}: {e}"
+            )
+
     async def _send_invoice_notification(
-        self,
-        shop_id: str,
-        invoice_data: Dict[str, Any]
+        self, shop_id: str, invoice_data: Dict[str, Any]
     ) -> None:
         """Send invoice notification."""
         try:
             # Get shop contact email
             shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id},
-                select={"email": True}
+                where={"id": shop_id}, select={"email": True}
             )
-            
+
             if not shop or not shop.email:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
-            
+
             # Send notification
             await self.notification_service.send_invoice_notification(
                 shop_id, invoice_data, shop.email
             )
-            
+
         except Exception as e:
             logger.error(f"Error sending invoice notification for shop {shop_id}: {e}")
-    
+
     async def _send_payment_notification(
-        self,
-        shop_id: str,
-        payment_data: Dict[str, Any],
-        payment_status: str
+        self, shop_id: str, payment_data: Dict[str, Any], payment_status: str
     ) -> None:
         """Send payment notification."""
         try:
             # Get shop contact email
             shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id},
-                select={"email": True}
+                where={"id": shop_id}, select={"email": True}
             )
-            
+
             if not shop or not shop.email:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
-            
+
             # Send notification
             await self.notification_service.send_payment_notification(
                 shop_id, payment_data, shop.email, payment_status
             )
-            
+
         except Exception as e:
             logger.error(f"Error sending payment notification for shop {shop_id}: {e}")
-    
+
     async def _send_billing_summary_notification(
-        self,
-        shop_id: str,
-        summary_data: Dict[str, Any]
+        self, shop_id: str, summary_data: Dict[str, Any]
     ) -> None:
         """Send billing summary notification."""
         try:
             # Get shop contact email
             shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id},
-                select={"email": True}
+                where={"id": shop_id}, select={"email": True}
             )
-            
+
             if not shop or not shop.email:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
-            
+
             # Send notification
             await self.notification_service.send_billing_summary(
                 shop_id, summary_data, shop.email
             )
-            
+
         except Exception as e:
-            logger.error(f"Error sending billing summary notification for shop {shop_id}: {e}")
+            logger.error(
+                f"Error sending billing summary notification for shop {shop_id}: {e}"
+            )
 
     # ============= UTILITY METHODS =============
 

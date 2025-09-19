@@ -17,53 +17,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
 
   try {
-    console.log("🔐 Starting webhook authentication...");
     const authResult = await authenticate.webhook(request);
     payload = authResult.payload;
     session = authResult.session;
     topic = authResult.topic;
     shop = authResult.shop;
-    console.log("✅ Authentication successful");
-    console.log("📋 Topic:", topic);
-    console.log("📋 Shop:", shop);
-    console.log("📋 Session ID:", session?.id);
-    console.log("📋 Payload keys:", Object.keys(payload || {}));
-    console.log("📋 Request body length:", JSON.stringify(payload).length);
-    console.log(
-      "📋 Request body preview:",
-      JSON.stringify(payload).substring(0, 200) + "...",
-    );
   } catch (authError) {
-    console.log("❌ Authentication failed:", authError);
-    console.log("❌ Auth error details:", {
-      message:
-        authError instanceof Error ? authError.message : String(authError),
-      stack: authError instanceof Error ? authError.stack : undefined,
-      name: authError instanceof Error ? authError.name : "Unknown",
-    });
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   if (!session || !shop) {
-    console.log(`❌ Session or shop missing for ${topic} webhook`);
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   try {
-    console.log(`🔔 [${timestamp}] ${topic} webhook received for ${shop}`);
-    console.log(`📦 Order ID: ${payload.id}`);
-    console.log(`💰 Total: ${payload.total_price}`);
-    console.log(`📧 Customer: ${payload.email || "Guest"}`);
-    console.log(`📅 Created: ${payload.created_at}`);
-    console.log(`🔄 Financial Status: ${payload.financial_status}`);
-    console.log(`📋 Fulfillment Status: ${payload.fulfillment_status}`);
-    console.log(`🏷️ Tags: ${payload.tags}`);
-    console.log(`📝 Note: ${payload.note || "No note"}`);
-    console.log(`🔗 Note Attributes:`, payload.note_attributes || []);
-
     // Log line items for attribution debugging
     if (payload.line_items && payload.line_items.length > 0) {
-      console.log("🔍 Line items details:");
       payload.line_items.forEach((item: any, index: number) => {
         console.log(`  Item ${index + 1}:`, {
           id: item.id,
@@ -84,10 +53,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     )?.value;
 
     if (payload.customer && payload.customer.id && sessionId) {
-      console.log(
-        `🔗 Triggering customer linking for customer ${payload.customer.id} with session ${sessionId}`,
-      );
-
       try {
         // Call your Python worker's customer linking API
         const response = await fetch(
@@ -145,7 +110,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get shop ID from database
-    console.log(`🔍 Looking up shop in database: ${shop}`);
     const shopRecord = await prisma.shop.findFirst({
       where: { shopDomain: shop },
       select: { id: true },
@@ -160,10 +124,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    console.log(`✅ Shop found in database: ${shopRecord.id}`);
-
     // Upsert without composite unique (shopifyId is nullable in schema)
-    console.log(`🔍 Checking if order ${orderId} already exists...`);
     const existing = await prisma.rawOrder.findFirst({
       where: { shopId: shopRecord.id, shopifyId: orderId },
       select: { id: true },
@@ -171,7 +132,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     let rawRecordId: string | null = null;
     if (existing) {
-      console.log(`⚠️ Order ${orderId} already exists, updating...`);
       const updated = await prisma.rawOrder.update({
         where: { id: existing.id },
         data: {
@@ -185,11 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } as any,
       });
       rawRecordId = updated.id;
-      console.log(
-        `✅ Order ${orderId} updated successfully (ID: ${updated.id})`,
-      );
     } else {
-      console.log(`📝 Creating new order record for ${orderId}`);
       const created = await prisma.rawOrder.create({
         data: {
           shopId: shopRecord.id,
@@ -207,20 +163,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } as any,
       });
       rawRecordId = created.id;
-      console.log(
-        `✅ Order ${orderId} created successfully (ID: ${created.id})`,
-      );
     }
 
-    console.log(
-      `✅ Order ${orderId} payment confirmed in raw table for shop ${shop}`,
-    );
-
     // Publish to Redis Stream for real-time processing (critical event - always publish)
-    console.log(`📡 Publishing order_paid event to Redis Stream...`);
     try {
       const streamService = await getRedisStreamService();
-      console.log(`✅ Redis Stream service initialized`);
 
       const streamData = {
         event_type: "order_paid",
@@ -230,16 +177,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         order_status: "paid",
       };
 
-      console.log(`📤 Publishing stream data:`, streamData);
-      const messageId = await streamService.publishShopifyEvent(streamData);
-
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-        orderStatus: streamData.order_status,
-      });
+      await streamService.publishShopifyEvent(streamData);
 
       // Also publish a normalize job for canonical staging
       if (rawRecordId) {

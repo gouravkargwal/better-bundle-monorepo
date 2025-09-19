@@ -5,14 +5,6 @@ import prisma from "../db.server";
 import { getRedisStreamService } from "../services/redis-stream.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log("🚀 Webhook request received - products/delete");
-  console.log("📋 Request method:", request.method);
-  console.log("📋 Request URL:", request.url);
-  console.log(
-    "📋 Request headers:",
-    Object.fromEntries(request.headers.entries()),
-  );
-
   let payload, session, topic, shop;
 
   try {
@@ -21,22 +13,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     session = authResult.session;
     topic = authResult.topic;
     shop = authResult.shop;
-    console.log("✅ Authentication successful");
-    console.log("📋 Topic:", topic);
-    console.log("📋 Shop:", shop);
   } catch (authError) {
-    console.log("❌ Authentication failed:", authError);
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   if (!session || !shop) {
-    console.log(`❌ Session or shop missing for ${topic} webhook`);
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
-
     // Extract product data from payload
     const product = payload;
     const productId = product.id?.toString();
@@ -70,10 +55,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    console.log(
-      `✅ Product ${productId} deletion event stored in raw table for shop ${shop}`,
-    );
-
     // Publish deletion event to Redis stream
     try {
       const eventData = {
@@ -86,7 +67,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const redisStreamService = await getRedisStreamService();
       await redisStreamService.publishShopifyEvent(eventData);
-      console.log(`📤 Product deletion event published to Redis stream`);
     } catch (redisError) {
       console.error(
         "❌ Failed to publish deletion event to Redis:",

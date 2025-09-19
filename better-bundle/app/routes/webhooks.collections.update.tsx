@@ -12,8 +12,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
-
     // Extract collection data from payload
     const collection = payload;
     const collectionId = collection.id?.toString();
@@ -52,10 +50,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } as any,
     });
 
-    console.log(
-      `✅ Collection ${collectionId} updated in raw table for shop ${shop}`,
-    );
-
     // Publish to Redis Stream for real-time processing
     try {
       const streamService = await getRedisStreamService();
@@ -67,14 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         timestamp: new Date().toISOString(),
       };
 
-      const messageId = await streamService.publishShopifyEvent(streamData);
-
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-      });
+      await streamService.publishShopifyEvent(streamData);
 
       // Also publish a normalize job for canonical staging
       const normalizeJob = {

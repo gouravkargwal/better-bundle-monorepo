@@ -181,7 +181,6 @@ class FraudDetectionResult(BaseModel):
     shop_id: str
     order_id: int
     is_fraud: bool
-    fraud_score: float  # 0.0 to 1.0
     fraud_reasons: List[str]
     detected_at: datetime
     metadata: Dict[str, Any]

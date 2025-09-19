@@ -12,8 +12,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
-
     // Extract collection data from payload
     const collection = payload;
     const collectionId = collection.id?.toString();
@@ -47,10 +45,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    console.log(
-      `✅ Collection ${collectionId} deletion event stored in raw table for shop ${shop}`,
-    );
-
     // Publish deletion event to Redis stream
     try {
       const eventData = {
@@ -63,7 +57,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const redisStreamService = await getRedisStreamService();
       await redisStreamService.publishShopifyEvent(eventData);
-      console.log(`📤 Collection deletion event published to Redis stream`);
     } catch (redisError) {
       console.error(
         "❌ Failed to publish collection deletion event to Redis:",

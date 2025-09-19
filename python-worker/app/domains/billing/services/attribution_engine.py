@@ -137,7 +137,6 @@ class AttributionEngine:
                 calculated_at=datetime.utcnow(),
                 metadata={
                     "interaction_count": len(interactions),
-                    "fraud_score": 0.0,  # No fraud detection
                     "calculation_method": "multi_touch_attribution",
                 },
             )
@@ -234,6 +233,7 @@ class AttributionEngine:
         logger.info(
             f"🛒 Processing {len(context.purchase_products)} products from purchase"
         )
+        logger.info(f"🔍 Purchase products data: {context.purchase_products}")
         for product in context.purchase_products:
             product_id = product.get("id")
             product_amount = Decimal(str(product.get("price", 0)))
@@ -292,9 +292,6 @@ class AttributionEngine:
 
             # Skip ATLAS interactions (web pixel) - they don't drive conversions
             if interaction.extensionType == ExtensionType.ATLAS.value:
-                logger.info(
-                    f"⏭️ Skipping ATLAS interaction {interaction.id} - web pixel doesn't drive attribution"
-                )
                 continue
 
             # Only process interactions from attribution-eligible extensions
@@ -302,9 +299,6 @@ class AttributionEngine:
                 ExtensionType(interaction.extensionType)
                 not in attribution_eligible_extensions
             ):
-                logger.info(
-                    f"⏭️ Skipping interaction {interaction.id} from {interaction.extensionType} - not attribution eligible"
-                )
                 continue
 
             # Extract product_id using adapter factory

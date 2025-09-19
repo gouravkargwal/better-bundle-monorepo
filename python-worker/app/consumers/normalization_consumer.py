@@ -165,19 +165,6 @@ class NormalizationConsumer(BaseConsumer):
                     metadata=metadata,
                 )
 
-                self.logger.info(
-                    f"🚀 Triggered feature computation after {data_type} normalization",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    entity_type=data_type,
-                    event_id=event_id,
-                )
-            else:
-                self.logger.debug(
-                    f"Skipping feature computation for {data_type} (not recommendation-relevant)",
-                    shop_id=shop_id,
-                )
-
         except Exception as e:
             self.logger.error(
                 f"Failed to trigger feature computation: {e}",

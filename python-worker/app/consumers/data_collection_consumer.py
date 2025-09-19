@@ -48,12 +48,6 @@ class DataCollectionConsumer(BaseConsumer):
 
             # Check if this is a data collection job
             if job_type != "data_collection":
-                # This might be an analysis job from the scheduler - skip it
-                self.logger.debug(
-                    f"Skipping non-data-collection job: {job_type}",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                )
                 return
 
             # Validate required fields for data collection jobs

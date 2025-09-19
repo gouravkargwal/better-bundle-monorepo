@@ -73,7 +73,7 @@ class PurchaseAttributionConsumer(BaseConsumer):
             for li in line_items or []:
                 products.append(
                     {
-                        "product_id": li.productId,
+                        "id": li.productId,  # Changed from product_id to id
                         "variant_id": li.variantId,
                         "quantity": li.quantity,
                         "price": li.price,
@@ -84,6 +84,10 @@ class PurchaseAttributionConsumer(BaseConsumer):
             total_amount = float(getattr(order, "totalAmount", 0.0) or 0.0)
             currency = getattr(order, "currencyCode", None) or "USD"
             customer_id = getattr(order, "customerId", None)
+
+            self.logger.info(
+                f"🔍 Created {len(products)} products for order {order_id}: {products}"
+            )
 
             # Try to find a recent session for this customer (optional)
             session = None
