@@ -63,7 +63,7 @@ class StreamManager:
         StreamType.NORMALIZATION: StreamConfig(
             stream_name=NORMALIZATION_STREAM,
             description="Entity normalization jobs",
-            event_types=["normalize_entity", "normalize_batch", "normalize_scan"],
+            event_types=["normalize_entity", "normalize_batch"],
         ),
         StreamType.PURCHASE_ATTRIBUTION: StreamConfig(
             stream_name=PURCHASE_ATTRIBUTION_STREAM,
@@ -73,7 +73,11 @@ class StreamManager:
         StreamType.REFUND_ATTRIBUTION: StreamConfig(
             stream_name=REFUND_ATTRIBUTION_STREAM,
             description="Refund attribution processing",
-            event_types=["refund_created", "refund_attribution_calculation"],
+            event_types=[
+                "refund_created",
+                "refund_attribution_calculation",
+                "refund_attribution_batch",
+            ],
         ),
         StreamType.REFUND_NORMALIZATION: StreamConfig(
             stream_name=REFUND_NORMALIZATION_STREAM,
@@ -104,7 +108,7 @@ class StreamManager:
         Get the appropriate stream for an event type.
 
         Args:
-            event_type: The type of event (e.g., 'normalize_entity', 'data_collection')
+            event_type: The type of event (e.g., 'normalize_entity', 'normalize_batch', 'data_collection')
 
         Returns:
             The stream name for the event type, or None if not found

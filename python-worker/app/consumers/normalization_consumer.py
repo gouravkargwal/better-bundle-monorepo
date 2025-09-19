@@ -19,136 +19,623 @@ from prisma import Json
 logger = get_logger(__name__)
 
 
-class NormalizationConsumer(BaseConsumer):
-    """Consumes normalize_entity, normalize_batch, and normalize_scan jobs and upserts into Staging* tables."""
+class PersistenceMapper:
+    """Declarative mapper: canonical DTO -> Prisma input data.
 
-    def __init__(self) -> None:
-        super().__init__(
-            stream_name=NORMALIZATION_STREAM,
-            consumer_group=NORMALIZATION_GROUP,
-            consumer_name="normalization-consumer",
-            batch_size=50,
-            poll_timeout=1000,
-            max_retries=3,
-            retry_delay=0.5,
-        )
+    Centralizes DB-specific concerns: relations, JSON fields, timestamps, and field cleanup.
+    """
+
+    # Per-entity configuration
+    CONFIG = {
+        "products": {
+            "json_fields": {
+                "metafields",
+                "tags",
+                "variants",
+                "images",
+                "media",
+                "options",
+                "noteAttributes",
+                "extras",
+            },
+            "timestamp_map": {
+                "shopifyUpdatedAt": "updatedAt",
+                "shopifyCreatedAt": "createdAt",
+            },
+            "remove_fields": {
+                "entityId",
+                "canonicalVersion",
+                "originalGid",
+                "customerCreatedAt",
+                "customerUpdatedAt",
+                "isActive",
+                "shopId",
+            },
+        },
+        "customers": {
+            "json_fields": {
+                "metafields",
+                "tags",
+                "addresses",
+                "defaultAddress",
+                "customerDefaultAddress",
+                "location",
+                "noteAttributes",
+                "extras",
+            },
+            "timestamp_map": {
+                "shopifyUpdatedAt": "updatedAt",
+                "shopifyCreatedAt": "createdAt",
+            },
+            "remove_fields": {
+                "entityId",
+                "canonicalVersion",
+                "originalGid",
+                "customerCreatedAt",
+                "customerUpdatedAt",
+                "isActive",
+                "shopId",
+            },
+        },
+        "collections": {
+            "json_fields": {
+                "metafields",
+                "tags",
+                "images",
+                "noteAttributes",
+                "extras",
+            },
+            "timestamp_map": {
+                "shopifyUpdatedAt": "updatedAt",
+                "shopifyCreatedAt": "createdAt",
+            },
+            "remove_fields": {
+                "entityId",
+                "canonicalVersion",
+                "originalGid",
+                "customerCreatedAt",
+                "customerUpdatedAt",
+                "isActive",
+                "shopId",
+            },
+        },
+        "orders": {
+            "json_fields": {
+                "metafields",
+                "tags",
+                "discountApplications",
+                "fulfillments",
+                "transactions",
+                "shippingAddress",
+                "billingAddress",
+                "defaultAddress",
+                "customerDefaultAddress",
+                "location",
+                "noteAttributes",
+                "extras",
+            },
+            "timestamp_map": {
+                "shopifyUpdatedAt": "updatedAt",
+                "shopifyCreatedAt": "createdAt",
+            },
+            "remove_fields": {
+                "entityId",
+                "canonicalVersion",
+                "originalGid",
+                "customerCreatedAt",
+                "customerUpdatedAt",
+                "isActive",
+                "refunds",
+                "lineItems",
+                "shopId",
+            },
+        },
+    }
+
+    @staticmethod
+    def apply(entity: str, canonical: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
+        cfg = PersistenceMapper.CONFIG.get(entity, {})
+        main_data: Dict[str, Any] = canonical.copy()
+
+        # Use relation connect syntax for all entities
+        main_data["shop"] = {"connect": {"id": shop_id}}
+
+        # Timestamp mapping
+        ts_map: Dict[str, str] = cfg.get("timestamp_map", {})
+        for src, dst in ts_map.items():
+            if src in main_data:
+                main_data[dst] = main_data[src]
+
+        # Ensure required timestamps
+        if "createdAt" not in main_data or main_data.get("createdAt") is None:
+            main_data["createdAt"] = now_utc()
+        if "updatedAt" not in main_data or main_data.get("updatedAt") is None:
+            main_data["updatedAt"] = now_utc()
+
+        # Provide safe defaults for known json-ish nullable fields
+        json_default_fields = {
+            "customerDefaultAddress",
+            "defaultAddress",
+            "shippingAddress",
+            "billingAddress",
+            "location",
+        }
+        for jf in json_default_fields:
+            if jf in main_data and (main_data[jf] is None or main_data[jf] == {}):
+                main_data[jf] = {}
+
+        # Wrap configured JSON fields using prisma.Json
+        json_fields: set = cfg.get("json_fields", set())
+        for field in json_fields:
+            if field in main_data and main_data[field] is not None:
+                try:
+                    main_data[field] = Json(main_data[field])
+                except (TypeError, ValueError):
+                    # Fallback to empty container of appropriate type
+                    if isinstance(main_data[field], (list, tuple)):
+                        main_data[field] = Json([])
+                    elif isinstance(main_data[field], dict):
+                        main_data[field] = Json({})
+                    else:
+                        main_data[field] = None
+
+        # Remove internal/canonical-only fields and scalar shopId
+        for rf in cfg.get("remove_fields", set()):
+            main_data.pop(rf, None)
+
+        return main_data
+
+
+class EntityNormalizationService:
+    """Handles core entity normalization logic (products, customers, collections)."""
+
+    def __init__(self):
         self.logger = get_logger(__name__)
 
-    async def _process_single_message(self, message: Dict[str, Any]):
+    async def normalize_entity(
+        self, raw_record: Any, shop_id: str, data_type: str
+    ) -> bool:
+        """Normalize a single entity record."""
         try:
-            payload = message.get("data") or message
+            # Parse and validate payload
+            payload = self._parse_payload(raw_record)
+            if not payload:
+                return False
+
+            # Get adapter and convert to canonical
+            data_format = self._detect_format(raw_record, payload)
+            adapter = get_adapter(data_format, data_type)
+            canonical = adapter.to_canonical(payload, shop_id)
+
+            # Prepare main data
+            main_data = self._prepare_main_data(canonical, shop_id, data_type)
+            if not main_data:
+                return False
+
+            # Get database and table
+            db = await get_database()
+            main_table = self._get_main_table(db, data_type)
+
+            # Check for existing record and idempotency
+            id_field = f"{data_type[:-1]}Id"
+            id_value = canonical.get(id_field)
+            existing = await main_table.find_first(
+                where={"shopId": shop_id, id_field: id_value}
+            )
+
+            if self._should_skip_update(existing, canonical):
+                return True
+
+            # Upsert main record
+            if existing:
+                await main_table.update(
+                    where={"id": existing.id},
+                    data=main_data,
+                )
+            else:
+                await main_table.create(data=main_data)
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Entity normalization failed: {e}")
+            # For certain errors, we should not retry
+            if self._should_not_retry(e):
+                self.logger.warning(f"Skipping retry for non-retryable error: {e}")
+            return False
+
+    def _should_not_retry(self, error: Exception) -> bool:
+        """Check if error should not be retried (data format issues, etc.)."""
+        error_str = str(error).lower()
+        # Don't retry for data format/validation errors
+        non_retryable_patterns = [
+            "unable to match input value",
+            "parse errors",
+            "a value is required but not set",
+            "invalid input",
+            "validation error",
+        ]
+        return any(pattern in error_str for pattern in non_retryable_patterns)
+
+    def _parse_payload(self, raw_record: Any) -> Optional[Dict]:
+        """Parse and validate raw record payload."""
+        payload = raw_record.payload
+
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                payload = payload.decode("utf-8")
+            except Exception:
+                self.logger.warning("Skipping raw record: invalid bytes payload")
+                return None
+
             if isinstance(payload, str):
                 try:
                     payload = json.loads(payload)
                 except Exception:
-                    pass
-            event_type = payload.get("event_type")
+                    self.logger.warning(
+                        "Skipping raw record: invalid JSON payload string"
+                    )
+                    return None
 
-            if event_type == "normalize_entity":
-                await self._handle_normalize_entity(payload)
-            elif event_type == "normalize_batch":
-                await self._handle_normalize_batch(payload)
-            elif event_type == "normalize_scan":
-                await self._handle_normalize_scan(payload)
-            else:
-                # Ignore non-normalization messages
-                return
+        if (
+            isinstance(payload, list)
+            and len(payload) == 1
+            and isinstance(payload[0], dict)
+        ):
+            payload = payload[0]
 
-        except Exception as e:
-            self.logger.error(f"Normalization failed: {e}")
-            raise
+        if not isinstance(payload, dict):
+            self.logger.warning("Skipping raw record: unexpected payload type")
+            return None
 
-    async def _handle_normalize_entity(self, payload: Dict[str, Any]):
-        """Handle single entity normalization (webhooks)."""
-        # NormalizeJob validation; be lenient about timestamp as string
-        if isinstance(payload.get("timestamp"), str):
-            # Pydantic will parse ISO strings automatically
-            pass
+        return payload
 
-        job = NormalizeJob(**payload)
-        db = await get_database()
+    def _detect_format(self, raw_record: Any, payload: Dict) -> str:
+        """Detect data format (GraphQL vs REST)."""
+        data_format = getattr(raw_record, "format", None)
+        if not data_format:
+            entity_id = payload.get("id", "")
+            data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
+        return data_format
 
-        # Check if this is a deletion event by looking at the original event type
-        original_event_type = payload.get("original_event_type")
-        is_deletion_event = original_event_type in [
-            "product_deleted",
-            "collection_deleted",
-            "customer_redacted",
+    def _prepare_main_data(
+        self, canonical: Dict, shop_id: str, data_type: str
+    ) -> Optional[Dict]:
+        """Prepare main table data from canonical structure using declarative mapper."""
+        # Validate presence of primary id
+        id_field = f"{data_type[:-1]}Id"
+        if not canonical.get(id_field):
+            self.logger.error(f"Missing primary id for canonical record: {id_field}")
+            return None
+
+        # Apply declarative mapping
+        main_data = PersistenceMapper.apply(data_type, canonical, shop_id)
+        return main_data
+
+    def _get_main_table(self, db, data_type: str):
+        """Get the appropriate main table for data type."""
+        table_map = {
+            "orders": db.orderdata,
+            "products": db.productdata,
+            "customers": db.customerdata,
+            "collections": db.collectiondata,
+        }
+        return table_map[data_type]
+
+    def _should_skip_update(self, existing, canonical: Dict) -> bool:
+        """Check if update should be skipped based on idempotency."""
+        if (
+            not existing
+            or not hasattr(existing, "shopifyUpdatedAt")
+            or not existing.shopifyUpdatedAt
+        ):
+            return False
+
+        incoming_updated_at = canonical.get("shopifyUpdatedAt")
+        if not incoming_updated_at:
+            return False
+
+        return incoming_updated_at <= existing.shopifyUpdatedAt
+
+    def _serialize_json_fields(self, main_data: Dict[str, Any]):
+        """Convert JSON fields to prisma.Json() for proper Prisma handling."""
+        json_fields = [
+            "metafields",
+            "tags",
+            "addresses",
+            "defaultAddress",
+            "location",
+            "shippingAddress",
+            "billingAddress",
+            "discountApplications",
+            "fulfillments",
+            "transactions",
+            "variants",
+            "images",
+            "media",
+            "options",
+            "noteAttributes",
+            "extras",
         ]
 
-        if is_deletion_event:
-            # This is a confirmed deletion event
-            await self._handle_entity_deletion(job, db)
-            return
+        for field in json_fields:
+            if field in main_data and main_data[field] is not None:
+                try:
+                    # Use prisma.Json() to properly handle JSON fields
+                    main_data[field] = Json(main_data[field])
+                except (TypeError, ValueError):
+                    if isinstance(main_data[field], (list, tuple)):
+                        main_data[field] = Json([])
+                    elif isinstance(main_data[field], dict):
+                        main_data[field] = Json({})
+            else:
+                main_data[field] = None
 
-        # For non-deletion events, check if raw record exists
-        raw_table = {
-            "orders": db.raworder,
-            "products": db.rawproduct,
-            "customers": db.rawcustomer,
-            "collections": db.rawcollection,
-        }[job.data_type]
+    def _clean_internal_fields(self, main_data: Dict):
+        """Remove internal/canonical fields not in DB schema."""
+        fields_to_remove = [
+            "entityId",
+            "canonicalVersion",
+            "originalGid",
+            "customerCreatedAt",
+            "customerUpdatedAt",
+            "isActive",
+        ]
+        for field in fields_to_remove:
+            main_data.pop(field, None)
 
-        raw = await raw_table.find_first(
-            where={"shopifyId": str(job.shopify_id), "shopId": job.shop_id}
-        )
 
-        if not raw:
-            # No raw record found for non-deletion event - this is an error
-            self.logger.warning(
-                "Raw record not found for non-deletion event",
-                shopify_id=job.shopify_id,
-                shop_id=job.shop_id,
-                event_type=original_event_type,
-            )
-            return
+class OrderNormalizationService:
+    """Handles order-specific normalization including line items."""
 
-        # Load raw record by shopifyId and shopId
-        raw_table = {
-            "orders": db.raworder,
-            "products": db.rawproduct,
-            "customers": db.rawcustomer,
-            "collections": db.rawcollection,
-        }[job.data_type]
+    def __init__(self):
+        self.logger = get_logger(__name__)
 
-        # Find by shopifyId and shopId instead of raw_id
-        raw = await raw_table.find_first(
-            where={"shopifyId": str(job.shopify_id), "shopId": job.shop_id}
-        )
-        if not raw:
-            self.logger.warning(
-                "Raw record not found", shopify_id=job.shopify_id, shop_id=job.shop_id
-            )
-            return
-
+    async def normalize_order(
+        self, raw_record: Any, shop_id: str, is_webhook: bool = True
+    ) -> bool:
+        """Normalize an order with its line items in a transaction."""
         try:
-            await self._normalize_single_raw_record(raw, job.shop_id, job.data_type)
+            # Parse payload and get canonical
+            payload = self._parse_payload(raw_record)
+            if not payload:
+                return False
 
-            # Only trigger feature computation after SUCCESSFUL normalization
-            await self._trigger_feature_computation(job.shop_id, job.data_type)
+            data_format = self._detect_format(raw_record, payload)
+            adapter = get_adapter(data_format, "orders")
+            canonical = adapter.to_canonical(payload, shop_id)
+
+            # Extract line items BEFORE applying PersistenceMapper
+            line_items = canonical.get("lineItems", [])
+            self.logger.info(
+                f"Extracted {len(line_items)} line items for order {canonical.get('orderId')}"
+            )
+
+            # Prepare main data
+            main_data = await self._prepare_order_data(canonical, shop_id)
+            if not main_data:
+                return False
+
+            # Process in transaction
+            db = await get_database()
+            order_record_id = None
+
+            async with db.tx() as transaction:
+                # Upsert main order record
+                order_table = transaction.orderdata
+                existing = await order_table.find_first(
+                    where={"shopId": shop_id, "orderId": canonical.get("orderId")}
+                )
+
+                if existing:
+                    await order_table.update(
+                        where={"id": existing.id},
+                        data=main_data,
+                    )
+                    order_record_id = existing.id
+                else:
+                    created_record = await order_table.create(data=main_data)
+                    order_record_id = created_record.id
+
+                # Create line items
+                if line_items:
+                    await self._create_line_items(
+                        transaction, order_record_id, line_items
+                    )
+
+            # Only publish events for webhook processing (not historical batch processing)
+            if is_webhook:
+                await self._publish_order_events(shop_id, canonical.get("orderId"))
+
+            return True
 
         except Exception as e:
-            self.logger.error(
-                "Normalization failed - skipping feature computation",
-                error=str(e),
-                shop_id=job.shop_id,
-                data_type=job.data_type,
-                shopify_id=job.shopify_id,
-            )
-            # Don't trigger feature computation if normalization failed
-            raise
+            self.logger.error(f"Order normalization failed: {e}")
+            # For certain errors, we should not retry
+            if self._should_not_retry(e):
+                self.logger.warning(f"Skipping retry for non-retryable error: {e}")
+            return False
 
-    async def _trigger_feature_computation(self, shop_id: str, data_type: str):
-        """Trigger feature computation after successful normalization"""
+    def _should_not_retry(self, error: Exception) -> bool:
+        """Check if error should not be retried (data format issues, etc.)."""
+        error_str = str(error).lower()
+        # Don't retry for data format/validation errors
+        non_retryable_patterns = [
+            "unable to match input value",
+            "parse errors",
+            "a value is required but not set",
+            "invalid input",
+            "validation error",
+        ]
+        return any(pattern in error_str for pattern in non_retryable_patterns)
+
+    def _parse_payload(self, raw_record: Any) -> Optional[Dict]:
+        """Parse order payload."""
+        payload = raw_record.payload
+
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                payload = payload.decode("utf-8")
+            except Exception:
+                return None
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return None
+
+        if (
+            isinstance(payload, list)
+            and len(payload) == 1
+            and isinstance(payload[0], dict)
+        ):
+            payload = payload[0]
+
+        return payload if isinstance(payload, dict) else None
+
+    def _detect_format(self, raw_record: Any, payload: Dict) -> str:
+        """Detect order data format."""
+        data_format = getattr(raw_record, "format", None)
+        if not data_format:
+            entity_id = payload.get("id", "")
+            data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
+        return data_format
+
+    async def _prepare_order_data(
+        self, canonical: Dict, shop_id: str
+    ) -> Optional[Dict]:
+        """Prepare order data for database using declarative mapper."""
+        # Ensure shop exists (connect will fail otherwise)
+        db = await get_database()
+        shop_exists = await db.shop.find_first(where={"id": shop_id})
+        if not shop_exists:
+            self.logger.error(f"Shop {shop_id} not found")
+            return None
+
+        if not canonical.get("orderId"):
+            self.logger.error("Missing orderId in canonical data")
+            return None
+
+        main_data = PersistenceMapper.apply("orders", canonical, shop_id)
+        return main_data
+
+    async def _create_line_items(
+        self, db_client: Any, order_record_id: str, line_items: List[Any]
+    ):
+        """Create line items for an order."""
+        if not line_items:
+            return
+
         try:
-            # Only trigger for certain entity types that affect recommendations
+            # Clear existing line items
+            await db_client.lineitemdata.delete_many(where={"orderId": order_record_id})
+
+            # Prepare bulk data
+            bulk_data = []
+            self.logger.info(
+                f"Processing {len(line_items)} line items for order {order_record_id}"
+            )
+            for item in line_items:
+                try:
+                    line_item_data = {
+                        "orderId": order_record_id,
+                        "productId": item.get("productId"),
+                        "variantId": item.get("variantId"),
+                        "title": item.get("title"),
+                        "quantity": int(item.get("quantity", 0)),
+                        "price": float(item.get("price", 0.0)),
+                        "properties": Json(item.get("properties", {})),
+                    }
+                    bulk_data.append(line_item_data)
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"Skipping invalid line item: {e}")
+                    continue
+
+            # Bulk create
+            if bulk_data:
+                await db_client.lineitemdata.create_many(data=bulk_data)
+
+        except Exception as e:
+            self.logger.error(f"Failed to create line items: {e}")
+
+    async def _publish_order_events(self, shop_id: str, order_id: str):
+        """Publish events after successful order processing."""
+        try:
+            await stream_manager.publish_to_domain(
+                StreamType.PURCHASE_ATTRIBUTION,
+                {
+                    "event_type": "purchase_ready_for_attribution",
+                    "shop_id": shop_id,
+                    "order_id": order_id,
+                    "timestamp": now_utc().isoformat(),
+                },
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to publish order events: {e}")
+
+    def _serialize_json_fields(self, main_data: Dict[str, Any]):
+        """Serialize JSON fields using prisma.Json() for proper Prisma handling."""
+        json_fields = [
+            "metafields",
+            "tags",
+            "addresses",
+            "defaultAddress",
+            "location",
+            "shippingAddress",
+            "billingAddress",
+            "discountApplications",
+            "fulfillments",
+            "transactions",
+            "variants",
+            "images",
+            "media",
+            "options",
+            "noteAttributes",
+            "extras",
+        ]
+
+        for field in json_fields:
+            if field in main_data and main_data[field] is not None:
+                try:
+                    # Use prisma.Json() to properly handle JSON fields
+                    main_data[field] = Json(main_data[field])
+                except (TypeError, ValueError):
+                    if isinstance(main_data[field], (list, tuple)):
+                        main_data[field] = Json([])
+                    elif isinstance(main_data[field], dict):
+                        main_data[field] = Json({})
+                    else:
+                        main_data[field] = None
+
+    def _clean_internal_fields(self, main_data: Dict):
+        """Remove internal fields."""
+        fields_to_remove = [
+            "entityId",
+            "canonicalVersion",
+            "originalGid",
+            "customerCreatedAt",
+            "customerUpdatedAt",
+            "isActive",
+        ]
+        for field in fields_to_remove:
+            main_data.pop(field, None)
+
+
+class FeatureComputationService:
+    """Handles feature computation triggers after normalization."""
+
+    def __init__(self):
+        self.logger = get_logger(__name__)
+
+    async def trigger_feature_computation(self, shop_id: str, data_type: str):
+        """Trigger feature computation after successful normalization."""
+        try:
             if data_type in ["products", "orders", "customers", "collections"]:
-                # Generate unique job ID
                 job_id = (
                     f"webhook_feature_compute_{shop_id}_{int(now_utc().timestamp())}"
                 )
 
-                # Prepare metadata
                 metadata = {
                     "batch_size": 100,
                     "incremental": True,
@@ -157,26 +644,26 @@ class NormalizationConsumer(BaseConsumer):
                     "timestamp": now_utc().isoformat(),
                 }
 
-                # Publish feature computation event
-                event_id = await streams_manager.publish_features_computed_event(
+                await streams_manager.publish_features_computed_event(
                     job_id=job_id,
                     shop_id=shop_id,
-                    features_ready=False,  # Need to compute features
+                    features_ready=False,
                     metadata=metadata,
                 )
 
         except Exception as e:
-            self.logger.error(
-                f"Failed to trigger feature computation: {e}",
-                shop_id=shop_id,
-                entity_type=data_type,
-            )
-            # Don't fail normalization if feature computation trigger fails
+            self.logger.error(f"Failed to trigger feature computation: {e}")
 
-    async def _handle_entity_deletion(self, job: NormalizeJob, db):
-        """Handle entity deletion by marking as inactive in normalized tables."""
+
+class EntityDeletionService:
+    """Handles entity deletion (soft delete) logic."""
+
+    def __init__(self):
+        self.logger = get_logger(__name__)
+
+    async def handle_entity_deletion(self, job: NormalizeJob, db):
+        """Handle entity deletion by marking as inactive."""
         try:
-            # Map data types to their normalized tables and ID fields
             entity_config = {
                 "products": {
                     "table": db.productdata,
@@ -207,46 +694,159 @@ class NormalizationConsumer(BaseConsumer):
                 )
                 return
 
-            # Check if entity exists in normalized table
+            # Check if entity exists
             entity = await config["table"].find_first(
                 where={"shopId": job.shop_id, config["id_field"]: str(job.shopify_id)}
             )
 
             if entity:
-                # Mark entity as inactive (soft delete)
+                # Mark as inactive
                 await config["table"].update_many(
                     where={
                         "shopId": job.shop_id,
                         config["id_field"]: str(job.shopify_id),
                     },
-                    data={"isActive": False, "updatedAt": datetime.utcnow()},
+                    data={"isActive": False, "updatedAt": now_utc()},
                 )
                 self.logger.info(
-                    f"{config['entity_name']} {job.shopify_id} marked as inactive (deleted)",
-                    shop_id=job.shop_id,
-                    entity_type=job.data_type,
+                    f"{config['entity_name']} {job.shopify_id} marked as inactive"
                 )
-
-                # Trigger feature computation after deletion
-                await self._trigger_feature_computation(job.shop_id, job.data_type)
             else:
                 self.logger.warning(
-                    f"No normalized {config['entity_name'].lower()} found for deletion",
-                    shopify_id=job.shopify_id,
-                    shop_id=job.shop_id,
-                    entity_type=job.data_type,
+                    f"No normalized {config['entity_name'].lower()} found for deletion"
                 )
 
         except Exception as e:
             self.logger.error(f"Failed to handle entity deletion: {e}")
             raise
 
+
+class NormalizationConsumer(BaseConsumer):
+    """Orchestrates normalization using specialized services."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            stream_name=NORMALIZATION_STREAM,
+            consumer_group=NORMALIZATION_GROUP,
+            consumer_name="normalization-consumer",
+            batch_size=50,
+            poll_timeout=1000,
+            max_retries=3,
+            retry_delay=0.5,
+            circuit_breaker_failures=3,  # Open circuit after 3 consecutive failures
+            circuit_breaker_timeout=300,  # Wait 5 minutes before attempting reset
+        )
+        self.logger = get_logger(__name__)
+
+        # Initialize services
+        self.entity_service = EntityNormalizationService()
+        self.order_service = OrderNormalizationService()
+        self.feature_service = FeatureComputationService()
+        self.deletion_service = EntityDeletionService()
+
+    async def _process_single_message(self, message: Dict[str, Any]):
+        try:
+            payload = message.get("data") or message
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    pass
+            event_type = payload.get("event_type")
+
+            if event_type == "normalize_entity":
+                await self._handle_normalize_entity(payload)
+            elif event_type == "normalize_batch":
+                await self._handle_normalize_batch(payload)
+            else:
+                # Ignore non-normalization messages
+                return
+
+        except Exception as e:
+            self.logger.error(f"Normalization failed: {e}")
+            raise
+
+    async def _handle_normalize_entity(self, payload: Dict[str, Any]):
+        """Handle single entity normalization (webhooks)."""
+        job = NormalizeJob(**payload)
+        db = await get_database()
+
+        # Check if this is a deletion event
+        original_event_type = payload.get("original_event_type")
+        is_deletion_event = original_event_type in [
+            "product_deleted",
+            "collection_deleted",
+            "customer_redacted",
+        ]
+
+        if is_deletion_event:
+            await self.deletion_service.handle_entity_deletion(job, db)
+            await self.feature_service.trigger_feature_computation(
+                job.shop_id, job.data_type
+            )
+            return
+
+        # Find raw record
+        raw_table = {
+            "orders": db.raworder,
+            "products": db.rawproduct,
+            "customers": db.rawcustomer,
+            "collections": db.rawcollection,
+        }[job.data_type]
+
+        raw = await raw_table.find_first(
+            where={"shopifyId": str(job.shopify_id), "shopId": job.shop_id}
+        )
+
+        if not raw:
+            self.logger.warning(
+                "Raw record not found for non-deletion event",
+                shopify_id=job.shopify_id,
+                shop_id=job.shop_id,
+                event_type=original_event_type,
+            )
+            return
+
+        try:
+            # Use appropriate service based on data type
+            if job.data_type == "orders":
+                success = await self.order_service.normalize_order(raw, job.shop_id)
+            else:
+                success = await self.entity_service.normalize_entity(
+                    raw, job.shop_id, job.data_type
+                )
+
+            if success:
+                await self.feature_service.trigger_feature_computation(
+                    job.shop_id, job.data_type
+                )
+
+        except Exception as e:
+            self.logger.error(f"Normalization failed: {e}")
+            # Log circuit breaker status for monitoring
+            self._log_circuit_breaker_status()
+            raise
+
+    def _log_circuit_breaker_status(self):
+        """Log current circuit breaker status for monitoring."""
+        status = self.get_circuit_breaker_status()
+        self.logger.warning(
+            f"Circuit breaker status: {status['state']}, "
+            f"failures: {status['failure_count']}, "
+            f"last failure: {status.get('last_failure_time', 'None')}"
+        )
+
+    def reset_circuit_breaker_manually(self):
+        """Manually reset circuit breaker (for admin use)."""
+        self.reset_circuit_breaker()
+        self.logger.info("Circuit breaker manually reset")
+
     async def _handle_normalize_batch(self, payload: Dict[str, Any]):
         """Handle batch normalization with pagination."""
         shop_id = payload.get("shop_id")
         data_type = payload.get("data_type")
         fmt = payload.get("format")
-        since = payload.get("since")  # ISO string or None
+        since = payload.get("since")
         page_size = payload.get("page_size", 100)
 
         if not all([shop_id, data_type]):
@@ -265,16 +865,14 @@ class NormalizationConsumer(BaseConsumer):
 
         # Build query conditions
         where_conditions = {"shopId": shop_id}
-        # Normalize since value; Redis may serialize None as "None"
         if isinstance(since, str) and since.lower() in ("none", "null", ""):
             since = None
 
         if since:
-            # Parse since timestamp
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             where_conditions["shopifyUpdatedAt"] = {"gt": since_dt}
 
-        # Fetch page of raw records, ordered by updatedAt, id for consistency
+        # Fetch page of raw records
         raw_records = await raw_table.find_many(
             where=where_conditions,
             order=[{"shopifyUpdatedAt": "asc"}, {"id": "asc"}],
@@ -284,7 +882,7 @@ class NormalizationConsumer(BaseConsumer):
         if not raw_records:
             return
 
-        # Process each record concurrently with bounded parallelism
+        # Process each record concurrently
         import asyncio
 
         semaphore = asyncio.Semaphore(20)
@@ -292,36 +890,34 @@ class NormalizationConsumer(BaseConsumer):
         async def process_record(raw_record):
             async with semaphore:
                 try:
-                    # Force GraphQL adapter when event format says so or payload looks GraphQL
                     if fmt == "graphql":
                         setattr(raw_record, "format", "graphql")
-                    await self._normalize_single_raw_record(
-                        raw_record, shop_id, data_type
-                    )
-                    return raw_record.shopifyUpdatedAt
+
+                    # Use appropriate service
+                    if data_type == "orders":
+                        success = await self.order_service.normalize_order(
+                            raw_record, shop_id, is_webhook=False
+                        )
+                    else:
+                        success = await self.entity_service.normalize_entity(
+                            raw_record, shop_id, data_type
+                        )
+
+                    return raw_record.shopifyUpdatedAt if success else None
                 except Exception as e:
-                    self.logger.error(
-                        f"Failed to normalize record",
-                        error=str(e),
-                        shop_id=shop_id,
-                        data_type=data_type,
-                        record_id=getattr(raw_record, "id", "unknown"),
-                    )
-                    # Return None to indicate failure, but don't stop the batch
+                    self.logger.error(f"Failed to normalize record: {e}")
                     return None
 
         tasks = [process_record(raw_record) for raw_record in raw_records]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Filter out failed results and exceptions
+        # Filter successful results
         successful_results = [
             r for r in results if r is not None and not isinstance(r, Exception)
         ]
-
-        # Track the last updated timestamp from the processed batch
         last_updated_at = max(successful_results) if successful_results else None
 
-        # Log batch processing results
+        # Log batch results
         failed_count = len(results) - len(successful_results)
         if failed_count > 0:
             self.logger.warning(
@@ -333,7 +929,7 @@ class NormalizationConsumer(BaseConsumer):
                 failed=failed_count,
             )
 
-        # If we got a full page, publish next batch event
+        # Continue pagination if needed
         if len(raw_records) == page_size:
             next_batch_payload = {
                 "event_type": "normalize_batch",
@@ -347,14 +943,12 @@ class NormalizationConsumer(BaseConsumer):
                 next_batch_payload["since"] = last_updated_at.isoformat()
             await streams_manager.publish_shopify_event(next_batch_payload)
 
-        # Update watermark to the last successfully processed updatedAt
+        # Update watermark
         if last_updated_at is not None:
             await db.normalizationwatermark.upsert(
                 where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}},
                 data={
-                    "update": {
-                        "lastNormalizedAt": last_updated_at,
-                    },
+                    "update": {"lastNormalizedAt": last_updated_at},
                     "create": {
                         "shopId": shop_id,
                         "dataType": data_type,
@@ -362,436 +956,3 @@ class NormalizationConsumer(BaseConsumer):
                     },
                 },
             )
-
-    async def _handle_normalize_scan(self, payload: Dict[str, Any]):
-        """Handle full scan normalization with watermark tracking."""
-        shop_id = payload.get("shop_id")
-        data_type = payload.get("data_type")
-        fmt = payload.get("format")
-        since = payload.get("since")  # Optional watermark
-        page_size = payload.get("page_size", 100)
-
-        if not all([shop_id, data_type]):
-            self.logger.error(
-                "Invalid normalize_scan job: missing required fields", payload=payload
-            )
-            return
-
-        db = await get_database()
-
-        # Get current watermark if since not provided
-        if not since:
-            watermark = await db.normalizationwatermark.find_unique(
-                where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}}
-            )
-            since = watermark.lastNormalizedAt.isoformat() if watermark else None
-
-        # Trigger first batch
-        batch_payload = {
-            "event_type": "normalize_batch",
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "format": fmt,
-            "page_size": page_size,
-            "timestamp": datetime.now().isoformat(),
-        }
-        # Only include 'since' when present to avoid sending string "None"
-        if since:
-            batch_payload["since"] = since
-        await streams_manager.publish_shopify_event(batch_payload)
-
-    async def _normalize_single_raw_record(
-        self, raw_record: Any, shop_id: str, data_type: str
-    ):
-        """Normalize a single raw record and upsert to staging."""
-        start_time = time.time()
-        # Normalize payload to a dict (guards against stringified JSON, bytes, or single-item lists)
-        payload = raw_record.payload
-        if isinstance(payload, (bytes, bytearray)):
-            try:
-                payload = payload.decode("utf-8")
-            except Exception:
-                self.logger.warning(
-                    "Skipping raw record: invalid bytes payload", shop_id=shop_id
-                )
-                return
-        if isinstance(payload, str):
-            try:
-                import json as _json
-
-                payload = _json.loads(payload)
-            except Exception:
-                self.logger.warning(
-                    "Skipping raw record: invalid JSON payload string", shop_id=shop_id
-                )
-                return
-        # Some sources may wrap node in a single-element list
-        if (
-            isinstance(payload, list)
-            and len(payload) == 1
-            and isinstance(payload[0], dict)
-        ):
-            payload = payload[0]
-        if not isinstance(payload, dict):
-            self.logger.warning(
-                "Skipping raw record: unexpected payload type",
-                type=type(payload).__name__,
-            )
-            return
-
-        # Detect format from normalized payload or use heuristic
-        data_format = getattr(raw_record, "format", None)
-        if not data_format:
-            # GraphQL has 'gid://' in IDs, REST uses numeric IDs
-            entity_id = payload.get("id", "")
-            data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
-
-        adapter = get_adapter(data_format, data_type)
-        try:
-            canonical = adapter.to_canonical(payload, shop_id)
-        except Exception as e:
-            self.logger.error(
-                "Adapter to_canonical failed",
-                error=str(e),
-                data_format=data_format,
-                data_type=data_type,
-                payload_keys=(
-                    list(payload.keys())[:8] if isinstance(payload, dict) else None
-                ),
-            )
-            raise
-
-        db = await get_database()
-        main_table = {
-            "orders": db.orderdata,
-            "products": db.productdata,
-            "customers": db.customerdata,
-            "collections": db.collectiondata,
-        }[data_type]
-
-        # Prepare main table data (canonical structure + base fields)
-        main_data = canonical.copy()
-        main_data["shopId"] = shop_id
-        # Resolve the primary identifier: now using table-specific id fields directly
-        id_field = f"{data_type[:-1]}Id"
-        id_value = canonical.get(id_field)
-        if not id_value:
-            # If still missing, abort this record gracefully
-            self.logger.error(
-                "Missing primary id for canonical record",
-                data_type=data_type,
-                id_field=id_field,
-            )
-            return
-        # The id is already in the correct field, no need to reassign
-
-        # Map internal timestamp fields (handle both old and new field names)
-        if "shopifyUpdatedAt" in main_data:
-            main_data["updatedAt"] = main_data["shopifyUpdatedAt"]
-        if "shopifyCreatedAt" in main_data:
-            main_data["createdAt"] = main_data["shopifyCreatedAt"]
-        if "customerUpdatedAt" in main_data:
-            main_data["updatedAt"] = main_data["customerUpdatedAt"]
-        if "customerCreatedAt" in main_data:
-            main_data["createdAt"] = main_data["customerCreatedAt"]
-
-        # Ensure shopId is always present
-        main_data["shopId"] = shop_id
-
-        # Ensure required timestamps are present
-        from datetime import datetime
-
-        if "createdAt" not in main_data or main_data["createdAt"] is None:
-            main_data["createdAt"] = datetime.utcnow()
-        if "updatedAt" not in main_data or main_data["updatedAt"] is None:
-            main_data["updatedAt"] = datetime.utcnow()
-
-        # Convert JSON fields to proper format for Prisma
-        self._serialize_json_fields(main_data)
-
-        # Guard by shopifyUpdatedAt for idempotency
-        incoming_updated_at = canonical.get("shopifyUpdatedAt")
-        id_field = f"{data_type[:-1]}Id"
-
-        existing = await main_table.find_first(
-            where={"shopId": shop_id, id_field: id_value}
-        )
-
-        if (
-            existing
-            and hasattr(existing, "shopifyUpdatedAt")
-            and existing.shopifyUpdatedAt
-            and incoming_updated_at
-        ):
-            if incoming_updated_at <= existing.shopifyUpdatedAt:
-                # Older or equal, skip
-                return
-
-        # Upsert directly into main table
-        unique_where = {"shopId_" + id_field: {"shopId": shop_id, id_field: id_value}}
-
-        # Handle line items separately for orders
-        line_items = main_data.pop("lineItems", [])
-
-        # Clean payload to match Prisma inputs - remove internal/canonical fields
-        main_data.pop("entityId", None)  # Legacy field
-        main_data.pop("canonicalVersion", None)  # Removed field
-        main_data.pop("originalGid", None)  # Internal tracking field
-        main_data.pop("customerCreatedAt", None)  # Internal timestamp
-        main_data.pop("customerUpdatedAt", None)  # Internal timestamp
-        main_data.pop("isActive", None)  # Internal field not in DB schema
-
-        # Handle None values for required JSON fields - convert to empty defaults
-        if (
-            "customerDefaultAddress" in main_data
-            and main_data["customerDefaultAddress"] is None
-        ):
-            main_data["customerDefaultAddress"] = "{}"
-        if "location" in main_data and main_data["location"] is None:
-            main_data["location"] = "{}"
-        if "defaultAddress" in main_data and main_data["defaultAddress"] is None:
-            main_data["defaultAddress"] = "{}"
-        if "shippingAddress" in main_data and main_data["shippingAddress"] is None:
-            main_data["shippingAddress"] = "{}"
-        if "billingAddress" in main_data and main_data["billingAddress"] is None:
-            main_data["billingAddress"] = "{}"
-
-        # Upsert main record - keep shopId as scalar since all models have it
-        if existing:
-            await main_table.update(
-                where={"id": existing.id},
-                data=main_data,
-            )
-            order_record_id = existing.id
-        else:
-            created_record = await main_table.create(data=main_data)
-            order_record_id = created_record.id
-
-        # Create line items separately for orders
-        if data_type == "orders" and line_items:
-            await self._create_line_items(order_record_id, line_items)
-
-            # Emit event to trigger purchase attribution after order is fully written
-            try:
-                await stream_manager.publish_to_domain(
-                    StreamType.PURCHASE_ATTRIBUTION,
-                    {
-                        "event_type": "purchase_ready_for_attribution",
-                        "shop_id": shop_id,
-                        "order_id": main_data.get("orderId") or id_value,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    },
-                )
-            except Exception as e:
-                self.logger.error(
-                    "Failed to publish purchase_ready_for_attribution",
-                    error=str(e),
-                    shop_id=shop_id,
-                )
-
-        # Process refunds from orders
-        if (
-            data_type == "orders"
-            and hasattr(canonical, "refunds")
-            and canonical.refunds
-        ):
-            await self._process_order_refunds(canonical, shop_id, order_record_id)
-
-        # Log performance metrics (production monitoring)
-        processing_time = time.time() - start_time
-        if processing_time > 1.0:  # Only log slow operations
-            self.logger.warning(
-                f"Slow normalization detected",
-                data_type=data_type,
-                processing_time_seconds=round(processing_time, 3),
-                shop_id=shop_id,
-            )
-
-    async def _process_order_refunds(
-        self, canonical_order, shop_id: str, order_record_id: str
-    ):
-        """Process refunds from a canonical order and create RefundData records."""
-        if not hasattr(canonical_order, "refunds") or not canonical_order.refunds:
-            return
-
-        db = await get_database()
-
-        for refund in canonical_order.refunds:
-            try:
-                # Create RefundData record
-                refund_data = await db.refunddata.create(
-                    data={
-                        "shopId": shop_id,
-                        "orderId": int(
-                            canonical_order.orderId
-                        ),  # Convert to int for BigInt field
-                        "refundId": refund.refundId,
-                        "refundedAt": refund.refundedAt,
-                        "note": refund.note or "",
-                        "restock": refund.restock,
-                        "totalRefundAmount": refund.totalRefundAmount,
-                        "currencyCode": refund.currencyCode,
-                    }
-                )
-
-                # Create RefundLineItemData records
-                for refund_line_item in refund.refundLineItems:
-                    await db.refundlineitemdata.create(
-                        data={
-                            "refundId": refund_data.id,
-                            "orderId": int(canonical_order.orderId),
-                            "productId": refund_line_item.productId,
-                            "variantId": refund_line_item.variantId,
-                            "quantity": refund_line_item.quantity,
-                            "unitPrice": refund_line_item.unitPrice,
-                            "refundAmount": refund_line_item.refundAmount,
-                            "properties": Json(refund_line_item.properties),
-                        }
-                    )
-
-                self.logger.info(
-                    f"✅ Created refund {refund.refundId} with {len(refund.refundLineItems)} line items",
-                    shop_id=shop_id,
-                    order_id=canonical_order.orderId,
-                )
-
-                # Trigger refund attribution
-                try:
-                    await stream_manager.publish_to_domain(
-                        StreamType.REFUND_ATTRIBUTION,
-                        {
-                            "event_type": "refund_ready_for_attribution",
-                            "shop_id": shop_id,
-                            "order_id": canonical_order.orderId,
-                            "refund_id": refund.refundId,
-                            "timestamp": datetime.utcnow().isoformat(),
-                        },
-                    )
-                except Exception as e:
-                    self.logger.error(
-                        "Failed to publish refund_ready_for_attribution",
-                        error=str(e),
-                        shop_id=shop_id,
-                    )
-
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to process refund {refund.refundId}",
-                    error=str(e),
-                    shop_id=shop_id,
-                )
-
-    def _serialize_json_fields(self, main_data: Dict[str, Any]):
-        """Convert JSON fields to proper JSON strings for Prisma."""
-        import json
-
-        json_fields = [
-            "metafields",
-            "tags",
-            "addresses",
-            "defaultAddress",
-            "location",
-            "shippingAddress",
-            "billingAddress",
-            "discountApplications",
-            "fulfillments",
-            "transactions",
-            "variants",
-            "images",
-            "media",
-            "options",
-            "noteAttributes",
-            "extras",
-        ]
-
-        for field in json_fields:
-            if field in main_data and main_data[field] is not None:
-                # Convert Python objects to JSON strings
-                try:
-                    main_data[field] = json.dumps(main_data[field])
-                except (TypeError, ValueError):
-                    # If serialization fails, set to appropriate default
-                    if isinstance(main_data[field], (list, tuple)):
-                        main_data[field] = "[]"
-                    elif isinstance(main_data[field], dict):
-                        main_data[field] = "{}"
-                    else:
-                        main_data[field] = None
-
-    async def _create_line_items(self, order_record_id: str, line_items: List[Any]):
-        """Create separate LineItemData records for an order using bulk operations."""
-        if not line_items:
-            return
-
-        db = await get_database()
-
-        try:
-            # Clear existing line items for this order (for updates)
-            await db.lineitemdata.delete_many(where={"orderId": order_record_id})
-
-            # Prepare bulk data
-            bulk_data = []
-            for item in line_items:
-                try:
-                    if isinstance(item, dict):
-                        # Always wrap properties in Json() for Prisma
-                        raw_properties = item.get("properties")
-                        if raw_properties:
-                            properties_value = Json(raw_properties)
-                        else:
-                            properties_value = Json({})
-                        self.logger.info(
-                            f"🔍 DEBUG: Dict item properties - original: {raw_properties}, final: {properties_value}, type: {type(properties_value)}"
-                        )
-                        line_item_data = {
-                            "orderId": order_record_id,
-                            "productId": item.get("productId"),
-                            "variantId": item.get("variantId"),
-                            "title": item.get("title"),
-                            "quantity": int(item.get("quantity", 0)),
-                            "price": float(item.get("price", 0.0)),
-                            "properties": properties_value,  # Always use Json() wrapper
-                        }
-                    else:
-                        # Always wrap properties in Json() for Prisma
-                        raw_properties = getattr(item, "properties", None)
-                        if raw_properties:
-                            properties_value = Json(raw_properties)
-                        else:
-                            properties_value = Json({})
-                        self.logger.info(
-                            f"🔍 DEBUG: Object item properties - original: {raw_properties}, final: {properties_value}, type: {type(properties_value)}"
-                        )
-                        line_item_data = {
-                            "orderId": order_record_id,
-                            "productId": getattr(item, "productId", None),
-                            "variantId": getattr(item, "variantId", None),
-                            "title": getattr(item, "title", None),
-                            "quantity": int(getattr(item, "quantity", 0)),
-                            "price": float(getattr(item, "price", 0.0)),
-                            "properties": properties_value,  # Always use Json() wrapper
-                        }
-                    bulk_data.append(line_item_data)
-                except (ValueError, TypeError) as e:
-                    self.logger.warning(f"Skipping invalid line item: {e}", item=item)
-                    continue
-
-            # Bulk create all line items in one operation
-            if bulk_data:
-                self.logger.info(
-                    f"🔍 DEBUG: About to create {len(bulk_data)} line items for order {order_record_id}"
-                )
-                self.logger.info(
-                    f"🔍 DEBUG: First line item data: {bulk_data[0] if bulk_data else 'None'}"
-                )
-                await db.lineitemdata.create_many(data=bulk_data)
-                self.logger.info(
-                    f"✅ Created {len(bulk_data)} line items for order {order_record_id}"
-                )
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to create line items for order {order_record_id}: {e}"
-            )
-            # Don't raise - let the order still be processed even if line items fail
-            # This is a non-critical operation that shouldn't block the main flow

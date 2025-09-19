@@ -1,7 +1,7 @@
 """
 Normalization Sweeper Service
 
-Periodically publishes normalize_scan events to catch any missed normalization jobs.
+Periodically publishes normalize_batch events to catch any missed normalization jobs.
 This acts as a safety net to ensure all raw data eventually gets normalized.
 """
 
@@ -25,7 +25,7 @@ class NormalizationSweeperService:
     async def run_sweep(self) -> Dict[str, Any]:
         """
         Run a full sweep across all shops and data types.
-        Publishes normalize_scan events for shops that haven't been normalized recently.
+        Publishes normalize_batch events for shops that haven't been normalized recently.
         """
         logger.info("Starting normalization sweep")
 
@@ -50,12 +50,29 @@ class NormalizationSweeperService:
                         )
 
                         if should_scan:
+                            # Get watermark to determine starting point
+                            watermark = await db.normalizationwatermark.find_unique(
+                                where={
+                                    "shopId_dataType": {
+                                        "shopId": shop_id,
+                                        "dataType": data_type,
+                                    }
+                                }
+                            )
+                            since = (
+                                watermark.lastNormalizedAt.isoformat()
+                                if watermark
+                                else None
+                            )
+
                             await streams_manager.publish_shopify_event(
                                 {
-                                    "event_type": "normalize_scan",
+                                    "event_type": "normalize_batch",
                                     "shop_id": shop_id,
                                     "data_type": data_type,
+                                    "format": "graphql",
                                     "page_size": 100,
+                                    "since": since,
                                     "timestamp": datetime.now().isoformat(),
                                 }
                             )
@@ -65,7 +82,7 @@ class NormalizationSweeperService:
                                 sweep_results["data_types_processed"].append(data_type)
 
                             logger.info(
-                                f"Triggered sweep scan",
+                                f"Triggered sweep batch",
                                 shop_id=shop_id,
                                 data_type=data_type,
                             )
