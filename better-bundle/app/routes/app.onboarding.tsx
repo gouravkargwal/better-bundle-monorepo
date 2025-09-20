@@ -7,19 +7,10 @@ import {
   BlockStack,
   Text,
   Banner,
-  InlineStack,
-  Icon,
   Badge,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import {
-  StarFilledIcon,
-  CashDollarIcon,
-  EyeCheckMarkIcon,
-  TeamIcon,
-  CheckIcon,
-  ArrowRightIcon,
-} from "@shopify/polaris-icons";
+import { ArrowRightIcon } from "@shopify/polaris-icons";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
@@ -33,6 +24,8 @@ import {
   markOnboardingCompleted,
 } from "app/services/shop.service";
 import { triggerFullAnalysis } from "app/services/analysis.service";
+import FeatureCard from "app/components/Onboarding/FeatureCard";
+import { Benefits } from "app/components/Onboarding/Benefits";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
@@ -107,55 +100,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function OnboardingPage() {
   const actionData = useActionData<typeof action>();
 
-  const features = [
-    {
-      icon: CashDollarIcon,
-      title: "Increase Revenue",
-      description: "Boost sales with AI-powered product recommendations",
-      color: "#10B981",
-      badge: "Up to 30% more sales",
-    },
-    {
-      icon: EyeCheckMarkIcon,
-      title: "Smart Analytics",
-      description: "Track performance with detailed attribution metrics",
-      color: "#3B82F6",
-      badge: "Real-time insights",
-    },
-    {
-      icon: TeamIcon,
-      title: "Better Experience",
-      description: "Personalized shopping for your customers",
-      color: "#8B5CF6",
-      badge: "Higher engagement",
-    },
-    {
-      icon: StarFilledIcon,
-      title: "Easy Setup",
-      description: "Get started in minutes with our simple setup",
-      color: "#F59E0B",
-      badge: "No coding required",
-    },
-  ];
-
-  const benefits = [
-    "AI-powered product recommendations",
-    "Real-time performance analytics",
-    "Revenue attribution tracking",
-    "Customer behavior insights",
-    "Easy-to-use dashboard",
-    "24/7 automated optimization",
-  ];
-
   return (
     <Page>
       <TitleBar title="Welcome to BetterBundle!" />
 
       <BlockStack gap="600">
-        {/* Hero Section */}
         <div
           style={{
-            padding: "48px 32px",
+            padding: "64px 32px",
             background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
             borderRadius: "20px",
             color: "white",
@@ -169,14 +121,66 @@ export default function OnboardingPage() {
               🚀 Welcome to BetterBundle!
             </Text>
             <div style={{ marginTop: "16px" }}>
-              <Text as="p" variant="headingMd" tone="subdued">
-                Transform your store with AI-powered product recommendations
-              </Text>
+              <div style={{ color: "rgba(255,255,255,0.9)" }}>
+                <Text as="p" variant="headingMd">
+                  Transform your store with AI-powered product recommendations
+                </Text>
+              </div>
             </div>
             <div style={{ marginTop: "24px" }}>
               <Badge size="large" tone="info">
                 Start earning more revenue in minutes
               </Badge>
+            </div>
+
+            {/* Pay-As-Performance Highlight */}
+            <div
+              style={{
+                marginTop: "32px",
+                padding: "24px",
+                backgroundColor: "rgba(255,255,255,0.15)",
+                borderRadius: "12px",
+                border: "2px solid rgba(255,255,255,0.3)",
+              }}
+            >
+              <Text as="h3" variant="headingLg" fontWeight="bold">
+                💳 Pay-As-Performance Model
+              </Text>
+              <div style={{ marginTop: "8px" }}>
+                <div style={{ color: "rgba(255,255,255,0.9)" }}>
+                  <Text as="p" variant="bodyLg">
+                    Start with $200 free credits • Only pay when you see results
+                    • No upfront costs
+                  </Text>
+                </div>
+              </div>
+              <div style={{ marginTop: "12px" }}>
+                <Badge size="large" tone="success">
+                  Risk-free trial with guaranteed results
+                </Badge>
+              </div>
+            </div>
+
+            {/* Call to Action Button */}
+            <div style={{ marginTop: "32px" }}>
+              <Form method="post">
+                <Button
+                  submit
+                  variant="primary"
+                  size="large"
+                  icon={ArrowRightIcon}
+                  loading={false}
+                >
+                  Start Your Free Trial Now
+                </Button>
+              </Form>
+              <div style={{ marginTop: "16px" }}>
+                <div style={{ color: "rgba(255,255,255,0.8)" }}>
+                  <Text as="p" variant="bodySm">
+                    Setup takes less than 2 minutes • No coding required
+                  </Text>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -206,177 +210,30 @@ export default function OnboardingPage() {
             }}
           />
         </div>
+        <FeatureCard />
+        <Benefits />
 
-        {/* Features Grid */}
-        <BlockStack gap="400">
-          <div style={{ textAlign: "center" }}>
-            <Text as="h2" variant="headingLg" fontWeight="bold">
-              Why Choose BetterBundle?
-            </Text>
-            <div style={{ marginTop: "8px" }}>
-              <Text as="p" variant="bodyLg" tone="subdued">
-                Everything you need to boost your store's performance
-              </Text>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "20px",
-              alignItems: "stretch",
-            }}
-          >
-            {features.map((feature, index) => (
-              <div
-                key={index}
-                style={{
-                  transition: "all 0.3s ease-in-out",
-                  cursor: "pointer",
-                  borderRadius: "16px",
-                  overflow: "hidden",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-8px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 20px 40px rgba(0,0,0,0.1)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                <Card>
-                  <div style={{ padding: "24px" }}>
-                    <BlockStack gap="300">
-                      <InlineStack align="space-between" blockAlign="center">
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: "48px",
-                            height: "48px",
-                            backgroundColor: feature.color + "15",
-                            borderRadius: "16px",
-                            border: `2px solid ${feature.color}30`,
-                          }}
-                        >
-                          <Icon source={feature.icon} tone="base" />
-                        </div>
-                        <Badge tone="info" size="small">
-                          {feature.badge}
-                        </Badge>
-                      </InlineStack>
-
-                      <BlockStack gap="200">
-                        <Text as="h3" variant="headingMd" fontWeight="bold">
-                          {feature.title}
-                        </Text>
-                        <Text as="p" variant="bodyMd" tone="subdued">
-                          {feature.description}
-                        </Text>
-                      </BlockStack>
-                    </BlockStack>
-                  </div>
-                </Card>
-              </div>
-            ))}
-          </div>
-        </BlockStack>
-
-        {/* Benefits Section */}
-        <div
-          style={{
-            padding: "32px",
-            backgroundColor: "#F8FAFC",
-            borderRadius: "16px",
-            border: "1px solid #E2E8F0",
-          }}
-        >
-          <BlockStack gap="400">
-            <div style={{ textAlign: "center" }}>
-              <Text as="h3" variant="headingLg" fontWeight="bold">
-                What You'll Get
-              </Text>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-                gap: "16px",
-              }}
-            >
-              {benefits.map((benefit, index) => (
-                <InlineStack key={index} gap="200" blockAlign="center">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: "24px",
-                      height: "24px",
-                      backgroundColor: "#10B981",
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Icon source={CheckIcon} tone="base" />
-                  </div>
-                  <Text as="p" variant="bodyMd">
-                    {benefit}
-                  </Text>
-                </InlineStack>
-              ))}
-            </div>
-          </BlockStack>
-        </div>
-
-        {/* Setup Section */}
-        <Card>
-          <div style={{ padding: "32px" }}>
-            <BlockStack gap="400">
-              <div style={{ textAlign: "center" }}>
-                <Text as="h3" variant="headingLg" fontWeight="bold">
-                  Ready to Get Started?
-                </Text>
-                <div style={{ marginTop: "8px" }}>
-                  <Text as="p" variant="bodyLg" tone="subdued">
-                    Complete your setup and start earning more revenue today
+        {/* Error Display Section */}
+        {actionData?.error && (
+          <Card>
+            <div style={{ padding: "24px" }}>
+              <Banner tone="critical">
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#FEF2F2",
+                    border: "2px solid #FCA5A5",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    {actionData.error}
                   </Text>
                 </div>
-              </div>
-
-              {actionData?.error && (
-                <Banner tone="critical">
-                  <Text as="p">{actionData.error}</Text>
-                </Banner>
-              )}
-
-              <div style={{ textAlign: "center" }}>
-                <Form method="post">
-                  <Button
-                    submit
-                    variant="primary"
-                    size="large"
-                    icon={ArrowRightIcon}
-                    loading={false}
-                  >
-                    Complete Setup & Start Earning
-                  </Button>
-                </Form>
-              </div>
-
-              <div style={{ textAlign: "center" }}>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Setup takes less than 2 minutes • No coding required
-                </Text>
-              </div>
-            </BlockStack>
-          </div>
-        </Card>
+              </Banner>
+            </div>
+          </Card>
+        )}
       </BlockStack>
     </Page>
   );
