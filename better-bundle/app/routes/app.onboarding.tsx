@@ -107,62 +107,215 @@ export default function OnboardingPage() {
       <BlockStack gap="600">
         <div
           style={{
-            padding: "64px 32px",
+            padding: "40px 32px",
             background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            borderRadius: "20px",
+            borderRadius: "24px",
             color: "white",
             textAlign: "center",
             position: "relative",
             overflow: "hidden",
+            boxShadow:
+              "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
           }}
         >
           <div style={{ position: "relative", zIndex: 2 }}>
-            <Text as="h1" variant="heading2xl" fontWeight="bold">
-              🚀 Welcome to BetterBundle!
+            {/* Hero Badge */}
+            <div style={{ marginBottom: "16px" }}>
+              <Badge
+                size="large"
+                tone="info"
+                style={{
+                  backgroundColor: "rgba(255, 255, 255, 0.2)",
+                  border: "1px solid rgba(255, 255, 255, 0.3)",
+                  color: "white",
+                  fontWeight: "600",
+                }}
+              >
+                ✨ New AI-Powered Solution
+              </Badge>
+            </div>
+
+            {/* Main Headline */}
+            <Text
+              as="h1"
+              variant="heading2xl"
+              fontWeight="bold"
+              style={{
+                fontSize: "3rem",
+                lineHeight: "1.1",
+                marginBottom: "16px",
+                background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              Welcome to BetterBundle!
             </Text>
-            <div style={{ marginTop: "16px" }}>
-              <div style={{ color: "rgba(255,255,255,0.9)" }}>
-                <Text as="p" variant="headingMd">
-                  Transform your store with AI-powered product recommendations
+
+            {/* Subheadline */}
+            <div
+              style={{
+                marginBottom: "20px",
+                maxWidth: "600px",
+                margin: "0 auto 20px",
+              }}
+            >
+              <Text
+                as="p"
+                variant="headingLg"
+                style={{
+                  color: "rgba(255,255,255,0.95)",
+                  lineHeight: "1.6",
+                  fontWeight: "500",
+                }}
+              >
+                Transform your store with AI-powered product recommendations
+                that boost revenue by up to 30%
+              </Text>
+            </div>
+
+            {/* Key Benefits Row */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "24px",
+                marginBottom: "24px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <div
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#10B981",
+                    borderRadius: "50%",
+                  }}
+                />
+                <Text
+                  as="span"
+                  variant="bodyLg"
+                  style={{ color: "rgba(255,255,255,0.9)" }}
+                >
+                  $200 Free Credits
                 </Text>
               </div>
-            </div>
-            <div style={{ marginTop: "24px" }}>
-              <Badge size="large" tone="info">
-                Start earning more revenue in minutes
-              </Badge>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <div
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#10B981",
+                    borderRadius: "50%",
+                  }}
+                />
+                <Text
+                  as="span"
+                  variant="bodyLg"
+                  style={{ color: "rgba(255,255,255,0.9)" }}
+                >
+                  No Setup Fees
+                </Text>
+              </div>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <div
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#10B981",
+                    borderRadius: "50%",
+                  }}
+                />
+                <Text
+                  as="span"
+                  variant="bodyLg"
+                  style={{ color: "rgba(255,255,255,0.9)" }}
+                >
+                  2-Minute Setup
+                </Text>
+              </div>
             </div>
 
             {/* Pay-As-Performance Highlight */}
             <div
               style={{
-                marginTop: "32px",
-                padding: "24px",
-                backgroundColor: "rgba(255,255,255,0.15)",
-                borderRadius: "12px",
-                border: "2px solid rgba(255,255,255,0.3)",
+                marginBottom: "24px",
+                padding: "20px",
+                backgroundColor: "rgba(255,255,255,0.12)",
+                borderRadius: "16px",
+                border: "1px solid rgba(255,255,255,0.2)",
+                backdropFilter: "blur(10px)",
+                maxWidth: "500px",
+                margin: "0 auto 24px",
               }}
             >
-              <Text as="h3" variant="headingLg" fontWeight="bold">
-                💳 Pay-As-Performance Model
-              </Text>
-              <div style={{ marginTop: "8px" }}>
-                <div style={{ color: "rgba(255,255,255,0.9)" }}>
-                  <Text as="p" variant="bodyLg">
-                    Start with $200 free credits • Only pay when you see results
-                    • No upfront costs
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "12px",
+                  marginBottom: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    backgroundColor: "rgba(16, 185, 129, 0.2)",
+                    borderRadius: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text as="span" variant="bodyLg" fontWeight="bold">
+                    💳
                   </Text>
                 </div>
+                <Text as="h3" variant="headingLg" fontWeight="bold">
+                  Pay-As-Performance Model
+                </Text>
               </div>
-              <div style={{ marginTop: "12px" }}>
-                <Badge size="large" tone="success">
-                  Risk-free trial with guaranteed results
-                </Badge>
-              </div>
+
+              <Text
+                as="p"
+                variant="bodyLg"
+                style={{
+                  color: "rgba(255,255,255,0.95)",
+                  lineHeight: "1.5",
+                  marginBottom: "20px",
+                }}
+              >
+                Only pay when you see results • No upfront costs • Risk-free
+                trial
+              </Text>
+
+              <Badge
+                size="large"
+                tone="success"
+                style={{
+                  backgroundColor: "rgba(16, 185, 129, 0.2)",
+                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                  color: "#10B981",
+                  fontWeight: "600",
+                }}
+              >
+                🎯 Guaranteed Results
+              </Badge>
             </div>
 
             {/* Call to Action Button */}
-            <div style={{ marginTop: "32px" }}>
+            <div>
               <Form method="post">
                 <Button
                   submit
@@ -170,29 +323,51 @@ export default function OnboardingPage() {
                   size="large"
                   icon={ArrowRightIcon}
                   loading={false}
+                  style={{
+                    padding: "16px 32px",
+                    fontSize: "18px",
+                    fontWeight: "600",
+                    borderRadius: "12px",
+                    boxShadow: "0 4px 14px 0 rgba(0, 118, 255, 0.39)",
+                    border: "none",
+                  }}
                 >
                   Start Your Free Trial Now
                 </Button>
               </Form>
-              <div style={{ marginTop: "16px" }}>
-                <div style={{ color: "rgba(255,255,255,0.8)" }}>
-                  <Text as="p" variant="bodySm">
-                    Setup takes less than 2 minutes • No coding required
-                  </Text>
-                </div>
+              <div style={{ marginTop: "12px" }}>
+                <Text
+                  as="p"
+                  variant="bodyMd"
+                  style={{
+                    color: "rgba(255,255,255,0.8)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "16px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>⚡ Setup in 2 minutes</span>
+                  <span>•</span>
+                  <span>🔒 No coding required</span>
+                  <span>•</span>
+                  <span>📈 Results in 24 hours</span>
+                </Text>
               </div>
             </div>
           </div>
 
-          {/* Decorative elements */}
+          {/* Enhanced Decorative elements */}
           <div
             style={{
               position: "absolute",
-              top: "-50px",
-              right: "-50px",
-              width: "200px",
-              height: "200px",
-              background: "rgba(255,255,255,0.1)",
+              top: "-100px",
+              right: "-100px",
+              width: "300px",
+              height: "300px",
+              background:
+                "radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)",
               borderRadius: "50%",
               zIndex: 1,
             }}
@@ -200,11 +375,24 @@ export default function OnboardingPage() {
           <div
             style={{
               position: "absolute",
-              bottom: "-30px",
-              left: "-30px",
-              width: "150px",
-              height: "150px",
-              background: "rgba(255,255,255,0.05)",
+              bottom: "-80px",
+              left: "-80px",
+              width: "250px",
+              height: "250px",
+              background:
+                "radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)",
+              borderRadius: "50%",
+              zIndex: 1,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "-50px",
+              width: "100px",
+              height: "100px",
+              background: "rgba(255,255,255,0.03)",
               borderRadius: "50%",
               zIndex: 1,
             }}
@@ -220,15 +408,63 @@ export default function OnboardingPage() {
               <Banner tone="critical">
                 <div
                   style={{
-                    padding: "16px",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "12px",
+                    padding: "20px",
                     backgroundColor: "#FEF2F2",
-                    border: "2px solid #FCA5A5",
-                    borderRadius: "8px",
+                    border: "1px solid #FECACA",
+                    borderRadius: "12px",
+                    boxShadow:
+                      "0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)",
                   }}
                 >
-                  <Text as="p" variant="bodyMd" fontWeight="semibold">
-                    {actionData.error}
-                  </Text>
+                  {/* Error Icon */}
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      width: "20px",
+                      height: "20px",
+                      backgroundColor: "#DC2626",
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: "2px",
+                    }}
+                  >
+                    <Text
+                      as="span"
+                      variant="bodySm"
+                      fontWeight="bold"
+                      color="white"
+                    >
+                      !
+                    </Text>
+                  </div>
+
+                  {/* Error Content */}
+                  <div style={{ flex: 1 }}>
+                    <Text
+                      as="h3"
+                      variant="headingSm"
+                      fontWeight="semibold"
+                      color="critical"
+                    >
+                      Setup Error
+                    </Text>
+                    <div style={{ marginTop: "4px" }}>
+                      <Text as="p" variant="bodyMd" color="critical">
+                        {actionData.error}
+                      </Text>
+                    </div>
+                    <div style={{ marginTop: "12px" }}>
+                      <Text as="p" variant="bodySm" color="subdued">
+                        Please try again or contact support if the issue
+                        persists.
+                      </Text>
+                    </div>
+                  </div>
                 </div>
               </Banner>
             </div>
