@@ -11,6 +11,7 @@ import {
 } from "@shopify/polaris";
 import { ExtensionManager } from "../components/Extensions/ExtensionManager";
 import prisma from "../db.server";
+import { TitleBar } from "@shopify/app-bridge-react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -96,35 +97,12 @@ export default function WidgetConfig() {
 
   return (
     <Page>
+      <TitleBar title="Extensions" />
       <Layout>
         <Layout.Section>
           <BlockStack gap="500">
-            {/* Header */}
-            <div
-              style={{
-                padding: "24px",
-                backgroundColor: "#ECFDF5",
-                borderRadius: "12px",
-                border: "1px solid #A7F3D0",
-              }}
-            >
-              <div style={{ color: "#065F46" }}>
-                <Text as="h2" variant="headingLg" fontWeight="bold">
-                  ⚙️ Extension Management
-                </Text>
-              </div>
-              <div style={{ marginTop: "8px" }}>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Learn about your BetterBundle extensions and how to activate
-                  them
-                </Text>
-              </div>
-            </div>
-
-            {/* Extension Manager */}
             <ExtensionManager extensions={extensions} />
 
-            {/* Theme Integration Help */}
             <div
               style={{
                 padding: "24px",

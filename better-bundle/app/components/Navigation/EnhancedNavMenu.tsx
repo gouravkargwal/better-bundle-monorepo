@@ -10,20 +10,16 @@ export function EnhancedNavMenu() {
   return (
     <div style={{ padding: "16px 0" }}>
       <NavMenu>
-        <NavItem to="/app" isActive={location.pathname === "/app"}>
-          Home
-        </NavItem>
-
         <NavItem
           to="/app/dashboard"
           isActive={location.pathname === "/app/dashboard"}
         >
-          Analytics Dashboard
+          Dashboard
         </NavItem>
 
         <NavItem
-          to="/app/widget-config"
-          isActive={location.pathname === "/app/widget-config"}
+          to="/app/extensions"
+          isActive={location.pathname === "/app/extensions"}
         >
           Extensions
         </NavItem>
@@ -32,7 +28,7 @@ export function EnhancedNavMenu() {
           to="/app/billing"
           isActive={location.pathname === "/app/billing"}
         >
-          Billing & Performance
+          Billing
         </NavItem>
 
         <NavItem to="/app/help" isActive={location.pathname === "/app/help"}>
