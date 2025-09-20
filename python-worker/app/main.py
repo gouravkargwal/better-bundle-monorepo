@@ -172,6 +172,13 @@ async def initialize_services():
         services["webhook_repository"] = WebhookRepository()
         services["webhook_handler"] = WebhookHandler(services["webhook_repository"])
 
+        # Initialize billing services
+        from app.domains.billing.services.billing_service import BillingService
+        from app.domains.billing.jobs.monthly_billing_job import MonthlyBillingJob
+
+        services["billing_service"] = BillingService(prisma)
+        services["monthly_billing_job"] = MonthlyBillingJob(prisma)
+
         # Register and start consumers
         consumer_manager.register_consumers(
             data_collection_consumer=services["data_collection_consumer"],
@@ -188,6 +195,9 @@ async def initialize_services():
 
         # Start consumer manager (this will start all registered consumers)
         await consumer_manager.start()
+
+        # Note: Monthly billing now handled by GitHub Actions
+        # See .github/workflows/monthly-billing.yml
 
         logger.info("Essential services initialized successfully")
 
@@ -214,6 +224,10 @@ async def get_service(service_name: str):
             services["feature_computation_consumer"] = FeatureComputationConsumer()
 
     return services[service_name]
+
+
+# Monthly billing scheduler removed - now handled by GitHub Actions
+# See .github/workflows/monthly-billing.yml for the cron job
 
 
 async def cleanup_services():
@@ -720,6 +734,51 @@ async def restart_consumer(consumer_name: str):
         }
     except Exception as e:
         logger.error(f"Failed to restart consumer {consumer_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Billing endpoints
+@app.post("/api/billing/run-monthly")
+async def run_monthly_billing():
+    """Manually trigger monthly billing for all shops"""
+    try:
+        if "monthly_billing_job" not in services:
+            raise HTTPException(
+                status_code=500, detail="Monthly billing job not available"
+            )
+
+        logger.info("🔄 Manual monthly billing triggered")
+        result = await services["monthly_billing_job"].run_monthly_billing()
+
+        return {
+            "message": "Monthly billing completed",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to run monthly billing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/run-shop/{shop_id}")
+async def run_shop_billing(shop_id: str):
+    """Manually trigger billing for a specific shop"""
+    try:
+        if "monthly_billing_job" not in services:
+            raise HTTPException(
+                status_code=500, detail="Monthly billing job not available"
+            )
+
+        logger.info(f"🔄 Manual billing triggered for shop {shop_id}")
+        result = await services["monthly_billing_job"].run_shop_billing(shop_id)
+
+        return {
+            "message": f"Billing completed for shop {shop_id}",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to run billing for shop {shop_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

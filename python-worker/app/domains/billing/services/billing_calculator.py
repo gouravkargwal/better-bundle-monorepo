@@ -77,6 +77,19 @@ class BillingCalculator:
                 logger.warning(f"No billing plan found for shop {shop_id}")
                 return self._create_empty_billing_result(shop_id, period)
 
+            # Check if shop is in trial period
+            trial_status = await self._check_trial_status(billing_plan, metrics_data)
+
+            # Handle trial completion if threshold reached
+            if trial_status.get("trial_just_completed", False):
+                await self._handle_trial_completion(shop_id, billing_plan, trial_status)
+
+            if trial_status["is_trial_active"]:
+                logger.info(
+                    f"Shop {shop_id} is in trial period. Revenue: ${trial_status['current_revenue']}, Threshold: ${trial_status['threshold']}"
+                )
+                return self._create_trial_billing_result(shop_id, period, trial_status)
+
             # Get plan configuration
             plan_config = billing_plan.configuration or self.default_config
 
@@ -443,3 +456,133 @@ class BillingCalculator:
         except Exception as e:
             logger.error(f"Error calculating billing summary for shop {shop_id}: {e}")
             return {"error": str(e)}
+
+    # ============= TRIAL LOGIC =============
+
+    async def _check_trial_status(
+        self, billing_plan, metrics_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Check if shop is still in trial period based on revenue threshold.
+
+        Args:
+            billing_plan: Shop's billing plan
+            metrics_data: Current period metrics
+
+        Returns:
+            Trial status information
+        """
+        try:
+            # Get current attributed revenue for this period
+            current_revenue = Decimal(str(metrics_data.get("attributed_revenue", 0)))
+
+            # Get trial threshold (default $200)
+            trial_threshold = Decimal(str(billing_plan.trialThreshold or 200.00))
+
+            # Check if trial is still active
+            is_trial_active = (
+                billing_plan.isTrialActive and current_revenue < trial_threshold
+            )
+
+            # Calculate remaining revenue needed
+            remaining_revenue = max(Decimal("0"), trial_threshold - current_revenue)
+
+            # Check if trial just completed (revenue threshold reached)
+            trial_just_completed = (
+                billing_plan.isTrialActive and current_revenue >= trial_threshold
+            )
+
+            return {
+                "is_trial_active": is_trial_active,
+                "current_revenue": float(current_revenue),
+                "threshold": float(trial_threshold),
+                "remaining_revenue": float(remaining_revenue),
+                "trial_progress": (
+                    float((current_revenue / trial_threshold) * 100)
+                    if trial_threshold > 0
+                    else 0
+                ),
+                "trial_just_completed": trial_just_completed,
+            }
+
+        except Exception as e:
+            logger.error(f"Error checking trial status: {e}")
+            return {
+                "is_trial_active": False,
+                "current_revenue": 0,
+                "threshold": 200,
+                "remaining_revenue": 200,
+                "trial_progress": 0,
+            }
+
+    async def _handle_trial_completion(
+        self, shop_id: str, billing_plan, trial_status: Dict[str, Any]
+    ) -> None:
+        """
+        Handle trial completion by updating billing plan status.
+
+        Args:
+            shop_id: Shop ID
+            billing_plan: Current billing plan
+            trial_status: Trial status information
+        """
+        try:
+            if trial_status.get("trial_just_completed", False):
+                logger.info(
+                    f"🎉 Trial completed for shop {shop_id}! Revenue: ${trial_status['current_revenue']}"
+                )
+
+                # Update billing plan to end trial
+                await self.prisma.billingplan.update(
+                    where={"id": billing_plan.id},
+                    data={
+                        "isTrialActive": False,
+                        "trialRevenue": trial_status["current_revenue"],
+                    },
+                )
+
+                logger.info(
+                    f"✅ Trial ended for shop {shop_id}. Normal billing begins."
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
+
+    def _create_trial_billing_result(
+        self, shop_id: str, period: BillingPeriod, trial_status: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create billing result for trial period (no charges).
+
+        Args:
+            shop_id: Shop ID
+            period: Billing period
+            trial_status: Trial status information
+
+        Returns:
+            Trial billing result
+        """
+        return {
+            "shop_id": shop_id,
+            "period": {
+                "start_date": period.start_date,
+                "end_date": period.end_date,
+                "cycle": period.cycle,
+            },
+            "trial_status": trial_status,
+            "calculation": {
+                "base_fee": 0.0,
+                "tiered_fee": 0.0,
+                "discounted_fee": 0.0,
+                "final_fee": 0.0,
+                "currency": "USD",
+                "trial_active": True,
+            },
+            "breakdown": {
+                "trial_threshold": trial_status["threshold"],
+                "current_revenue": trial_status["current_revenue"],
+                "remaining_revenue": trial_status["remaining_revenue"],
+                "trial_progress": trial_status["trial_progress"],
+            },
+            "calculated_at": datetime.utcnow().isoformat(),
+        }

@@ -881,9 +881,11 @@ model BillingPlan {
   updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
   effectiveFrom  DateTime          @map("effective_from") @db.Timestamptz(6)
   effectiveUntil DateTime?         @map("effective_until") @db.Timestamptz(6)
+  isTrialActive  Boolean           @default(true) @map("is_trial_active")
+  trialThreshold Decimal           @default(200.00) @map("trial_threshold") @db.Decimal(10, 2)
+  trialRevenue   Decimal           @default(0.00) @map("trial_revenue") @db.Decimal(12, 2)
   events         BillingEvent[]
   invoices       BillingInvoice[]
-  metrics        BillingMetrics[]
 
   @@index([shopDomain])
   @@index([status])
@@ -891,35 +893,6 @@ model BillingPlan {
   @@map("billing_plans")
 }
 
-model BillingMetrics {
-  id                String       @id @default(cuid())
-  shopId            String       @map("shop_id") @db.VarChar(255)
-  planId            String       @map("plan_id") @db.VarChar(255)
-  periodStart       DateTime     @map("period_start") @db.Timestamptz(6)
-  periodEnd         DateTime     @map("period_end") @db.Timestamptz(6)
-  cycle             BillingCycle
-  totalRevenue      Decimal      @map("total_revenue") @db.Decimal(12, 2)
-  attributedRevenue Decimal      @map("attributed_revenue") @db.Decimal(12, 2)
-  billableRevenue   Decimal      @map("billable_revenue") @db.Decimal(12, 2)
-  totalInteractions Int          @map("total_interactions")
-  totalConversions  Int          @map("total_conversions")
-  conversionRate    Float        @map("conversion_rate")
-  averageOrderValue Decimal      @map("average_order_value") @db.Decimal(10, 2)
-  extensionMetrics  Json         @default("[]") @map("extension_metrics")
-  calculatedFee     Decimal      @map("calculated_fee") @db.Decimal(10, 2)
-  appliedDiscounts  Decimal      @map("applied_discounts") @db.Decimal(10, 2)
-  finalFee          Decimal      @map("final_fee") @db.Decimal(10, 2)
-  calculatedAt      DateTime     @default(now()) @map("calculated_at") @db.Timestamptz(6)
-  billedAt          DateTime?    @map("billed_at") @db.Timestamptz(6)
-  plan              BillingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, periodStart, periodEnd])
-  @@index([shopId])
-  @@index([planId])
-  @@index([periodStart])
-  @@index([periodEnd])
-  @@map("billing_metrics")
-}
 
 model BillingInvoice {
   id               String        @id @default(cuid())

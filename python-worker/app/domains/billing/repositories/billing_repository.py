@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from prisma import Prisma
 from prisma.models import (
     BillingPlan,
-    BillingMetrics,
     BillingInvoice,
     BillingEvent,
     UserInteraction,
@@ -123,73 +122,74 @@ class BillingRepository:
             logger.error(f"Error updating billing plan {plan_id}: {e}")
             return None
 
-    # ============= BILLING METRICS =============
+    async def create_trial_billing_plan(
+        self, shop_id: str, shop_domain: str, trial_threshold: float = 200.00
+    ) -> Dict[str, Any]:
+        """
+        Create a trial billing plan for a new shop installation.
 
-    async def create_billing_metrics(
-        self,
-        shop_id: str,
-        plan_id: str,
-        period: BillingPeriod,
-        metrics_data: Dict[str, Any],
-    ) -> BillingMetrics:
-        """Create billing metrics for a period."""
+        Args:
+            shop_id: Shop ID
+            shop_domain: Shop domain
+            trial_threshold: Revenue threshold for trial (default $200)
+
+        Returns:
+            Created billing plan information
+        """
         try:
-            metrics = await self.prisma.billingmetrics.create(
+            logger.info(f"Creating trial billing plan for shop {shop_id}")
+
+            # Create trial billing plan
+            billing_plan = await self.prisma.billingplan.create(
                 {
                     "shopId": shop_id,
-                    "planId": plan_id,
-                    "periodStart": period.start_date,
-                    "periodEnd": period.end_date,
-                    "cycle": period.cycle,
-                    "totalRevenue": float(metrics_data.get("total_revenue", 0)),
-                    "attributedRevenue": float(
-                        metrics_data.get("attributed_revenue", 0)
-                    ),
-                    "billableRevenue": float(metrics_data.get("billable_revenue", 0)),
-                    "totalInteractions": metrics_data.get("total_interactions", 0),
-                    "totalConversions": metrics_data.get("total_conversions", 0),
-                    "conversionRate": metrics_data.get("conversion_rate", 0.0),
-                    "averageOrderValue": float(
-                        metrics_data.get("average_order_value", 0)
-                    ),
-                    "extensionMetrics": metrics_data.get("extension_metrics", []),
-                    "calculatedFee": float(metrics_data.get("calculated_fee", 0)),
-                    "appliedDiscounts": float(metrics_data.get("applied_discounts", 0)),
-                    "finalFee": float(metrics_data.get("final_fee", 0)),
+                    "shopDomain": shop_domain,
+                    "name": "Free Trial Plan",
+                    "type": "revenue_share",
+                    "status": "active",
+                    "configuration": {
+                        "revenue_share_rate": 0.03,
+                        "trial_threshold": trial_threshold,
+                        "trial_active": True,
+                    },
+                    "effectiveFrom": datetime.utcnow(),
+                    "isTrialActive": True,
+                    "trialThreshold": trial_threshold,
+                    "trialRevenue": 0.0,
                 }
             )
 
             # Create billing event
             await self.create_billing_event(
                 shop_id=shop_id,
-                event_type="metrics_calculated",
-                data={"metrics_id": metrics.id, "period": period.__dict__},
-                metadata={"calculated_at": datetime.utcnow().isoformat()},
+                event_type="trial_started",
+                data={
+                    "trial_threshold": trial_threshold,
+                    "plan_id": billing_plan.id,
+                },
+                metadata={
+                    "trial_type": "revenue_based",
+                    "created_at": datetime.utcnow().isoformat(),
+                },
             )
 
-            logger.info(f"Created billing metrics {metrics.id} for shop {shop_id}")
-            return metrics
+            logger.info(
+                f"Created trial billing plan {billing_plan.id} for shop {shop_id}"
+            )
+
+            return {
+                "plan_id": billing_plan.id,
+                "name": billing_plan.name,
+                "type": billing_plan.type,
+                "status": billing_plan.status,
+                "trial_threshold": float(billing_plan.trialThreshold),
+                "trial_active": billing_plan.isTrialActive,
+                "created_at": billing_plan.createdAt.isoformat(),
+            }
 
         except Exception as e:
-            logger.error(f"Error creating billing metrics for shop {shop_id}: {e}")
+            logger.error(f"Error creating trial billing plan for shop {shop_id}: {e}")
             raise
-
-    async def get_billing_metrics(
-        self, shop_id: str, period_start: datetime, period_end: datetime
-    ) -> Optional[BillingMetrics]:
-        """Get billing metrics for a specific period."""
-        try:
-            metrics = await self.prisma.billingmetrics.find_first(
-                where={
-                    "shopId": shop_id,
-                    "periodStart": period_start,
-                    "periodEnd": period_end,
-                }
-            )
-            return metrics
-        except Exception as e:
-            logger.error(f"Error getting billing metrics for shop {shop_id}: {e}")
-            return None
 
     async def get_shop_attribution_data(
         self, shop_id: str, period_start: datetime, period_end: datetime

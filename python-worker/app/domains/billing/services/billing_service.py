@@ -144,15 +144,6 @@ class BillingService:
                 shop_id, period, metrics_data
             )
 
-            # Store billing metrics
-            if billing_result.get("plan_id"):
-                await self.billing_repository.create_billing_metrics(
-                    shop_id=shop_id,
-                    plan_id=billing_result["plan_id"],
-                    period=period,
-                    metrics_data=billing_result["metrics"],
-                )
-
             logger.info(
                 f"Monthly billing calculated for shop {shop_id}: ${billing_result['calculation']['final_fee']}"
             )

@@ -27,15 +27,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Index() {
-  const { dashboardData, shop, isNewUser, error } =
-    useLoaderData<typeof loader>();
+  const { dashboardData, shop, isNewUser } = useLoaderData<typeof loader>();
 
   return (
     <WelcomePage
       dashboardData={dashboardData}
       shop={shop}
       isNewUser={isNewUser}
-      error={error}
     />
   );
 }

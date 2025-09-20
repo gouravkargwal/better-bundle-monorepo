@@ -225,6 +225,52 @@ const shopify = shopifyApp({
           "⚙️ Widget configuration no longer needed - using Shopify native approach",
         );
 
+        // Create trial billing plan for new installations
+        console.log("💰 Checking for existing billing plan...");
+        const existingBillingPlan = await prisma.billingPlan.findFirst({
+          where: {
+            shopId: myshopifyDomain,
+            status: "active",
+          },
+        });
+
+        if (!existingBillingPlan) {
+          console.log("🎉 Creating trial billing plan for new installation");
+
+          // Get shop record to get the ID
+          const shopRecord = await prisma.shop.findUnique({
+            where: { shopDomain: myshopifyDomain },
+            select: { id: true },
+          });
+
+          if (shopRecord) {
+            // Create trial billing plan
+            const billingPlan = await prisma.billingPlan.create({
+              data: {
+                shopId: shopRecord.id,
+                shopDomain: myshopifyDomain,
+                name: "Free Trial Plan",
+                type: "revenue_share",
+                status: "active",
+                configuration: {
+                  revenue_share_rate: 0.03,
+                  trial_threshold: 200.0,
+                  trial_active: true,
+                },
+                effectiveFrom: new Date(),
+              },
+            });
+
+            console.log(`✅ Trial billing plan created: ${billingPlan.id}`);
+          } else {
+            console.log(
+              "⚠️ Shop record not found, skipping billing plan creation",
+            );
+          }
+        } else {
+          console.log("✅ Billing plan already exists, skipping creation");
+        }
+
         // Activate Atlas web pixel extension
         console.log("🎯 Activating Atlas web pixel for:", myshopifyDomain);
         await activateAtlasWebPixel(admin, myshopifyDomain);

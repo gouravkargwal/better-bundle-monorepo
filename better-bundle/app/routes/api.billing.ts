@@ -21,7 +21,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   try {
     // Get billing plan
-    const billingPlan = await prisma.billingPlan.findFirst({
+    let billingPlan = await prisma.billingPlan.findFirst({
       where: {
         shopId: shop,
         status: "active",
@@ -30,6 +30,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
         effectiveFrom: "desc",
       },
     });
+
+    // If no billing plan exists, create a trial plan
+    if (!billingPlan) {
+      console.log(`Creating trial billing plan for shop: ${shop}`);
+      billingPlan = await prisma.billingPlan.create({
+        data: {
+          shopId: shop,
+          shopDomain: shop, // You might want to get the actual domain
+          name: "Free Trial Plan",
+          type: "revenue_share",
+          status: "active",
+          configuration: {
+            revenue_share_rate: 0.03,
+            trial_threshold: 200.0,
+            trial_active: true,
+          },
+          effectiveFrom: new Date(),
+          isTrialActive: true,
+          trialThreshold: 200.0,
+          trialRevenue: 0.0,
+        },
+      });
+
+      console.log(
+        `Created trial billing plan ${billingPlan.id} for shop ${shop}`,
+      );
+    }
 
     // Get recent invoices
     const recentInvoices = await prisma.billingInvoice.findMany({
@@ -53,31 +80,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       take: 10,
     });
 
-    // Get current month's billing metrics
-    const currentMonth = new Date();
-    const firstDay = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth(),
-      1,
-    );
-    const lastDay = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth() + 1,
-      0,
-    );
-
-    const currentMetrics = await prisma.billingMetrics.findFirst({
-      where: {
-        shopId: shop,
-        periodStart: {
-          gte: firstDay,
-        },
-        periodEnd: {
-          lte: lastDay,
-        },
-      },
-    });
-
     return json({
       success: true,
       data: {
@@ -89,6 +91,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
               status: billingPlan.status,
               configuration: billingPlan.configuration,
               effective_from: billingPlan.effectiveFrom,
+              trial_status: {
+                is_trial_active: billingPlan.isTrialActive,
+                trial_threshold: billingPlan.trialThreshold,
+                trial_revenue: billingPlan.trialRevenue,
+                remaining_revenue: Math.max(
+                  0,
+                  billingPlan.trialThreshold - billingPlan.trialRevenue,
+                ),
+                trial_progress:
+                  billingPlan.trialThreshold > 0
+                    ? (billingPlan.trialRevenue / billingPlan.trialThreshold) *
+                      100
+                    : 0,
+              },
             }
           : null,
         recent_invoices: recentInvoices.map((invoice) => ({
@@ -108,18 +124,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
           data: event.data,
           occurred_at: event.occurredAt,
         })),
-        current_metrics: currentMetrics
-          ? {
-              total_revenue: currentMetrics.totalRevenue,
-              attributed_revenue: currentMetrics.attributedRevenue,
-              billable_revenue: currentMetrics.billableRevenue,
-              total_interactions: currentMetrics.totalInteractions,
-              total_conversions: currentMetrics.totalConversions,
-              conversion_rate: currentMetrics.conversionRate,
-              calculated_fee: currentMetrics.calculatedFee,
-              final_fee: currentMetrics.finalFee,
-            }
-          : null,
       },
     });
   } catch (error) {
@@ -153,9 +157,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
       case "update_billing_plan":
         return await updateBillingPlan(shop, data);
-
-      case "get_billing_summary":
-        return await getBillingSummary(shop, data);
 
       default:
         return json(
@@ -372,72 +373,3 @@ async function updateBillingPlan(shopId: string, updateData: any) {
 }
 
 // ============= BILLING SUMMARY =============
-
-async function getBillingSummary(shopId: string, params: any) {
-  try {
-    const { months = 12 } = params;
-
-    // Get billing metrics for the specified number of months
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - months);
-
-    const billingMetrics = await prisma.billingMetrics.findMany({
-      where: {
-        shopId: shopId,
-        periodStart: {
-          gte: cutoffDate,
-        },
-      },
-      orderBy: {
-        periodStart: "desc",
-      },
-    });
-
-    // Calculate summary statistics
-    const totalRevenue = billingMetrics.reduce(
-      (sum, metric) => sum + Number(metric.attributedRevenue),
-      0,
-    );
-
-    const totalFees = billingMetrics.reduce(
-      (sum, metric) => sum + Number(metric.finalFee),
-      0,
-    );
-
-    const averageMonthlyRevenue =
-      totalRevenue / Math.max(billingMetrics.length, 1);
-    const averageMonthlyFee = totalFees / Math.max(billingMetrics.length, 1);
-    const averageFeeRate =
-      totalRevenue > 0 ? (totalFees / totalRevenue) * 100 : 0;
-
-    return json({
-      success: true,
-      data: {
-        summary: {
-          total_revenue: totalRevenue,
-          total_fees: totalFees,
-          average_monthly_revenue: averageMonthlyRevenue,
-          average_monthly_fee: averageMonthlyFee,
-          average_fee_rate: averageFeeRate,
-          months_analyzed: billingMetrics.length,
-        },
-        monthly_breakdown: billingMetrics.map((metric) => ({
-          period_start: metric.periodStart,
-          period_end: metric.periodEnd,
-          revenue: Number(metric.attributedRevenue),
-          fee: Number(metric.finalFee),
-          currency: "USD",
-        })),
-      },
-    });
-  } catch (error) {
-    console.error("Error getting billing summary:", error);
-    return json(
-      {
-        success: false,
-        error: "Failed to get billing summary",
-      },
-      { status: 500 },
-    );
-  }
-}
