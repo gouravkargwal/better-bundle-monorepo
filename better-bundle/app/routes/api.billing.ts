@@ -20,6 +20,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { shop } = session;
 
   try {
+    // Get shop information for currency
+    const shopInfo = await prisma.shop.findUnique({
+      where: { shopDomain: shop },
+      select: { currencyCode: true },
+    });
+
     // Get billing plan
     let billingPlan = await prisma.billingPlan.findFirst({
       where: {
@@ -91,6 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               status: billingPlan.status,
               configuration: billingPlan.configuration,
               effective_from: billingPlan.effectiveFrom,
+              currency: shopInfo?.currencyCode || "USD",
               trial_status: {
                 is_trial_active: billingPlan.isTrialActive,
                 trial_threshold: billingPlan.trialThreshold,

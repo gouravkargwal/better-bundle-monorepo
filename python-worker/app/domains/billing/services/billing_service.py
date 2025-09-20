@@ -14,7 +14,7 @@ from prisma import Prisma
 
 from .attribution_engine import AttributionEngine, AttributionContext
 from .billing_calculator import BillingCalculator
-from .shopify_billing_service import ShopifyBillingService
+from .shopify_usage_billing_service import ShopifyUsageBillingService
 from .fraud_detection_service import FraudDetectionService
 from .notification_service import BillingNotificationService
 from ..repositories.billing_repository import BillingRepository, BillingPeriod
@@ -33,7 +33,9 @@ class BillingService:
         self.billing_repository = BillingRepository(prisma)
         self.attribution_engine = AttributionEngine(prisma)
         self.billing_calculator = BillingCalculator(self.billing_repository)
-        self.shopify_billing_service = ShopifyBillingService(prisma)
+        self.shopify_usage_billing_service = ShopifyUsageBillingService(
+            prisma, self.billing_repository
+        )
         self.fraud_detection_service = FraudDetectionService(prisma)
         self.notification_service = BillingNotificationService(prisma)
 
@@ -179,31 +181,26 @@ class BillingService:
                 logger.info(f"No billing charge needed for shop {shop_id}")
                 return billing_result
 
-            # Create Shopify charge
-            shopify_charge = (
-                await self.shopify_billing_service.create_monthly_billing_charge(
+            # Record usage for usage-based billing
+            usage_record = (
+                await self.shopify_usage_billing_service.process_monthly_usage_billing(
                     shop_id, billing_result
                 )
             )
 
-            if shopify_charge:
-                billing_result["shopify_charge"] = {
-                    "id": shopify_charge.id,
-                    "status": shopify_charge.status,
-                    "amount": float(shopify_charge.amount),
-                    "currency": shopify_charge.currency,
-                    "description": shopify_charge.description,
-                    "created_at": shopify_charge.created_at.isoformat(),
+            if usage_record:
+                billing_result["usage_record"] = {
+                    "id": usage_record.id,
+                    "subscription_line_item_id": usage_record.subscription_line_item_id,
+                    "description": usage_record.description,
+                    "price": usage_record.price,
+                    "created_at": usage_record.created_at,
                 }
 
-                logger.info(
-                    f"Created Shopify charge {shopify_charge.id} for shop {shop_id}"
-                )
+                logger.info(f"Recorded usage {usage_record.id} for shop {shop_id}")
             else:
-                logger.error(f"Failed to create Shopify charge for shop {shop_id}")
-                billing_result["shopify_charge_error"] = (
-                    "Failed to create Shopify charge"
-                )
+                logger.error(f"Failed to record usage for shop {shop_id}")
+                billing_result["usage_record_error"] = "Failed to record usage"
 
             return billing_result
 

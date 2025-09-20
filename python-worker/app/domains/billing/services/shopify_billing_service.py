@@ -19,6 +19,130 @@ from ..repositories.billing_repository import BillingRepository, BillingPeriod
 
 logger = logging.getLogger(__name__)
 
+# Currency symbols mapping
+CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "CAD": "C$",
+    "AUD": "A$",
+    "JPY": "¥",
+    "CHF": "CHF",
+    "SEK": "kr",
+    "NOK": "kr",
+    "DKK": "kr",
+    "PLN": "zł",
+    "CZK": "Kč",
+    "HUF": "Ft",
+    "BGN": "лв",
+    "RON": "lei",
+    "HRK": "kn",
+    "RSD": "дин",
+    "MKD": "ден",
+    "BAM": "КМ",
+    "ALL": "L",
+    "ISK": "kr",
+    "UAH": "₴",
+    "RUB": "₽",
+    "BYN": "Br",
+    "KZT": "₸",
+    "GEL": "₾",
+    "AMD": "֏",
+    "AZN": "₼",
+    "KGS": "с",
+    "TJS": "SM",
+    "TMT": "T",
+    "UZS": "so'm",
+    "MNT": "₮",
+    "KHR": "៛",
+    "LAK": "₭",
+    "VND": "₫",
+    "THB": "฿",
+    "MYR": "RM",
+    "SGD": "S$",
+    "IDR": "Rp",
+    "PHP": "₱",
+    "INR": "₹",
+    "PKR": "₨",
+    "BDT": "৳",
+    "LKR": "₨",
+    "NPR": "₨",
+    "BTN": "Nu",
+    "MVR": "ރ",
+    "AFN": "؋",
+    "IRR": "﷼",
+    "IQD": "ع.د",
+    "JOD": "د.ا",
+    "KWD": "د.ك",
+    "LBP": "ل.ل",
+    "OMR": "ر.ع",
+    "QAR": "ر.ق",
+    "SAR": "ر.س",
+    "SYP": "ل.س",
+    "AED": "د.إ",
+    "YER": "﷼",
+    "ILS": "₪",
+    "JMD": "J$",
+    "BBD": "Bds$",
+    "BZD": "BZ$",
+    "XCD": "EC$",
+    "KYD": "CI$",
+    "TTD": "TT$",
+    "AWG": "ƒ",
+    "BSD": "B$",
+    "BMD": "BD$",
+    "BND": "B$",
+    "FJD": "FJ$",
+    "GYD": "G$",
+    "LRD": "L$",
+    "SBD": "SI$",
+    "SRD": "Sr$",
+    "TVD": "TV$",
+    "VES": "Bs.S",
+    "ARS": "$",
+    "BOB": "Bs",
+    "BRL": "R$",
+    "CLP": "$",
+    "COP": "$",
+    "CRC": "₡",
+    "CUP": "$",
+    "DOP": "RD$",
+    "GTQ": "Q",
+    "HNL": "L",
+    "MXN": "$",
+    "NIO": "C$",
+    "PAB": "B/.",
+    "PEN": "S/",
+    "PYG": "₲",
+    "UYU": "$U",
+    "VEF": "Bs",
+    "ZAR": "R",
+    "BWP": "P",
+    "LSL": "L",
+    "NAD": "N$",
+    "SZL": "L",
+    "ZMW": "ZK",
+    "ZWL": "Z$",
+    "AOA": "Kz",
+    "CDF": "FC",
+    "GMD": "D",
+    "GNF": "FG",
+    "KES": "KSh",
+    "LRD": "L$",
+    "MAD": "د.م.",
+    "MGA": "Ar",
+    "MUR": "₨",
+    "NGN": "₦",
+    "RWF": "RF",
+    "SLL": "Le",
+    "SOS": "S",
+    "TZS": "TSh",
+    "UGX": "USh",
+    "XAF": "FCFA",
+    "XOF": "CFA",
+    "ZAR": "R",
+}
+
 
 @dataclass
 class ShopifyCharge:
@@ -56,8 +180,10 @@ class ShopifyBillingService:
     def __init__(self, prisma: Prisma):
         self.prisma = prisma
         self.billing_repository = BillingRepository(prisma)
-        self.base_url = "https://{shop_domain}.myshopify.com/admin/api/2024-01"
-        self.timeout = 30.0
+
+    def _get_currency_symbol(self, currency_code: str) -> str:
+        """Get currency symbol for display"""
+        return CURRENCY_SYMBOLS.get(currency_code, currency_code)
 
     async def create_billing_charge(
         self,
@@ -318,9 +444,12 @@ class ShopifyBillingService:
             currency = billing_result["calculation"]["currency"]
             period = billing_result["period"]
 
+            # Get currency symbol for description
+            currency_symbol = self._get_currency_symbol(currency)
+
             description = (
                 f"Better Bundle - {period['start_date'][:7]} "
-                f"(${billing_result['metrics']['attributed_revenue']:.2f} attributed revenue)"
+                f"({currency_symbol}{billing_result['metrics']['attributed_revenue']:.2f} attributed revenue)"
             )
 
             metadata = {

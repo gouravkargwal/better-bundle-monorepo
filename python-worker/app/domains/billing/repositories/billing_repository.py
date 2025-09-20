@@ -47,6 +47,33 @@ class BillingRepository:
     def __init__(self, prisma: Prisma):
         self.prisma = prisma
 
+    # ============= SHOP OPERATIONS =============
+
+    async def get_shop(self, shop_id: str) -> Optional[Any]:
+        """
+        Get shop information including currency.
+
+        Args:
+            shop_id: Shop ID
+
+        Returns:
+            Shop object or None
+        """
+        try:
+            shop = await self.prisma.shop.find_unique(
+                where={"id": shop_id},
+                select={
+                    "id": True,
+                    "shopDomain": True,
+                    "currencyCode": True,
+                    "isActive": True,
+                },
+            )
+            return shop
+        except Exception as e:
+            logger.error(f"Error getting shop {shop_id}: {e}")
+            return None
+
     # ============= BILLING PLANS =============
 
     async def create_billing_plan(
@@ -425,9 +452,7 @@ class BillingRepository:
         """Get list of shop IDs that need billing processing."""
         try:
             # Get shops with active billing plans
-            plans = await self.prisma.billingplan.find_many(
-                where={"status": "active"}, select={"shopId": True}
-            )
+            plans = await self.prisma.billingplan.find_many(where={"status": "active"})
 
             shop_ids = [plan.shopId for plan in plans]
             logger.info(f"Found {len(shop_ids)} shops for billing processing")

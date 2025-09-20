@@ -71,11 +71,18 @@ class BillingCalculator:
                 f"Calculating billing fee for shop {shop_id} for period {period.start_date} to {period.end_date}"
             )
 
+            # Get shop currency first
+            shop = await self.billing_repository.get_shop(shop_id)
+            store_currency = shop.currencyCode if shop and shop.currencyCode else "USD"
+            logger.info(f"Using currency {store_currency} for shop {shop_id}")
+
             # Get billing plan for shop
             billing_plan = await self.billing_repository.get_billing_plan(shop_id)
             if not billing_plan:
                 logger.warning(f"No billing plan found for shop {shop_id}")
-                return self._create_empty_billing_result(shop_id, period)
+                return self._create_empty_billing_result(
+                    shop_id, period, store_currency
+                )
 
             # Check if shop is in trial period
             trial_status = await self._check_trial_status(billing_plan, metrics_data)
@@ -88,7 +95,9 @@ class BillingCalculator:
                 logger.info(
                     f"Shop {shop_id} is in trial period. Revenue: ${trial_status['current_revenue']}, Threshold: ${trial_status['threshold']}"
                 )
-                return self._create_trial_billing_result(shop_id, period, trial_status)
+                return self._create_trial_billing_result(
+                    shop_id, period, trial_status, store_currency
+                )
 
             # Get plan configuration
             plan_config = billing_plan.configuration or self.default_config
@@ -113,6 +122,7 @@ class BillingCalculator:
             billing_result = {
                 "shop_id": shop_id,
                 "plan_id": billing_plan.id,
+                "currency": store_currency,
                 "period": {
                     "start_date": period.start_date,
                     "end_date": period.end_date,
@@ -124,7 +134,7 @@ class BillingCalculator:
                     "tiered_fee": float(tiered_fee),
                     "discounted_fee": float(discounted_fee),
                     "final_fee": float(final_fee),
-                    "currency": plan_config.get("currency", "USD"),
+                    "currency": store_currency,
                 },
                 "breakdown": self._create_fee_breakdown(metrics_data, plan_config),
                 "calculated_at": datetime.utcnow().isoformat(),
@@ -310,12 +320,13 @@ class BillingCalculator:
         }
 
     def _create_empty_billing_result(
-        self, shop_id: str, period: BillingPeriod
+        self, shop_id: str, period: BillingPeriod, currency: str = "USD"
     ) -> Dict[str, Any]:
         """Create empty billing result when no plan is found."""
         return {
             "shop_id": shop_id,
             "plan_id": None,
+            "currency": currency,
             "period": {
                 "start_date": period.start_date,
                 "end_date": period.end_date,
@@ -549,7 +560,11 @@ class BillingCalculator:
             logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
 
     def _create_trial_billing_result(
-        self, shop_id: str, period: BillingPeriod, trial_status: Dict[str, Any]
+        self,
+        shop_id: str,
+        period: BillingPeriod,
+        trial_status: Dict[str, Any],
+        currency: str = "USD",
     ) -> Dict[str, Any]:
         """
         Create billing result for trial period (no charges).
@@ -558,12 +573,14 @@ class BillingCalculator:
             shop_id: Shop ID
             period: Billing period
             trial_status: Trial status information
+            currency: Store currency
 
         Returns:
             Trial billing result
         """
         return {
             "shop_id": shop_id,
+            "currency": currency,
             "period": {
                 "start_date": period.start_date,
                 "end_date": period.end_date,

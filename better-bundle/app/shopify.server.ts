@@ -6,147 +6,7 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
-// Widget configuration removed - using Shopify native approach
-
-/**
- * Activates the Atlas web pixel extension for the shop
- */
-async function activateAtlasWebPixel(admin: any, shopDomain: string) {
-  try {
-    // Get the backend URL from environment or use a default
-    const backendUrl = process.env.BACKEND_URL;
-
-    const webPixelSettings = {
-      backend_url: backendUrl,
-    };
-
-    // First, try to create the web pixel
-    const createMutation = `
-      mutation webPixelCreate($webPixel: WebPixelInput!) {
-        webPixelCreate(webPixel: $webPixel) {
-          userErrors {
-            code
-            field
-            message
-          }
-          webPixel {
-            id
-            settings
-          }
-        }
-      }
-    `;
-
-    const createResponse = await admin.graphql(createMutation, {
-      variables: {
-        webPixel: {
-          settings: JSON.stringify(webPixelSettings),
-        },
-      },
-    });
-
-    const createResponseJson = await createResponse.json();
-
-    // Check if creation was successful
-    if (
-      createResponseJson.data?.webPixelCreate?.userErrors?.length === 0 &&
-      createResponseJson.data?.webPixelCreate?.webPixel
-    ) {
-      console.log(
-        "✅ Atlas web pixel created successfully:",
-        createResponseJson.data.webPixelCreate.webPixel.id,
-      );
-      return createResponseJson.data.webPixelCreate.webPixel;
-    }
-
-    // If creation failed due to "TAKEN" error, try to update existing web pixel
-    const hasTakenError =
-      createResponseJson.data?.webPixelCreate?.userErrors?.some(
-        (error: any) => error.code === "TAKEN",
-      );
-
-    if (hasTakenError) {
-      console.log("🔄 Web pixel already exists, attempting to update...");
-
-      // First, get the existing web pixel ID
-      const query = `
-        query {
-          webPixels(first: 1) {
-            edges {
-              node {
-                id
-                settings
-              }
-            }
-          }
-        }
-      `;
-
-      const queryResponse = await admin.graphql(query);
-      const queryResponseJson = await queryResponse.json();
-
-      if (queryResponseJson.data?.webPixels?.edges?.length > 0) {
-        const webPixelId = queryResponseJson.data.webPixels.edges[0].node.id;
-
-        // Update the existing web pixel
-        const updateMutation = `
-          mutation webPixelUpdate($id: ID!, $webPixel: WebPixelInput!) {
-            webPixelUpdate(id: $id, webPixel: $webPixel) {
-              userErrors {
-                code
-                field
-                message
-              }
-              webPixel {
-                id
-                settings
-              }
-            }
-          }
-        `;
-
-        const updateResponse = await admin.graphql(updateMutation, {
-          variables: {
-            id: webPixelId,
-            webPixel: {
-              settings: JSON.stringify(webPixelSettings),
-            },
-          },
-        });
-
-        const updateResponseJson = await updateResponse.json();
-
-        if (
-          updateResponseJson.data?.webPixelUpdate?.userErrors?.length === 0 &&
-          updateResponseJson.data?.webPixelUpdate?.webPixel
-        ) {
-          console.log(
-            "✅ Atlas web pixel updated successfully:",
-            updateResponseJson.data.webPixelUpdate.webPixel.id,
-          );
-          return updateResponseJson.data.webPixelUpdate.webPixel;
-        } else {
-          console.error(
-            "❌ Web pixel update errors:",
-            updateResponseJson.data?.webPixelUpdate?.userErrors,
-          );
-        }
-      }
-    } else {
-      // Other creation errors
-      console.error(
-        "❌ Web pixel creation errors:",
-        createResponseJson.data?.webPixelCreate?.userErrors,
-      );
-    }
-
-    throw new Error("Failed to create or update web pixel");
-  } catch (error) {
-    console.error("❌ Failed to activate Atlas web pixel:", error);
-    // Don't throw the error to prevent breaking the entire afterAuth flow
-    // The app can still function without the web pixel
-  }
-}
+import { activateAtlasWebPixel } from "./services/atlas.service";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -160,7 +20,6 @@ const shopify = shopifyApp({
   hooks: {
     afterAuth: async ({ session, admin }) => {
       console.log("🔐 afterAuth hook triggered for shop:", session.shop);
-
       const myshopifyDomain = session.shop;
       try {
         // Fetch shop details including custom domain from Shopify API
@@ -197,9 +56,6 @@ const shopify = shopifyApp({
             ? shop.primaryDomain?.host
             : null;
 
-        console.log("📝 Creating/updating shop record for:", myshopifyDomain);
-        console.log("🌐 Custom domain:", customDomain || "Not set");
-
         await prisma.shop.upsert({
           where: { shopDomain: myshopifyDomain },
           update: {
@@ -225,7 +81,7 @@ const shopify = shopifyApp({
           "⚙️ Widget configuration no longer needed - using Shopify native approach",
         );
 
-        // Create trial billing plan for new installations
+        // Create usage-based subscription for new installations
         console.log("💰 Checking for existing billing plan...");
         const existingBillingPlan = await prisma.billingPlan.findFirst({
           where: {
@@ -235,33 +91,46 @@ const shopify = shopifyApp({
         });
 
         if (!existingBillingPlan) {
-          console.log("🎉 Creating trial billing plan for new installation");
+          console.log(
+            "🎉 Creating usage-based subscription for new installation",
+          );
 
           // Get shop record to get the ID
           const shopRecord = await prisma.shop.findUnique({
             where: { shopDomain: myshopifyDomain },
-            select: { id: true },
+            select: { id: true, currencyCode: true },
           });
 
           if (shopRecord) {
-            // Create trial billing plan
+            // Create usage-based billing plan (subscription will be created via API)
             const billingPlan = await prisma.billingPlan.create({
               data: {
                 shopId: shopRecord.id,
                 shopDomain: myshopifyDomain,
-                name: "Free Trial Plan",
-                type: "revenue_share",
+                name: "Usage-Based Trial Plan",
+                type: "usage_based",
                 status: "active",
                 configuration: {
-                  revenue_share_rate: 0.03,
-                  trial_threshold: 200.0,
+                  usage_based: true,
                   trial_active: true,
+                  trial_threshold: 200.0,
+                  trial_revenue: 0.0,
+                  revenue_share_rate: 0.03,
+                  capped_amount: 1000.0,
+                  currency: shopRecord.currencyCode || "USD",
+                  subscription_pending: true,
                 },
                 effectiveFrom: new Date(),
+                isTrialActive: true,
+                trialThreshold: 200.0,
+                trialRevenue: 0.0,
               },
             });
 
-            console.log(`✅ Trial billing plan created: ${billingPlan.id}`);
+            console.log(
+              `✅ Usage-based billing plan created: ${billingPlan.id}`,
+            );
+            console.log("📋 Subscription will be created via API call");
           } else {
             console.log(
               "⚠️ Shop record not found, skipping billing plan creation",

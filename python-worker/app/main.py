@@ -175,9 +175,13 @@ async def initialize_services():
         # Initialize billing services
         from app.domains.billing.services.billing_service import BillingService
         from app.domains.billing.jobs.monthly_billing_job import MonthlyBillingJob
+        from app.core.database.simple_db_client import get_database
 
-        services["billing_service"] = BillingService(prisma)
-        services["monthly_billing_job"] = MonthlyBillingJob(prisma)
+        # Get database connection
+        db = await get_database()
+
+        services["billing_service"] = BillingService(db)
+        services["monthly_billing_job"] = MonthlyBillingJob(db)
 
         # Register and start consumers
         consumer_manager.register_consumers(
@@ -779,6 +783,314 @@ async def run_shop_billing(shop_id: str):
         }
     except Exception as e:
         logger.error(f"Failed to run billing for shop {shop_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Trial data setup endpoints
+@app.post("/api/trial/setup-test-data")
+async def setup_test_trial_data():
+    """Create test trial data for testing"""
+    try:
+        from app.utils.trial_data_setup import create_test_scenarios
+
+        result = await create_test_scenarios()
+
+        return {
+            "message": "Test trial data created",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to setup test trial data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/trial/create-shop")
+async def create_shop_with_trial(
+    shop_id: str,
+    shop_domain: str,
+    trial_threshold: float = 200.0,
+    trial_revenue: float = 0.0,
+    is_trial_active: bool = True,
+):
+    """Create a shop with trial billing plan"""
+    try:
+        from app.utils.trial_data_setup import create_shop_with_trial_plan
+
+        result = await create_shop_with_trial_plan(
+            shop_id=shop_id,
+            shop_domain=shop_domain,
+            trial_threshold=trial_threshold,
+            trial_revenue=trial_revenue,
+            is_trial_active=is_trial_active,
+        )
+
+        return {
+            "message": f"Shop with trial plan created",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to create shop with trial: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/trial/status/{shop_id}")
+async def get_trial_status(shop_id: str):
+    """Get trial status for a shop"""
+    try:
+        from app.utils.trial_data_setup import get_trial_status
+
+        result = await get_trial_status(shop_id)
+
+        return {
+            "message": f"Trial status for shop {shop_id}",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get trial status for shop {shop_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/trial/update-revenue/{shop_id}")
+async def update_trial_revenue(shop_id: str, additional_revenue: float):
+    """Update trial revenue for a shop"""
+    try:
+        from app.utils.trial_data_setup import update_trial_revenue
+
+        result = await update_trial_revenue(shop_id, additional_revenue)
+
+        return {
+            "message": f"Trial revenue updated for shop {shop_id}",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to update trial revenue for shop {shop_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/trial/cleanup-test-data")
+async def cleanup_test_trial_data():
+    """Cleanup test trial data"""
+    try:
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+
+        # Delete test shops and related data
+        test_shop_ids = [
+            "test-new-trial",
+            "test-progress-trial",
+            "test-completed-trial",
+        ]
+
+        # Delete billing events
+        await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
+
+        # Delete billing plans
+        await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
+
+        # Delete shops
+        await db.shop.delete_many(where={"id": {"in": test_shop_ids}})
+
+        return {
+            "message": "Test trial data cleaned up",
+            "deleted_shops": test_shop_ids,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to cleanup test trial data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/setup-comprehensive-test-data")
+async def setup_comprehensive_billing_test_data():
+    """Create comprehensive billing test data with real revenue and attribution"""
+    try:
+        from app.utils.comprehensive_billing_test import (
+            create_comprehensive_billing_test_data,
+        )
+
+        result = await create_comprehensive_billing_test_data()
+
+        return {
+            "message": "Comprehensive billing test data created",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to setup comprehensive billing test data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/billing/test-summary")
+async def get_billing_test_summary():
+    """Get summary of all billing test data"""
+    try:
+        from app.utils.comprehensive_billing_test import get_billing_test_summary
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+        result = await get_billing_test_summary(db)
+
+        return {
+            "message": "Billing test data summary",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get billing test summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/cleanup-comprehensive-test-data")
+async def cleanup_comprehensive_billing_test_data():
+    """Clean up comprehensive billing test data"""
+    try:
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+
+        # Delete all test shops and related data
+        test_shop_ids = [
+            "test-trial-shop",
+            "test-progress-shop",
+            "test-completed-trial",
+            "test-regular-shop",
+            "test-high-revenue-shop",
+        ]
+
+        # Delete in reverse order to handle foreign key constraints
+        await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
+        await db.billinginvoice.delete_many(where={"shopId": {"in": test_shop_ids}})
+        await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
+        await db.interactionevent.delete_many(where={"shopId": {"in": test_shop_ids}})
+        await db.purchaseevent.delete_many(where={"shopId": {"in": test_shop_ids}})
+        await db.shop.delete_many(where={"id": {"in": test_shop_ids}})
+
+        return {
+            "message": "Comprehensive billing test data cleaned up",
+            "deleted_shops": test_shop_ids,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to cleanup comprehensive billing test data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/add-test-data-for-existing-shops")
+async def add_test_data_for_existing_shops():
+    """Add comprehensive test data for existing development stores"""
+    try:
+        from app.utils.development_store_test import add_test_data_for_existing_shops
+
+        result = await add_test_data_for_existing_shops()
+
+        return {
+            "message": "Test data added for existing shops",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to add test data for existing shops: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/billing/existing-shops-summary")
+async def get_existing_shops_summary():
+    """Get summary of existing shops with their test data"""
+    try:
+        from app.utils.development_store_test import get_existing_shops_summary
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+        result = await get_existing_shops_summary(db)
+
+        return {
+            "message": "Existing shops summary",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get existing shops summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/setup-simple-test-data")
+async def setup_simple_billing_test_data():
+    """Create simple billing test data"""
+    try:
+        from app.utils.simple_billing_test import create_simple_billing_test_data
+
+        result = await create_simple_billing_test_data()
+
+        return {
+            "message": "Simple billing test data created",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to setup simple billing test data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/billing/simple-test-summary")
+async def get_simple_billing_test_summary():
+    """Get summary of simple billing test data"""
+    try:
+        from app.utils.simple_billing_test import get_simple_billing_test_summary
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+        result = await get_simple_billing_test_summary(db)
+
+        return {
+            "message": "Simple billing test data summary",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get simple billing test summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/billing/setup-currency-test-data")
+async def setup_currency_test_data():
+    """Create currency test data with different currencies"""
+    try:
+        from app.utils.currency_test_data import create_currency_test_data
+
+        result = await create_currency_test_data()
+
+        return {
+            "message": "Currency test data created",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to setup currency test data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/billing/currency-test-summary")
+async def get_currency_test_summary():
+    """Get summary of currency test data"""
+    try:
+        from app.utils.currency_test_data import get_currency_test_summary
+        from app.core.database.simple_db_client import get_database
+
+        db = await get_database()
+        result = await get_currency_test_summary(db)
+
+        return {
+            "message": "Currency test data summary",
+            "result": result,
+            "timestamp": now_utc().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get currency test summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -20,6 +20,7 @@ interface BillingData {
     status: string;
     configuration: any;
     effective_from: string;
+    currency?: string;
     trial_status: {
       is_trial_active: boolean;
       trial_threshold: number;
@@ -110,6 +111,135 @@ export function BillingDashboard() {
     }
   };
 
+  const getCurrencySymbol = (currencyCode: string) => {
+    const symbols: { [key: string]: string } = {
+      USD: "$",
+      EUR: "€",
+      GBP: "£",
+      CAD: "C$",
+      AUD: "A$",
+      JPY: "¥",
+      CHF: "CHF",
+      SEK: "kr",
+      NOK: "kr",
+      DKK: "kr",
+      PLN: "zł",
+      CZK: "Kč",
+      HUF: "Ft",
+      BGN: "лв",
+      RON: "lei",
+      HRK: "kn",
+      RSD: "дин",
+      MKD: "ден",
+      BAM: "КМ",
+      ALL: "L",
+      ISK: "kr",
+      UAH: "₴",
+      RUB: "₽",
+      BYN: "Br",
+      KZT: "₸",
+      GEL: "₾",
+      AMD: "֏",
+      AZN: "₼",
+      KGS: "с",
+      TJS: "SM",
+      TMT: "T",
+      UZS: "so'm",
+      MNT: "₮",
+      KHR: "៛",
+      LAK: "₭",
+      VND: "₫",
+      THB: "฿",
+      MYR: "RM",
+      SGD: "S$",
+      IDR: "Rp",
+      PHP: "₱",
+      INR: "₹",
+      PKR: "₨",
+      BDT: "৳",
+      LKR: "₨",
+      NPR: "₨",
+      BTN: "Nu",
+      MVR: "ރ",
+      AFN: "؋",
+      IRR: "﷼",
+      IQD: "ع.د",
+      JOD: "د.ا",
+      KWD: "د.ك",
+      LBP: "ل.ل",
+      OMR: "ر.ع",
+      QAR: "ر.ق",
+      SAR: "ر.س",
+      SYP: "ل.س",
+      AED: "د.إ",
+      YER: "﷼",
+      ILS: "₪",
+      JMD: "J$",
+      BBD: "Bds$",
+      BZD: "BZ$",
+      XCD: "EC$",
+      KYD: "CI$",
+      TTD: "TT$",
+      AWG: "ƒ",
+      BSD: "B$",
+      BMD: "BD$",
+      BND: "B$",
+      FJD: "FJ$",
+      GYD: "G$",
+      LRD: "L$",
+      SBD: "SI$",
+      SRD: "Sr$",
+      TVD: "TV$",
+      VES: "Bs.S",
+      ARS: "$",
+      BOB: "Bs",
+      BRL: "R$",
+      CLP: "$",
+      COP: "$",
+      CRC: "₡",
+      CUP: "$",
+      DOP: "RD$",
+      GTQ: "Q",
+      HNL: "L",
+      MXN: "$",
+      NIO: "C$",
+      PAB: "B/.",
+      PEN: "S/",
+      PYG: "₲",
+      UYU: "$U",
+      VEF: "Bs",
+      ZAR: "R",
+      BWP: "P",
+      LSL: "L",
+      NAD: "N$",
+      SZL: "L",
+      ZMW: "ZK",
+      ZWL: "Z$",
+      AOA: "Kz",
+      CDF: "FC",
+      GMD: "D",
+      GNF: "FG",
+      KES: "KSh",
+      MAD: "د.م.",
+      MGA: "Ar",
+      MUR: "₨",
+      NGN: "₦",
+      RWF: "RF",
+      SLL: "Le",
+      SOS: "S",
+      TZS: "TSh",
+      UGX: "USh",
+      XAF: "FCFA",
+      XOF: "CFA",
+    };
+    return symbols[currencyCode] || currencyCode;
+  };
+
+  const formatCurrency = (amount: number, currencyCode: string = "USD") => {
+    const symbol = getCurrencySymbol(currencyCode);
+    return `${symbol}${amount.toFixed(2)}`;
+  };
+
   if (loading) {
     return (
       <Box padding="400">
@@ -197,6 +327,21 @@ export function BillingDashboard() {
                       <strong>Effective:</strong>{" "}
                       {formatDate(billingData.billing_plan.effective_from)}
                     </Text>
+                    {billingData.billing_plan.currency && (
+                      <Text as="p" variant="bodyMd">
+                        <strong>Currency:</strong>{" "}
+                        {billingData.billing_plan.currency} (
+                        {getCurrencySymbol(billingData.billing_plan.currency)})
+                      </Text>
+                    )}
+                    {billingData.billing_plan.configuration
+                      ?.subscription_id && (
+                      <Text as="p" variant="bodyMd">
+                        <strong>Subscription:</strong>{" "}
+                        {billingData.billing_plan.configuration
+                          .subscription_status || "Pending"}
+                      </Text>
+                    )}
 
                     {/* Trial Status */}
                     {billingData.billing_plan.trial_status.is_trial_active ? (
@@ -223,9 +368,11 @@ export function BillingDashboard() {
                           </InlineStack>
 
                           <Text as="p" variant="bodyMd" tone="subdued">
-                            Generate $
-                            {billingData.billing_plan.trial_status.remaining_revenue.toFixed(
-                              2,
+                            Generate{" "}
+                            {formatCurrency(
+                              billingData.billing_plan.trial_status
+                                .remaining_revenue,
+                              billingData.billing_plan.currency || "USD",
                             )}{" "}
                             more in attributed revenue to start billing
                           </Text>
@@ -252,13 +399,17 @@ export function BillingDashboard() {
                           </div>
 
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Current attributed revenue: $
-                            {billingData.billing_plan.trial_status.trial_revenue.toFixed(
-                              2,
+                            Current attributed revenue:{" "}
+                            {formatCurrency(
+                              billingData.billing_plan.trial_status
+                                .trial_revenue,
+                              billingData.billing_plan.currency || "USD",
                             )}{" "}
-                            / $
-                            {billingData.billing_plan.trial_status.trial_threshold.toFixed(
-                              2,
+                            /{" "}
+                            {formatCurrency(
+                              billingData.billing_plan.trial_status
+                                .trial_threshold,
+                              billingData.billing_plan.currency || "USD",
                             )}
                           </Text>
                         </BlockStack>
@@ -287,9 +438,11 @@ export function BillingDashboard() {
                           </Text>
 
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Trial completed with $
-                            {billingData.billing_plan.trial_status.trial_revenue.toFixed(
-                              2,
+                            Trial completed with{" "}
+                            {formatCurrency(
+                              billingData.billing_plan.trial_status
+                                .trial_revenue,
+                              billingData.billing_plan.currency || "USD",
                             )}{" "}
                             in attributed revenue
                           </Text>
@@ -365,9 +518,10 @@ export function BillingDashboard() {
                                   variant="headingMd"
                                   fontWeight="bold"
                                 >
-                                  $
-                                  {billingData.billing_plan.trial_status.trial_revenue.toFixed(
-                                    2,
+                                  {formatCurrency(
+                                    billingData.billing_plan.trial_status
+                                      .trial_revenue,
+                                    billingData.billing_plan.currency || "USD",
                                   )}
                                 </Text>
                               </div>
