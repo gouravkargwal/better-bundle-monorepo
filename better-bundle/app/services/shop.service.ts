@@ -1,5 +1,6 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
+import { getTrialThresholdInShopCurrency } from "../utils/currency-converter";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -67,6 +68,27 @@ const createShopAndSetOnboardingCompleted = async (
   tx?: any,
 ) => {
   const db = tx || prisma;
+
+  // Check if this is a reinstall (shop exists but was inactive)
+  const existingShop = await db.shop.findUnique({
+    where: { shopDomain: shopData.myshopifyDomain },
+    include: {
+      // Include billing plan to check if it was previously active
+    },
+  });
+
+  const isReinstall = existingShop && !existingShop.isActive;
+
+  if (isReinstall) {
+    console.log(`🔄 Reactivating shop: ${shopData.myshopifyDomain}`);
+    console.log(`   - Previous status: inactive`);
+    console.log(
+      `   - Previous onboarding: ${existingShop.onboardingCompleted}`,
+    );
+  } else {
+    console.log(`🆕 Creating new shop: ${shopData.myshopifyDomain}`);
+  }
+
   const shop = await db.shop.upsert({
     where: { shopDomain: shopData.myshopifyDomain },
     update: {
@@ -75,6 +97,10 @@ const createShopAndSetOnboardingCompleted = async (
       email: shopData.email,
       planType: shopData.plan.displayName,
       isActive: true,
+      // For reinstalls, preserve onboarding status if it was completed
+      ...(isReinstall && existingShop.onboardingCompleted
+        ? {}
+        : { onboardingCompleted: false as any }),
     },
     create: {
       shopDomain: shopData.myshopifyDomain,
@@ -86,6 +112,28 @@ const createShopAndSetOnboardingCompleted = async (
       onboardingCompleted: false as any, // Start as false, will be set to true later
     },
   });
+
+  // Create billing event for reactivation if it's a reinstall
+  if (isReinstall) {
+    await db.billingEvent.create({
+      data: {
+        shopId: shop.id,
+        type: "billing_reactivated",
+        data: {
+          reason: "app_reinstalled",
+          reactivatedAt: new Date().toISOString(),
+          shopDomain: shopData.myshopifyDomain,
+          preservedOnboarding: existingShop.onboardingCompleted,
+        },
+        metadata: {
+          processedAt: new Date().toISOString(),
+          isReinstall: true,
+        },
+        occurredAt: new Date(),
+      },
+    });
+  }
+
   return shop;
 };
 
@@ -102,6 +150,15 @@ const activateTrialBillingPlan = async (
   tx?: any,
 ) => {
   const db = tx || prisma;
+
+  // Fixed $200 USD trial threshold (industry standard)
+  const TRIAL_THRESHOLD_USD = 200.0;
+
+  // Convert to shop currency for display and storage
+  const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
+    shopRecord.currencyCode,
+  );
+
   const billingPlan = await db.billingPlan.upsert({
     where: { shopId: shopRecord.id },
     update: {
@@ -109,15 +166,17 @@ const activateTrialBillingPlan = async (
       configuration: {
         usage_based: true,
         trial_active: true,
-        trial_threshold: 200.0,
+        trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
         capped_amount: 1000.0,
         currency: shopRecord.currencyCode,
         subscription_pending: true,
+        // Store the USD threshold for reference
+        trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
       isTrialActive: true,
-      trialThreshold: 200.0,
+      trialThreshold: trialThresholdInShopCurrency,
       trialRevenue: 0.0,
     },
     create: {
@@ -129,19 +188,30 @@ const activateTrialBillingPlan = async (
       configuration: {
         usage_based: true,
         trial_active: true,
-        trial_threshold: 200.0,
+        trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
         capped_amount: 1000.0,
         currency: shopRecord.currencyCode,
         subscription_pending: true,
+        // Store the USD threshold for reference
+        trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
       effectiveFrom: new Date(),
       isTrialActive: true,
-      trialThreshold: 200.0,
+      trialThreshold: trialThresholdInShopCurrency,
       trialRevenue: 0.0,
     },
   });
+
+  console.log(`✅ Trial billing plan activated for ${shopDomain}:`);
+  console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
+  console.log(
+    `   - Trial threshold in shop currency: ${trialThresholdInShopCurrency} ${shopRecord.currencyCode}`,
+  );
+  console.log(`   - Shop currency: ${shopRecord.currencyCode}`);
+  console.log(`   - Revenue share rate: 3%`);
+
   return billingPlan;
 };
 
@@ -290,6 +360,75 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
   }
 };
 
+const deactivateShopBilling = async (
+  shopDomain: string,
+  reason: string = "app_uninstalled",
+) => {
+  try {
+    console.log(`🔄 Deactivating billing for shop: ${shopDomain}`);
+
+    // 1. Mark shop as inactive
+    await prisma.shop.updateMany({
+      where: { shopDomain },
+      data: {
+        isActive: false,
+        updatedAt: new Date(),
+      },
+    });
+
+    // 2. Deactivate all billing plans for this shop
+    const updatedPlans = await prisma.billingPlan.updateMany({
+      where: { shopDomain },
+      data: {
+        status: "inactive",
+        effectiveUntil: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+
+    // 3. Create billing event to track the deactivation
+    const billingPlan = await prisma.billingPlan.findFirst({
+      where: { shopDomain },
+      select: { id: true },
+    });
+
+    if (billingPlan) {
+      await prisma.billingEvent.create({
+        data: {
+          shopId: shopDomain,
+          type: "billing_suspended",
+          data: {
+            reason,
+            deactivatedAt: new Date().toISOString(),
+            shopDomain,
+          },
+          metadata: {
+            processedAt: new Date().toISOString(),
+            plansAffected: updatedPlans.count,
+          },
+          occurredAt: new Date(),
+        },
+      });
+    }
+
+    console.log(`✅ Successfully deactivated billing for ${shopDomain}:`);
+    console.log(`   - Marked shop as inactive`);
+    console.log(`   - Deactivated ${updatedPlans.count} billing plans`);
+    console.log(`   - Created billing event`);
+
+    return {
+      success: true,
+      plansDeactivated: updatedPlans.count,
+      reason,
+    };
+  } catch (error) {
+    console.error(`❌ Error deactivating billing for ${shopDomain}:`, error);
+    throw new Error(
+      `Failed to deactivate billing for shop: ${error instanceof Error ? error.message : "Unknown error"}`,
+    );
+  }
+};
+
 export {
   getShop,
   getShopOnboardingCompleted,
@@ -299,4 +438,5 @@ export {
   activateAtlasWebPixel,
   getShopInfoFromShopify,
   markOnboardingCompleted,
+  deactivateShopBilling,
 };

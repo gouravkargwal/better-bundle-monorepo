@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
-import { Page, Layout, Text, BlockStack } from "@shopify/polaris";
+import { Page, Layout, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { BillingDashboard } from "../components/Billing/BillingDashboard";
 

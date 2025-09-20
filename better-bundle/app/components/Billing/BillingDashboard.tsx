@@ -410,6 +410,9 @@ function BillingStatus({
                           plan.currency,
                         )}
                       </Text>
+                      <Text as="p" variant="bodyXs" tone="subdued">
+                        (Equivalent to $200 USD)
+                      </Text>
                     </div>
                     <div>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -569,8 +572,6 @@ function InvoicesHistory({
     </BlockStack>
   );
 }
-
-// ============= BILLING EVENTS COMPONENT =============
 
 function BillingEvents({ billingData, formatDate }: any) {
   const events = billingData?.recent_events || [];
