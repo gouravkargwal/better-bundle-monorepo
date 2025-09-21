@@ -38,10 +38,6 @@ from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsu
 # AnalyticsConsumer removed - was using deleted analytics services
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 
-# Webhook imports
-from app.webhooks.handler import WebhookHandler
-from app.webhooks.repository import WebhookRepository
-
 # from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer  # Removed - using unified analytics
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
@@ -167,10 +163,6 @@ async def initialize_services():
         services["refund_attribution_consumer"] = RefundAttributionConsumer()
 
         # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
-
-        # Initialize webhook services
-        services["webhook_repository"] = WebhookRepository()
-        services["webhook_handler"] = WebhookHandler(services["webhook_repository"])
 
         # Initialize billing services
         from app.domains.billing.services.billing_service import BillingService

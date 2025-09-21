@@ -266,6 +266,8 @@ class UnifiedSessionService:
 
             # Map field names to Prisma field names
             prisma_update = {}
+            if "customer_id" in update_dict:
+                prisma_update["customerId"] = update_dict["customer_id"]
             if "status" in update_dict:
                 prisma_update["status"] = update_dict["status"]
             if "lastActive" in update_dict:

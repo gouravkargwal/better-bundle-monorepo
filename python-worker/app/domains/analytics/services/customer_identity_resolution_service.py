@@ -10,7 +10,11 @@ from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
 from app.core.database import get_database
-from app.domains.analytics.models.session import UserSession, SessionStatus
+from app.domains.analytics.models.session import (
+    UserSession,
+    SessionStatus,
+    SessionUpdate,
+)
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
@@ -130,7 +134,7 @@ class CustomerIdentityResolutionService:
         try:
             # Update session with customer ID
             await self.session_service.update_session(
-                session_id, self.session_service.SessionUpdate(customer_id=customer_id)
+                session_id, SessionUpdate(customer_id=customer_id)
             )
 
             # Update all interactions in this session
@@ -196,7 +200,7 @@ class CustomerIdentityResolutionService:
             sessions = await db.usersession.find_many(
                 where={
                     "shopId": shop_id,
-                    "customerId": None,  # Only anonymous sessions
+                    "customerId": {"equals": None},  # Only anonymous sessions
                     "ipAddress": current_session.ip_address,
                     "userAgent": current_session.user_agent,
                     "status": SessionStatus.ACTIVE,
@@ -242,7 +246,7 @@ class CustomerIdentityResolutionService:
             sessions = await db.usersession.find_many(
                 where={
                     "shopId": shop_id,
-                    "customerId": None,  # Only anonymous sessions
+                    "customerId": {"equals": None},  # Only anonymous sessions
                     "browserSessionId": current_session.browser_session_id,
                     "status": SessionStatus.ACTIVE,
                     "expiresAt": {"gt": utcnow()},
@@ -300,14 +304,9 @@ class CustomerIdentityResolutionService:
         try:
             db = await get_database()
 
-            # Look for sessions with email in metadata
-            sessions = await db.usersession.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": None,
-                    "metadata": {"path": ["email"], "equals": email},
-                }
-            )
+            # Look for sessions with email in metadata (simplified - no metadata field exists)
+            # For now, return empty list since we don't have metadata field
+            sessions = []
 
             matches = []
             for session in sessions:
@@ -333,14 +332,9 @@ class CustomerIdentityResolutionService:
         try:
             db = await get_database()
 
-            # Look for sessions with phone in metadata
-            sessions = await db.usersession.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": None,
-                    "metadata": {"path": ["phone"], "equals": phone},
-                }
-            )
+            # Look for sessions with phone in metadata (simplified - no metadata field exists)
+            # For now, return empty list since we don't have metadata field
+            sessions = []
 
             matches = []
             for session in sessions:
@@ -470,7 +464,6 @@ class CustomerIdentityResolutionService:
             # Get unique extensions used
             interactions = await db.userinteraction.find_many(
                 where={"sessionId": {"in": all_session_ids}},
-                select={"extensionType": True},
             )
 
             unique_extensions = list(set(i.extensionType for i in interactions))
@@ -496,9 +489,7 @@ class CustomerIdentityResolutionService:
 
             db = await get_database()
 
-            sessions = await db.usersession.find_many(
-                where={"id": {"in": session_ids}}, select={"createdAt": True}
-            )
+            sessions = await db.usersession.find_many(where={"id": {"in": session_ids}})
 
             if not sessions:
                 return 0
@@ -606,7 +597,6 @@ class CustomerIdentityResolutionService:
                     "id": {"in": all_session_ids},
                     "shopId": shop_id,
                 },
-                select={"id": True, "browserSessionId": True},
             )
 
             # Create identity links for each session

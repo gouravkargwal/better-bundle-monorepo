@@ -10,7 +10,11 @@ from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
 from app.core.database import get_database
-from app.domains.analytics.models.session import UserSession, SessionStatus
+from app.domains.analytics.models.session import (
+    UserSession,
+    SessionStatus,
+    SessionUpdate,
+)
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.domains.analytics.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
@@ -127,12 +131,15 @@ class CrossSessionLinkingService:
         try:
             db = await get_database()
 
+            # Build where conditions like in unified_session_service.py
+            where_conditions = {
+                "shopId": shop_id,
+                "customerId": customer_id,
+                "status": "active",
+            }
+
             sessions_data = await db.usersession.find_many(
-                where={
-                    "customerId": customer_id,
-                    "shopId": shop_id,
-                    "status": "active",  # Use string value instead of enum
-                },
+                where=where_conditions,
                 order={"createdAt": "asc"},
             )
 
@@ -182,7 +189,7 @@ class CrossSessionLinkingService:
             # Find anonymous sessions with matching identifiers
             where_conditions = {
                 "shopId": shop_id,
-                "customerId": None,  # Only anonymous sessions
+                "customerId": {"equals": None},  # Only anonymous sessions
                 "status": "active",  # Use string value instead of enum
                 "expiresAt": {"gt": utcnow()},
             }
@@ -391,7 +398,7 @@ class CrossSessionLinkingService:
                 # Link session to customer
                 await self.session_service.update_session(
                     session.id,
-                    self.session_service.SessionUpdate(customer_id=customer_id),
+                    SessionUpdate(customer_id=customer_id),
                 )
 
                 # Update interactions in this session

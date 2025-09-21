@@ -87,6 +87,7 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     """Model for updating an existing user session"""
 
+    customer_id: Optional[str] = Field(None, description="Customer identifier")
     status: Optional[SessionStatus] = Field(None, description="New session status")
     last_active: Optional[datetime] = Field(None, description="Update last active time")
     extensions_used: Optional[List[str]] = Field(
