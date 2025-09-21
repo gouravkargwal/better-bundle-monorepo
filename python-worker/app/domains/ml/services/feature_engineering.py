@@ -515,26 +515,39 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         Handles all complexity internally including parallel computation and incremental logic
         """
         try:
+            logger.info(
+                f"🚀 Starting comprehensive feature pipeline for shop {shop_id}"
+            )
+            logger.info(
+                f"📋 Pipeline params: batch_size={batch_size}, incremental={incremental}"
+            )
+
             from ..repositories.feature_repository import FeatureRepository
 
             repository = FeatureRepository()
 
             # Load shop data
+            logger.info(f"🔍 Loading shop data for {shop_id}")
             shop_data = await repository.get_shop_data(shop_id)
             if not shop_data:
+                logger.error(f"❌ Shop {shop_id} not found")
                 return {
                     "success": False,
                     "error": f"Shop {shop_id} not found",
                     "timestamp": now_utc().isoformat(),
                 }
+            logger.info(f"✅ Shop data loaded successfully")
 
             # Handle incremental vs full data loading with chunked processing
             if incremental:
+                logger.info(f"🔄 Running incremental processing for shop {shop_id}")
                 last_computation_time = (
                     await repository.get_last_feature_computation_time(shop_id)
                 )
+                logger.info(f"⏰ Last computation time: {last_computation_time}")
 
                 # Load only data modified since last computation using chunked processing
+                logger.info(f"📦 Loading products for shop {shop_id}")
                 products = await self.process_entities_in_chunks(
                     shop_id,
                     "products",
@@ -543,6 +556,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     incremental=True,
                     since_timestamp=last_computation_time,
                 )
+                logger.info(f"📦 Loaded {len(products) if products else 0} products")
+                logger.info(f"👥 Loading customers for shop {shop_id}")
                 customers = await self.process_entities_in_chunks(
                     shop_id,
                     "customers",
@@ -551,6 +566,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     incremental=True,
                     since_timestamp=last_computation_time,
                 )
+                logger.info(f"👥 Loaded {len(customers) if customers else 0} customers")
+
+                logger.info(f"🛒 Loading orders for shop {shop_id}")
                 orders = await self.process_entities_in_chunks(
                     shop_id,
                     "orders",
@@ -559,6 +577,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     incremental=True,
                     since_timestamp=last_computation_time,
                 )
+                logger.info(f"🛒 Loaded {len(orders) if orders else 0} orders")
+
+                logger.info(f"📚 Loading collections for shop {shop_id}")
                 collections = await self.process_entities_in_chunks(
                     shop_id,
                     "collections",
@@ -566,6 +587,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     chunk_size=100,
                     incremental=True,
                     since_timestamp=last_computation_time,
+                )
+                logger.info(
+                    f"📚 Loaded {len(collections) if collections else 0} collections"
                 )
 
                 # NEW: Load unified analytics data
@@ -595,7 +619,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 )
 
                 # If no recent data, skip processing
-                if not any(
+                logger.info(f"🔍 Checking if there's recent data to process...")
+                has_recent_data = any(
                     [
                         products,
                         customers,
@@ -605,7 +630,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         user_sessions,
                         purchase_attributions,
                     ]
-                ):
+                )
+                logger.info(f"📊 Recent data check: has_recent_data={has_recent_data}")
+
+                if not has_recent_data:
 
                     return {
                         "success": True,

@@ -356,17 +356,19 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         try:
             from app.core.redis_client import streams_manager
 
-            for data_type in data_types:
-                await streams_manager.publish_shopify_event(
-                    {
-                        "event_type": "normalize_batch",
-                        "shop_id": shop_id,
-                        "data_type": data_type,
-                        "format": "graphql",
-                        "page_size": 100,
-                        "timestamp": now_utc().isoformat(),
-                    }
-                )
+            # Trigger normalization for ALL data types in a single event
+            # This will process all data types together instead of separately
+            await streams_manager.publish_shopify_event(
+                {
+                    "event_type": "normalize_batch",
+                    "shop_id": shop_id,
+                    "data_type": "all",  # Process all data types
+                    "data_types": data_types,  # Pass all data types for processing
+                    "format": "graphql",
+                    "page_size": 100,
+                    "timestamp": now_utc().isoformat(),
+                }
+            )
         except Exception as e:
             logger.error(f"Failed to trigger normalization: {e}")
 

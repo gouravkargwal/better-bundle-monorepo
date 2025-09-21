@@ -39,6 +39,8 @@ class FeatureComputationConsumer(BaseConsumer):
     async def _process_single_message(self, message: Dict[str, Any]):
         """Process a single feature computation job message"""
         try:
+            self.logger.info(f"🔄 Processing feature computation message: {message}")
+
             # Extract message data
             job_id = message.get("job_id")
             shop_id = message.get("shop_id")
@@ -46,6 +48,10 @@ class FeatureComputationConsumer(BaseConsumer):
             # Parse boolean from string (Redis streams store everything as strings)
             features_ready = features_ready_raw.lower() in ("true", "1", "yes", "on")
             metadata = message.get("metadata", {})
+
+            self.logger.info(
+                f"📋 Extracted: job_id={job_id}, shop_id={shop_id}, features_ready={features_ready}"
+            )
 
             if not job_id or not shop_id:
                 self.logger.error("Invalid message: missing job_id or shop_id")
@@ -61,7 +67,12 @@ class FeatureComputationConsumer(BaseConsumer):
 
             # Only process if features are not ready (need to be computed)
             if not features_ready:
+                self.logger.info(f"🚀 Starting feature computation for shop {shop_id}")
                 await self._compute_features_for_shop(job_id, shop_id, metadata)
+            else:
+                self.logger.info(
+                    f"⏭️ Skipping feature computation - features already ready for shop {shop_id}"
+                )
 
             # Mark job as completed
             if job_id in self.active_feature_jobs:
@@ -83,11 +94,8 @@ class FeatureComputationConsumer(BaseConsumer):
         try:
             # Determine batch size based on metadata or use default
             batch_size = metadata.get("batch_size", 100)
-
-            # Run the feature engineering pipeline
-            # Use incremental processing by default to avoid recalculating existing features
             incremental = metadata.get(
-                "incremental", True
+                "incremental", False
             )  # Default to incremental processing
             await self.feature_service.run_comprehensive_pipeline_for_shop(
                 shop_id=shop_id, batch_size=batch_size, incremental=incremental

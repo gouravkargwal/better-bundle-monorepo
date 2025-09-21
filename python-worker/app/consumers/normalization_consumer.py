@@ -224,6 +224,11 @@ class EntityNormalizationService:
             )
 
             if self._should_skip_update(existing, canonical):
+                # Even if we skip normalization, we should still trigger feature computation
+                # because new behavioral data might have been collected
+                self.logger.info(
+                    f"Skipping normalization for {data_type} {canonical.get(f'{data_type[:-1]}Id')} - no updates needed, but triggering feature computation"
+                )
                 return True
 
             # Upsert main record
@@ -625,6 +630,10 @@ class FeatureComputationService:
     async def trigger_feature_computation(self, shop_id: str, data_type: str):
         """Trigger feature computation after successful normalization."""
         try:
+            self.logger.info(
+                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type}"
+            )
+
             if data_type in ["products", "orders", "customers", "collections"]:
                 job_id = (
                     f"webhook_feature_compute_{shop_id}_{int(now_utc().timestamp())}"
@@ -632,18 +641,22 @@ class FeatureComputationService:
 
                 metadata = {
                     "batch_size": 100,
-                    "incremental": True,
+                    "incremental": False,  # Use full processing for webhook-triggered events
                     "trigger_source": "webhook_normalization",
                     "entity_type": data_type,
                     "timestamp": now_utc().isoformat(),
                 }
 
+                self.logger.info(
+                    f"📤 Publishing feature computation event: job_id={job_id}, shop_id={shop_id}, data_type={data_type}"
+                )
                 await streams_manager.publish_features_computed_event(
                     job_id=job_id,
                     shop_id=shop_id,
                     features_ready=False,
                     metadata=metadata,
                 )
+                self.logger.info(f"✅ Feature computation event published successfully")
 
         except Exception as e:
             self.logger.error(f"Failed to trigger feature computation: {e}")
@@ -740,6 +753,8 @@ class NormalizationConsumer(BaseConsumer):
 
     async def _process_single_message(self, message: Dict[str, Any]):
         try:
+            self.logger.info(f"🔄 Processing normalization message: {message}")
+
             payload = message.get("data") or message
             if isinstance(payload, str):
                 try:
@@ -748,12 +763,17 @@ class NormalizationConsumer(BaseConsumer):
                     pass
             event_type = payload.get("event_type")
 
+            self.logger.info(f"📋 Extracted event_type: {event_type}")
+
             if event_type == "normalize_entity":
+                self.logger.info("📥 Processing normalize_entity event")
                 await self._handle_normalize_entity(payload)
             elif event_type == "normalize_batch":
+                self.logger.info("📥 Processing normalize_batch event")
                 await self._handle_normalize_batch(payload)
             else:
                 # Ignore non-normalization messages
+                self.logger.info(f"⏭️ Ignoring non-normalization message: {event_type}")
                 return
 
         except Exception as e:
@@ -810,10 +830,11 @@ class NormalizationConsumer(BaseConsumer):
                     raw, job.shop_id, job.data_type
                 )
 
-            if success:
-                await self.feature_service.trigger_feature_computation(
-                    job.shop_id, job.data_type
-                )
+            # Always trigger feature computation, even if normalization was skipped
+            # This ensures features are updated when new behavioral data is collected
+            await self.feature_service.trigger_feature_computation(
+                job.shop_id, job.data_type
+            )
 
         except Exception as e:
             self.logger.error(f"Normalization failed: {e}")
@@ -837,17 +858,61 @@ class NormalizationConsumer(BaseConsumer):
 
     async def _handle_normalize_batch(self, payload: Dict[str, Any]):
         """Handle batch normalization with pagination."""
+        self.logger.info(f"🔄 Starting batch normalization: {payload}")
+
         shop_id = payload.get("shop_id")
         data_type = payload.get("data_type")
         fmt = payload.get("format")
         since = payload.get("since")
         page_size = payload.get("page_size", 100)
 
+        self.logger.info(
+            f"📋 Batch params: shop_id={shop_id}, data_type={data_type}, format={fmt}, since={since}, page_size={page_size}"
+        )
+
         if not all([shop_id, data_type]):
             self.logger.error(
                 "Invalid normalize_batch job: missing required fields", payload=payload
             )
             return
+
+        # Check if we need to process all data types
+        if data_type == "all":
+            # Process all data types from the payload
+            data_types = payload.get(
+                "data_types", ["products", "orders", "customers", "collections"]
+            )
+            self.logger.info(f"🔄 Processing all data types: {data_types}")
+
+            # Process each data type
+            for dt in data_types:
+                self.logger.info(f"🔄 Processing {dt} data type")
+                await self._process_normalize_batch_recursive(
+                    shop_id, dt, fmt, since, page_size
+                )
+
+            # Trigger feature computation only once after all data types are complete
+            self.logger.info(
+                f"🚀 All data types complete, triggering feature computation"
+            )
+            # Trigger feature computation for products (primary data type) which will process all data
+            await self.feature_service.trigger_feature_computation(shop_id, "products")
+        else:
+            # Process single data type
+            await self._process_normalize_batch_recursive(
+                shop_id, data_type, fmt, since, page_size
+            )
+
+            # After all batches are complete, trigger feature computation
+            self.logger.info(
+                f"🚀 All batches complete for {data_type}, triggering feature computation"
+            )
+            await self.feature_service.trigger_feature_computation(shop_id, data_type)
+
+    async def _process_normalize_batch_recursive(
+        self, shop_id: str, data_type: str, fmt: str, since: str, page_size: int
+    ):
+        """Recursively process all batches for a data type without firing events"""
 
         db = await get_database()
         raw_table = {
@@ -923,22 +988,24 @@ class NormalizationConsumer(BaseConsumer):
                 failed=failed_count,
             )
 
-        # Continue pagination if needed
+        # Don't trigger feature computation after each batch - only at the end
+
+        # Continue pagination if needed - handle directly without events
         if len(raw_records) == page_size:
-            next_batch_payload = {
-                "event_type": "normalize_batch",
-                "shop_id": shop_id,
-                "data_type": data_type,
-                "format": fmt,
-                "page_size": page_size,
-                "timestamp": datetime.now().isoformat(),
-            }
-            if last_updated_at:
-                next_batch_payload["since"] = last_updated_at.isoformat()
-            await streams_manager.publish_shopify_event(next_batch_payload)
+            self.logger.info(
+                f"📄 More records available, continuing pagination for {data_type}"
+            )
+            # Recursively call the same method for next batch
+            await self._process_normalize_batch_recursive(
+                shop_id,
+                data_type,
+                fmt,
+                last_updated_at.isoformat() if last_updated_at else None,
+                page_size,
+            )
         else:
-            # Entire normalization process is complete - trigger feature computation
-            await self.feature_service.trigger_feature_computation(shop_id, data_type)
+            # Entire normalization process is complete for this data type
+            self.logger.info(f"✅ {data_type} normalization process complete")
 
         # Update watermark
         if last_updated_at is not None:
