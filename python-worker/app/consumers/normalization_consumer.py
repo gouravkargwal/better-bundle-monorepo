@@ -407,9 +407,6 @@ class OrderNormalizationService:
 
             # Extract line items BEFORE applying PersistenceMapper
             line_items = canonical.get("lineItems", [])
-            self.logger.info(
-                f"Extracted {len(line_items)} line items for order {canonical.get('orderId')}"
-            )
 
             # Prepare main data
             main_data = await self._prepare_order_data(canonical, shop_id)
@@ -533,9 +530,6 @@ class OrderNormalizationService:
 
             # Prepare bulk data
             bulk_data = []
-            self.logger.info(
-                f"Processing {len(line_items)} line items for order {order_record_id}"
-            )
             for item in line_items:
                 try:
                     line_item_data = {
@@ -942,6 +936,9 @@ class NormalizationConsumer(BaseConsumer):
             if last_updated_at:
                 next_batch_payload["since"] = last_updated_at.isoformat()
             await streams_manager.publish_shopify_event(next_batch_payload)
+        else:
+            # Entire normalization process is complete - trigger feature computation
+            await self.feature_service.trigger_feature_computation(shop_id, data_type)
 
         # Update watermark
         if last_updated_at is not None:
