@@ -131,7 +131,7 @@ class CrossSessionLinkingService:
                 where={
                     "customerId": customer_id,
                     "shopId": shop_id,
-                    "status": SessionStatus.ACTIVE,
+                    "status": "active",  # Use string value instead of enum
                 },
                 order={"createdAt": "asc"},
             )
@@ -183,7 +183,7 @@ class CrossSessionLinkingService:
             where_conditions = {
                 "shopId": shop_id,
                 "customerId": None,  # Only anonymous sessions
-                "status": SessionStatus.ACTIVE,
+                "status": "active",  # Use string value instead of enum
                 "expiresAt": {"gt": utcnow()},
             }
 

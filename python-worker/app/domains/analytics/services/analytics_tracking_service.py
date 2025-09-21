@@ -24,6 +24,7 @@ from app.domains.analytics.models.extension import ExtensionType
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
+from app.core.redis_client import streams_manager
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,15 @@ class AnalyticsTrackingService:
                     session_id, extension_type.value
                 )
                 await self.session_service.increment_session_interactions(session_id)
+
+                # Handle customer linking for CUSTOMER_LINKED interactions
+                if interaction_type == InteractionType.CUSTOMER_LINKED and customer_id:
+                    logger.info(
+                        f"🔗 CUSTOMER_LINKED detected - shop_id: {shop_id}, session_id: {session_id}, customer_id: {customer_id}"
+                    )
+                    await self._trigger_customer_linking(
+                        shop_id, session_id, customer_id
+                    )
 
                 logger.info(
                     f"Tracked interaction: {interaction_type} from {extension_type} in"
@@ -452,3 +462,44 @@ class AnalyticsTrackingService:
         except Exception as e:
             logger.error(f"Failed to fire feature computation event: {str(e)}")
             return None
+
+    async def _trigger_customer_linking(
+        self, shop_id: str, session_id: str, customer_id: str
+    ):
+        """
+        Trigger customer linking for cross-session linking and backfilling
+
+        This method publishes a customer linking event to the consumer
+        which will handle cross-session linking and UserInteraction backfilling.
+        """
+        try:
+            logger.info(
+                f"🚀 Starting customer linking trigger - shop_id: {shop_id}, session_id: {session_id}, customer_id: {customer_id}"
+            )
+
+            # Generate job ID for the customer linking event
+            job_id = f"customer_linking_{shop_id}_{customer_id}_{session_id}"
+            logger.info(f"📝 Generated job_id: {job_id}")
+
+            # Publish the customer linking event
+            logger.info(f"📤 Publishing customer linking event to Redis stream...")
+            event_id = await streams_manager.publish_customer_linking_event(
+                job_id=job_id,
+                shop_id=shop_id,
+                customer_id=customer_id,
+                event_type="customer_linking",
+                trigger_session_id=session_id,
+                linked_sessions=None,
+                metadata={
+                    "session_id": session_id,
+                    "source": "analytics_tracking_service",
+                },
+            )
+
+            logger.info(
+                f"✅ Published customer linking event - event_id: {event_id}, customer: {customer_id}, session: {session_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Failed to trigger customer linking: {e}")
+            raise

@@ -56,16 +56,16 @@ class CustomerLinkingConsumer(BaseConsumer):
             linked_sessions = message.get("linked_sessions", [])
             event_type = message.get("event_type", "customer_linking")
 
+            self.logger.info(
+                f"📨 Received customer linking message - job_id: {job_id}, shop_id: {shop_id}, customer_id: {customer_id}, event_type: {event_type}"
+            )
+
             if not job_id or not shop_id or not customer_id:
-                self.logger.error("Invalid message: missing required fields")
+                self.logger.error("❌ Invalid message: missing required fields")
                 return
 
             self.logger.info(
-                f"Processing customer linking job",
-                job_id=job_id,
-                shop_id=shop_id,
-                customer_id=customer_id,
-                event_type=event_type,
+                f"🔄 Processing customer linking job - job_id: {job_id}, shop_id: {shop_id}, customer_id: {customer_id}, event_type: {event_type}"
             )
 
             # Track the job
@@ -116,10 +116,13 @@ class CustomerLinkingConsumer(BaseConsumer):
         """Process customer identity resolution and linking"""
         try:
             self.logger.info(
-                f"Processing customer identity resolution for customer {customer_id}"
+                f"🔍 Processing customer identity resolution for customer {customer_id} with trigger_session_id: {trigger_session_id}"
             )
 
             # Run cross-session linking to find more sessions
+            self.logger.info(
+                f"🔗 Starting cross-session linking for customer {customer_id}..."
+            )
             linking_result = (
                 await self.cross_session_linking_service.link_customer_sessions(
                     customer_id=customer_id,
@@ -128,17 +131,33 @@ class CustomerLinkingConsumer(BaseConsumer):
                 )
             )
 
+            self.logger.info(f"📊 Cross-session linking result: {linking_result}")
+
             if linking_result.get("success"):
+                linked_sessions = linking_result.get("linked_sessions", [])
                 self.logger.info(
-                    f"Cross-session linking completed: {linking_result.get('linked_sessions', 0)} sessions linked"
+                    f"✅ Cross-session linking completed: {len(linked_sessions)} sessions linked - {linked_sessions}"
                 )
+
+                # Trigger backfill for all linked sessions
+                if linked_sessions:
+                    self.logger.info(
+                        f"🔄 Starting backfill for {len(linked_sessions)} sessions..."
+                    )
+                    await self._process_interaction_backfill(
+                        job_id, shop_id, customer_id, linked_sessions
+                    )
+                else:
+                    self.logger.warning(
+                        f"⚠️ No sessions to backfill for customer {customer_id}"
+                    )
             else:
                 self.logger.warning(
-                    f"Cross-session linking failed: {linking_result.get('error', 'Unknown error')}"
+                    f"❌ Cross-session linking failed: {linking_result.get('error', 'Unknown error')}"
                 )
 
         except Exception as e:
-            self.logger.error(f"Error in customer linking: {str(e)}")
+            self.logger.error(f"❌ Error in customer linking: {str(e)}")
             raise
 
     async def _process_cross_session_linking(
@@ -176,16 +195,21 @@ class CustomerLinkingConsumer(BaseConsumer):
             from app.core.database import get_database
 
             self.logger.info(
-                f"Processing interaction backfill for customer {customer_id} with {len(linked_sessions)} sessions"
+                f"🔄 Processing interaction backfill for customer {customer_id} with {len(linked_sessions)} sessions: {linked_sessions}"
             )
 
             db = await get_database()
 
             # Get all session IDs that need backfill
             all_session_ids = linked_sessions
+            total_backfilled = 0
 
             # Update all interactions in these sessions with customer_id
             for session_id in all_session_ids:
+                self.logger.info(
+                    f"🔍 Backfilling session {session_id} for customer {customer_id}..."
+                )
+
                 result = await db.userinteraction.update_many(
                     where={
                         "sessionId": session_id,
@@ -195,11 +219,17 @@ class CustomerLinkingConsumer(BaseConsumer):
                 )
 
                 self.logger.info(
-                    f"Backfilled {result} interactions for session {session_id}"
+                    f"✅ Backfilled {result} interactions for session {session_id}"
                 )
+                total_backfilled += result
+
+            self.logger.info(f"📊 Total interactions backfilled: {total_backfilled}")
 
             # Fire feature computation event for updated interactions
             try:
+                self.logger.info(
+                    f"🚀 Firing feature computation event for shop {shop_id}..."
+                )
                 await self.identity_resolution_service.fire_feature_computation_event(
                     shop_id=shop_id,
                     trigger_source="customer_linking_backfill",
@@ -207,17 +237,18 @@ class CustomerLinkingConsumer(BaseConsumer):
                     batch_size=100,
                     incremental=True,
                 )
+                self.logger.info(f"✅ Feature computation event fired successfully")
             except Exception as e:
                 self.logger.warning(
-                    f"Failed to fire feature computation event: {str(e)}"
+                    f"⚠️ Failed to fire feature computation event: {str(e)}"
                 )
 
             self.logger.info(
-                f"Interaction backfill completed for customer {customer_id}"
+                f"✅ Interaction backfill completed for customer {customer_id} - {total_backfilled} interactions updated"
             )
 
         except Exception as e:
-            self.logger.error(f"Error in interaction backfill: {str(e)}")
+            self.logger.error(f"❌ Error in interaction backfill: {str(e)}")
             raise
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
