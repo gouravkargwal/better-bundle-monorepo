@@ -36,35 +36,35 @@ export function BillingStatus({
   };
 
   return (
-    <BlockStack gap="500">
+    <BlockStack gap="300">
       {/* Billing Plan Overview */}
       <div
         style={{
-          padding: "40px 32px",
+          padding: "24px 20px",
           background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-          borderRadius: "24px",
+          borderRadius: "16px",
           color: "white",
           textAlign: "center",
           position: "relative",
           overflow: "hidden",
           boxShadow:
-            "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+            "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
           border: "1px solid rgba(255, 255, 255, 0.1)",
         }}
       >
         <div style={{ position: "relative", zIndex: 2 }}>
           {/* Hero Badge */}
-          <div style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "12px" }}>
             <div
               style={{
                 display: "inline-block",
-                padding: "8px 16px",
+                padding: "6px 12px",
                 backgroundColor: "rgba(255, 255, 255, 0.2)",
                 border: "1px solid rgba(255, 255, 255, 0.3)",
                 color: "white",
                 fontWeight: "600",
-                borderRadius: "8px",
-                fontSize: "14px",
+                borderRadius: "6px",
+                fontSize: "12px",
               }}
             >
               💳 Billing Dashboard
@@ -74,9 +74,9 @@ export function BillingStatus({
           {/* Main Headline */}
           <div
             style={{
-              fontSize: "3rem",
-              lineHeight: "1.1",
-              marginBottom: "16px",
+              fontSize: "2rem",
+              lineHeight: "1.2",
+              marginBottom: "8px",
               background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
@@ -90,17 +90,17 @@ export function BillingStatus({
           {/* Subheadline */}
           <div
             style={{
-              marginBottom: "20px",
-              maxWidth: "600px",
-              margin: "0 auto 20px",
+              marginBottom: "12px",
+              maxWidth: "500px",
+              margin: "0 auto 12px",
             }}
           >
             <div
               style={{
                 color: "rgba(255,255,255,0.95)",
-                lineHeight: "1.6",
+                lineHeight: "1.4",
                 fontWeight: "500",
-                fontSize: "1.25rem",
+                fontSize: "1rem",
               }}
             >
               {plan.type.replace("_", " ").toUpperCase()} Plan •{" "}
@@ -113,8 +113,8 @@ export function BillingStatus({
             style={{
               display: "flex",
               justifyContent: "center",
-              gap: "24px",
-              marginBottom: "24px",
+              gap: "16px",
+              marginBottom: "16px",
               flexWrap: "wrap",
             }}
           >
@@ -178,10 +178,10 @@ export function BillingStatus({
           <div
             style={{
               position: "absolute",
-              top: "-100px",
-              right: "-100px",
-              width: "300px",
-              height: "300px",
+              top: "-50px",
+              right: "-50px",
+              width: "150px",
+              height: "150px",
               background:
                 "radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)",
               borderRadius: "50%",
@@ -191,10 +191,10 @@ export function BillingStatus({
           <div
             style={{
               position: "absolute",
-              bottom: "-80px",
-              left: "-80px",
-              width: "250px",
-              height: "250px",
+              bottom: "-40px",
+              left: "-40px",
+              width: "120px",
+              height: "120px",
               background:
                 "radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)",
               borderRadius: "50%",
@@ -220,30 +220,30 @@ export function BillingStatus({
       {safeTrialStatus.is_trial_active ? (
         <div
           style={{
-            padding: "40px 32px",
+            padding: "24px 20px",
             background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
-            borderRadius: "24px",
+            borderRadius: "16px",
             color: "white",
             textAlign: "center",
             position: "relative",
             overflow: "hidden",
             boxShadow:
-              "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
             border: "1px solid rgba(255, 255, 255, 0.1)",
           }}
         >
           <div style={{ position: "relative", zIndex: 2 }}>
-            <div style={{ marginBottom: "16px" }}>
+            <div style={{ marginBottom: "12px" }}>
               <div
                 style={{
                   display: "inline-block",
-                  padding: "8px 16px",
+                  padding: "6px 12px",
                   backgroundColor: "rgba(255, 255, 255, 0.2)",
                   border: "1px solid rgba(255, 255, 255, 0.3)",
                   color: "white",
                   fontWeight: "600",
-                  borderRadius: "8px",
-                  fontSize: "14px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
                 }}
               >
                 🎉 Free Trial Active
@@ -252,9 +252,9 @@ export function BillingStatus({
 
             <div
               style={{
-                fontSize: "2.5rem",
-                lineHeight: "1.1",
-                marginBottom: "16px",
+                fontSize: "2rem",
+                lineHeight: "1.2",
+                marginBottom: "8px",
                 background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
@@ -267,17 +267,17 @@ export function BillingStatus({
 
             <div
               style={{
-                marginBottom: "20px",
-                maxWidth: "600px",
-                margin: "0 auto 20px",
+                marginBottom: "12px",
+                maxWidth: "500px",
+                margin: "0 auto 12px",
               }}
             >
               <div
                 style={{
                   color: "rgba(255,255,255,0.95)",
-                  lineHeight: "1.6",
+                  lineHeight: "1.4",
                   fontWeight: "500",
-                  fontSize: "1.25rem",
+                  fontSize: "1rem",
                 }}
               >
                 Generate{" "}
@@ -291,14 +291,14 @@ export function BillingStatus({
 
             <div
               style={{
-                marginBottom: "24px",
-                padding: "20px",
+                marginBottom: "16px",
+                padding: "16px",
                 backgroundColor: "rgba(255,255,255,0.12)",
-                borderRadius: "16px",
+                borderRadius: "12px",
                 border: "1px solid rgba(255,255,255,0.2)",
                 backdropFilter: "blur(10px)",
-                maxWidth: "500px",
-                margin: "0 auto 24px",
+                maxWidth: "400px",
+                margin: "0 auto 16px",
               }}
             >
               <div
@@ -306,8 +306,8 @@ export function BillingStatus({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: "12px",
-                  marginBottom: "16px",
+                  gap: "8px",
+                  marginBottom: "12px",
                 }}
               >
                 <div
@@ -350,7 +350,7 @@ export function BillingStatus({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gridTemplateColumns: "repeat(3, 1fr)",
                   gap: "16px",
                   marginTop: "20px",
                 }}
@@ -464,15 +464,15 @@ export function BillingStatus({
       ) : (
         <div
           style={{
-            padding: "40px 32px",
+            padding: "24px 20px",
             background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
-            borderRadius: "24px",
+            borderRadius: "16px",
             color: "white",
             textAlign: "center",
             position: "relative",
             overflow: "hidden",
             boxShadow:
-              "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
             border: "1px solid rgba(255, 255, 255, 0.1)",
           }}
         >
@@ -544,7 +544,7 @@ export function BillingStatus({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gridTemplateColumns: "repeat(3, 1fr)",
                   gap: "16px",
                 }}
               >
