@@ -114,19 +114,20 @@ class ShopifyDataStorageService:
         """Generic method to process any type of items with essential batching"""
         current_time = now_utc()
 
-        # Extract item data using generic methods
+        # Store raw data with full GraphQL ID - no extraction here
         item_data_map = {}
         for item in items:
-            item_id = self._extract_id_generic(data_type, item)
-            if not item_id:
+            # Get the full GraphQL ID from the item
+            full_id = self._get_full_graphql_id(item)
+            if not full_id:
                 continue
 
             created_at, updated_at = self._extract_shopify_timestamps(item)
-            item_data_map[item_id] = {
+            item_data_map[full_id] = {
                 "shopId": shop_id,
                 "payload": self._serialize_item_generic(item),
                 "extractedAt": current_time,
-                "shopifyId": item_id,
+                "shopifyId": full_id,  # Store full GraphQL ID
                 "shopifyCreatedAt": created_at,
                 "shopifyUpdatedAt": updated_at,
             }
@@ -134,7 +135,7 @@ class ShopifyDataStorageService:
         if not item_data_map:
             return {"new": 0, "updated": 0}
 
-        # Batch lookup existing items (chunked to avoid timeouts)
+        # Batch lookup existing items using full GraphQL IDs
         existing_items = await self._batch_lookup_existing_items(
             db, data_type, shop_id, list(item_data_map.keys())
         )
@@ -180,17 +181,6 @@ class ShopifyDataStorageService:
             "collections": "rawcollection",
         }
         return table_mapping.get(data_type, f"raw{data_type}")
-
-    def _extract_id_generic(self, data_type: str, item: Any) -> Optional[str]:
-        """Generic ID extraction for any data type"""
-        extractors = {
-            "products": self._extract_product_id,
-            "orders": self._extract_order_id,
-            "customers": self._extract_customer_id,
-            "collections": self._extract_collection_id,
-        }
-        extractor = extractors.get(data_type)
-        return extractor(item) if extractor else None
 
     def _serialize_item_generic(self, item: Any) -> str:
         """Generic serialization for any item type"""
@@ -246,40 +236,18 @@ class ShopifyDataStorageService:
                 {"error": "serialization_failed", "data": str(product)}, default=str
             )
 
-    def _extract_id_generic(self, data_type: str, item: Any) -> Optional[str]:
-        """Generic method to extract ID from any Shopify item"""
+    def _get_full_graphql_id(self, item: Any) -> Optional[str]:
+        """Get the full GraphQL ID from Shopify item without extraction"""
         try:
             if hasattr(item, "id"):
-                item_id = str(item.id)
+                return str(item.id)
             elif isinstance(item, dict) and "id" in item:
-                item_id = str(item["id"])
+                return str(item["id"])
             else:
                 return None
-
-            # Extract numeric ID from Shopify GraphQL ID format (gid://shopify/Product/123456789)
-            graphql_prefix = f"gid://shopify/{data_type.title()}/"
-            if item_id.startswith(graphql_prefix):
-                return item_id.split("/")[-1]
-            return item_id
         except Exception as e:
-            logger.warning(f"Failed to extract {data_type} ID: {e}")
+            logger.warning(f"Failed to get GraphQL ID: {e}")
             return None
-
-    def _extract_product_id(self, product: Any) -> Optional[str]:
-        """Extract product ID from product object"""
-        return self._extract_id_generic("Product", product)
-
-    def _extract_order_id(self, order: Any) -> Optional[str]:
-        """Extract order ID from order object"""
-        return self._extract_id_generic("Order", order)
-
-    def _extract_customer_id(self, customer: Any) -> Optional[str]:
-        """Extract customer ID from customer object"""
-        return self._extract_id_generic("Customer", customer)
-
-    def _extract_collection_id(self, collection: Any) -> Optional[str]:
-        """Extract collection ID from collection object"""
-        return self._extract_id_generic("Collection", collection)
 
     def _extract_shopify_timestamps(
         self, data: Any

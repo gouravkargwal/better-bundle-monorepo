@@ -74,17 +74,31 @@ class GraphQLProductAdapter(BaseAdapter):
         price = variants[0].price if variants else None
         compare_at = variants[0].compareAtPrice if variants else None
 
-        # Images/media/options via edges → arrays of nodes
-        def _edges_to_nodes(
+        # Images/media/options via edges → arrays of nodes with extracted IDs
+        def _edges_to_nodes_with_extracted_ids(
             container: Optional[Dict[str, Any]],
         ) -> List[Dict[str, Any]]:
             if not isinstance(container, dict):
                 return []
-            return [edge.get("node", {}) for edge in container.get("edges", []) or []]
+            nodes = []
+            for edge in container.get("edges", []) or []:
+                node = edge.get("node", {})
+                # Extract numeric ID from GraphQL ID
+                if "id" in node:
+                    node["id"] = _extract_numeric_gid(node["id"])
+                nodes.append(node)
+            return nodes
 
-        images = _edges_to_nodes(payload.get("images"))
-        media = _edges_to_nodes(payload.get("media"))
-        options = payload.get("options") or []
+        images = _edges_to_nodes_with_extracted_ids(payload.get("images"))
+        media = _edges_to_nodes_with_extracted_ids(payload.get("media"))
+
+        # Extract IDs from options array
+        options = []
+        for option in payload.get("options") or []:
+            option_copy = option.copy()
+            if "id" in option_copy:
+                option_copy["id"] = _extract_numeric_gid(option_copy["id"])
+            options.append(option_copy)
 
         seo = payload.get("seo") or {}
         seo_title = seo.get("title")
