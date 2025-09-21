@@ -27,6 +27,11 @@ class GorseItemSync:
         """
         if not shop_id:
             return item_id
+
+        # Check if item_id is already prefixed to avoid double prefixing
+        if item_id.startswith(f"shop_{shop_id}_"):
+            return item_id
+
         return f"shop_{shop_id}_{item_id}"
 
     async def sync_items(

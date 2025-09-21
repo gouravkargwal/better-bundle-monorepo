@@ -27,6 +27,11 @@ class GorseUserSync:
         """
         if not shop_id:
             return user_id
+
+        # Check if user_id is already prefixed to avoid double prefixing
+        if user_id.startswith(f"shop_{shop_id}_"):
+            return user_id
+
         return f"shop_{shop_id}_{user_id}"
 
     async def sync_users(
