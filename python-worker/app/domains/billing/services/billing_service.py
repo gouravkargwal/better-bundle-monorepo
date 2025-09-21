@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 
-from prisma import Prisma
+from prisma import Prisma, Json
 
 from .attribution_engine import AttributionEngine, AttributionContext
 from .billing_calculator import BillingCalculator
@@ -80,6 +80,11 @@ class BillingService:
                 f"${attribution_result.total_attributed_revenue}"
             )
 
+            # Update trial revenue in real-time if shop is in trial
+            await self._update_trial_revenue(
+                purchase_event.shop_id, attribution_result.total_attributed_revenue
+            )
+
             return attribution_result
 
         except Exception as e:
@@ -87,6 +92,132 @@ class BillingService:
                 f"Error processing attribution for purchase {purchase_event.order_id}: {e}"
             )
             raise
+
+    # ============= TRIAL REVENUE UPDATES =============
+
+    async def _update_trial_revenue(
+        self, shop_id: str, attributed_revenue: Decimal
+    ) -> None:
+        """
+        Update trial revenue in real-time when purchase attribution occurs.
+
+        Args:
+            shop_id: Shop ID
+            attributed_revenue: Amount of attributed revenue to add
+        """
+        try:
+            # Get current billing plan
+            billing_plan = await self.prisma.billingplan.find_first(
+                where={"shopId": shop_id, "status": "active", "isTrialActive": True}
+            )
+
+            if not billing_plan:
+                logger.debug(f"No active trial billing plan found for shop {shop_id}")
+                return
+
+            # Update trial revenue
+            current_trial_revenue = float(billing_plan.trialRevenue or 0)
+            new_trial_revenue = current_trial_revenue + float(attributed_revenue)
+
+            # Handle configuration field properly
+            current_config = billing_plan.configuration or {}
+            updated_config = {
+                **current_config,
+                "trial_revenue": new_trial_revenue,
+                "last_updated": datetime.utcnow().isoformat(),
+            }
+
+            await self.prisma.billingplan.update(
+                where={"id": billing_plan.id},
+                data={
+                    "trialRevenue": new_trial_revenue,
+                    "configuration": Json(updated_config),
+                },
+            )
+
+            # Get shop currency for proper formatting
+            shop = await self.prisma.shop.find_unique(where={"id": shop_id})
+            currency = shop.currencyCode if shop and shop.currencyCode else "USD"
+            currency_symbol = "₹" if currency == "INR" else "$"
+
+            logger.info(
+                f"💰 Updated trial revenue for shop {shop_id}: "
+                f"{currency_symbol}{current_trial_revenue} → {currency_symbol}{new_trial_revenue} (+{currency_symbol}{attributed_revenue})"
+            )
+
+            # Check if trial threshold reached
+            trial_threshold = float(billing_plan.trialThreshold or 200)
+            if new_trial_revenue >= trial_threshold:
+                logger.info(
+                    f"🎉 Trial threshold reached for shop {shop_id}! "
+                    f"Revenue: {currency_symbol}{new_trial_revenue}, Threshold: {currency_symbol}{trial_threshold}"
+                )
+
+                # Handle trial completion
+                await self._handle_trial_completion(
+                    shop_id, billing_plan, new_trial_revenue
+                )
+
+        except Exception as e:
+            logger.error(f"Error updating trial revenue for shop {shop_id}: {e}")
+
+    async def _handle_trial_completion(
+        self, shop_id: str, billing_plan, final_revenue: float
+    ) -> None:
+        """
+        Handle trial completion when threshold is reached.
+
+        Args:
+            shop_id: Shop ID
+            billing_plan: Current billing plan
+            final_revenue: Final trial revenue amount
+        """
+        try:
+            # Update billing plan to mark trial as completed
+            current_config = billing_plan.configuration or {}
+            updated_config = {
+                **current_config,
+                "trial_active": False,
+                "trial_completed_at": datetime.utcnow().isoformat(),
+                "trial_completion_revenue": final_revenue,
+            }
+
+            await self.prisma.billingplan.update(
+                where={"id": billing_plan.id},
+                data={
+                    "isTrialActive": False,
+                    "trialRevenue": final_revenue,
+                    "configuration": Json(updated_config),
+                },
+            )
+
+            # Create billing event
+            await self.prisma.billingevent.create(
+                data={
+                    "shopId": shop_id,
+                    "type": "trial_completed",
+                    "data": {
+                        "final_revenue": final_revenue,
+                        "completed_at": datetime.utcnow().isoformat(),
+                    },
+                    "metadata": {
+                        "trial_completion": True,
+                        "final_revenue": final_revenue,
+                    },
+                }
+            )
+
+            # Get shop currency for proper formatting
+            shop = await self.prisma.shop.find_unique(where={"id": shop_id})
+            currency = shop.currencyCode if shop and shop.currencyCode else "USD"
+            currency_symbol = "₹" if currency == "INR" else "$"
+
+            logger.info(
+                f"✅ Trial completed for shop {shop_id} with revenue {currency_symbol}{final_revenue}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
 
     # ============= BILLING CALCULATION =============
 

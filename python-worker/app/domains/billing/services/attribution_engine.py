@@ -554,11 +554,27 @@ class AttributionEngine:
             # if session_connect:
             #     attribution_data["session"] = session_connect
 
+            # Check if attribution already exists
+            existing_attribution = await self.prisma.purchaseattribution.find_first(
+                where={"shopId": result.shop_id, "orderId": str(result.order_id)}
+            )
+
+            if existing_attribution:
+                logger.info(
+                    f"Attribution already exists for order {result.order_id}, skipping storage"
+                )
+                return
+
             await self.prisma.purchaseattribution.create(attribution_data)
 
             logger.info(f"Stored attribution result for order {result.order_id}")
 
         except Exception as e:
+            if "Unique constraint failed" in str(e):
+                logger.info(
+                    f"Attribution already exists for order {result.order_id}, skipping storage"
+                )
+                return
             logger.error(
                 f"Error storing attribution result for order {result.order_id}: {e}"
             )
