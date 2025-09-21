@@ -16,9 +16,9 @@ import { getDashboardOverview } from "../services/dashboard.service";
 import {
   RevenueKPICards,
   PerformanceKPICards,
-} from "../components/dashboard/KPICards";
-import { TopProductsTable } from "../components/dashboard/TopProductsTable";
-import { RecentActivity } from "../components/dashboard/RecentActivity";
+} from "../components/Dashboard/KPICards";
+import { TopProductsTable } from "../components/Dashboard/TopProductsTable";
+import { RecentActivity } from "../components/Dashboard/RecentActivity";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);

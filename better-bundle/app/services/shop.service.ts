@@ -169,10 +169,8 @@ const activateTrialBillingPlan = async (
         trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
-        capped_amount: 1000.0,
         currency: shopRecord.currencyCode,
         subscription_pending: true,
-        // Store the USD threshold for reference
         trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
       isTrialActive: true,
@@ -191,10 +189,8 @@ const activateTrialBillingPlan = async (
         trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
-        capped_amount: 1000.0,
         currency: shopRecord.currencyCode,
         subscription_pending: true,
-        // Store the USD threshold for reference
         trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
       effectiveFrom: new Date(),

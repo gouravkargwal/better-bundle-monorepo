@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { useActionData, Form, json } from "@remix-run/react";
+import { useActionData, Form, json, useNavigation } from "@remix-run/react";
 import {
   Page,
   Card,
@@ -47,12 +47,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin, redirect } = await authenticate.admin(request);
-
   try {
+    console.log("📊 Getting shop data from Shopify...");
     const shopData = await getShopInfoFromShopify(admin);
+    console.log("✅ Shop data retrieved successfully");
     // Use atomic transaction to ensure all database operations succeed or fail together
+    console.log("💾 Starting database transaction...");
     await prisma.$transaction(async (tx) => {
       // Step 1: Create/update shop record (idempotent)
+      console.log("🏪 Creating/updating shop record...");
       const shop = await createShopAndSetOnboardingCompleted(
         session,
         shopData,
@@ -60,28 +63,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
 
       // Step 2: Create/update billing plan (idempotent) - using shop.id from the transaction
+      console.log("💳 Activating trial billing plan...");
       await activateTrialBillingPlan(session.shop, shop, tx);
 
       // Step 3: Mark onboarding as completed (atomic with other operations)
+      console.log("✅ Marking onboarding as completed...");
       await markOnboardingCompleted(session.shop, tx);
     });
+    console.log("✅ Database transaction completed");
 
     // Step 4: Activate web pixel (critical for tracking)
     try {
+      console.log("🎯 Activating web pixel...");
       await activateAtlasWebPixel(admin, session.shop);
+      console.log("✅ Web pixel activated successfully");
     } catch (error) {
-      console.error("Web pixel activation failed:", error);
+      console.error("❌ Web pixel activation failed:", error);
       throw new Error("Failed to activate web pixel. Please try again.");
     }
 
     // Step 5: Trigger analysis (critical for functionality)
     try {
+      console.log("🔍 Triggering full analysis...");
       await triggerFullAnalysis(session.shop);
+      console.log("✅ Analysis triggered successfully");
     } catch (error) {
-      console.error("Analysis trigger failed:", error);
+      console.error("❌ Analysis trigger failed:", error);
       throw new Error("Failed to start analysis. Please try again.");
     }
 
+    console.log("🎉 Onboarding completed successfully, redirecting to app");
     return redirect("/app");
   } catch (error) {
     console.error("Failed to complete onboarding:", error);
@@ -99,6 +110,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function OnboardingPage() {
   const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const isLoading =
+    ["loading", "submitting"].includes(navigation.state) &&
+    navigation.formMethod === "POST";
+  // Debug logging
+  console.log("🔍 Navigation state:", navigation.state);
+  console.log("🔍 Is submitting:", isLoading);
+  console.log("🔍 Navigation formMethod:", navigation.formMethod);
+  console.log("🔍 Navigation formAction:", navigation.formAction);
+  console.log("🔍 Navigation object:", navigation);
 
   return (
     <Page>
@@ -316,13 +337,14 @@ export default function OnboardingPage() {
 
             {/* Call to Action Button */}
             <div>
-              <Form method="post">
+              <Form method="post" name="onboarding-form">
                 <Button
                   submit
                   variant="primary"
                   size="large"
-                  icon={ArrowRightIcon}
-                  loading={false}
+                  icon={isLoading ? undefined : ArrowRightIcon}
+                  loading={isLoading}
+                  disabled={isLoading}
                   style={{
                     padding: "16px 32px",
                     fontSize: "18px",
@@ -332,7 +354,9 @@ export default function OnboardingPage() {
                     border: "none",
                   }}
                 >
-                  Start Your Free Trial Now
+                  {isLoading
+                    ? "Setting up your store..."
+                    : "Start Your Free Trial Now"}
                 </Button>
               </Form>
               <div style={{ marginTop: "12px" }}>
