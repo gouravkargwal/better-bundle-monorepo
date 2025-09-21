@@ -78,6 +78,55 @@ class GorseDataTransformers:
                 "most_active_day": user.get("mostActiveDay"),
                 "device_type": user.get("deviceType", "unknown"),
                 "primary_referrer": user.get("primaryReferrer", "direct"),
+                # NEW: Enhanced customer demographic features
+                "customer_email": user.get("customerEmail", ""),
+                "customer_first_name": user.get("customerFirstName", ""),
+                "customer_last_name": user.get("customerLastName", ""),
+                "customer_verified_email": bool(
+                    user.get("customerVerifiedEmail", False)
+                ),
+                "customer_tax_exempt": bool(user.get("customerTaxExempt", False)),
+                "customer_currency_code": user.get("customerCurrencyCode", "USD"),
+                "customer_locale": user.get("customerLocale", "en"),
+                # NEW: Enhanced device and location features
+                "browser_type": user.get("browserType", "unknown"),
+                "os_type": user.get("osType", "unknown"),
+                "screen_resolution": user.get("screenResolution", "unknown"),
+                "country": user.get("country", "unknown"),
+                "region": user.get("region", "unknown"),
+                "city": user.get("city", "unknown"),
+                "timezone": user.get("timezone", "unknown"),
+                "language": user.get("language", "en"),
+                "referrer_type": user.get("referrerType", "direct"),
+                "traffic_source": user.get("trafficSource", "direct"),
+                "device_consistency": float(user.get("deviceConsistency", 0)),
+                # NEW: Additional CustomerBehaviorFeatures fields
+                "total_unified_sessions": int(user.get("totalUnifiedSessions", 0)),
+                "cross_session_span_days": int(user.get("crossSessionSpanDays", 0)),
+                "session_frequency_score": float(user.get("sessionFrequencyScore", 0)),
+                "device_diversity": int(user.get("deviceDiversity", 0)),
+                "avg_session_duration": float(user.get("avgSessionDuration", 0)),
+                "extension_engagement_score": float(
+                    user.get("extensionEngagementScore", 0)
+                ),
+                "recommendation_click_rate": float(
+                    user.get("recommendationClickRate", 0)
+                ),
+                "upsell_interaction_count": int(user.get("upsellInteractionCount", 0)),
+                "total_interactions_in_sessions": int(
+                    user.get("totalInteractionsInSessions", 0)
+                ),
+                "avg_interactions_per_session": float(
+                    user.get("avgInteractionsPerSession", 0)
+                ),
+                "session_engagement_score": float(
+                    user.get("sessionEngagementScore", 0)
+                ),
+                "multi_touch_attribution_score": float(
+                    user.get("multiTouchAttributionScore", 0)
+                ),
+                "attribution_revenue": float(user.get("attributionRevenue", 0)),
+                "conversion_path_length": int(user.get("conversionPathLength", 0)),
                 # From aggregated InteractionFeatures
                 "total_interaction_score": float(
                     user.get("total_interaction_score") or 0
@@ -86,6 +135,15 @@ class GorseDataTransformers:
                 # From aggregated SessionFeatures
                 "completed_sessions": int(user.get("completed_sessions") or 0),
                 "avg_session_duration": float(user.get("avg_session_duration") or 0),
+                # From aggregated InteractionFeatures
+                "total_interactions": int(user.get("total_interactions") or 0),
+                "avg_interaction_score": float(user.get("avg_interaction_score") or 0),
+                "product_affinity_score": float(
+                    user.get("product_affinity_score") or 0
+                ),
+                # From aggregated CollectionFeatures
+                "collections_viewed": int(user.get("collections_viewed") or 0),
+                "collection_engagement": float(user.get("collection_engagement") or 0),
                 # Computed segments
                 "customer_segment": self._calculate_customer_segment(user),
                 "is_active": bool((user.get("daysSinceLastOrder") or 365) < 30),
@@ -93,6 +151,12 @@ class GorseDataTransformers:
                 "is_frequent_buyer": bool(
                     (user.get("orderFrequencyPerMonth") or 0) > 1
                 ),
+                # NEW: Enhanced customer segments using new data
+                "is_verified_customer": bool(user.get("customerVerifiedEmail", False)),
+                "is_tax_exempt": bool(user.get("customerTaxExempt", False)),
+                "geographic_segment": self._calculate_geographic_segment(user),
+                "device_segment": self._calculate_device_segment(user),
+                "traffic_source_segment": self._calculate_traffic_source_segment(user),
                 # Optimized features for better recommendations
                 "purchase_power": min(float(user.get("totalSpent") or 0) / 5000, 1.0),
                 "purchase_frequency": min(
@@ -277,6 +341,54 @@ class GorseDataTransformers:
             "price_tier": product.get("priceTier", "mid"),
             "popularity_score": float(product.get("popularityScore", 0)),
             "trending_score": float(product.get("trendingScore", 0)),
+            # NEW: Enhanced product features using previously unused fields
+            "content_richness_score": int(product.get("contentRichnessScore", 0)),
+            "description_length": int(product.get("descriptionLength", 0)),
+            "description_html_length": int(product.get("descriptionHtmlLength", 0)),
+            "product_age": product.get("productAge"),
+            "last_updated_days": product.get("lastUpdatedDays"),
+            "update_frequency": float(product.get("updateFrequency", 0)),
+            "product_type": product.get("productType", "unknown"),
+            "category_complexity": float(product.get("categoryComplexity", 0)),
+            "availability_score": float(product.get("availabilityScore", 0)),
+            "status_stability": float(product.get("statusStability", 0)),
+            # From InteractionFeatures (aggregated)
+            "total_interactions": int(product.get("totalInteractions", 0)),
+            "interaction_score": float(product.get("interactionScore", 0)),
+            "affinity_score": float(product.get("affinityScore", 0)),
+            "refund_risk_score": float(product.get("refundRiskScore", 0)),
+            "net_purchase_value": float(product.get("netPurchaseValue", 0)),
+            # From SessionFeatures (aggregated)
+            "session_engagement": float(product.get("sessionEngagement", 0)),
+            "checkout_completion_rate": float(product.get("checkoutCompletionRate", 0)),
+            "cart_abandonment_rate": float(product.get("cartAbandonmentRate", 0)),
+            # From SearchProductFeatures (aggregated)
+            "search_impressions": int(product.get("searchImpressions", 0)),
+            "search_clicks": int(product.get("searchClicks", 0)),
+            "search_purchases": int(product.get("searchPurchases", 0)),
+            "search_ctr": float(product.get("searchCTR", 0)),
+            "search_conversion_rate": float(product.get("searchConversionRate", 0)),
+            # From ProductFeatures - additional fields
+            "cart_abandonment_rate": float(product.get("cartAbandonmentRate", 0)),
+            "cart_modification_rate": float(product.get("cartModificationRate", 0)),
+            "cart_view_to_purchase_rate": float(
+                product.get("cartViewToPurchaseRate", 0)
+            ),
+            "seo_optimization": float(product.get("seoOptimization", 0)),
+            "seo_title_length": int(product.get("seoTitleLength", 0)),
+            "seo_description_length": int(product.get("seoDescriptionLength", 0)),
+            "has_video_content": bool(product.get("hasVideoContent", False)),
+            "has_3d_content": bool(product.get("has3DContent", False)),
+            "media_count": int(product.get("mediaCount", 0)),
+            "has_online_store_url": bool(product.get("hasOnlineStoreUrl", False)),
+            "has_preview_url": bool(product.get("hasPreviewUrl", False)),
+            "has_custom_template": bool(product.get("hasCustomTemplate", False)),
+            "metafield_utilization": float(product.get("metafieldUtilization", 0)),
+            "media_richness": float(product.get("mediaRichness", 0)),
+            "refunded_orders": int(product.get("refundedOrders", 0)),
+            "refund_rate": float(product.get("refundRate", 0)),
+            "total_refunded_amount": float(product.get("totalRefundedAmount", 0)),
+            "net_revenue": float(product.get("netRevenue", 0)),
             "variant_complexity": (
                 float(product.get("variantComplexity", 0))
                 if product.get("variantComplexity")
@@ -293,16 +405,37 @@ class GorseDataTransformers:
                 else 0
             ),
             # From ProductData
-            "product_type": product.get("productType", "unknown"),
             "vendor": product.get("vendor", "unknown"),
             "in_stock": bool(product.get("totalInventory", 0) > 0),
             "has_discount": self._calculate_has_discount(product),
+            # NEW: Enhanced product segments using new data
+            "content_quality_segment": self._calculate_content_quality_segment(product),
+            "lifecycle_segment": self._calculate_product_lifecycle_segment(product),
+            "availability_segment": self._calculate_availability_segment(product),
             # Collection features (from CollectionFeatures table)
             "collection_count": (
                 len(product.get("collections", []))
                 if isinstance(product.get("collections"), list)
                 else 0
             ),
+            # NEW: Enhanced collection features using previously unused fields
+            "handle_quality": float(product.get("handleQuality", 0)),
+            "template_score": int(product.get("templateScore", 0)),
+            "seo_optimization_score": float(product.get("seoOptimizationScore", 0)),
+            "collection_age": product.get("collectionAge"),
+            "collection_update_frequency": float(product.get("updateFrequency", 0)),
+            "lifecycle_stage": product.get("lifecycleStage", "unknown"),
+            # NEW: Enhanced product features using previously unused fields
+            "content_richness_score": int(product.get("contentRichnessScore", 0)),
+            "description_length": int(product.get("descriptionLength", 0)),
+            "description_html_length": int(product.get("descriptionHtmlLength", 0)),
+            "product_age": product.get("productAge"),
+            "last_updated_days": product.get("lastUpdatedDays"),
+            "update_frequency": float(product.get("updateFrequency", 0)),
+            "product_type": product.get("productType", "unknown"),
+            "category_complexity": float(product.get("categoryComplexity", 0)),
+            "availability_score": float(product.get("availabilityScore", 0)),
+            "status_stability": float(product.get("statusStability", 0)),
             "collection_quality_score": float(
                 product.get("collection_performance_score", 0.5)
             ),
@@ -1170,3 +1303,158 @@ class GorseDataTransformers:
             return "very_low"
         else:
             return "none"
+
+    def _calculate_geographic_segment(self, user: Dict[str, Any]) -> str:
+        """Calculate geographic segment based on location data"""
+        try:
+            country = user.get("country", "").lower()
+            region = user.get("region", "").lower()
+
+            if not country or country == "unknown":
+                return "unknown"
+
+            # Major markets
+            if country in ["us", "united states", "usa"]:
+                return "north_america"
+            elif country in ["ca", "canada"]:
+                return "north_america"
+            elif country in ["gb", "uk", "united kingdom", "great britain"]:
+                return "europe"
+            elif country in ["de", "germany", "deutschland"]:
+                return "europe"
+            elif country in ["fr", "france"]:
+                return "europe"
+            elif country in ["au", "australia"]:
+                return "oceania"
+            elif country in ["jp", "japan"]:
+                return "asia"
+            elif country in ["cn", "china"]:
+                return "asia"
+            else:
+                return "other"
+        except Exception as e:
+            logger.error(f"Error calculating geographic segment: {e}")
+            return "unknown"
+
+    def _calculate_device_segment(self, user: Dict[str, Any]) -> str:
+        """Calculate device segment based on device data"""
+        try:
+            device_type = user.get("deviceType", "").lower()
+            browser_type = user.get("browserType", "").lower()
+            os_type = user.get("osType", "").lower()
+
+            if not device_type or device_type == "unknown":
+                return "unknown"
+
+            # Mobile-first segmentation
+            if device_type in ["mobile", "phone", "smartphone"]:
+                return "mobile_primary"
+            elif device_type in ["tablet", "ipad"]:
+                return "tablet_primary"
+            elif device_type in ["desktop", "computer", "pc"]:
+                return "desktop_primary"
+            else:
+                return "other"
+        except Exception as e:
+            logger.error(f"Error calculating device segment: {e}")
+            return "unknown"
+
+    def _calculate_traffic_source_segment(self, user: Dict[str, Any]) -> str:
+        """Calculate traffic source segment based on referrer data"""
+        try:
+            traffic_source = user.get("trafficSource", "").lower()
+            referrer_type = user.get("referrerType", "").lower()
+
+            if not traffic_source or traffic_source == "unknown":
+                return "unknown"
+
+            # Traffic source segmentation
+            if traffic_source in ["organic", "search"]:
+                return "organic_search"
+            elif traffic_source in ["social", "facebook", "instagram", "twitter"]:
+                return "social_media"
+            elif traffic_source in ["email", "newsletter"]:
+                return "email_marketing"
+            elif traffic_source in ["paid", "advertising", "ads"]:
+                return "paid_advertising"
+            elif traffic_source in ["direct", "direct_traffic"]:
+                return "direct_traffic"
+            elif traffic_source in ["referral", "referrer"]:
+                return "referral"
+            else:
+                return "other"
+        except Exception as e:
+            logger.error(f"Error calculating traffic source segment: {e}")
+            return "unknown"
+
+    def _calculate_content_quality_segment(self, product: Dict[str, Any]) -> str:
+        """Calculate content quality segment based on product content data"""
+        try:
+            content_richness = int(product.get("contentRichnessScore", 0))
+            description_length = int(product.get("descriptionLength", 0))
+            description_html_length = int(product.get("descriptionHtmlLength", 0))
+
+            # High quality content
+            if content_richness > 80 and description_length > 200:
+                return "high_quality"
+            elif content_richness > 60 and description_length > 100:
+                return "medium_quality"
+            elif content_richness > 40 and description_length > 50:
+                return "basic_quality"
+            else:
+                return "low_quality"
+        except Exception as e:
+            logger.error(f"Error calculating content quality segment: {e}")
+            return "unknown"
+
+    def _calculate_product_lifecycle_segment(self, product: Dict[str, Any]) -> str:
+        """Calculate product lifecycle segment based on age and update frequency"""
+        try:
+            product_age = product.get("productAge")
+            update_frequency = float(product.get("updateFrequency", 0))
+
+            if product_age is None:
+                return "unknown"
+
+            # Lifecycle segmentation
+            if product_age < 30:  # Less than 30 days
+                return "new_product"
+            elif product_age < 90:  # Less than 3 months
+                return "recent_product"
+            elif product_age < 365:  # Less than 1 year
+                return "established_product"
+            elif update_frequency > 0.5:  # Frequently updated
+                return "active_product"
+            else:
+                return "mature_product"
+        except Exception as e:
+            logger.error(f"Error calculating product lifecycle segment: {e}")
+            return "unknown"
+
+    def _calculate_availability_segment(self, product: Dict[str, Any]) -> str:
+        """Calculate availability segment based on inventory and status data"""
+        try:
+            availability_score = float(product.get("availabilityScore", 0))
+            status_stability = float(product.get("statusStability", 0))
+            total_inventory = int(product.get("totalInventory", 0))
+
+            # High availability
+            if (
+                availability_score > 80
+                and status_stability > 80
+                and total_inventory > 10
+            ):
+                return "high_availability"
+            elif (
+                availability_score > 60
+                and status_stability > 60
+                and total_inventory > 0
+            ):
+                return "medium_availability"
+            elif availability_score > 40 and status_stability > 40:
+                return "low_availability"
+            else:
+                return "unavailable"
+        except Exception as e:
+            logger.error(f"Error calculating availability segment: {e}")
+            return "unknown"
