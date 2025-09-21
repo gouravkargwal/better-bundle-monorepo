@@ -550,8 +550,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
                     node {
                         id
                         name
-                        email
-                        phone
                         createdAt
                         updatedAt
                         processedAt
@@ -598,8 +596,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             firstName
                             lastName
                             displayName
-                            email
-                            phone
                             tags
                             createdAt
                             updatedAt
@@ -607,12 +603,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             verifiedEmail
                             defaultAddress {
                                 id
-                                address1
                                 city
                                 province
                                 country
-                                zip
-                                phone
                                 provinceCode
                                 countryCodeV2
                             }
@@ -674,22 +667,16 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             processedAt
                         }
                         shippingAddress {
-                            address1
                             city
                             province
                             country
-                            zip
-                            phone
                             provinceCode
                             countryCodeV2
                         }
                         billingAddress {
-                            address1
                             city
                             province
                             country
-                            zip
-                            phone
                             provinceCode
                             countryCodeV2
                         }
@@ -771,18 +758,12 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         id
                         firstName
                         lastName
-                        email
-                        phone
                         createdAt
                         updatedAt
                         defaultAddress {
-                            address1
-                            address2
                             city
                             province
                             country
-                            zip
-                            phone
                         }
                         tags
                     }
