@@ -108,8 +108,8 @@ class AnalyticsApiClient {
 
       const payload: UnifiedSessionRequest = {
         shop_domain: shopDomain,
-        customer_id: customerId || null,
-        browser_session_id: null,
+        customer_id: customerId,
+        browser_session_id: "",
         user_agent: navigator.userAgent,
         ip_address: null, // Will be detected server-side
         referrer: null,

@@ -388,16 +388,18 @@ class FeatureRepository(IFeatureRepository):
                 skip=offset,
                 include={"lineItems": True},
             )
-            
+
             # Convert Prisma objects to dictionaries, including nested lineItems
             orders = []
             for order in result:
                 order_dict = dict(order)
                 # Convert lineItems from Prisma objects to dictionaries
                 if order_dict.get("lineItems"):
-                    order_dict["lineItems"] = [dict(line_item) for line_item in order_dict["lineItems"]]
+                    order_dict["lineItems"] = [
+                        dict(line_item) for line_item in order_dict["lineItems"]
+                    ]
                 orders.append(order_dict)
-            
+
             return orders
         except Exception as e:
             logger.error(f"Failed to get orders batch for shop {shop_id}: {str(e)}")

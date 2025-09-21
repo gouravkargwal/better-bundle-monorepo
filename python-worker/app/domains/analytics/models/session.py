@@ -63,7 +63,9 @@ class SessionCreate(BaseModel):
 
     shop_id: str = Field(..., description="Shop identifier")
     customer_id: Optional[str] = Field(None, description="Customer identifier")
-    browser_session_id: str = Field(..., description="Browser session identifier")
+    browser_session_id: Optional[str] = Field(
+        None, description="Browser session identifier"
+    )
     user_agent: Optional[str] = Field(None, description="User agent string")
     ip_address: Optional[str] = Field(None, description="IP address")
     referrer: Optional[str] = Field(None, description="Referrer URL")
