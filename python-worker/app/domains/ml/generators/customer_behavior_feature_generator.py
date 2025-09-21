@@ -1165,7 +1165,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                     "multiTouchAttributionScore": 0.0,
                     "attributionRevenue": 0.0,
                     "conversionPathLength": 0,
-                    "extensionContributionWeights": {},
+                    # Note: extensionContributionWeights field removed - not in database schema
                 }
 
             # Filter attributions for this customer
@@ -1178,7 +1178,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                     "multiTouchAttributionScore": 0.0,
                     "attributionRevenue": 0.0,
                     "conversionPathLength": 0,
-                    "extensionContributionWeights": {},
+                    # Note: extensionContributionWeights field removed - not in database schema
                 }
 
             # Calculate attribution metrics
@@ -1199,7 +1199,15 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                         "contributingExtensions", []
                     )
                     if isinstance(contributing_extensions, list):
-                        unique_extensions.update(contributing_extensions)
+                        # Ensure we only add strings, not dictionaries
+                        for ext in contributing_extensions:
+                            if isinstance(ext, str):
+                                unique_extensions.add(ext)
+                            elif isinstance(ext, dict):
+                                # Extract extension type from dictionary
+                                ext_type = ext.get("extensionType", "")
+                                if ext_type:
+                                    unique_extensions.add(ext_type)
                 multi_touch_score = min(
                     len(unique_extensions) / 4.0, 1.0
                 )  # Normalize to 0-1
@@ -1236,7 +1244,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 "multiTouchAttributionScore": round(multi_touch_score, 4),
                 "attributionRevenue": round(total_revenue, 2),
                 "conversionPathLength": conversion_path_length,
-                "extensionContributionWeights": extension_weights,
+                # Note: extensionContributionWeights field removed - not in database schema
             }
 
         except Exception as e:
@@ -1245,7 +1253,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 "multiTouchAttributionScore": 0.0,
                 "attributionRevenue": 0.0,
                 "conversionPathLength": 0,
-                "extensionContributionWeights": {},
+                # Note: extensionContributionWeights field removed - not in database schema
             }
 
     def _compute_device_location_features(
