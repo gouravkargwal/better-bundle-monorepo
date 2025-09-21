@@ -166,6 +166,7 @@ class BillingService:
     ) -> None:
         """
         Handle trial completion when threshold is reached.
+        For usage-based billing, this stops all services and requires user consent.
 
         Args:
             shop_id: Shop ID
@@ -173,13 +174,29 @@ class BillingService:
             final_revenue: Final trial revenue amount
         """
         try:
-            # Update billing plan to mark trial as completed
+            # 1. STOP ALL SERVICES - Mark shop as inactive to stop all functionality
+            await self.prisma.shop.update_many(
+                where={"id": shop_id},
+                data={
+                    "isActive": False,
+                    "suspendedAt": datetime.utcnow(),
+                    "suspensionReason": "trial_completed_consent_required",
+                    "serviceImpact": "suspended",
+                    "updatedAt": datetime.utcnow(),
+                },
+            )
+
+            # 2. Update billing plan to mark trial as completed but services stopped
             current_config = billing_plan.configuration or {}
             updated_config = {
                 **current_config,
                 "trial_active": False,
                 "trial_completed_at": datetime.utcnow().isoformat(),
                 "trial_completion_revenue": final_revenue,
+                "services_stopped": True,
+                "consent_required": True,
+                "subscription_required": True,
+                "billing_suspended": True,
             }
 
             await self.prisma.billingplan.update(
@@ -187,22 +204,46 @@ class BillingService:
                 data={
                     "isTrialActive": False,
                     "trialRevenue": final_revenue,
+                    "status": "suspended",  # Change status to suspended
                     "configuration": Json(updated_config),
                 },
             )
 
-            # Create billing event
+            # 3. Create billing event for trial completion
             await self.prisma.billingevent.create(
                 data={
                     "shopId": shop_id,
                     "type": "trial_completed",
+                    "occurredAt": datetime.utcnow(),
                     "data": {
                         "final_revenue": final_revenue,
                         "completed_at": datetime.utcnow().isoformat(),
+                        "services_stopped": True,
+                        "consent_required": True,
                     },
                     "metadata": {
                         "trial_completion": True,
                         "final_revenue": final_revenue,
+                        "services_stopped": True,
+                        "consent_required": True,
+                    },
+                }
+            )
+
+            # 4. Create service suspension event
+            await self.prisma.billingevent.create(
+                data={
+                    "shopId": shop_id,
+                    "type": "service_suspended",
+                    "occurredAt": datetime.utcnow(),
+                    "data": {
+                        "reason": "trial_completed_consent_required",
+                        "suspended_at": datetime.utcnow().isoformat(),
+                        "requires_consent": True,
+                    },
+                    "metadata": {
+                        "suspension_type": "trial_completion",
+                        "consent_required": True,
                     },
                 }
             )
@@ -213,11 +254,127 @@ class BillingService:
             currency_symbol = "₹" if currency == "INR" else "$"
 
             logger.info(
-                f"✅ Trial completed for shop {shop_id} with revenue {currency_symbol}{final_revenue}"
+                f"🛑 Trial completed for shop {shop_id} with revenue {currency_symbol}{final_revenue}"
+            )
+            logger.info(
+                f"🚫 Services stopped - user consent required for usage-based billing"
             )
 
         except Exception as e:
             logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
+
+    async def handle_trial_completion_with_consent(
+        self, shop_id: str, capped_amount: float, billing_rate: float
+    ) -> bool:
+        """
+        Handle user consent for trial completion and reactivate services with capped billing.
+
+        Args:
+            shop_id: Shop ID
+            capped_amount: Maximum amount user agrees to be charged
+            billing_rate: Billing rate (e.g., 3% for 0.03)
+
+        Returns:
+            True if consent processed successfully, False otherwise
+        """
+        try:
+            logger.info(f"🔄 Processing trial completion consent for shop {shop_id}")
+            logger.info(f"   Capped amount: ${capped_amount}")
+            logger.info(f"   Billing rate: {billing_rate * 100}%")
+
+            # 1. Reactivate shop services
+            await self.prisma.shop.update_many(
+                where={"id": shop_id},
+                data={
+                    "isActive": True,
+                    "suspendedAt": None,
+                    "suspensionReason": None,
+                    "serviceImpact": None,
+                    "updatedAt": datetime.utcnow(),
+                },
+            )
+
+            # 2. Update billing plan with consent and capped amount
+            billing_plan = await self.prisma.billingplan.find_first(
+                where={"shopId": shop_id, "status": "suspended"}
+            )
+
+            if not billing_plan:
+                logger.error(f"No suspended billing plan found for shop {shop_id}")
+                return False
+
+            current_config = billing_plan.configuration or {}
+            updated_config = {
+                **current_config,
+                "consent_given": True,
+                "services_stopped": False,
+                "consent_required": False,
+                "subscription_required": False,
+                "billing_suspended": False,
+                "capped_amount": capped_amount,
+                "billing_rate": billing_rate,
+                "consent_given_at": datetime.utcnow().isoformat(),
+            }
+
+            await self.prisma.billingplan.update(
+                where={"id": billing_plan.id},
+                data={
+                    "status": "active",
+                    "configuration": Json(updated_config),
+                },
+            )
+
+            # 3. Create consent event
+            await self.prisma.billingevent.create(
+                data={
+                    "shopId": shop_id,
+                    "type": "trial_completed_with_consent",
+                    "occurredAt": datetime.utcnow(),
+                    "data": {
+                        "consent_given": True,
+                        "capped_amount": capped_amount,
+                        "billing_rate": billing_rate,
+                        "consent_given_at": datetime.utcnow().isoformat(),
+                    },
+                    "metadata": {
+                        "trial_completion": True,
+                        "consent_given": True,
+                        "capped_amount": capped_amount,
+                    },
+                }
+            )
+
+            # 4. Create service reactivation event
+            await self.prisma.billingevent.create(
+                data={
+                    "shopId": shop_id,
+                    "type": "service_reactivated",
+                    "occurredAt": datetime.utcnow(),
+                    "data": {
+                        "reason": "trial_completion_consent_given",
+                        "reactivated_at": datetime.utcnow().isoformat(),
+                        "capped_amount": capped_amount,
+                    },
+                    "metadata": {
+                        "reactivation_type": "trial_completion_consent",
+                        "capped_amount": capped_amount,
+                    },
+                }
+            )
+
+            logger.info(
+                f"✅ Services reactivated for shop {shop_id} with capped billing"
+            )
+            logger.info(f"   Capped amount: ${capped_amount}")
+            logger.info(f"   Billing rate: {billing_rate * 100}%")
+
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error handling trial completion consent for shop {shop_id}: {e}"
+            )
+            return False
 
     # ============= BILLING CALCULATION =============
 
