@@ -83,16 +83,21 @@ class CrossSessionLinkingService:
             potential_sessions = await self._find_potential_sessions(
                 existing_sessions, shop_id
             )
+            logger.info(f"Found {len(potential_sessions)} potential sessions to link")
 
             # Step 3: Calculate confidence scores for potential matches
             scored_sessions = await self._score_potential_sessions(
                 existing_sessions, potential_sessions
+            )
+            logger.info(
+                f"Found {len(scored_sessions)} high-confidence sessions to link"
             )
 
             # Step 4: Link high-confidence matches
             linked_sessions = await self._link_high_confidence_sessions(
                 scored_sessions, customer_id
             )
+            logger.info(f"Successfully linked {len(linked_sessions)} sessions")
 
             # Step 5: Create session links for tracking
             session_links = await self._create_session_links(
@@ -108,7 +113,7 @@ class CrossSessionLinkingService:
                 "success": True,
                 "customer_id": customer_id,
                 "existing_sessions": len(existing_sessions),
-                "linked_sessions": len(linked_sessions),
+                "linked_sessions": linked_sessions,  # Return the actual list, not len()
                 "total_sessions": len(existing_sessions) + len(linked_sessions),
                 "session_links": len(session_links),
                 "journey_summary": journey_summary,
@@ -130,14 +135,23 @@ class CrossSessionLinkingService:
         """Get all existing sessions for a customer"""
         try:
             db = await get_database()
-            sessions_data = await db.usersession.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": customer_id,
-                    "status": "active",
-                },
+
+            # Try a simpler query first - just get all sessions for this shop
+            all_sessions = await db.usersession.find_many(
+                where={"shopId": shop_id},
                 order={"createdAt": "asc"},
             )
+
+            logger.info(f"Found {len(all_sessions)} total sessions for shop {shop_id}")
+
+            # Filter by customer_id in Python since Prisma query is failing
+            # Convert customer_id to string to match database format
+            customer_id_str = str(customer_id)
+            sessions_data = [s for s in all_sessions if s.customerId == customer_id_str]
+            logger.info(
+                f"Found {len(sessions_data)} sessions for customer {customer_id}"
+            )
+
             sessions = []
             for session_data in sessions_data:
                 session = UserSession(
@@ -157,6 +171,9 @@ class CrossSessionLinkingService:
                 )
                 sessions.append(session)
 
+            logger.info(
+                f"Returning {len(sessions)} UserSession objects for customer {customer_id}"
+            )
             return sessions
 
         except Exception as e:
