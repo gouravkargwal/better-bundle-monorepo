@@ -94,7 +94,7 @@ export function ExtensionManager({
   ).length;
 
   return (
-    <BlockStack gap="500">
+    <BlockStack gap="300">
       {/* Summary Stats - Following dashboard pattern */}
       <div
         style={{
@@ -121,8 +121,8 @@ export function ExtensionManager({
           }}
         >
           <Card>
-            <div style={{ minHeight: "120px", padding: "4px" }}>
-              <BlockStack gap="300">
+            <div style={{ minHeight: "100px", padding: "4px" }}>
+              <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
                   <BlockStack gap="100">
                     <Text
@@ -181,8 +181,8 @@ export function ExtensionManager({
           }}
         >
           <Card>
-            <div style={{ minHeight: "120px", padding: "4px" }}>
-              <BlockStack gap="300">
+            <div style={{ minHeight: "100px", padding: "4px" }}>
+              <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
                   <BlockStack gap="100">
                     <Text
@@ -260,7 +260,7 @@ export function ExtensionManager({
             >
               <Card>
                 <div style={{ minHeight: "160px", padding: "4px" }}>
-                  <BlockStack gap="300">
+                  <BlockStack gap="200">
                     <InlineStack align="space-between" blockAlign="center">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingSm" fontWeight="bold">

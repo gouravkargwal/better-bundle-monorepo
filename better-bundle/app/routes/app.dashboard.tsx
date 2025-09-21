@@ -8,7 +8,9 @@ import {
   Spinner,
   Banner,
   Tabs,
+  Icon,
 } from "@shopify/polaris";
+import { ChartCohortIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
@@ -69,24 +71,38 @@ export default function Dashboard() {
     return (
       <Page>
         <TitleBar title="Analytics Dashboard" />
-        <BlockStack gap="500">
+        <BlockStack gap="300">
           <div
             style={{
-              padding: "48px",
+              padding: "40px 32px",
               textAlign: "center",
-              backgroundColor: "#F8FAFC",
+              background: "linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)",
               borderRadius: "16px",
               border: "1px solid #E2E8F0",
             }}
           >
+            <div
+              style={{
+                display: "inline-block",
+                padding: "12px",
+                backgroundColor: "#3B82F615",
+                borderRadius: "12px",
+                marginBottom: "16px",
+              }}
+            >
+              <Icon source={ChartCohortIcon} tone="base" />
+            </div>
             <Spinner size="large" />
             <div style={{ marginTop: "24px" }}>
               <BlockStack gap="300">
-                <Text as="h3" variant="headingMd" fontWeight="bold">
-                  Loading your analytics...
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  We're gathering your extension performance data
+                <div style={{ color: "#1E293B" }}>
+                  <Text as="h3" variant="headingLg" fontWeight="bold">
+                    📊 Loading your analytics...
+                  </Text>
+                </div>
+                <Text as="p" variant="bodyLg" tone="subdued">
+                  We're gathering your extension performance data and generating
+                  insights
                 </Text>
               </BlockStack>
             </div>
@@ -123,7 +139,7 @@ export default function Dashboard() {
     switch (selectedTab) {
       case 0: // Revenue
         return (
-          <BlockStack gap="500">
+          <BlockStack gap="300">
             <RevenueKPICards
               data={dashboardData.overview}
               attributedMetrics={dashboardData.attributedMetrics}
@@ -132,19 +148,19 @@ export default function Dashboard() {
         );
       case 1: // Performance
         return (
-          <BlockStack gap="500">
+          <BlockStack gap="300">
             <PerformanceKPICards data={dashboardData.overview} />
           </BlockStack>
         );
       case 2: // Top Products
         return (
-          <BlockStack gap="500">
+          <BlockStack gap="300">
             <TopProductsTable data={dashboardData.topProducts} />
           </BlockStack>
         );
       case 3: // Recent Activity
         return (
-          <BlockStack gap="500">
+          <BlockStack gap="300">
             <RecentActivity data={dashboardData.recentActivity} />
           </BlockStack>
         );
@@ -156,7 +172,107 @@ export default function Dashboard() {
   return (
     <Page>
       <TitleBar title="Analytics Dashboard" />
-      <BlockStack gap="400">
+      <BlockStack gap="300">
+        {/* Hero Section */}
+        <div
+          style={{
+            padding: "24px 20px",
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            borderRadius: "16px",
+            color: "white",
+            textAlign: "center",
+            position: "relative",
+            overflow: "hidden",
+            boxShadow:
+              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+          }}
+        >
+          <div style={{ position: "relative", zIndex: 2 }}>
+            {/* Hero Badge */}
+            <div style={{ marginBottom: "12px" }}>
+              <div
+                style={{
+                  display: "inline-block",
+                  padding: "6px 12px",
+                  backgroundColor: "rgba(255, 255, 255, 0.2)",
+                  border: "1px solid rgba(255, 255, 255, 0.3)",
+                  color: "white",
+                  fontWeight: "600",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                }}
+              >
+                📊 Analytics Dashboard
+              </div>
+            </div>
+
+            {/* Main Headline */}
+            <div
+              style={{
+                fontSize: "2rem",
+                lineHeight: "1.2",
+                marginBottom: "8px",
+                background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+                fontWeight: "bold",
+              }}
+            >
+              Performance Analytics
+            </div>
+
+            {/* Subheadline */}
+            <div
+              style={{
+                marginBottom: "12px",
+                maxWidth: "500px",
+                margin: "0 auto 12px",
+              }}
+            >
+              <div
+                style={{
+                  color: "rgba(255,255,255,0.95)",
+                  lineHeight: "1.4",
+                  fontWeight: "500",
+                  fontSize: "1rem",
+                }}
+              >
+                Track your AI recommendations performance and revenue impact
+              </div>
+            </div>
+
+            {/* Enhanced Decorative elements */}
+            <div
+              style={{
+                position: "absolute",
+                top: "-50px",
+                right: "-50px",
+                width: "150px",
+                height: "150px",
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)",
+                borderRadius: "50%",
+                zIndex: 1,
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-40px",
+                left: "-40px",
+                width: "120px",
+                height: "120px",
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)",
+                borderRadius: "50%",
+                zIndex: 1,
+              }}
+            />
+          </div>
+        </div>
+
         <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange}>
           {renderTabContent()}
         </Tabs>
