@@ -438,7 +438,7 @@ class RedisStreamsManager:
             "status": "queued",
         }
 
-        return await self.publish_event(settings.CUSTOMER_LINKING_STREAM, event_data)
+        return await self.publish_event("betterbundle:customer-linking", event_data)
 
 
 # Global streams manager instance
