@@ -130,19 +130,14 @@ class CrossSessionLinkingService:
         """Get all existing sessions for a customer"""
         try:
             db = await get_database()
-
-            # Build where conditions like in unified_session_service.py
-            where_conditions = {
-                "shopId": shop_id,
-                "customerId": customer_id,
-                "status": "active",
-            }
-
             sessions_data = await db.usersession.find_many(
-                where=where_conditions,
+                where={
+                    "shopId": shop_id,
+                    "customerId": customer_id,
+                    "status": "active",
+                },
                 order={"createdAt": "asc"},
             )
-
             sessions = []
             for session_data in sessions_data:
                 session = UserSession(
