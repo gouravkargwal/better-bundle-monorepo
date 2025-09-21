@@ -91,6 +91,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                     self._compute_extension_features(user_interactions, customer_id)
                 )
 
+                # NEW: Device and location features from behavioral events
+                features.update(
+                    self._compute_device_location_features(user_interactions)
+                )
+
             # Cross-session features
             if user_sessions:
                 features.update(
@@ -1241,4 +1246,156 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 "attributionRevenue": 0.0,
                 "conversionPathLength": 0,
                 "extensionContributionWeights": {},
+            }
+
+    def _compute_device_location_features(
+        self, user_interactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute device and location features from behavioral events"""
+        try:
+            # Extract device and location data from interactions
+            device_types = []
+            browser_types = []
+            os_types = []
+            screen_resolutions = []
+            countries = []
+            regions = []
+            cities = []
+            timezones = []
+            languages = []
+            referrers = []
+
+            for interaction in user_interactions:
+                metadata = interaction.get("metadata", {})
+
+                # Device information
+                device_type = metadata.get("deviceType", "")
+                if device_type:
+                    device_types.append(device_type)
+
+                browser_type = metadata.get("browserType", "")
+                if browser_type:
+                    browser_types.append(browser_type)
+
+                os_type = metadata.get("osType", "")
+                if os_type:
+                    os_types.append(os_type)
+
+                screen_resolution = metadata.get("screenResolution", "")
+                if screen_resolution:
+                    screen_resolutions.append(screen_resolution)
+
+                # Location information
+                country = metadata.get("country", "")
+                if country:
+                    countries.append(country)
+
+                region = metadata.get("region", "")
+                if region:
+                    regions.append(region)
+
+                city = metadata.get("city", "")
+                if city:
+                    cities.append(city)
+
+                timezone = metadata.get("timezone", "")
+                if timezone:
+                    timezones.append(timezone)
+
+                language = metadata.get("language", "")
+                if language:
+                    languages.append(language)
+
+                referrer = metadata.get("referrer", "")
+                if referrer:
+                    referrers.append(referrer)
+
+            # Calculate diversity metrics
+            device_diversity = len(set(device_types)) if device_types else 0
+            location_diversity = len(set(countries)) if countries else 0
+            referrer_diversity = len(set(referrers)) if referrers else 0
+
+            # Most common values
+            most_common_device = (
+                Counter(device_types).most_common(1)[0][0] if device_types else ""
+            )
+            most_common_country = (
+                Counter(countries).most_common(1)[0][0] if countries else ""
+            )
+            most_common_timezone = (
+                Counter(timezones).most_common(1)[0][0] if timezones else ""
+            )
+            most_common_language = (
+                Counter(languages).most_common(1)[0][0] if languages else ""
+            )
+
+            # Device consistency score (0-100)
+            device_consistency = 0
+            if device_types:
+                device_counts = Counter(device_types)
+                total_devices = len(device_types)
+                most_common_count = device_counts.most_common(1)[0][1]
+                device_consistency = int((most_common_count / total_devices) * 100)
+
+            # Geographic consistency score (0-100)
+            geo_consistency = 0
+            if countries:
+                country_counts = Counter(countries)
+                total_countries = len(countries)
+                most_common_count = country_counts.most_common(1)[0][1]
+                geo_consistency = int((most_common_count / total_countries) * 100)
+
+            # Referrer analysis
+            referrer_types = []
+            for referrer in referrers:
+                if "google" in referrer.lower():
+                    referrer_types.append("search")
+                elif "facebook" in referrer.lower() or "instagram" in referrer.lower():
+                    referrer_types.append("social")
+                elif "email" in referrer.lower():
+                    referrer_types.append("email")
+                elif referrer == "" or referrer == "direct":
+                    referrer_types.append("direct")
+                else:
+                    referrer_types.append("other")
+
+            most_common_referrer_type = (
+                Counter(referrer_types).most_common(1)[0][0]
+                if referrer_types
+                else "direct"
+            )
+
+            return {
+                "deviceDiversity": device_diversity,
+                "locationDiversity": location_diversity,
+                "referrerDiversity": referrer_diversity,
+                "deviceConsistency": device_consistency,
+                "geoConsistency": geo_consistency,
+                "mostCommonDevice": most_common_device,
+                "mostCommonCountry": most_common_country,
+                "mostCommonTimezone": most_common_timezone,
+                "mostCommonLanguage": most_common_language,
+                "mostCommonReferrerType": most_common_referrer_type,
+                "totalDeviceTypes": len(set(device_types)),
+                "totalCountries": len(set(countries)),
+                "totalTimezones": len(set(timezones)),
+                "totalLanguages": len(set(languages)),
+            }
+        except Exception as e:
+            logger.error(f"Error computing device location features: {str(e)}")
+            return {
+                "deviceDiversity": 0,
+                "locationDiversity": 0,
+                "referrerDiversity": 0,
+                "deviceConsistency": 0,
+                "geoConsistency": 0,
+                "mostCommonDevice": "",
+                "mostCommonCountry": "",
+                "mostCommonTimezone": "",
+                "mostCommonLanguage": "",
+                "mostCommonReferrerType": "direct",
+                "totalDeviceTypes": 0,
+                "totalCountries": 0,
+                "totalTimezones": 0,
+                "totalLanguages": 0,
             }

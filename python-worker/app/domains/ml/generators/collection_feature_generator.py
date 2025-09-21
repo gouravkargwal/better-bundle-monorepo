@@ -82,11 +82,23 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             features.update(self._compute_seo_score(collection))
             features.update(self._compute_image_score(collection))
 
+            # NEW: Compute enhanced collection features using previously unused fields
+            collection_metadata_features = self._compute_collection_metadata_features(
+                collection
+            )
+            collection_lifecycle_features = self._compute_collection_lifecycle_features(
+                collection
+            )
+
             # Performance score (composite)
             features.update(self._compute_performance_score(features))
 
             # Validate and clean features
             features = self.validate_features(features)
+
+            # Add enhanced collection features
+            features.update(collection_metadata_features)
+            features.update(collection_lifecycle_features)
 
             # Add lastComputedAt timestamp
             from app.shared.helpers import now_utc
@@ -453,3 +465,124 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         score += normalized_image * 0.05
 
         return {"performanceScore": score}
+
+    def _compute_collection_metadata_features(
+        self, collection: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute collection metadata features using previously unused fields"""
+        try:
+            # Handle and template features (currently unused)
+            handle = collection.get("handle", "")
+            template_suffix = collection.get("templateSuffix", "")
+
+            # Handle quality score (URL-friendly)
+            handle_quality = 0
+            if handle and len(handle) > 3:
+                handle_quality = min(len(handle) / 10, 10)  # Max 10 points
+
+            # Template customization score
+            template_score = 10 if template_suffix else 0
+
+            # Metafields analysis (currently unused)
+            metafields = collection.get("metafields", [])
+            metafield_count = len(metafields) if isinstance(metafields, list) else 0
+            metafield_utilization = min(metafield_count / 5, 1.0)  # Normalize to 0-1
+
+            # Extras analysis (currently unused)
+            extras = collection.get("extras", {})
+            extras_count = len(extras) if isinstance(extras, dict) else 0
+            extras_utilization = min(extras_count / 3, 1.0)  # Normalize to 0-1
+
+            return {
+                "handleQuality": handle_quality,
+                "templateScore": template_score,
+                "metafieldUtilization": metafield_utilization,
+                "extrasUtilization": extras_utilization,
+                "handle": handle,
+                "templateSuffix": template_suffix,
+                "metafieldCount": metafield_count,
+                "extrasCount": extras_count,
+            }
+        except Exception as e:
+            logger.error(f"Error computing collection metadata features: {str(e)}")
+            return {
+                "handleQuality": 0,
+                "templateScore": 0,
+                "metafieldUtilization": 0.0,
+                "extrasUtilization": 0.0,
+                "handle": "",
+                "templateSuffix": "",
+                "metafieldCount": 0,
+                "extrasCount": 0,
+            }
+
+    def _compute_collection_lifecycle_features(
+        self, collection: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute collection lifecycle features using previously unused fields"""
+        try:
+            from app.shared.helpers import now_utc
+
+            # Collection age and update frequency
+            created_at = collection.get("createdAt")
+            updated_at = collection.get("updatedAt")
+
+            collection_age = 0
+            last_updated_days = 0
+            update_frequency = 0.0
+
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+                collection_age = (now_utc() - created_at).days
+
+            if updated_at:
+                if isinstance(updated_at, str):
+                    updated_at = datetime.fromisoformat(
+                        updated_at.replace("Z", "+00:00")
+                    )
+                last_updated_days = (now_utc() - updated_at).days
+
+                # Calculate update frequency (updates per month)
+                if created_at and updated_at > created_at:
+                    days_since_creation = (updated_at - created_at).days
+                    if days_since_creation > 0:
+                        update_frequency = (
+                            30.0 / days_since_creation
+                        )  # Updates per month
+
+            # Collection maturity score based on age and updates
+            maturity_score = 0
+            if collection_age > 365:  # More than 1 year old
+                maturity_score = 100
+            elif collection_age > 180:  # More than 6 months old
+                maturity_score = 75
+            elif collection_age > 90:  # More than 3 months old
+                maturity_score = 50
+            elif collection_age > 30:  # More than 1 month old
+                maturity_score = 25
+            else:
+                maturity_score = 10  # New collection
+
+            # Bonus for active maintenance
+            if update_frequency > 1.0:  # Updated more than once per month
+                maturity_score += 20
+            elif update_frequency > 0.5:  # Updated at least twice per month
+                maturity_score += 10
+
+            return {
+                "collectionAge": collection_age,
+                "lastUpdatedDays": last_updated_days,
+                "updateFrequency": round(update_frequency, 2),
+                "maturityScore": min(maturity_score, 100),
+            }
+        except Exception as e:
+            logger.error(f"Error computing collection lifecycle features: {str(e)}")
+            return {
+                "collectionAge": 0,
+                "lastUpdatedDays": 0,
+                "updateFrequency": 0.0,
+                "maturityScore": 0,
+            }

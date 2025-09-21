@@ -7,6 +7,7 @@ import datetime
 from typing import Dict, Any, List, Optional
 import statistics
 from datetime import timedelta
+from prisma import Json
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -71,6 +72,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 customer_orders
             )
 
+            # NEW: Compute customer demographic features using CustomerData table
+            customer_demographic_features = self._compute_customer_demographic_features(
+                customer_data
+            )
+
             features = {
                 "shopId": shop_id,
                 "customerId": customer_id,
@@ -115,6 +121,42 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "customerHealthScore": customer_enhancement_features[
                     "customer_health_score"
                 ],
+                # NEW: Customer demographic features from CustomerData table
+                "customerEmail": customer_demographic_features["customer_email"],
+                "customerFirstName": customer_demographic_features[
+                    "customer_first_name"
+                ],
+                "customerLastName": customer_demographic_features["customer_last_name"],
+                "customerLocation": Json(
+                    customer_demographic_features["customer_location"]
+                ),
+                "customerTags": Json(customer_demographic_features["customer_tags"]),
+                "customerCreatedAtShopify": customer_demographic_features[
+                    "customer_created_at_shopify"
+                ],
+                "customerLastOrderId": customer_demographic_features[
+                    "customer_last_order_id"
+                ],
+                "customerMetafields": Json(
+                    customer_demographic_features["customer_metafields"]
+                ),
+                "customerState": customer_demographic_features["customer_state"],
+                "customerVerifiedEmail": customer_demographic_features[
+                    "customer_verified_email"
+                ],
+                "customerTaxExempt": customer_demographic_features[
+                    "customer_tax_exempt"
+                ],
+                "customerDefaultAddress": Json(
+                    customer_demographic_features["customer_default_address"]
+                ),
+                "customerAddresses": Json(
+                    customer_demographic_features["customer_addresses"]
+                ),
+                "customerCurrencyCode": customer_demographic_features[
+                    "customer_currency_code"
+                ],
+                "customerLocale": customer_demographic_features["customer_locale"],
                 "lastComputedAt": now_utc(),
             }
 
@@ -482,6 +524,22 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             "geographicRegion": None,
             "currencyPreference": "USD",
             "customerHealthScore": 0,
+            # NEW: Customer demographic features from CustomerData table
+            "customerEmail": "",
+            "customerFirstName": "",
+            "customerLastName": "",
+            "customerLocation": Json({}),
+            "customerTags": Json([]),
+            "customerCreatedAtShopify": None,
+            "customerLastOrderId": "",
+            "customerMetafields": Json([]),
+            "customerState": "",
+            "customerVerifiedEmail": False,
+            "customerTaxExempt": False,
+            "customerDefaultAddress": Json({}),
+            "customerAddresses": Json([]),
+            "customerCurrencyCode": "USD",
+            "customerLocale": "en",
             "lastComputedAt": now_utc(),
         }
 
@@ -589,4 +647,48 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "geographic_region": None,
                 "currency_preference": None,
                 "customer_health_score": 0,
+            }
+
+    def _compute_customer_demographic_features(
+        self, customer_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute customer demographic features using CustomerData table"""
+        try:
+            # Extract all customer data fields (previously unused)
+            return {
+                "customer_email": customer_data.get("email", ""),
+                "customer_first_name": customer_data.get("firstName", ""),
+                "customer_last_name": customer_data.get("lastName", ""),
+                "customer_location": customer_data.get("location", {}),
+                "customer_tags": customer_data.get("tags", []),
+                "customer_created_at_shopify": customer_data.get("createdAtShopify"),
+                "customer_last_order_id": customer_data.get("lastOrderId", ""),
+                "customer_metafields": customer_data.get("metafields", []),
+                "customer_state": customer_data.get("state", ""),
+                "customer_verified_email": customer_data.get("verifiedEmail", False),
+                "customer_tax_exempt": customer_data.get("taxExempt", False),
+                "customer_default_address": customer_data.get("defaultAddress", {}),
+                "customer_addresses": customer_data.get("addresses", []),
+                "customer_currency_code": customer_data.get("currencyCode", "USD"),
+                "customer_locale": customer_data.get("customerLocale", "en"),
+                "customer_is_active": customer_data.get("isActive", True),
+            }
+        except Exception as e:
+            logger.error(f"Error computing customer demographic features: {str(e)}")
+            return {
+                "customer_email": "",
+                "customer_first_name": "",
+                "customer_last_name": "",
+                "customer_location": Json({}),
+                "customer_tags": Json([]),
+                "customer_created_at_shopify": None,
+                "customer_last_order_id": "",
+                "customer_metafields": Json([]),
+                "customer_state": "",
+                "customer_verified_email": False,
+                "customer_tax_exempt": False,
+                "customer_default_address": Json({}),
+                "customer_addresses": Json([]),
+                "customer_currency_code": "USD",
+                "customer_locale": "en",
             }

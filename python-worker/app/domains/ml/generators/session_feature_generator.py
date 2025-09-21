@@ -69,6 +69,10 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             context_features = self._compute_context_features(events)
             features.update(context_features)
 
+            # NEW: Enhanced session features using device/location data
+            enhanced_context_features = self._compute_enhanced_context_features(events)
+            features.update(enhanced_context_features)
+
             # Add lastComputedAt timestamp
             features["lastComputedAt"] = now_utc()
             logger.debug(
@@ -415,3 +419,192 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             return domain if domain else None
         except:
             return None
+
+    def _compute_enhanced_context_features(
+        self, events: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compute enhanced context features using device/location data from behavioral events"""
+        try:
+            if not events:
+                return {
+                    "deviceType": "",
+                    "browserType": "",
+                    "osType": "",
+                    "screenResolution": "",
+                    "country": "",
+                    "region": "",
+                    "city": "",
+                    "timezone": "",
+                    "language": "",
+                    "referrerType": "direct",
+                    "trafficSource": "direct",
+                    "deviceConsistency": 0,
+                    "locationConsistency": 0,
+                }
+
+            # Extract device and location data from events
+            device_types = []
+            browser_types = []
+            os_types = []
+            screen_resolutions = []
+            countries = []
+            regions = []
+            cities = []
+            timezones = []
+            languages = []
+            referrers = []
+
+            for event in events:
+                event_data = event.get("eventData", {})
+
+                # Device information
+                device_type = event_data.get("deviceType", "")
+                if device_type:
+                    device_types.append(device_type)
+
+                browser_type = event_data.get("browserType", "")
+                if browser_type:
+                    browser_types.append(browser_type)
+
+                os_type = event_data.get("osType", "")
+                if os_type:
+                    os_types.append(os_type)
+
+                screen_resolution = event_data.get("screenResolution", "")
+                if screen_resolution:
+                    screen_resolutions.append(screen_resolution)
+
+                # Location information
+                country = event_data.get("country", "")
+                if country:
+                    countries.append(country)
+
+                region = event_data.get("region", "")
+                if region:
+                    regions.append(region)
+
+                city = event_data.get("city", "")
+                if city:
+                    cities.append(city)
+
+                timezone = event_data.get("timezone", "")
+                if timezone:
+                    timezones.append(timezone)
+
+                language = event_data.get("language", "")
+                if language:
+                    languages.append(language)
+
+                referrer = event_data.get("referrer", "")
+                if referrer:
+                    referrers.append(referrer)
+
+            # Get most common values
+            from collections import Counter
+
+            most_common_device = (
+                Counter(device_types).most_common(1)[0][0] if device_types else ""
+            )
+            most_common_browser = (
+                Counter(browser_types).most_common(1)[0][0] if browser_types else ""
+            )
+            most_common_os = Counter(os_types).most_common(1)[0][0] if os_types else ""
+            most_common_screen = (
+                Counter(screen_resolutions).most_common(1)[0][0]
+                if screen_resolutions
+                else ""
+            )
+            most_common_country = (
+                Counter(countries).most_common(1)[0][0] if countries else ""
+            )
+            most_common_region = (
+                Counter(regions).most_common(1)[0][0] if regions else ""
+            )
+            most_common_city = Counter(cities).most_common(1)[0][0] if cities else ""
+            most_common_timezone = (
+                Counter(timezones).most_common(1)[0][0] if timezones else ""
+            )
+            most_common_language = (
+                Counter(languages).most_common(1)[0][0] if languages else ""
+            )
+
+            # Device consistency (0-100)
+            device_consistency = 0
+            if device_types:
+                device_counts = Counter(device_types)
+                total_devices = len(device_types)
+                most_common_count = device_counts.most_common(1)[0][1]
+                device_consistency = int((most_common_count / total_devices) * 100)
+
+            # Location consistency (0-100)
+            location_consistency = 0
+            if countries:
+                country_counts = Counter(countries)
+                total_countries = len(countries)
+                most_common_count = country_counts.most_common(1)[0][1]
+                location_consistency = int((most_common_count / total_countries) * 100)
+
+            # Referrer analysis
+            referrer_types = []
+            for referrer in referrers:
+                if "google" in referrer.lower():
+                    referrer_types.append("search")
+                elif "facebook" in referrer.lower() or "instagram" in referrer.lower():
+                    referrer_types.append("social")
+                elif "email" in referrer.lower():
+                    referrer_types.append("email")
+                elif referrer == "" or referrer == "direct":
+                    referrer_types.append("direct")
+                else:
+                    referrer_types.append("other")
+
+            most_common_referrer_type = (
+                Counter(referrer_types).most_common(1)[0][0]
+                if referrer_types
+                else "direct"
+            )
+
+            # Traffic source classification
+            traffic_source = "direct"
+            if referrer_types:
+                if "search" in referrer_types:
+                    traffic_source = "search"
+                elif "social" in referrer_types:
+                    traffic_source = "social"
+                elif "email" in referrer_types:
+                    traffic_source = "email"
+                elif "other" in referrer_types:
+                    traffic_source = "referral"
+
+            return {
+                "deviceType": most_common_device,
+                "browserType": most_common_browser,
+                "osType": most_common_os,
+                "screenResolution": most_common_screen,
+                "country": most_common_country,
+                "region": most_common_region,
+                "city": most_common_city,
+                "timezone": most_common_timezone,
+                "language": most_common_language,
+                "referrerType": most_common_referrer_type,
+                "trafficSource": traffic_source,
+                "deviceConsistency": device_consistency,
+                "locationConsistency": location_consistency,
+            }
+        except Exception as e:
+            logger.error(f"Error computing enhanced context features: {str(e)}")
+            return {
+                "deviceType": "",
+                "browserType": "",
+                "osType": "",
+                "screenResolution": "",
+                "country": "",
+                "region": "",
+                "city": "",
+                "timezone": "",
+                "language": "",
+                "referrerType": "direct",
+                "trafficSource": "direct",
+                "deviceConsistency": 0,
+                "locationConsistency": 0,
+            }

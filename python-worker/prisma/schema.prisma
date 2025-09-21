@@ -339,6 +339,7 @@ model Shop {
   currencyCode                 String?                       @db.VarChar(10)
   moneyFormat                  String?                       @db.VarChar(100)
   isActive                     Boolean                       @default(true)
+  onboardingCompleted          Boolean                       @default(false)
   email                        String?                       @db.VarChar(255)
   createdAt                    DateTime                      @default(now())
   updatedAt                    DateTime                      @updatedAt
@@ -403,7 +404,22 @@ model UserFeatures {
   refundedOrders              Int      @default(0)
   refundRate                  Float    @default(0.0)
   totalRefundedAmount         Float    @default(0.0)
-  netLifetimeValue            Float    @default(0.0)
+  netLifetimeValue             Float    @default(0.0)
+  // NEW: Customer demographic features from CustomerData table
+  customerEmail               String?  @db.VarChar(255)
+  customerFirstName           String?  @db.VarChar(100)
+  customerLastName            String?  @db.VarChar(100)
+  customerLocation            Json?    @default("{}")
+  customerTags                Json?    @default("[]")
+  customerCreatedAtShopify    DateTime?
+  customerLastOrderId         String?  @db.VarChar(100)
+  customerMetafields          Json?    @default("[]")
+  customerVerifiedEmail       Boolean  @default(false)
+  customerTaxExempt           Boolean  @default(false)
+  customerDefaultAddress       Json?    @default("{}")
+  customerAddresses           Json?    @default("[]")
+  customerCurrencyCode        String?  @db.VarChar(10)
+  customerLocale              String?  @db.VarChar(10)
   lastComputedAt              DateTime @default(now())
   shop                        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -467,6 +483,17 @@ model ProductFeatures {
   totalRefundedAmount    Float     @default(0.0)
   netRevenue             Float     @default(0.0)
   refundRiskScore        Float     @default(0.0)
+  // NEW: Enhanced product features using previously unused fields
+  contentRichnessScore   Int       @default(0)
+  descriptionLength      Int       @default(0)
+  descriptionHtmlLength  Int       @default(0)
+  productAge             Int?
+  lastUpdatedDays        Int?
+  updateFrequency        Float?
+  productType            String?   @db.VarChar(100)
+  categoryComplexity     Float?
+  availabilityScore      Float?
+  statusStability        Float?
   lastComputedAt         DateTime  @default(now())
   shop                   Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -506,6 +533,13 @@ model CollectionFeatures {
   performanceScore    Float    @default(0)
   seoScore            Int      @default(0)
   imageScore          Int      @default(0)
+  // NEW: Enhanced collection features using previously unused fields
+  handleQuality       Float?
+  templateScore       Int      @default(0)
+  seoOptimizationScore Float?
+  collectionAge        Int?
+  updateFrequency     Float?
+  lifecycleStage      String?  @db.VarChar(50)
   lastComputedAt      DateTime @default(now())
   shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -568,6 +602,18 @@ model CustomerBehaviorFeatures {
   multiTouchAttributionScore  Float    @default(0)
   attributionRevenue          Float    @default(0)
   conversionPathLength        Int      @default(0)
+  // NEW: Enhanced device and location features from behavioral events
+  browserType                 String?  @db.VarChar(50)
+  osType                      String?  @db.VarChar(50)
+  screenResolution            String?  @db.VarChar(20)
+  country                     String?  @db.VarChar(100)
+  region                      String?  @db.VarChar(100)
+  city                        String?  @db.VarChar(100)
+  timezone                    String?  @db.VarChar(50)
+  language                    String?  @db.VarChar(10)
+  referrerType                String?  @db.VarChar(50)
+  trafficSource               String?  @db.VarChar(50)
+  deviceConsistency           Float?
   lastComputedAt              DateTime @default(now())
   shop                        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -648,6 +694,18 @@ model SessionFeatures {
   referrerDomain      String?  @db.VarChar(255)
   landingPage         String?  @db.VarChar(500)
   exitPage            String?  @db.VarChar(500)
+  // NEW: Enhanced session features using device/location data
+  browserType         String?  @db.VarChar(50)
+  osType              String?  @db.VarChar(50)
+  screenResolution    String?  @db.VarChar(20)
+  country             String?  @db.VarChar(100)
+  region              String?  @db.VarChar(100)
+  city                String?  @db.VarChar(100)
+  timezone            String?  @db.VarChar(50)
+  language            String?  @db.VarChar(10)
+  referrerType        String?  @db.VarChar(50)
+  trafficSource       String?  @db.VarChar(50)
+  deviceConsistency   Float?
   lastComputedAt      DateTime @default(now())
   shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
 

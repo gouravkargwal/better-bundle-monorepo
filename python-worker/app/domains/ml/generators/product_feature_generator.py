@@ -94,6 +94,16 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 product_data
             )
 
+            # NEW: Compute enhanced features using previously unused fields
+            content_quality_features = self._compute_content_quality_features(
+                product_data
+            )
+            product_lifecycle_features = self._compute_product_lifecycle_features(
+                product_data
+            )
+            category_features = self._compute_category_features(product_data)
+            availability_features = self._compute_availability_features(product_data)
+
             features = {
                 "shopId": shop_id,
                 "productId": product_id,
@@ -152,6 +162,21 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "totalRefundedAmount": refund_metrics["total_refunded_amount"],
                 "netRevenue": refund_metrics["net_revenue"],
                 "refundRiskScore": refund_metrics["refund_risk_score"],
+                # NEW: Enhanced features using previously unused fields
+                "contentRichnessScore": content_quality_features[
+                    "content_richness_score"
+                ],
+                "descriptionLength": content_quality_features["description_length"],
+                "descriptionHtmlLength": content_quality_features[
+                    "description_html_length"
+                ],
+                "productAge": product_lifecycle_features["product_age"],
+                "lastUpdatedDays": product_lifecycle_features["last_updated_days"],
+                "updateFrequency": product_lifecycle_features["update_frequency"],
+                "productType": category_features["product_type"],
+                "categoryComplexity": category_features["category_complexity"],
+                "availabilityScore": availability_features["availability_score"],
+                "statusStability": availability_features["status_stability"],
                 "lastComputedAt": now_utc(),
             }
 
@@ -620,6 +645,17 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "totalRefundedAmount": 0.0,
             "netRevenue": 0.0,
             "refundRiskScore": 0.0,
+            # NEW: Enhanced features using previously unused fields
+            "contentRichnessScore": 0,
+            "descriptionLength": 0,
+            "descriptionHtmlLength": 0,
+            "productAge": 0,
+            "lastUpdatedDays": 0,
+            "updateFrequency": 0.0,
+            "productType": "",
+            "categoryComplexity": 0,
+            "availabilityScore": 0,
+            "statusStability": 0,
             "lastComputedAt": now_utc(),
         }
 
@@ -840,4 +876,167 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "total_refunded_amount": 0.0,
                 "net_revenue": 0.0,
                 "refund_risk_score": 0.0,
+            }
+
+    def _compute_content_quality_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute content quality features using previously unused fields"""
+        try:
+            # Description analysis (currently unused)
+            description = product_data.get("description", "")
+            description_html = product_data.get("descriptionHtml", "")
+
+            description_length = len(description) if description else 0
+            description_html_length = len(description_html) if description_html else 0
+
+            # Content richness score (0-100)
+            content_richness_score = 0
+            if description_length > 0:
+                content_richness_score += min(
+                    description_length / 10, 50
+                )  # Max 50 points for description
+            if description_html_length > 0:
+                content_richness_score += min(
+                    description_html_length / 20, 30
+                )  # Max 30 points for HTML
+            if description_length > 100 and description_html_length > 50:
+                content_richness_score += 20  # Bonus for rich content
+
+            return {
+                "content_richness_score": min(content_richness_score, 100),
+                "description_length": description_length,
+                "description_html_length": description_html_length,
+            }
+        except Exception as e:
+            logger.error(f"Error computing content quality features: {str(e)}")
+            return {
+                "content_richness_score": 0,
+                "description_length": 0,
+                "description_html_length": 0,
+            }
+
+    def _compute_product_lifecycle_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute product lifecycle features using previously unused fields"""
+        try:
+            created_at = product_data.get("productCreatedAt")
+            updated_at = product_data.get("productUpdatedAt")
+
+            product_age = 0
+            last_updated_days = 0
+            update_frequency = 0.0
+
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at = datetime.datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+                product_age = (now_utc() - created_at).days
+
+            if updated_at:
+                if isinstance(updated_at, str):
+                    updated_at = datetime.datetime.fromisoformat(
+                        updated_at.replace("Z", "+00:00")
+                    )
+                last_updated_days = (now_utc() - updated_at).days
+
+                # Calculate update frequency (updates per month)
+                if created_at and updated_at > created_at:
+                    days_since_creation = (updated_at - created_at).days
+                    if days_since_creation > 0:
+                        update_frequency = (
+                            30.0 / days_since_creation
+                        )  # Updates per month
+
+            return {
+                "product_age": product_age,
+                "last_updated_days": last_updated_days,
+                "update_frequency": round(update_frequency, 2),
+            }
+        except Exception as e:
+            logger.error(f"Error computing product lifecycle features: {str(e)}")
+            return {
+                "product_age": 0,
+                "last_updated_days": 0,
+                "update_frequency": 0.0,
+            }
+
+    def _compute_category_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute category features using previously unused fields"""
+        try:
+            product_type = product_data.get("productType", "")
+
+            # Category complexity score based on product type
+            category_complexity = 0
+            if product_type:
+                # Simple categorization based on common product types
+                if any(
+                    keyword in product_type.lower()
+                    for keyword in ["electronics", "technology", "computer"]
+                ):
+                    category_complexity = 80  # High complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["clothing", "fashion", "apparel"]
+                ):
+                    category_complexity = 60  # Medium-high complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["book", "media", "digital"]
+                ):
+                    category_complexity = 40  # Medium complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["food", "beverage", "consumable"]
+                ):
+                    category_complexity = 30  # Low-medium complexity
+                else:
+                    category_complexity = 50  # Default medium complexity
+
+            return {
+                "product_type": product_type,
+                "category_complexity": category_complexity,
+            }
+        except Exception as e:
+            logger.error(f"Error computing category features: {str(e)}")
+            return {
+                "product_type": "",
+                "category_complexity": 0,
+            }
+
+    def _compute_availability_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute availability features using previously unused fields"""
+        try:
+            status = product_data.get("status", "")
+            is_active = product_data.get("isActive", True)
+
+            # Availability score (0-100)
+            availability_score = 0
+            if is_active:
+                availability_score += 50  # Base score for active products
+            if status and status.upper() == "ACTIVE":
+                availability_score += 30  # Bonus for explicit active status
+            elif status and status.upper() == "DRAFT":
+                availability_score += 10  # Lower score for draft products
+            elif status and status.upper() == "ARCHIVED":
+                availability_score = 0  # No score for archived products
+
+            # Status stability (how stable the product status is)
+            status_stability = 100 if status and status.upper() == "ACTIVE" else 50
+
+            return {
+                "availability_score": min(availability_score, 100),
+                "status_stability": status_stability,
+            }
+        except Exception as e:
+            logger.error(f"Error computing availability features: {str(e)}")
+            return {
+                "availability_score": 0,
+                "status_stability": 0,
             }
