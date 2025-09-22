@@ -20,6 +20,9 @@ from app.consumers.kafka.purchase_attribution_consumer import (
 from app.consumers.kafka.refund_attribution_consumer import (
     RefundAttributionKafkaConsumer,
 )
+from app.consumers.kafka.refund_normalization_consumer import (
+    RefundNormalizationKafkaConsumer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,10 @@ class KafkaConsumerManager:
             # Refund attribution consumer
             refund_attribution_consumer = RefundAttributionKafkaConsumer()
             consumers_to_init.append(refund_attribution_consumer)
+
+            # Refund normalization consumer (listens on shopify-events)
+            refund_normalization_consumer = RefundNormalizationKafkaConsumer()
+            consumers_to_init.append(refund_normalization_consumer)
 
             # Initialize all consumers in parallel with staggered start
             logger.info(

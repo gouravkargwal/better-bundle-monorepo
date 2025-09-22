@@ -8,6 +8,7 @@ import asyncio
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.core.database.simple_db_client import get_database
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
 
@@ -538,15 +539,37 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 }
             logger.info(f"✅ Shop data loaded successfully")
 
+            # Build per-entity incremental windows from PipelineWatermark
+            db = await get_database()
+            pw_rows = await db.pipelinewatermark.find_many(where={"shopId": shop_id})
+
+            def _get_pw(data_type: str):
+                for r in pw_rows:
+                    if getattr(r, "dataType", None) == data_type:
+                        return r
+                return None
+
+            # Resolve since timestamps per entity type (lastFeaturesComputedAt)
+            # If None, we'll treat as full for that type
+            products_since = getattr(
+                _get_pw("products"), "lastFeaturesComputedAt", None
+            )
+            customers_since = getattr(
+                _get_pw("customers"), "lastFeaturesComputedAt", None
+            )
+            orders_since = getattr(_get_pw("orders"), "lastFeaturesComputedAt", None)
+            collections_since = getattr(
+                _get_pw("collections"), "lastFeaturesComputedAt", None
+            )
+
             # Handle incremental vs full data loading with chunked processing
             if incremental:
                 logger.info(f"🔄 Running incremental processing for shop {shop_id}")
-                last_computation_time = (
-                    await repository.get_last_feature_computation_time(shop_id)
+                logger.info(
+                    f"⏰ Feature watermarks: products={products_since}, customers={customers_since}, orders={orders_since}, collections={collections_since}"
                 )
-                logger.info(f"⏰ Last computation time: {last_computation_time}")
 
-                # Load only data modified since last computation using chunked processing
+                # Load only data modified since per-type watermark using chunked processing
                 logger.info(f"📦 Loading products for shop {shop_id}")
                 products = await self.process_entities_in_chunks(
                     shop_id,
@@ -554,7 +577,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size * 2,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        products_since.isoformat() if products_since else None
+                    ),
                 )
                 logger.info(f"📦 Loaded {len(products) if products else 0} products")
                 logger.info(f"👥 Loading customers for shop {shop_id}")
@@ -564,7 +589,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        customers_since.isoformat() if customers_since else None
+                    ),
                 )
                 logger.info(f"👥 Loaded {len(customers) if customers else 0} customers")
 
@@ -575,7 +602,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size * 3,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=orders_since.isoformat() if orders_since else None,
                 )
                 logger.info(f"🛒 Loaded {len(orders) if orders else 0} orders")
 
@@ -586,7 +613,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        collections_since.isoformat() if collections_since else None
+                    ),
                 )
                 logger.info(
                     f"📚 Loaded {len(collections) if collections else 0} collections"
@@ -599,7 +628,30 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size * 3,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        min(
+                            [
+                                p
+                                for p in [
+                                    products_since,
+                                    customers_since,
+                                    orders_since,
+                                    collections_since,
+                                ]
+                                if p is not None
+                            ],
+                            default=None,
+                        ).isoformat()
+                        if any(
+                            [
+                                products_since,
+                                customers_since,
+                                orders_since,
+                                collections_since,
+                            ]
+                        )
+                        else None
+                    ),
                 )
                 user_sessions = await self.process_entities_in_chunks(
                     shop_id,
@@ -607,7 +659,30 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        min(
+                            [
+                                p
+                                for p in [
+                                    products_since,
+                                    customers_since,
+                                    orders_since,
+                                    collections_since,
+                                ]
+                                if p is not None
+                            ],
+                            default=None,
+                        ).isoformat()
+                        if any(
+                            [
+                                products_since,
+                                customers_since,
+                                orders_since,
+                                collections_since,
+                            ]
+                        )
+                        else None
+                    ),
                 )
                 purchase_attributions = await self.process_entities_in_chunks(
                     shop_id,
@@ -615,7 +690,30 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     batch_size,
                     chunk_size=100,
                     incremental=True,
-                    since_timestamp=last_computation_time,
+                    since_timestamp=(
+                        min(
+                            [
+                                p
+                                for p in [
+                                    products_since,
+                                    customers_since,
+                                    orders_since,
+                                    collections_since,
+                                ]
+                                if p is not None
+                            ],
+                            default=None,
+                        ).isoformat()
+                        if any(
+                            [
+                                products_since,
+                                customers_since,
+                                orders_since,
+                                collections_since,
+                            ]
+                        )
+                        else None
+                    ),
                 )
 
                 # If no recent data, skip processing
@@ -693,6 +791,55 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             save_results = await self._save_all_features_with_parallel_processing(
                 shop_id, all_features
             )
+
+            # Update PipelineWatermark.lastFeaturesComputedAt per type if we saved new features
+            try:
+                total_new = sum(
+                    v.get("saved_count", 0)
+                    for v in save_results.values()
+                    if isinstance(v, dict)
+                )
+                if total_new > 0:
+                    from datetime import datetime, timezone
+
+                    window_end = datetime.now(timezone.utc)
+                    # Update each present type
+                    for dtype, key in [
+                        ("products", "products"),
+                        ("customers", "users"),
+                        ("orders", "orders"),
+                        ("collections", "collections"),
+                    ]:
+                        if (
+                            key in save_results
+                            and isinstance(save_results[key], dict)
+                            and save_results[key].get("saved_count", 0) > 0
+                        ):
+                            await db.pipelinewatermark.upsert(
+                                where={
+                                    "shopId_dataType": {
+                                        "shopId": shop_id,
+                                        "dataType": dtype,
+                                    }
+                                },
+                                data={
+                                    "update": {"lastFeaturesComputedAt": window_end},
+                                    "create": {
+                                        "shopId": shop_id,
+                                        "dataType": dtype,
+                                        "lastFeaturesComputedAt": window_end,
+                                    },
+                                },
+                            )
+                    logger.info(
+                        "💾 Feature watermarks updated",
+                        extra={
+                            "shop_id": shop_id,
+                            "window_end": window_end.isoformat(),
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to update feature watermarks: {e}")
 
             # Trigger unified Gorse sync after successful feature computation
             # Add a small delay to ensure database transactions are committed

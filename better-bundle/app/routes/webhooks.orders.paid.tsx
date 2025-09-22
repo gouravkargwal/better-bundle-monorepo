@@ -5,15 +5,6 @@ import prisma from "../db.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const timestamp = new Date().toISOString();
-  console.log(`🚀 [${timestamp}] Webhook request received - orders/paid`);
-  console.log("📋 Request method:", request.method);
-  console.log("📋 Request URL:", request.url);
-  console.log(
-    "📋 Request headers:",
-    Object.fromEntries(request.headers.entries()),
-  );
-
   let payload, session, topic, shop;
 
   try {
@@ -31,75 +22,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    // Log line items for attribution debugging
-    if (payload.line_items && payload.line_items.length > 0) {
-      payload.line_items.forEach((item: any, index: number) => {
-        console.log(`  Item ${index + 1}:`, {
-          id: item.id,
-          variant_id: item.variant_id,
-          product_id: item.product_id,
-          title: item.title,
-          properties: item.properties || {},
-          quantity: item.quantity,
-          price: item.price,
-        });
-      });
-    }
-
-    // ===== CUSTOMER LINKING INTEGRATION =====
-    // Extract session ID from order note attributes for customer linking
-    const sessionId = payload.note_attributes?.find(
-      (attr: any) => attr.name === "session_id",
-    )?.value;
-
-    if (payload.customer && payload.customer.id && sessionId) {
-      try {
-        // Call your Python worker's customer linking API
-        const response = await fetch(
-          `${process.env.PYTHON_WORKER_URL}/api/customer-identity/identify-customer`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              session_id: sessionId,
-              customer_id: payload.customer.id.toString(),
-              shop_id: shop,
-              trigger_event: "purchase",
-              customer_data: {
-                email: payload.customer.email,
-                phone: payload.customer.phone,
-                first_name: payload.customer.first_name,
-                last_name: payload.customer.last_name,
-                order_id: payload.id,
-                order_total: payload.total_price,
-                order_currency: payload.currency,
-              },
-            }),
-          },
-        );
-
-        if (response.ok) {
-          const result = await response.json();
-          console.log(
-            `✅ Customer linking successful: ${result.data?.total_sessions_linked || 0} sessions linked`,
-          );
-        } else {
-          console.error(
-            `❌ Customer linking failed: ${response.status} ${response.statusText}`,
-          );
-        }
-      } catch (error) {
-        console.error(`❌ Error calling customer linking API:`, error);
-        // Don't fail the webhook if customer linking fails
-      }
-    } else {
-      console.log(
-        `ℹ️ Skipping customer linking - no customer ID or session ID found`,
-      );
-    }
-
     // Extract order data from payload
     const order = payload;
     const orderId = order.id?.toString();
@@ -117,106 +39,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!shopRecord) {
       console.error(`❌ Shop not found in database: ${shop}`);
-      console.error(
-        "Available shops:",
-        await prisma.shop.findMany({ select: { shopDomain: true } }),
-      );
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Upsert without composite unique (shopifyId is nullable in schema)
-    const existing = await prisma.rawOrder.findFirst({
-      where: { shopId: shopRecord.id, shopifyId: orderId },
-      select: { id: true, payload: true },
-    });
+    const kafkaProducer = await KafkaProducerService.getInstance();
 
-    let rawRecordId: string | null = null;
-    if (existing) {
-      // Update existing order, preserving any existing refunds
-      const existingPayload = existing.payload as any;
-      const updatedPayload = {
-        ...order,
-        refunds: existingPayload.refunds || [], // Preserve existing refunds
-      };
+    const streamData = {
+      event_type: "order_paid",
+      shop_id: shopRecord.id,
+      shopify_id: orderId,
+      timestamp: new Date().toISOString(),
+      raw_payload: order,
+    } as const;
 
-      const updated = await prisma.rawOrder.update({
-        where: { id: existing.id },
-        data: {
-          payload: updatedPayload,
-          shopifyUpdatedAt: order.updated_at
-            ? new Date(order.updated_at)
-            : new Date(),
-          source: "webhook" as any,
-          format: "rest" as any,
-          receivedAt: new Date() as any,
-        } as any,
-      });
-      rawRecordId = updated.id;
-
-      // Log if we found existing refunds (refund webhook arrived first)
-      if (existingPayload.refunds && existingPayload.refunds.length > 0) {
-        console.log(
-          `✅ Updated order ${orderId} with ${existingPayload.refunds.length} existing refunds`,
-        );
-      }
-    } else {
-      // Create new order record
-      const created = await prisma.rawOrder.create({
-        data: {
-          shopId: shopRecord.id,
-          payload: order,
-          shopifyId: orderId,
-          shopifyCreatedAt: order.created_at
-            ? new Date(order.created_at)
-            : new Date(),
-          shopifyUpdatedAt: order.updated_at
-            ? new Date(order.updated_at)
-            : new Date(),
-          source: "webhook" as any,
-          format: "rest" as any,
-          receivedAt: new Date() as any,
-        } as any,
-      });
-      rawRecordId = created.id;
-    }
-
-    // Publish to Kafka for real-time processing (critical event - always publish)
-    try {
-      const kafkaProducer = await KafkaProducerService.getInstance();
-
-      const streamData = {
-        event_type: "order_paid",
-        shop_id: shopRecord.id,
-        shopify_id: orderId,
-        timestamp: new Date().toISOString(),
-        order_status: "paid",
-      };
-
-      await kafkaProducer.publishShopifyEvent(streamData);
-
-      // Also publish a normalize job for canonical staging
-      if (rawRecordId) {
-        const normalizeJob = {
-          event_type: "normalize_entity",
-          data_type: "orders",
-          format: "rest",
-          shop_id: shopRecord.id,
-          raw_id: rawRecordId,
-          shopify_id: orderId,
-          timestamp: new Date().toISOString(),
-        } as const;
-        await kafkaProducer.publishShopifyEvent(normalizeJob);
-      }
-    } catch (kafkaError) {
-      console.error(`❌ Error publishing to Kafka:`, kafkaError);
-      // Don't fail the webhook if Kafka publishing fails
-    }
+    await kafkaProducer.publishShopifyEvent(streamData);
 
     return json({
       success: true,
       orderId: orderId,
       shopId: shopRecord.id,
-      message: "Order payment data stored successfully",
+      message: "Order paid event published to Kafka",
     });
   } catch (error) {
     console.error(`❌ Error processing ${topic} webhook:`, error);

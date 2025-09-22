@@ -2,26 +2,16 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  let payload, session, topic, shop;
-
   try {
-    const authResult = await authenticate.webhook(request);
-    payload = authResult.payload;
-    session = authResult.session;
-    topic = authResult.topic;
-    shop = authResult.shop;
-  } catch (authError) {
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
+    const { payload, session, shop } = await authenticate.webhook(request);
 
-  if (!session || !shop) {
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
+    if (!session || !shop) {
+      return json({ error: "Authentication failed" }, { status: 401 });
+    }
 
-  try {
     // Extract product data from payload
     const product = payload;
     const productId = product.id?.toString();
@@ -41,39 +31,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.error(`❌ Shop not found: ${shop}`);
       return json({ error: "Shop not found" }, { status: 404 });
     }
+    const kafkaProducer = await KafkaProducerService.getInstance();
 
-    // Store raw product data for deletion event
-    await prisma.rawProduct.create({
-      data: {
-        shopId: shopRecord.id,
-        payload: product,
-        shopifyId: productId,
-        shopifyCreatedAt: product.created_at
-          ? new Date(product.created_at)
-          : new Date(),
-        shopifyUpdatedAt: new Date(), // Use current time for deletion
-      },
-    });
+    const streamData = {
+      event_type: "product_deleted",
+      shop_id: shopRecord.id,
+      shopify_id: productId,
+      timestamp: new Date().toISOString(),
+      raw_payload: product,
+    };
 
-    // Publish deletion event to Redis stream
-    try {
-      const eventData = {
-        event_type: "product_deleted",
-        shop_id: shopRecord.id,
-        shopify_id: productId,
-        timestamp: new Date().toISOString(),
-        payload: product,
-      };
-
-      const redisStreamService = await getRedisStreamService();
-      await redisStreamService.publishShopifyEvent(eventData);
-    } catch (redisError) {
-      console.error(
-        "❌ Failed to publish deletion event to Redis:",
-        redisError,
-      );
-      // Don't fail the webhook if Redis publishing fails
-    }
+    await kafkaProducer.publishShopifyEvent(streamData);
 
     return json({
       success: true,
@@ -82,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       message: "Product deletion event stored successfully",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
+    console.error(`❌ Error processing products delete webhook:`, error);
     return json(
       {
         error: "Internal server error",

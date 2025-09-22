@@ -10,8 +10,8 @@ from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
 from app.core.database.simple_db_client import get_database
-from app.core.redis_client import streams_manager
-from app.core.stream_manager import stream_manager, StreamType
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
 from prisma import Json
 
@@ -560,15 +560,19 @@ class OrderNormalizationService:
     async def _publish_order_events(self, shop_id: str, order_id: str):
         """Publish events after successful order processing."""
         try:
-            await stream_manager.publish_to_domain(
-                StreamType.PURCHASE_ATTRIBUTION,
-                {
-                    "event_type": "purchase_ready_for_attribution",
-                    "shop_id": shop_id,
-                    "order_id": order_id,
-                    "timestamp": now_utc().isoformat(),
-                },
-            )
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+            try:
+                await publisher.publish_purchase_attribution_event(
+                    {
+                        "event_type": "purchase_ready_for_attribution",
+                        "shop_id": shop_id,
+                        "order_id": order_id,
+                        "timestamp": now_utc().isoformat(),
+                    }
+                )
+            finally:
+                await publisher.close()
         except Exception as e:
             self.logger.error(f"Failed to publish order events: {e}")
 

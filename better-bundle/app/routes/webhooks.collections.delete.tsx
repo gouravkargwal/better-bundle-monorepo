@@ -2,16 +2,16 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
-
-  if (!session || !shop) {
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
-
   try {
+    const { payload, session, shop } = await authenticate.webhook(request);
+
+    if (!session || !shop) {
+      return json({ error: "Authentication failed" }, { status: 401 });
+    }
+
     // Extract collection data from payload
     const collection = payload;
     const collectionId = collection.id?.toString();
@@ -32,38 +32,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Shop not found" }, { status: 404 });
     }
 
-    // Store raw collection data for deletion event
-    await prisma.rawCollection.create({
-      data: {
-        shopId: shopRecord.id,
-        payload: collection,
-        shopifyId: collectionId,
-        shopifyCreatedAt: collection.created_at
-          ? new Date(collection.created_at)
-          : new Date(),
-        shopifyUpdatedAt: new Date(), // Use current time for deletion
-      },
-    });
-
     // Publish deletion event to Redis stream
-    try {
-      const eventData = {
-        event_type: "collection_deleted",
-        shop_id: shopRecord.id,
-        shopify_id: collectionId,
-        timestamp: new Date().toISOString(),
-        payload: collection,
-      };
+    const kafkaProducer = await KafkaProducerService.getInstance();
 
-      const redisStreamService = await getRedisStreamService();
-      await redisStreamService.publishShopifyEvent(eventData);
-    } catch (redisError) {
-      console.error(
-        "❌ Failed to publish collection deletion event to Redis:",
-        redisError,
-      );
-      // Don't fail the webhook if Redis publishing fails
-    }
+    const eventData = {
+      event_type: "collection_deleted",
+      shop_id: shopRecord.id,
+      shopify_id: collectionId,
+      timestamp: new Date().toISOString(),
+      raw_payload: collection,
+    };
+
+    await kafkaProducer.publishShopifyEvent(eventData);
 
     return json({
       success: true,
@@ -72,7 +52,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       message: "Collection deletion event stored successfully",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
+    console.error(`❌ Error processing collections delete webhook:`, error);
     return json(
       {
         error: "Internal server error",

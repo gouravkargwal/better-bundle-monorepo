@@ -1,83 +1,143 @@
+"""
+Kafka-based refund normalization consumer for processing refund_created events
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict
-from datetime import datetime
+import json
+from typing import Any, Dict, Optional, List
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.consumers.base_consumer import BaseConsumer
-from app.core.logging import get_logger
+from app.core.kafka.consumer import KafkaConsumer
+from app.core.config.kafka_settings import kafka_settings
+from app.core.messaging.event_subscriber import EventSubscriber
+from app.core.messaging.interfaces import EventHandler
+from app.core.messaging.event_publisher import EventPublisher
 from app.core.database.simple_db_client import get_database
-from app.shared.constants.redis import (
-    REFUND_NORMALIZATION_STREAM,
-    REFUND_NORMALIZATION_GROUP,
-)
+from app.core.logging import get_logger
 from prisma import Json
 
 
-class RefundNormalizationConsumer(BaseConsumer):
-    """Consumes refund_created events and normalizes refund data into RefundData and RefundLineItemData."""
+logger = get_logger(__name__)
 
-    def __init__(self) -> None:
-        super().__init__(
-            stream_name=REFUND_NORMALIZATION_STREAM,
-            consumer_group=REFUND_NORMALIZATION_GROUP,
-            consumer_name="refund-normalization-consumer",
-            batch_size=50,
-            poll_timeout=1000,
-            max_retries=3,
-            retry_delay=0.5,
-        )
-        self.logger = get_logger(__name__)
 
-    async def _process_single_message(self, message: Dict[str, Any]):
+class RefundNormalizationKafkaConsumer:
+    """Kafka consumer for refund normalization jobs (listens to shopify-events)."""
+
+    def __init__(self):
+        self.consumer = KafkaConsumer(kafka_settings.model_dump())
+        self.event_subscriber = EventSubscriber(kafka_settings.model_dump())
+        self.publisher = EventPublisher(kafka_settings.model_dump())
+        self._initialized = False
+
+    async def initialize(self):
+        """Initialize consumer and handlers."""
         try:
-            self.logger.info(f"🔄 Processing refund normalization message: {message}")
+            # Initialize Kafka consumer and event subscriber on refund-specific topic
+            topics = ["refund-normalization-jobs"]
+            group_id = "refund-normalization-processors"
 
-            # Handle both string keys and numbered keys from Redis Stream
-            # String keys: {'event_type': 'refund_created', 'shop_id': '...', ...}
-            # Numbered keys: {'0': 'event_type', '1': 'refund_created', '2': 'shop_id', ...}
-            if "event_type" in message:
-                # String keys format
-                event_type = message.get("event_type")
-                shop_id = message.get("shop_id")
-                order_id = message.get("shopify_id")
-                raw_record_id = message.get("raw_record_id")
-            else:
-                # Numbered keys format - convert to string keys
-                event_type = message.get("1")  # '1' contains the event_type value
-                shop_id = message.get("3")  # '3' contains the shop_id value
-                order_id = message.get("5")  # '5' contains the shopify_id value
-                raw_record_id = message.get("7")  # '7' contains the raw_record_id value
+            await self.consumer.initialize(topics=topics, group_id=group_id)
+            await self.event_subscriber.initialize(topics=topics, group_id=group_id)
+
+            # Add handler
+            self.event_subscriber.add_handler(
+                RefundNormalizationJobHandler(self.publisher)
+            )
+
+            self._initialized = True
+            logger.info("Refund normalization Kafka consumer initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize refund normalization consumer: {e}")
+            raise
+
+    async def start_consuming(self):
+        """Start consuming messages."""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            logger.info("Starting refund normalization consumer...")
+            await self.event_subscriber.consume_and_handle(
+                topics=["refund-normalization-jobs"],
+                group_id="refund-normalization-processors",
+            )
+        except Exception as e:
+            logger.error(f"Error in refund normalization consumer: {e}")
+            raise
+
+    async def close(self):
+        """Close consumer and dependencies."""
+        if self.consumer:
+            await self.consumer.close()
+        if self.event_subscriber:
+            await self.event_subscriber.close()
+        if self.publisher:
+            await self.publisher.close()
+        logger.info("Refund normalization consumer closed")
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Get health status of the refund normalization consumer."""
+        return {
+            "status": "running" if self._initialized else "stopped",
+            "last_health_check": datetime.utcnow().isoformat(),
+        }
+
+
+class RefundNormalizationJobHandler(EventHandler):
+    """Handler for refund normalization events coming from shopify-events."""
+
+    def __init__(self, publisher: EventPublisher):
+        self.logger = get_logger(__name__)
+        self.publisher = publisher
+
+    def can_handle(self, event_type: str) -> bool:
+        # We only handle refund_created events from the unified shopify-events topic
+        return event_type == "refund_created"
+
+    async def handle(self, event: Dict[str, Any]) -> bool:
+        try:
+            self.logger.info(f"🔄 Processing refund normalization message: {event}")
+
+            # Extract data from the simplified event structure
+            event_type = event.get("event_type")
+            shop_id = event.get("shop_id")
+            order_id = event.get("shopify_id")
+            refund_id = event.get("refund_id")
 
             self.logger.info(
-                f"📋 Extracted data: event_type={event_type}, shop_id={shop_id}, order_id={order_id}, raw_record_id={raw_record_id}"
+                f"📋 Extracted data: event_type={event_type}, shop_id={shop_id}, order_id={order_id}, refund_id={refund_id}"
             )
 
             if event_type != "refund_created":
-                self.logger.warning(f"⚠️ Skipping non-refund event: {event_type}")
-                return
+                self.logger.info(f"⏭️ Ignoring non-refund event: {event_type}")
+                return True
 
-            if not shop_id or not order_id or not raw_record_id:
+            if not shop_id or not order_id or not refund_id:
                 self.logger.error(
                     "❌ Invalid refund_created payload - missing required fields",
-                    message=message,
+                    message=event,
                 )
-                return
+                return True
 
             db = await get_database()
             self.logger.info(
-                f"🔍 Fetching RawOrder data using raw_record_id: {raw_record_id}"
+                f"🔍 Fetching RawOrder data for shop_id: {shop_id}, order_id: {order_id}"
             )
 
-            # Load raw refund data from RawOrder using the raw_record_id
-            raw_order = await db.raworder.find_unique(where={"id": raw_record_id})
+            # Load raw refund data from RawOrder using shop_id and order_id
+            raw_order = await db.raworder.find_first(
+                where={"shopId": shop_id, "shopifyId": order_id}
+            )
             if not raw_order or not getattr(raw_order, "payload", None):
                 self.logger.warning(
                     "RawOrder not found for refund normalization",
                     shop_id=shop_id,
                     order_id=order_id,
                 )
-                return
+                return True
 
             # Extract refund from payload
             payload_data = (
@@ -91,27 +151,33 @@ class RefundNormalizationConsumer(BaseConsumer):
                     shop_id=shop_id,
                     order_id=order_id,
                 )
-                # This is normal - the order webhook will update this record with complete data
-                # For now, we can still process the refund with minimal data
 
-            # Extract refund from payload
-            refund_obj = None
-            refund_id = None
+            # Extract specific refund from payload by refund_id
+            refund_obj: Optional[Dict[str, Any]] = None
             try:
-                refunds = payload_data.get("refunds") or []
+                refunds: List[Dict[str, Any]] = payload_data.get("refunds") or []
                 if refunds:
-                    # Get the most recent refund (last one in the array)
-                    refund_obj = refunds[-1]
-                    refund_id = str(refund_obj.get("id", ""))
-                    self.logger.info(f"📋 Processing refund ID: {refund_id}")
+                    # Find the specific refund by refund_id
+                    for refund in refunds:
+                        if str(refund.get("id", "")) == str(refund_id):
+                            refund_obj = refund
+                            break
+
+                    if refund_obj:
+                        self.logger.info(f"📋 Processing refund ID: {refund_id}")
+                    else:
+                        self.logger.warning(
+                            f"Refund {refund_id} not found in payload refunds"
+                        )
+                        return True
                 else:
                     self.logger.warning("No refunds found in payload")
-                    return
+                    return True
             except Exception as e:
                 self.logger.error(
                     "Failed to extract refund from raw payload", error=str(e)
                 )
-                return
+                return True
 
             if not refund_obj:
                 self.logger.warning(
@@ -119,7 +185,7 @@ class RefundNormalizationConsumer(BaseConsumer):
                     shop_id=shop_id,
                     order_id=order_id,
                 )
-                return
+                return True
 
             # PRE-CHECK: Only process refunds from orders with extension interactions
             if not await self._has_extension_interactions_for_order(
@@ -130,7 +196,7 @@ class RefundNormalizationConsumer(BaseConsumer):
                     shop_id=shop_id,
                     order_id=order_id,
                 )
-                return
+                return True
 
             # Process refund within a transaction
             async with db.tx() as transaction:
@@ -208,9 +274,7 @@ class RefundNormalizationConsumer(BaseConsumer):
                             "quantity": quantity,
                             "unitPrice": Decimal(str(unit_price)),
                             "refundAmount": Decimal(str(refund_amount_item)),
-                            "properties": Json(
-                                {}
-                            ),  # Will be populated by attribution consumer
+                            "properties": Json({}),  # Populated by attribution consumer
                         }
                     )
 
@@ -222,17 +286,24 @@ class RefundNormalizationConsumer(BaseConsumer):
                 line_items=len(refund_line_items),
             )
 
-            # Trigger refund attribution after successful normalization
-            from app.core.stream_manager import stream_manager, StreamType
-
-            await stream_manager.publish_to_domain(
-                StreamType.REFUND_ATTRIBUTION, message
+            # Trigger refund attribution after successful normalization via Kafka
+            await self.publisher.publish_refund_attribution_event(
+                {
+                    "event_type": "refund_created",
+                    "shop_id": shop_id,
+                    "refund_id": refund_id,
+                    "shopify_id": order_id,
+                }
             )
-            self.logger.info("📤 Triggered refund attribution after normalization")
+            self.logger.info(
+                "📤 Triggered refund attribution after normalization (Kafka)"
+            )
+
+            return True
 
         except Exception as e:
             self.logger.error("Failed to normalize refund", error=str(e))
-            raise
+            return False
 
     async def _has_extension_interactions_for_order(
         self, db, shop_id: str, order_id: str
@@ -263,27 +334,17 @@ class RefundNormalizationConsumer(BaseConsumer):
                 )
                 return False
 
-            # Check for interactions in the last 30 days
-            from datetime import timedelta
-
             cutoff_time = datetime.utcnow() - timedelta(days=30)
 
             # Check for any interactions from attribution-eligible extensions
-            # (Phoenix, Venus, Apollo - excluding Atlas web pixel tracking)
             interactions = await db.userinteraction.find_many(
                 where={
                     "shopId": shop_id,
                     "customerId": customer_id,
                     "createdAt": {"gte": cutoff_time},
-                    "extensionType": {
-                        "in": [
-                            "phoenix",
-                            "venus",
-                            "apollo",
-                        ]  # Attribution-eligible extensions
-                    },
+                    "extensionType": {"in": ["phoenix", "venus", "apollo"]},
                 },
-                take=1,  # We only need to know if any exist
+                take=1,
             )
 
             has_interactions = len(interactions) > 0
