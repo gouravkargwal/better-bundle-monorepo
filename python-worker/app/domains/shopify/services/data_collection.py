@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.core.database.simple_db_client import get_database
 
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
@@ -245,8 +246,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         include_customers: bool = True,
         include_collections: bool = True,
     ) -> Dict[str, Any]:
-        """Collect all available data from Shopify API - Simplified Industry Standard"""
-        logger.info(f"Starting data collection for {shop_domain}")
+        """Collect all available data from Shopify API with session tracking"""
+        # Start collection session
+        collection_start_time = now_utc()
+        session_id = f"collection_{shop_id}_{int(collection_start_time.timestamp())}"
+
+        logger.info(
+            f"🚀 Starting data collection session: {session_id} for {shop_domain}"
+        )
 
         try:
             # 1. Check permissions
@@ -276,17 +283,25 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 shop_domain, access_token, shop_id, collectable_data
             )
 
-            # 4. Trigger normalization
+            # 4. Trigger normalization with session tracking
             await self._trigger_normalization(
-                shop_id, results.get("processed_types", [])
+                shop_id, results.get("processed_types", []), collection_start_time
             )
 
             total_items = sum(
                 len(data) for data in results.get("collected_data", {}).values() if data
             )
-            logger.info(f"Collection completed: {total_items} items")
+            logger.info(
+                f"✅ Collection session {session_id} completed: {total_items} items"
+            )
 
-            return {"success": True, "total_items": total_items}
+            return {
+                "success": True,
+                "message": f"Collected {total_items} items",
+                "session_id": session_id,
+                "session_start_time": collection_start_time.isoformat(),
+                "total_items": total_items,
+            }
 
         except Exception as e:
             logger.error(f"Collection failed for {shop_domain}: {e}")
@@ -348,8 +363,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             storage_method = getattr(self.data_storage, config["store"])
             await storage_method(data, shop_id)
 
-    async def _trigger_normalization(self, shop_id: str, data_types: List[str]):
-        """Trigger normalization for processed data types using Kafka"""
+    async def _trigger_normalization(
+        self, shop_id: str, data_types: List[str], collection_start_time: datetime
+    ):
+        """Trigger normalization for processed data types using Kafka with per-data-type time tracking"""
         if not data_types:
             return
 
@@ -362,40 +379,152 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 data_types=data_types,
             )
 
+            # Get per-data-type time ranges for data collected in this session
+            data_type_time_ranges = await self._get_per_data_type_session_time_ranges(
+                shop_id, data_types, collection_start_time
+            )
+
+            if not data_type_time_ranges:
+                logger.warning(
+                    f"⚠️ No new data found for shop {shop_id} in this collection session, skipping normalization"
+                )
+                return
+
             # Initialize event publisher
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
 
             try:
-                # Create normalization event
-                normalization_event = {
-                    "event_type": "normalize_batch",
-                    "shop_id": shop_id,
-                    "data_type": "all",  # Process all data types
-                    "data_types": data_types,  # Pass all data types for processing
-                    "format": "graphql",
-                    "page_size": 100,
-                    "timestamp": now_utc().isoformat(),
-                    "source": "data_collection_service",
-                }
+                # Send separate normalization events for each data type with its specific time range
+                for data_type, time_range in data_type_time_ranges.items():
+                    if not time_range:
+                        logger.warning(f"⚠️ No time range for {data_type}, skipping")
+                        continue
 
-                # Publish to normalization-jobs topic
-                message_id = await publisher.publish_normalization_event(
-                    normalization_event
-                )
+                    normalization_event = {
+                        "event_type": "normalize_data",
+                        "shop_id": shop_id,
+                        "data_type": data_type,  # Process specific data type
+                        "format": "graphql",
+                        "start_time": time_range["start_time"],
+                        "end_time": time_range["end_time"],
+                        "timestamp": now_utc().isoformat(),
+                        "source": "data_collection_service",
+                    }
 
-                logger.info(
-                    f"✅ Normalization event published successfully",
-                    shop_id=shop_id,
-                    data_types=data_types,
-                    message_id=message_id,
-                )
+                    # Publish to normalization-jobs topic
+                    message_id = await publisher.publish_normalization_event(
+                        normalization_event
+                    )
+
+                    logger.info(
+                        f"✅ Normalization event published for {data_type}",
+                        shop_id=shop_id,
+                        data_type=data_type,
+                        time_range=time_range,
+                        message_id=message_id,
+                    )
 
             finally:
                 await publisher.close()
 
         except Exception as e:
             logger.error(f"❌ Failed to trigger normalization via Kafka: {e}")
+
+    async def _get_per_data_type_session_time_ranges(
+        self, shop_id: str, data_types: List[str], collection_start_time: datetime
+    ) -> Dict[str, Optional[Dict[str, str]]]:
+        """Get per-data-type time ranges for data collected in this specific session"""
+        data_type_time_ranges = {}
+
+        try:
+            db = await get_database()
+
+            for data_type in data_types:
+                raw_table = {
+                    "orders": db.raworder,
+                    "products": db.rawproduct,
+                    "customers": db.rawcustomer,
+                    "collections": db.rawcollection,
+                }.get(data_type)
+
+                if not raw_table:
+                    logger.warning(f"⚠️ Unknown data type: {data_type}")
+                    data_type_time_ranges[data_type] = None
+                    continue
+
+                # Get data collected in this session for this specific data type
+                # Use a time window approach: look for data collected within the last 10 minutes
+                from datetime import timedelta
+
+                time_window_start = collection_start_time - timedelta(minutes=10)
+
+                logger.info(
+                    f"🔍 Looking for {data_type} data between {time_window_start.isoformat()} and now"
+                )
+
+                records = await raw_table.find_many(
+                    where={
+                        "shopId": shop_id,
+                        "extractedAt": {"gte": time_window_start},
+                    },
+                    order={"extractedAt": "asc"},
+                )
+
+                if not records:
+                    logger.info(
+                        f"📊 No new {data_type} data collected in this session for shop {shop_id}"
+                    )
+                    data_type_time_ranges[data_type] = None
+                    continue
+
+                # Get the earliest and latest extractedAt times for this data type in this session
+                earliest = await raw_table.find_first(
+                    where={
+                        "shopId": shop_id,
+                        "extractedAt": {"gte": time_window_start},
+                    },
+                    order={"extractedAt": "asc"},
+                )
+                latest = await raw_table.find_first(
+                    where={
+                        "shopId": shop_id,
+                        "extractedAt": {"gte": time_window_start},
+                    },
+                    order={"extractedAt": "desc"},
+                )
+
+                if earliest and latest:
+                    time_range = {
+                        "start_time": earliest.extractedAt.isoformat(),
+                        "end_time": latest.extractedAt.isoformat(),
+                    }
+                    data_type_time_ranges[data_type] = time_range
+                    logger.info(
+                        f"📊 {data_type}: {len(records)} records, time range: {time_range}"
+                    )
+                else:
+                    logger.warning(f"⚠️ Could not determine time range for {data_type}")
+                    data_type_time_ranges[data_type] = None
+
+            # Log summary
+            successful_types = [
+                dt for dt, tr in data_type_time_ranges.items() if tr is not None
+            ]
+            failed_types = [
+                dt for dt, tr in data_type_time_ranges.items() if tr is None
+            ]
+
+            if successful_types:
+                logger.info(f"✅ Per-data-type time ranges: {successful_types}")
+            if failed_types:
+                logger.warning(f"⚠️ Failed data types: {failed_types}")
+
+            return data_type_time_ranges
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get per-data-type session time ranges: {e}")
+            return {data_type: None for data_type in data_types}
 
     async def _get_last_collection_time(
         self, shop_domain: str, data_type: str
@@ -425,7 +554,28 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             else:
                 return None
 
-            if latest_record and hasattr(latest_record, "extractedAt"):
+            # Log latest record timestamps for transparency
+            if latest_record:
+                shopify_updated = getattr(latest_record, "shopifyUpdatedAt", None)
+                extracted_at = getattr(latest_record, "extractedAt", None)
+                logger.info(
+                    "Resolved incremental watermark",
+                    extra={
+                        "shop_id": shop.id,
+                        "data_type": data_type,
+                        "shopifyUpdatedAt": (
+                            shopify_updated.isoformat() if shopify_updated else None
+                        ),
+                        "extractedAt": (
+                            extracted_at.isoformat() if extracted_at else None
+                        ),
+                    },
+                )
+
+            if latest_record and hasattr(latest_record, "shopifyUpdatedAt"):
+                return latest_record.shopifyUpdatedAt
+            elif latest_record and hasattr(latest_record, "extractedAt"):
+                # Fallback to extractedAt if shopifyUpdatedAt is not available
                 return latest_record.extractedAt
             return None
 

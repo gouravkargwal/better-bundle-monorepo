@@ -79,17 +79,51 @@ class EventPublisher:
         key = job_data.get("shop_id")
 
         try:
+            # Pre-publish diagnostic logging
+            logger.info(
+                "Publishing data collection job",
+                extra={
+                    "topic": "data-collection-jobs",
+                    "job_type": job_data.get("job_type"),
+                    "shop_id": job_data.get("shop_id"),
+                    "shop_domain": job_data.get("shop_domain"),
+                    "data_types": job_data.get("data_types"),
+                    "include_products": job_data.get("include_products"),
+                    "include_orders": job_data.get("include_orders"),
+                    "include_customers": job_data.get("include_customers"),
+                    "include_collections": job_data.get("include_collections"),
+                    "key": key,
+                    "payload_keys": list(job_with_metadata.keys()),
+                },
+            )
+
             message_id = await self._producer.send(
                 "data-collection-jobs", job_with_metadata, key
             )
 
+            # Post-publish confirmation logging
             logger.info(
-                f"Data job published: {job_data.get('job_type')} for shop {job_data.get('shop_id')}"
+                "Data collection job published",
+                extra={
+                    "topic": "data-collection-jobs",
+                    "message_id": message_id,
+                    "job_type": job_data.get("job_type"),
+                    "shop_id": job_data.get("shop_id"),
+                    "data_types": job_data.get("data_types"),
+                },
             )
             return message_id
 
         except Exception as e:
-            logger.error(f"Failed to publish data job: {e}")
+            # Failure logging with minimal payload echo
+            logger.error(
+                f"Failed to publish data job: {e}",
+                extra={
+                    "topic": "data-collection-jobs",
+                    "job_type": job_data.get("job_type"),
+                    "shop_id": job_data.get("shop_id"),
+                },
+            )
             raise
 
     async def publish_ml_training_event(self, training_data: Dict[str, Any]) -> str:
