@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  kafka_b:
+    image: bitnami/kafka:latest
+    container_name: kafka_b
+    ports:
+      # Expose the EXTERNAL listener port to your host machine
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    environment:
+      # KRaft settings
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka_b:9094
+
+      # --- CORRECTED LISTENER CONFIGURATION ---
+      - KAFKA_CFG_LISTENERS=INTERNAL://:9093,EXTERNAL://:9092,CONTROLLER://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka_b:9093,EXTERNAL://localhost:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - ALLOW_PLAINTEXT_LISTENER=yes
+
+      # Enable auto-topic creation
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=4
+      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=1
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka_b
+    ports:
+      - "8080:8080"
+    environment:
+      # Connect to the INTERNAL listener
+      KAFKA_CLUSTERS_0_NAME: local-kafka-kraft
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka_b:9093
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+  rest-proxy:
+    image: confluentinc/cp-kafka-rest:latest
+    depends_on:
+      - kafka_b
+    ports:
+      - "8082:8082"
+    hostname: rest-proxy
+    container_name: rest-proxy
+    environment:
+      KAFKA_REST_HOST_NAME: rest-proxy
+      # Connect to the INTERNAL listener
+      KAFKA_REST_BOOTSTRAP_SERVERS: "kafka_b:9093"
+      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+
+volumes:
+  kafka_data:
+    driver: local

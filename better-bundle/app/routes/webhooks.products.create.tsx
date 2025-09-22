@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
@@ -64,9 +64,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } as any,
     });
 
-    // Publish to Redis Stream for real-time processing
+    // Publish to Kafka for real-time processing
     try {
-      const streamService = await getRedisStreamService();
+      const kafkaProducer = await KafkaProducerService.getInstance();
 
       const streamData = {
         event_type: "product_created",
@@ -75,7 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         timestamp: new Date().toISOString(),
       };
 
-      await streamService.publishShopifyEvent(streamData);
+      await kafkaProducer.publishShopifyEvent(streamData);
 
       // Also publish a normalize job for canonical staging
       const normalizeJob = {
@@ -87,10 +87,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopify_id: productId,
         timestamp: new Date().toISOString(),
       } as const;
-      await streamService.publishShopifyEvent(normalizeJob);
-    } catch (streamError) {
-      console.error(`❌ Error publishing to Redis Stream:`, streamError);
-      // Don't fail the webhook if stream publishing fails
+      await kafkaProducer.publishShopifyEvent(normalizeJob);
+    } catch (kafkaError) {
+      console.error(`❌ Error publishing to Kafka:`, kafkaError);
+      // Don't fail the webhook if Kafka publishing fails
     }
 
     return json({

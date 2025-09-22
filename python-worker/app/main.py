@@ -2,61 +2,43 @@
 Main application for BetterBundle Python Worker
 """
 
-import asyncio
-import json
-import time
 import uvicorn
-from datetime import datetime
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Header, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
 
 from app.core.config.settings import settings
-from app.core.logging import setup_logging, get_logger
+from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
-# Domain imports
 from app.domains.shopify.services import (
     ShopifyDataCollectionService,
     ShopifyAPIClient,
     ShopifyPermissionService,
 )
-from app.domains.ml.services import (
-    FeatureEngineeringService,
-)
 
-# All analytics services removed - they were causing async_timing decorator errors
 
-# Consumer imports
 from app.consumers.consumer_manager import consumer_manager
 from app.consumers.data_collection_consumer import DataCollectionConsumer
 from app.consumers.normalization_consumer import NormalizationConsumer
 from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsumer
 
-# AnalyticsConsumer removed - was using deleted analytics services
 from app.consumers.feature_computation_consumer import FeatureComputationConsumer
 
-# from app.consumers.behavioral_events_consumer import BehavioralEventsConsumer  # Removed - using unified analytics
 from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
 from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
 from app.consumers.refund_normalization_consumer import RefundNormalizationConsumer
 from app.consumers.refund_attribution_consumer import RefundAttributionConsumer
 
-# Note: Old Gorse consumers removed - using unified_gorse_service.py instead
-from app.core.database.simple_db_client import get_database, close_database
-from app.core.redis_client import streams_manager
-from datetime import datetime
-from typing import Optional
+from app.core.kafka.consumer_manager import KafkaConsumerManager
 
-# API imports
+
 from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.extension_activity import router as extension_activity_router
 
-# Initialize logging (already configured in main.py)
 logger = get_logger(__name__)
 
 
@@ -69,12 +51,32 @@ async def lifespan(app: FastAPI):
     # Initialize services
     await initialize_services()
 
+    # Start Kafka consumers
+    global kafka_consumer_manager
+    if kafka_consumer_manager:
+        logger.info("🔄 Starting Kafka consumers...")
+        await kafka_consumer_manager.start_all()
+        logger.info("✅ Kafka consumers started successfully")
+
     logger.info("BetterBundle Python Worker started successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down BetterBundle Python Worker...")
+
+    # Stop Kafka consumers first
+    if kafka_consumer_manager:
+        logger.info("🔄 Stopping Kafka consumers...")
+        await kafka_consumer_manager.stop_all()
+        logger.info("✅ Kafka consumers stopped")
+
+    # Close topic manager
+    from app.core.kafka.topic_manager import topic_manager
+
+    await topic_manager.close()
+    logger.info("✅ Kafka topic manager closed")
+
     await cleanup_services()
     logger.info("BetterBundle Python Worker shutdown complete")
 
@@ -120,13 +122,16 @@ app.add_middleware(
 # Global service instances
 services = {}
 
+# Kafka Consumer Manager (global instance)
+kafka_consumer_manager = None
+
 
 async def initialize_services():
     """Initialize only essential services at startup"""
     try:
         logger.info("Initializing essential services...")
 
-        # Initialize only core Shopify services (lazy load others)
+        # Initialize Shopify services first
         services["shopify_api"] = ShopifyAPIClient()
         services["shopify_permissions"] = ShopifyPermissionService(
             api_client=services["shopify_api"]
@@ -135,45 +140,33 @@ async def initialize_services():
             api_client=services["shopify_api"],
             permission_service=services["shopify_permissions"],
         )
+        logger.info("✅ Shopify services initialized")
 
-        # Initialize only data collection consumer (most critical)
+        # Initialize consumers
         services["data_collection_consumer"] = DataCollectionConsumer(
-            shopify_service=services["shopify"]
+            services["shopify"]
         )
-
-        # Initialize normalization consumer
         services["normalization_consumer"] = NormalizationConsumer()
-
-        # Initialize purchase attribution consumer
         services["purchase_attribution_consumer"] = PurchaseAttributionConsumer()
-
-        # Initialize feature computation consumer
         services["feature_computation_consumer"] = FeatureComputationConsumer()
-
-        # Behavioral events consumer removed - using unified analytics system
-
-        # Initialize customer linking consumer
         services["customer_linking_consumer"] = CustomerLinkingConsumer()
-
-        # Initialize Shopify events consumer
         services["shopify_events_consumer"] = ShopifyEventsConsumer()
-
-        # Initialize refund consumers
         services["refund_normalization_consumer"] = RefundNormalizationConsumer()
         services["refund_attribution_consumer"] = RefundAttributionConsumer()
+        logger.info("✅ Consumers initialized")
 
-        # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
+        # Initialize Kafka Topic Manager and create topics
+        from app.core.kafka.topic_manager import topic_manager
 
-        # Initialize billing services
-        from app.domains.billing.services.billing_service import BillingService
-        from app.domains.billing.jobs.monthly_billing_job import MonthlyBillingJob
-        from app.core.database.simple_db_client import get_database
+        await topic_manager.initialize()
+        await topic_manager.create_topics_if_not_exist()
+        logger.info("✅ Kafka topics created/verified")
 
-        # Get database connection
-        db = await get_database()
-
-        services["billing_service"] = BillingService(db)
-        services["monthly_billing_job"] = MonthlyBillingJob(db)
+        # Initialize Kafka Consumer Manager
+        global kafka_consumer_manager
+        kafka_consumer_manager = KafkaConsumerManager()
+        await kafka_consumer_manager.initialize(services)
+        logger.info("✅ Kafka Consumer Manager initialized")
 
         # Register and start consumers
         consumer_manager.register_consumers(
@@ -185,15 +178,9 @@ async def initialize_services():
             shopify_events_consumer=services["shopify_events_consumer"],
             refund_normalization_consumer=services["refund_normalization_consumer"],
             refund_attribution_consumer=services["refund_attribution_consumer"],
-            # Note: Old Gorse consumers removed - using unified_gorse_service.py instead
-            # Note: BehavioralEventsConsumer removed - using unified analytics system
         )
 
-        # Start consumer manager (this will start all registered consumers)
         await consumer_manager.start()
-
-        # Note: Monthly billing now handled by GitHub Actions
-        # See .github/workflows/monthly-billing.yml
 
         logger.info("Essential services initialized successfully")
 
@@ -202,38 +189,12 @@ async def initialize_services():
         raise
 
 
-async def get_service(service_name: str):
-    """Lazy load services on demand"""
-    if service_name not in services:
-        logger.info(f"Lazy loading service: {service_name}")
-
-        if service_name == "feature_engineering":
-            logger.info("Using FeatureEngineeringService (refactored architecture)")
-            services["feature_engineering"] = FeatureEngineeringService()
-        elif service_name == "ml_pipeline":
-            if "feature_engineering" not in services:
-                await get_service("feature_engineering")
-            # Note: gorse_ml service removed - using unified_gorse_service.py instead
-        # All analytics services removed - they were causing async_timing decorator errors
-        # Analytics consumer removed - was using deleted analytics services
-        elif service_name == "feature_computation_consumer":
-            services["feature_computation_consumer"] = FeatureComputationConsumer()
-
-    return services[service_name]
-
-
-# Monthly billing scheduler removed - now handled by GitHub Actions
-# See .github/workflows/monthly-billing.yml for the cron job
-
-
 async def cleanup_services():
     """Cleanup all services"""
     try:
 
         # Stop consumer manager
         await consumer_manager.stop()
-
-        # Note: Old Gorse services removed - using unified_gorse_service.py instead
 
         # Shutdown database connection
         from app.core.database.simple_db_client import close_database
@@ -258,1175 +219,209 @@ async def health_check():
         "services": list(services.keys()),
     }
 
-    # ShopifyEventsConsumer health check removed - consumer was replaced by NormalizationConsumer
-
     return health_status
 
 
-# Shopify data endpoints
-@app.post("/api/shopify/collect-data")
-async def collect_shopify_data(
-    shop_id: str,
-    background_tasks: BackgroundTasks,
-    collection_config: Optional[Dict[str, Any]] = None,
-):
-    """Collect Shopify data for a shop"""
-    try:
-        if "shopify" not in services:
-            raise HTTPException(status_code=500, detail="Shopify service not available")
-
-        # Start data collection in background
-        background_tasks.add_task(
-            services["shopify"].collect_all_data_by_shop_id,
-            shop_id,
-            collection_config or {},
-        )
-
-        return {
-            "message": "Data collection started",
-            "shop_id": shop_id,
-            "status": "processing",
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to start data collection: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/shopify/data-status/{shop_id}")
-async def get_data_status(shop_id: str):
-    """Get data collection status for a shop"""
-    try:
-        if "shopify" not in services:
-            raise HTTPException(status_code=500, detail="Shopify service not available")
-
-        status = await services["shopify"].get_collection_status(shop_id)
-        return status
-
-    except Exception as e:
-        logger.error(f"Failed to get data status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Main table processing endpoints
-@app.post("/api/main-table/process")
-async def trigger_main_table_processing(
+# Generic Kafka Event Endpoints
+@app.post("/api/kafka/events/publish")
+async def publish_kafka_event(
     request: Request,
     background_tasks: BackgroundTasks,
 ):
-    """Trigger main table processing for a shop"""
+    """Generic endpoint to publish events to any Kafka topic"""
     try:
-        from app.core.redis_client import streams_manager
-        from app.shared.helpers import now_utc
+        from app.core.messaging.event_publisher import EventPublisher
 
-        # Extract parameters from request body (JSON) or form data
+        # Extract parameters from request body
         try:
             body = await request.json()
         except:
-            # Fallback to form data
             form_data = await request.form()
             body = dict(form_data)
 
+        # Required fields
+        topic = body.get("topic")
+        event_data = body.get("event_data", {})
+        event_type = body.get("event_type")
         shop_id = body.get("shop_id")
-        shop_domain = body.get("shop_domain", "")
+        key = body.get("key", shop_id)  # Use shop_id as default key
 
         # Validate required parameters
-        if not shop_id:
-            raise HTTPException(status_code=400, detail="shop_id is required")
+        if not topic:
+            raise HTTPException(status_code=400, detail="topic is required")
+        if not event_data:
+            raise HTTPException(status_code=400, detail="event_data is required")
 
-        # Validate that the shop exists and is active
+        # Initialize event publisher
+        from app.core.config.kafka_settings import kafka_settings
+
+        publisher = EventPublisher(kafka_settings.model_dump())
+        await publisher.initialize()
+
         try:
-            from app.core.database.simple_db_client import get_database
+            # Add metadata to event data
+            event_with_metadata = {
+                **event_data,
+                "timestamp": now_utc().isoformat(),
+                "event_type": event_type,
+                "shop_id": shop_id,
+                "source": "api_trigger",
+            }
 
-            db = await get_database()
-            shop = await db.shop.find_unique(where={"id": shop_id})
-
-            if not shop:
-                raise HTTPException(
-                    status_code=404, detail=f"Shop not found for ID: {shop_id}"
+            # Publish event based on topic
+            if topic == "shopify-events":
+                message_id = await publisher.publish_shopify_event(event_with_metadata)
+            elif topic == "data-collection-jobs":
+                message_id = await publisher.publish_data_job_event(event_with_metadata)
+            elif topic == "normalization-jobs":
+                message_id = await publisher.publish_normalization_event(
+                    event_with_metadata
                 )
-
-            if not shop.isActive:
-                raise HTTPException(
-                    status_code=400, detail=f"Shop is inactive for ID: {shop_id}"
+            elif topic == "ml-training":
+                message_id = await publisher.publish_ml_training_event(
+                    event_with_metadata
                 )
+            elif topic == "behavioral-events":
+                message_id = await publisher.publish_behavioral_event(
+                    event_with_metadata
+                )
+            elif topic == "billing-events":
+                message_id = await publisher.publish_billing_event(event_with_metadata)
+            elif topic == "access-control":
+                message_id = await publisher.publish_access_control_event(
+                    event_with_metadata
+                )
+            elif topic == "analytics-events":
+                message_id = await publisher.publish_analytics_event(
+                    event_with_metadata
+                )
+            elif topic == "notification-events":
+                message_id = await publisher.publish_notification_event(
+                    event_with_metadata
+                )
+            elif topic == "integration-events":
+                message_id = await publisher.publish_integration_event(
+                    event_with_metadata
+                )
+            elif topic == "audit-events":
+                message_id = await publisher.publish_audit_event(event_with_metadata)
+            elif topic == "feature-computation-jobs":
+                message_id = await publisher.publish_feature_computation_event(
+                    event_with_metadata
+                )
+            elif topic == "customer-linking-jobs":
+                message_id = await publisher.publish_customer_linking_event(
+                    event_with_metadata
+                )
+            elif topic == "purchase-attribution-jobs":
+                message_id = await publisher.publish_purchase_attribution_event(
+                    event_with_metadata
+                )
+            elif topic == "refund-attribution-jobs":
+                message_id = await publisher.publish_refund_attribution_event(
+                    event_with_metadata
+                )
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown topic: {topic}")
 
-            logger.info(
-                f"Shop validation successful for main table processing: {shop_id} (domain: {shop.shopDomain})"
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to validate shop for main table processing: {e}")
-            raise HTTPException(
-                status_code=500, detail=f"Failed to validate shop: {str(e)}"
-            )
-
-        # Generate a unique job ID for main table processing
-        job_id = f"main_table_processing_{shop_id}_{int(now_utc().timestamp())}"
-
-        # Publish the main table processing event to Redis stream
-        event_id = await streams_manager.publish_data_job_event(
-            job_id=job_id,
-            shop_id=shop_id,
-            shop_domain=shop_domain,
-            access_token="",  # Not needed for main table processing
-            job_type="main_table_processing",
-        )
-
-        return {
-            "message": "Main table processing triggered",
-            "job_id": job_id,
-            "shop_id": shop_id,
-            "shop_domain": shop_domain,
-            "event_id": event_id,
-            "status": "processing",
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        import traceback
-
-        error_detail = str(e) if str(e) else f"Unknown error: {type(e).__name__}"
-        logger.error(f"Failed to trigger main table processing: {error_detail}")
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=error_detail)
-
-
-@app.get("/api/main-table/status/{shop_id}")
-async def get_main_table_processing_status(shop_id: str):
-    """Get main table processing status for a shop"""
-    try:
-        if "main_table_processing_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Main table processing consumer not available"
-            )
-
-        # Get health status from the consumer
-        health_status = await services[
-            "main_table_processing_consumer"
-        ].get_health_status()
-
-        # Get active jobs for this shop
-        active_jobs = {}
-        for job_id, job_data in services[
-            "main_table_processing_consumer"
-        ].active_jobs.items():
-            if job_data.get("shop_id") == shop_id:
-                active_jobs[job_id] = job_data
-
-        return {
-            "shop_id": shop_id,
-            "consumer_status": health_status,
-            "active_jobs": active_jobs,
-            "timestamp": now_utc().isoformat(),
-        }
+            return {
+                "message": f"Event published to {topic}",
+                "topic": topic,
+                "message_id": message_id,
+                "event_type": event_type,
+                "shop_id": shop_id,
+                "status": "published",
+                "timestamp": now_utc().isoformat(),
+            }
+        finally:
+            await publisher.close()
 
     except Exception as e:
-        logger.error(f"Failed to get main table processing status: {e}")
+        logger.error(f"Failed to publish Kafka event: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Feature computation endpoints
-@app.post("/api/features/compute")
-async def compute_features(
-    request: Request,
-    background_tasks: BackgroundTasks,
-):
-    """Trigger feature computation consumer via Redis stream"""
+@app.get("/api/kafka/topics")
+async def get_available_topics():
+    """Get list of available Kafka topics and their configurations"""
     try:
-        from app.core.redis_client import streams_manager
-        from app.shared.helpers import now_utc
+        from app.core.config.kafka_settings import kafka_settings
 
-        # Extract parameters from request body (JSON) or form data
-        try:
-            body = await request.json()
-        except:
-            # Fallback to form data
-            form_data = await request.form()
-            body = dict(form_data)
-
-        shop_id = body.get("shop_id")
-        batch_size = int(body.get("batch_size", 100))
-        features_ready = body.get("features_ready", False)
-        incremental = body.get("incremental", True)  # Default to incremental processing
-
-        # Validate required parameters
-        if not shop_id:
-            raise HTTPException(status_code=400, detail="shop_id is required")
-
-        # Generate a unique job ID
-        job_id = f"feature_compute_{shop_id}_{int(now_utc().timestamp())}"
-
-        # Prepare event metadata
-        metadata = {
-            "batch_size": batch_size,
-            "incremental": incremental,
-            "trigger_source": "api_endpoint",
-            "timestamp": now_utc().isoformat(),
-            "processed_count": 0,  # Will be updated by the consumer
-        }
-
-        # Publish the feature computation event to Redis stream
-        event_id = await streams_manager.publish_features_computed_event(
-            job_id=job_id,
-            shop_id=shop_id,
-            features_ready=features_ready,
-            metadata=metadata,
-        )
+        topics_info = {}
+        for topic_name, config in kafka_settings.topics.items():
+            topics_info[topic_name] = {
+                "partitions": config.get("partitions", 1),
+                "replication_factor": config.get("replication_factor", 1),
+                "retention_ms": config.get("retention_ms"),
+                "compression_type": config.get("compression_type", "none"),
+                "cleanup_policy": config.get("cleanup_policy", "delete"),
+            }
 
         return {
-            "message": "Feature computation consumer triggered",
-            "job_id": job_id,
-            "shop_id": shop_id,
-            "batch_size": batch_size,
-            "event_id": event_id,
-            "status": "queued",
+            "topics": topics_info,
+            "total_topics": len(topics_info),
             "timestamp": now_utc().isoformat(),
         }
 
     except Exception as e:
-        logger.error(f"Failed to trigger feature computation consumer: {e}")
+        logger.error(f"Failed to get Kafka topics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/features/status/{shop_id}")
-async def get_feature_computation_status(shop_id: str):
-    """Get feature computation status for a shop"""
-    try:
-        # Get the feature computation consumer from services
-        if "feature_computation_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Feature computation consumer not available"
-            )
-
-        consumer = services["feature_computation_consumer"]
-
-        # Get active jobs for this shop
-        active_jobs = {
-            job_id: job_info
-            for job_id, job_info in consumer.active_feature_jobs.items()
-            if job_info.get("shop_id") == shop_id
-        }
-
-        return {
-            "shop_id": shop_id,
-            "consumer_status": consumer.status.value,
-            "active_jobs": len(active_jobs),
-            "jobs": active_jobs,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get feature computation status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ML pipeline endpoints
-@app.post("/api/ml/pipeline/run")
-async def run_ml_pipeline(
-    shop_id: str,
-    pipeline_config: Dict[str, Any],
-    background_tasks: BackgroundTasks,
-):
-    """Run ML pipeline for a shop"""
-    try:
-        # Lazy load ML pipeline service
-        ml_pipeline_service = await get_service("ml_pipeline")
-
-        # Start ML pipeline in background
-        background_tasks.add_task(
-            ml_pipeline_service.run_end_to_end_pipeline,
-            shop_id,
-            {},  # Empty shop_data for now
-            pipeline_config,
-        )
-
-        return {
-            "message": "ML pipeline started",
-            "shop_id": shop_id,
-            "status": "processing",
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to start ML pipeline: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Data collection consumer endpoints
-@app.post("/api/data-collection/trigger")
-async def trigger_data_collection_consumer(
-    request: Request,
-    background_tasks: BackgroundTasks,
-):
-    """Trigger data collection consumer via Redis stream"""
-    try:
-        from app.core.redis_client import streams_manager
-        from app.shared.helpers import now_utc
-
-        # Extract parameters from request body (JSON) or form data
-        try:
-            body = await request.json()
-        except:
-            # Fallback to form data
-            form_data = await request.form()
-            body = dict(form_data)
-
-        shop_id = body.get("shop_id")
-        shop_domain = body.get("shop_domain")
-        access_token = body.get("access_token")
-        job_type = body.get("job_type", "data_collection")
-
-        # Validate required parameters
-        if not shop_id:
-            raise HTTPException(status_code=400, detail="shop_id is required")
-        if not shop_domain:
-            raise HTTPException(status_code=400, detail="shop_domain is required")
-        if not access_token:
-            raise HTTPException(status_code=400, detail="access_token is required")
-
-        # Generate a unique job ID
-        job_id = f"data_collection_{shop_id}_{int(now_utc().timestamp())}"
-
-        # Publish the data collection job to Redis stream
-        event_id = await streams_manager.publish_data_job_event(
-            job_id=job_id,
-            shop_id=shop_id,
-            shop_domain=shop_domain,
-            access_token=access_token,
-            job_type=job_type,
-        )
-
-        return {
-            "message": "Data collection consumer triggered",
-            "job_id": job_id,
-            "shop_id": shop_id,
-            "shop_domain": shop_domain,
-            "event_id": event_id,
-            "status": "queued",
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to trigger data collection consumer: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/data-collection/status/{shop_id}")
-async def get_data_collection_status(shop_id: str):
-    """Get data collection status for a shop"""
-    try:
-        # Get the data collection consumer from services
-        if "data_collection_consumer" not in services:
-            raise HTTPException(
-                status_code=500, detail="Data collection consumer not available"
-            )
-
-        consumer = services["data_collection_consumer"]
-
-        # Get active jobs for this shop
-        active_jobs = {
-            job_id: job_info
-            for job_id, job_info in consumer.active_jobs.items()
-            if job_info.get("shop_id") == shop_id
-        }
-
-        return {
-            "shop_id": shop_id,
-            "consumer_status": consumer.status.value,
-            "active_jobs": len(active_jobs),
-            "jobs": active_jobs,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get data collection status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Consumer monitoring endpoints
-@app.get("/api/consumers/status")
+@app.get("/api/kafka/consumers/status")
 async def get_consumers_status():
-    """Get status of all Redis consumers"""
+    """Get status of all Kafka consumers"""
     try:
-        return consumer_manager.get_all_consumers_status()
+        consumer_status = {}
+
+        # Check each consumer type
+        consumer_types = [
+            "shopify_events_consumer",
+            "data_collection_consumer",
+            "normalization_consumer",
+            "purchase_attribution_consumer",
+            "feature_computation_consumer",
+            "customer_linking_consumer",
+            "shopify_events_consumer",
+            "refund_normalization_consumer",
+            "refund_attribution_consumer",
+        ]
+
+        for consumer_type in consumer_types:
+            if consumer_type in services:
+                consumer = services[consumer_type]
+                if hasattr(consumer, "get_health_status"):
+                    status = await consumer.get_health_status()
+                elif hasattr(consumer, "active_jobs"):
+                    status = {
+                        "status": "running",
+                        "active_jobs": len(consumer.active_jobs),
+                        "last_health_check": now_utc().isoformat(),
+                    }
+                else:
+                    status = {"status": "unknown"}
+
+                consumer_status[consumer_type] = status
+            else:
+                consumer_status[consumer_type] = {"status": "not_initialized"}
+
+        # Add Kafka consumer manager status
+        global kafka_consumer_manager
+        if kafka_consumer_manager:
+            kafka_status = await kafka_consumer_manager.health_check()
+            consumer_status["kafka_consumer_manager"] = kafka_status
+        else:
+            consumer_status["kafka_consumer_manager"] = {"status": "not_initialized"}
+
+        return {
+            "consumers": consumer_status,
+            "total_consumers": len(consumer_status),
+            "timestamp": now_utc().isoformat(),
+        }
+
     except Exception as e:
         logger.error(f"Failed to get consumers status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/consumers/{consumer_name}/status")
-async def get_consumer_status(consumer_name: str):
-    """Get status of a specific consumer"""
-    try:
-        status = consumer_manager.get_consumer_status(consumer_name)
-        if not status:
-            raise HTTPException(
-                status_code=404, detail=f"Consumer {consumer_name} not found"
-            )
-        return status
-    except Exception as e:
-        logger.error(f"Failed to get consumer status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/consumers/{consumer_name}/circuit-breaker")
-async def get_circuit_breaker_status(consumer_name: str):
-    """Get circuit breaker status for a specific consumer"""
-    try:
-        consumer = consumer_manager.get_consumer(consumer_name)
-        if not consumer:
-            raise HTTPException(
-                status_code=404, detail=f"Consumer {consumer_name} not found"
-            )
-        return consumer.get_circuit_breaker_status()
-    except Exception as e:
-        logger.error(f"Failed to get circuit breaker status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/consumers/{consumer_name}/reset-circuit-breaker")
-async def reset_circuit_breaker(consumer_name: str):
-    """Reset circuit breaker for a specific consumer"""
-    try:
-        consumer = consumer_manager.get_consumer(consumer_name)
-        if not consumer:
-            raise HTTPException(
-                status_code=404, detail=f"Consumer {consumer_name} not found"
-            )
-
-        consumer.reset_circuit_breaker()
-        return {
-            "message": f"Circuit breaker reset for consumer {consumer_name}",
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to reset circuit breaker: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/consumers/{consumer_name}/restart")
-async def restart_consumer(consumer_name: str):
-    """Restart a specific consumer"""
-    try:
-        consumer = consumer_manager.get_consumer(consumer_name)
-        if not consumer:
-            raise HTTPException(
-                status_code=404, detail=f"Consumer {consumer_name} not found"
-            )
-
-        # Stop and restart the consumer
-        await consumer.stop()
-        await asyncio.sleep(2)  # Wait a bit
-        await consumer.start()
-
-        return {
-            "message": f"Consumer {consumer_name} restarted",
-            "status": consumer.status.value,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to restart consumer {consumer_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Billing endpoints
-@app.post("/api/billing/run-monthly")
-async def run_monthly_billing():
-    """Manually trigger monthly billing for all shops"""
-    try:
-        if "monthly_billing_job" not in services:
-            raise HTTPException(
-                status_code=500, detail="Monthly billing job not available"
-            )
-
-        logger.info("🔄 Manual monthly billing triggered")
-        result = await services["monthly_billing_job"].run_monthly_billing()
-
-        return {
-            "message": "Monthly billing completed",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to run monthly billing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/run-shop/{shop_id}")
-async def run_shop_billing(shop_id: str):
-    """Manually trigger billing for a specific shop"""
-    try:
-        if "monthly_billing_job" not in services:
-            raise HTTPException(
-                status_code=500, detail="Monthly billing job not available"
-            )
-
-        logger.info(f"🔄 Manual billing triggered for shop {shop_id}")
-        result = await services["monthly_billing_job"].run_shop_billing(shop_id)
-
-        return {
-            "message": f"Billing completed for shop {shop_id}",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to run billing for shop {shop_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Trial data setup endpoints
-@app.post("/api/trial/setup-test-data")
-async def setup_test_trial_data():
-    """Create test trial data for testing"""
-    try:
-        from app.utils.trial_data_setup import create_test_scenarios
-
-        result = await create_test_scenarios()
-
-        return {
-            "message": "Test trial data created",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to setup test trial data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/trial/create-shop")
-async def create_shop_with_trial(
-    shop_id: str,
-    shop_domain: str,
-    trial_threshold: float = 200.0,
-    trial_revenue: float = 0.0,
-    is_trial_active: bool = True,
-):
-    """Create a shop with trial billing plan"""
-    try:
-        from app.utils.trial_data_setup import create_shop_with_trial_plan
-
-        result = await create_shop_with_trial_plan(
-            shop_id=shop_id,
-            shop_domain=shop_domain,
-            trial_threshold=trial_threshold,
-            trial_revenue=trial_revenue,
-            is_trial_active=is_trial_active,
-        )
-
-        return {
-            "message": f"Shop with trial plan created",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to create shop with trial: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/trial/status/{shop_id}")
-async def get_trial_status(shop_id: str):
-    """Get trial status for a shop"""
-    try:
-        from app.utils.trial_data_setup import get_trial_status
-
-        result = await get_trial_status(shop_id)
-
-        return {
-            "message": f"Trial status for shop {shop_id}",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get trial status for shop {shop_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/trial/update-revenue/{shop_id}")
-async def update_trial_revenue(shop_id: str, additional_revenue: float):
-    """Update trial revenue for a shop"""
-    try:
-        from app.utils.trial_data_setup import update_trial_revenue
-
-        result = await update_trial_revenue(shop_id, additional_revenue)
-
-        return {
-            "message": f"Trial revenue updated for shop {shop_id}",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to update trial revenue for shop {shop_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/trial/cleanup-test-data")
-async def cleanup_test_trial_data():
-    """Cleanup test trial data"""
-    try:
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-
-        # Delete test shops and related data
-        test_shop_ids = [
-            "test-new-trial",
-            "test-progress-trial",
-            "test-completed-trial",
-        ]
-
-        # Delete billing events
-        await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
-
-        # Delete billing plans
-        await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
-
-        # Delete shops
-        await db.shop.delete_many(where={"id": {"in": test_shop_ids}})
-
-        return {
-            "message": "Test trial data cleaned up",
-            "deleted_shops": test_shop_ids,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to cleanup test trial data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/setup-comprehensive-test-data")
-async def setup_comprehensive_billing_test_data():
-    """Create comprehensive billing test data with real revenue and attribution"""
-    try:
-        from app.utils.comprehensive_billing_test import (
-            create_comprehensive_billing_test_data,
-        )
-
-        result = await create_comprehensive_billing_test_data()
-
-        return {
-            "message": "Comprehensive billing test data created",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to setup comprehensive billing test data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/billing/test-summary")
-async def get_billing_test_summary():
-    """Get summary of all billing test data"""
-    try:
-        from app.utils.comprehensive_billing_test import get_billing_test_summary
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-        result = await get_billing_test_summary(db)
-
-        return {
-            "message": "Billing test data summary",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get billing test summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/cleanup-comprehensive-test-data")
-async def cleanup_comprehensive_billing_test_data():
-    """Clean up comprehensive billing test data"""
-    try:
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-
-        # Delete all test shops and related data
-        test_shop_ids = [
-            "test-trial-shop",
-            "test-progress-shop",
-            "test-completed-trial",
-            "test-regular-shop",
-            "test-high-revenue-shop",
-        ]
-
-        # Delete in reverse order to handle foreign key constraints
-        await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
-        await db.billinginvoice.delete_many(where={"shopId": {"in": test_shop_ids}})
-        await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
-        await db.interactionevent.delete_many(where={"shopId": {"in": test_shop_ids}})
-        await db.purchaseevent.delete_many(where={"shopId": {"in": test_shop_ids}})
-        await db.shop.delete_many(where={"id": {"in": test_shop_ids}})
-
-        return {
-            "message": "Comprehensive billing test data cleaned up",
-            "deleted_shops": test_shop_ids,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to cleanup comprehensive billing test data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/add-test-data-for-existing-shops")
-async def add_test_data_for_existing_shops():
-    """Add comprehensive test data for existing development stores"""
-    try:
-        from app.utils.development_store_test import add_test_data_for_existing_shops
-
-        result = await add_test_data_for_existing_shops()
-
-        return {
-            "message": "Test data added for existing shops",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to add test data for existing shops: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/billing/existing-shops-summary")
-async def get_existing_shops_summary():
-    """Get summary of existing shops with their test data"""
-    try:
-        from app.utils.development_store_test import get_existing_shops_summary
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-        result = await get_existing_shops_summary(db)
-
-        return {
-            "message": "Existing shops summary",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get existing shops summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/setup-simple-test-data")
-async def setup_simple_billing_test_data():
-    """Create simple billing test data"""
-    try:
-        from app.utils.simple_billing_test import create_simple_billing_test_data
-
-        result = await create_simple_billing_test_data()
-
-        return {
-            "message": "Simple billing test data created",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to setup simple billing test data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/billing/simple-test-summary")
-async def get_simple_billing_test_summary():
-    """Get summary of simple billing test data"""
-    try:
-        from app.utils.simple_billing_test import get_simple_billing_test_summary
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-        result = await get_simple_billing_test_summary(db)
-
-        return {
-            "message": "Simple billing test data summary",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get simple billing test summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/billing/setup-currency-test-data")
-async def setup_currency_test_data():
-    """Create currency test data with different currencies"""
-    try:
-        from app.utils.currency_test_data import create_currency_test_data
-
-        result = await create_currency_test_data()
-
-        return {
-            "message": "Currency test data created",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to setup currency test data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/billing/currency-test-summary")
-async def get_currency_test_summary():
-    """Get summary of currency test data"""
-    try:
-        from app.utils.currency_test_data import get_currency_test_summary
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-        result = await get_currency_test_summary(db)
-
-        return {
-            "message": "Currency test data summary",
-            "result": result,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get currency test summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/debug/redis-health")
-async def check_redis_health():
-    """Check Redis connection health"""
-    try:
-        from app.core.redis_client import check_redis_health
-
-        is_healthy = await check_redis_health()
-        return {"redis_healthy": is_healthy, "timestamp": now_utc().isoformat()}
-    except Exception as e:
-        logger.error(f"Failed to check Redis health: {e}")
-        return {
-            "redis_healthy": False,
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/database-health")
-async def check_database_health():
-    """Check database connection health"""
-    try:
-        from app.core.database.simple_db_client import check_database_health
-
-        is_healthy = await check_database_health()
-        return {
-            "database_healthy": is_healthy,
-            "timestamp": now_utc().isoformat(),
-            "timeout_settings": {
-                "connect_timeout": settings.DATABASE_CONNECT_TIMEOUT,
-                "query_timeout": settings.DATABASE_QUERY_TIMEOUT,
-                "pool_timeout": settings.DATABASE_POOL_TIMEOUT,
-            },
-        }
-    except Exception as e:
-        logger.error(f"Failed to check database health: {e}")
-        return {
-            "database_healthy": False,
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/consumer-database-test/{consumer_name}")
-async def test_consumer_database_connection(consumer_name: str):
-    """Test database connection from a specific consumer's perspective"""
-    try:
-        consumer = consumer_manager.get_consumer(consumer_name)
-        if not consumer:
-            raise HTTPException(
-                status_code=404, detail=f"Consumer {consumer_name} not found"
-            )
-
-        # Try to get the database and run a simple query
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-
-        # Test a simple query that consumers might run
-        start_time = now_utc()
-        result = await db.query_raw('SELECT COUNT(*) as shop_count FROM "Shop"')
-        query_time = (now_utc() - start_time).total_seconds()
-
-        return {
-            "consumer_name": consumer_name,
-            "database_test": "success",
-            "query_time_seconds": query_time,
-            "shop_count": result[0]["shop_count"] if result else 0,
-            "timestamp": now_utc().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Consumer database test failed for {consumer_name}: {e}")
-        return {
-            "consumer_name": consumer_name,
-            "database_test": "failed",
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/raw-payload-structure/{shop_id}")
-async def debug_raw_payload_structure(
-    shop_id: str, data_type: str = "products", limit: int = 3
-):
-    """Debug the structure of raw payloads to understand field extraction failures"""
-    try:
-        from app.core.database.simple_db_client import get_database
-        import json
-
-        db = await get_database()
-
-        # Map data types to table names
-        table_map = {
-            "products": "RawProduct",
-            "orders": "RawOrder",
-            "customers": "RawCustomer",
-            "collections": "RawCollection",
-        }
-
-        table_name = table_map.get(data_type, "RawProduct")
-
-        # Get sample raw payloads
-        raw_samples = await db.query_raw(
-            f'SELECT "shopifyId", "payload", "extractedAt" FROM "{table_name}" WHERE "shopId" = $1 LIMIT $2',
-            shop_id,
-            limit,
-        )
-
-        parsed_samples = []
-        for sample in raw_samples:
-            payload = sample["payload"]
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except:
-                    pass
-
-            # Analyze payload structure
-            structure_analysis = {
-                "shopifyId": sample["shopifyId"],
-                "extractedAt": sample["extractedAt"],
-                "payload_type": type(payload).__name__,
-                "top_level_keys": (
-                    list(payload.keys()) if isinstance(payload, dict) else "Not a dict"
-                ),
-                "has_raw_data": (
-                    "raw_data" in payload if isinstance(payload, dict) else False
-                ),
-                "has_data_key": (
-                    "data" in payload if isinstance(payload, dict) else False
-                ),
-                "has_direct_type": (
-                    data_type in payload if isinstance(payload, dict) else False
-                ),
-            }
-
-            # Check nested structure
-            if isinstance(payload, dict):
-                if "raw_data" in payload and isinstance(payload["raw_data"], dict):
-                    structure_analysis["raw_data_keys"] = list(
-                        payload["raw_data"].keys()
-                    )
-                    structure_analysis["has_nested_type"] = (
-                        data_type in payload["raw_data"]
-                    )
-
-                if "data" in payload and isinstance(payload["data"], dict):
-                    structure_analysis["data_keys"] = list(payload["data"].keys())
-                    structure_analysis["has_data_type"] = data_type in payload["data"]
-
-            # Sample of actual payload (first 500 chars)
-            payload_str = (
-                str(payload)[:500] + "..." if len(str(payload)) > 500 else str(payload)
-            )
-            structure_analysis["payload_sample"] = payload_str
-
-            parsed_samples.append(structure_analysis)
-
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "table_name": table_name,
-            "sample_count": len(parsed_samples),
-            "samples": parsed_samples,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Debug raw payload structure failed: {e}")
-        return {
-            "shop_id": shop_id,
-            "data_type": data_type,
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.get("/api/debug/table-counts/{shop_id}")
-async def check_table_counts(shop_id: str):
-    """Check raw vs main table counts for debugging"""
-    try:
-        from app.core.database.simple_db_client import get_database
-
-        db = await get_database()
-
-        # Check all data types
-        results = {}
-        for data_type in ["products", "orders", "customers", "collections"]:
-            # Map to table names
-            raw_tables = {
-                "products": "RawProduct",
-                "orders": "RawOrder",
-                "customers": "RawCustomer",
-                "collections": "RawCollection",
-            }
-            main_tables = {
-                "products": "ProductData",
-                "orders": "OrderData",
-                "customers": "CustomerData",
-                "collections": "CollectionData",
-            }
-
-            raw_table = raw_tables[data_type]
-            main_table = main_tables[data_type]
-
-            # Get counts
-            raw_count = await db.query_raw(
-                f'SELECT COUNT(*) as count FROM "{raw_table}" WHERE "shopId" = $1',
-                shop_id,
-            )
-            main_count = await db.query_raw(
-                f'SELECT COUNT(*) as count FROM "{main_table}" WHERE "shopId" = $1',
-                shop_id,
-            )
-
-            results[data_type] = {
-                "raw_count": raw_count[0]["count"] if raw_count else 0,
-                "main_count": main_count[0]["count"] if main_count else 0,
-                "gap": (raw_count[0]["count"] if raw_count else 0)
-                - (main_count[0]["count"] if main_count else 0),
-            }
-
-        return {
-            "shop_id": shop_id,
-            "table_comparison": results,
-            "timestamp": now_utc().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Table counts check failed: {e}")
-        return {
-            "shop_id": shop_id,
-            "error": str(e),
-            "timestamp": now_utc().isoformat(),
-        }
-
-
-@app.post("/api/shopify/permissions/cache/clear")
-async def clear_permission_cache(shop_domain: Optional[str] = None):
-    """Clear permission cache for a specific shop or all shops"""
-    try:
-        if "shopify" not in services:
-            raise HTTPException(status_code=500, detail="Shopify service not available")
-
-        shopify_service = services["shopify"]
-        # Clear the cache of the permission service that's actually used by the data collection service
-        await shopify_service.permission_service.clear_permission_cache(shop_domain)
-
-        if shop_domain:
-            return {"message": f"Permission cache cleared for {shop_domain}"}
-        else:
-            return {"message": "All permission cache cleared"}
-    except Exception as e:
-        logger.error(f"Failed to clear permission cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Webhook endpoints
-@app.post("/collect/behavioral-events")
-async def handle_behavioral_event(request: Request):
-    """This endpoint receives behavioral events from the Shopify Web Pixel and queues them for background processing.
-
-    Authentication: Uses shop domain validation for basic security.
-    """
-    try:
-        if "webhook_handler" not in services:
-            raise HTTPException(status_code=500, detail="Webhook handler not available")
-
-        # Get payload from request body
-        payload = await request.json()
-        shop_domain = payload.get("shop_domain")
-
-        # Validate shop domain
-        if not shop_domain:
-            raise HTTPException(
-                status_code=400, detail="shop_domain required in payload."
-            )
-
-        # Basic shop validation with Redis caching
-        try:
-            from app.core.redis_client import get_redis_client
-
-            # Try Redis cache first
-            redis_client = await get_redis_client()
-            cache_key = f"shop_domain:{shop_domain}"
-            cached_shop_data = await redis_client.get(cache_key)
-
-            if cached_shop_data:
-                # Cache hit - decode and validate
-                shop_data = json.loads(
-                    cached_shop_data.decode("utf-8")
-                    if isinstance(cached_shop_data, bytes)
-                    else cached_shop_data
-                )
-                if not shop_data.get("isActive", False):
-                    raise HTTPException(status_code=403, detail="Shop is not active.")
-            else:
-                # Cache miss - query database
-                db = await get_database()
-                shop = await db.shop.find_unique(
-                    where={"shopDomain": shop_domain},
-                )
-
-                if not shop:
-                    raise HTTPException(
-                        status_code=404, detail="Shop not found in our system."
-                    )
-
-                if not shop.isActive:
-                    raise HTTPException(status_code=403, detail="Shop is not active.")
-
-                # Cache the result for 1 hour
-                shop_data = {
-                    "id": shop.id,
-                    "shopDomain": shop.shopDomain,
-                    "isActive": shop.isActive,
-                }
-                await redis_client.setex(cache_key, 3600, json.dumps(shop_data))
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to validate shop domain: {e}")
-            raise HTTPException(status_code=500, detail="Failed to validate request.")
-
-        logger.info(f"Shop validation successful for: {shop_domain}")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to process behavioral event: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process request.")
-
-    # Queue the event for background processing
-    result = await services["webhook_handler"].queue_behavioral_event(
-        shop_domain, payload
-    )
-
-    if "error" in result.get("status"):
-        raise HTTPException(status_code=500, detail=result)
-
-    return result
 
 
 # Error handlers

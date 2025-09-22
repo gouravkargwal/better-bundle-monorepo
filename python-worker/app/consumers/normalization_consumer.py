@@ -648,15 +648,38 @@ class FeatureComputationService:
                 }
 
                 self.logger.info(
-                    f"📤 Publishing feature computation event: job_id={job_id}, shop_id={shop_id}, data_type={data_type}"
+                    f"📤 Publishing feature computation event via Kafka: job_id={job_id}, shop_id={shop_id}, data_type={data_type}"
                 )
-                await streams_manager.publish_features_computed_event(
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    features_ready=False,
-                    metadata=metadata,
-                )
-                self.logger.info(f"✅ Feature computation event published successfully")
+
+                # Use Kafka instead of Redis streams
+                from app.core.messaging.event_publisher import EventPublisher
+                from app.core.config.kafka_settings import kafka_settings
+
+                publisher = EventPublisher(kafka_settings.model_dump())
+                await publisher.initialize()
+
+                try:
+                    feature_event = {
+                        "job_id": job_id,
+                        "shop_id": shop_id,
+                        "features_ready": False,
+                        "metadata": metadata,
+                        "event_type": "feature_computation",
+                        "data_type": data_type,
+                        "timestamp": now_utc().isoformat(),
+                        "source": "normalization_consumer",
+                    }
+
+                    message_id = await publisher.publish_feature_computation_event(
+                        feature_event
+                    )
+                    self.logger.info(
+                        f"✅ Feature computation event published successfully via Kafka",
+                        message_id=message_id,
+                    )
+
+                finally:
+                    await publisher.close()
 
         except Exception as e:
             self.logger.error(f"Failed to trigger feature computation: {e}")

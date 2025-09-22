@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { payload, session, topic, shop } = await authenticate.webhook(request);
@@ -101,9 +101,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Don't fail the webhook if customer linking fails
     }
 
-    // Publish to Redis Stream for real-time processing
+    // Publish to Kafka for real-time processing
     try {
-      const streamService = await getRedisStreamService();
+      const kafkaProducer = await KafkaProducerService.getInstance();
 
       const streamData = {
         event_type: "customer_created",
@@ -112,9 +112,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         timestamp: new Date().toISOString(),
       };
 
-      const messageId = await streamService.publishShopifyEvent(streamData);
+      const messageId = await kafkaProducer.publishShopifyEvent(streamData);
 
-      console.log(`📡 Published to Redis Stream:`, {
+      console.log(`📡 Published to Kafka:`, {
         messageId,
         eventType: streamData.event_type,
         shopId: streamData.shop_id,
@@ -131,10 +131,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopify_id: customerId,
         timestamp: new Date().toISOString(),
       } as const;
-      await streamService.publishShopifyEvent(normalizeJob);
-    } catch (streamError) {
-      console.error(`❌ Error publishing to Redis Stream:`, streamError);
-      // Don't fail the webhook if stream publishing fails
+      await kafkaProducer.publishShopifyEvent(normalizeJob);
+    } catch (kafkaError) {
+      console.error(`❌ Error publishing to Kafka:`, kafkaError);
+      // Don't fail the webhook if Kafka publishing fails
     }
 
     return json({

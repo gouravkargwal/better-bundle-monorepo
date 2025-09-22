@@ -349,17 +349,26 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             await storage_method(data, shop_id)
 
     async def _trigger_normalization(self, shop_id: str, data_types: List[str]):
-        """Trigger normalization for processed data types"""
+        """Trigger normalization for processed data types using Kafka"""
         if not data_types:
             return
 
         try:
-            from app.core.redis_client import streams_manager
+            from app.core.messaging.event_publisher import EventPublisher
+            from app.core.config.kafka_settings import kafka_settings
 
-            # Trigger normalization for ALL data types in a single event
-            # This will process all data types together instead of separately
-            await streams_manager.publish_shopify_event(
-                {
+            logger.info(
+                f"🔄 Triggering normalization via Kafka for shop {shop_id}",
+                data_types=data_types,
+            )
+
+            # Initialize event publisher
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+
+            try:
+                # Create normalization event
+                normalization_event = {
                     "event_type": "normalize_batch",
                     "shop_id": shop_id,
                     "data_type": "all",  # Process all data types
@@ -367,10 +376,26 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     "format": "graphql",
                     "page_size": 100,
                     "timestamp": now_utc().isoformat(),
+                    "source": "data_collection_service",
                 }
-            )
+
+                # Publish to normalization-jobs topic
+                message_id = await publisher.publish_normalization_event(
+                    normalization_event
+                )
+
+                logger.info(
+                    f"✅ Normalization event published successfully",
+                    shop_id=shop_id,
+                    data_types=data_types,
+                    message_id=message_id,
+                )
+
+            finally:
+                await publisher.close()
+
         except Exception as e:
-            logger.error(f"Failed to trigger normalization: {e}")
+            logger.error(f"❌ Failed to trigger normalization via Kafka: {e}")
 
     async def _get_last_collection_time(
         self, shop_domain: str, data_type: str
