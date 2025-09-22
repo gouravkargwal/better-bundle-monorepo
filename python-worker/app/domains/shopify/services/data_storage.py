@@ -130,6 +130,9 @@ class ShopifyDataStorageService:
                 "shopifyId": full_id,  # Store full GraphQL ID
                 "shopifyCreatedAt": created_at,
                 "shopifyUpdatedAt": updated_at,
+                # Correctly mark collected data as GraphQL backfill (not webhook/rest)
+                "source": "backfill",
+                "format": "graphql",
             }
 
         if not item_data_map:
@@ -167,6 +170,8 @@ class ShopifyDataStorageService:
                         "payload": item_data["payload"],
                         "extractedAt": item_data["extractedAt"],
                         "shopifyUpdatedAt": item_data["shopifyUpdatedAt"],
+                        "source": "backfill",
+                        "format": "graphql",
                     },
                 )
 

@@ -204,6 +204,14 @@ class EntityNormalizationService:
             data_format = self._detect_format(raw_record, payload)
             adapter = get_adapter(data_format, data_type)
             canonical = adapter.to_canonical(payload, shop_id)
+            self.logger.info(
+                "📦 Canonical entity prepared",
+                extra={
+                    "data_type": data_type,
+                    "id": canonical.get(f"{data_type[:-1]}Id"),
+                    "format": data_format,
+                },
+            )
 
             # Prepare main data
             main_data = self._prepare_main_data(canonical, shop_id, data_type)
@@ -231,11 +239,27 @@ class EntityNormalizationService:
 
             # Upsert main record
             if existing:
+                self.logger.info(
+                    "✏️ Updating existing entity",
+                    extra={
+                        "data_type": data_type,
+                        "id": id_value,
+                        "shop_id": shop_id,
+                    },
+                )
                 await main_table.update(
                     where={"id": existing.id},
                     data=main_data,
                 )
             else:
+                self.logger.info(
+                    "🆕 Creating new entity",
+                    extra={
+                        "data_type": data_type,
+                        "id": id_value,
+                        "shop_id": shop_id,
+                    },
+                )
                 await main_table.create(data=main_data)
 
             return True
@@ -421,6 +445,10 @@ class OrderNormalizationService:
             order_record_id = None
 
             async with db.tx() as transaction:
+                self.logger.info(
+                    "🔐 Order normalization transaction started",
+                    extra={"orderId": canonical.get("orderId"), "shop_id": shop_id},
+                )
                 # Upsert main order record
                 order_table = transaction.orderdata
                 existing = await order_table.find_first(
@@ -428,17 +456,39 @@ class OrderNormalizationService:
                 )
 
                 if existing:
+                    self.logger.info(
+                        "✏️ Updating existing order",
+                        extra={
+                            "orderId": canonical.get("orderId"),
+                            "record_id": existing.id,
+                            "shop_id": shop_id,
+                        },
+                    )
                     await order_table.update(
                         where={"id": existing.id},
                         data=main_data,
                     )
                     order_record_id = existing.id
                 else:
+                    self.logger.info(
+                        "🆕 Creating new order",
+                        extra={
+                            "orderId": canonical.get("orderId"),
+                            "shop_id": shop_id,
+                        },
+                    )
                     created_record = await order_table.create(data=main_data)
                     order_record_id = created_record.id
 
                 # Create line items
                 if line_items:
+                    self.logger.info(
+                        "🧾 Replacing line items",
+                        extra={
+                            "orderId": canonical.get("orderId"),
+                            "line_items_count": len(line_items),
+                        },
+                    )
                     await self._create_line_items(
                         transaction, order_record_id, line_items
                     )

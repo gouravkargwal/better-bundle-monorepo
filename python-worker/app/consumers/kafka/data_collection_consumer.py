@@ -11,6 +11,7 @@ from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.messaging.interfaces import EventHandler
 from app.domains.shopify.services import ShopifyDataCollectionService
 from app.core.logging import get_logger
+from app.core.database import get_database
 
 logger = get_logger(__name__)
 
@@ -190,6 +191,32 @@ class DataCollectionJobHandler(EventHandler):
                     has_access_token=bool(access_token),
                 )
                 return False
+
+            # Verify shop exists in database
+            db = await get_database()
+            shop_record = await db.shop.find_unique(
+                where={"id": shop_id, "isActive": True}
+            )
+
+            if not shop_record:
+                self.logger.error(
+                    "❌ Unknown shop_id. Aborting data collection",
+                    shop_id=shop_id,
+                    shop_domain=shop_domain,
+                )
+                return False
+
+            # Optional: cross-check domain mismatch (proceed with a warning)
+            if (
+                getattr(shop_record, "shopDomain", None)
+                and shop_record.shopDomain != shop_domain
+            ):
+                self.logger.warning(
+                    "⚠️ shop_domain mismatch between event and DB",
+                    event_shop_domain=shop_domain,
+                    db_shop_domain=shop_record.shopDomain,
+                    shop_id=shop_id,
+                )
 
             self.logger.info(
                 "🚀 Processing data collection job",

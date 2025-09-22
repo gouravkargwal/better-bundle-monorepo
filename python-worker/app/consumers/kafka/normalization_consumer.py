@@ -288,6 +288,20 @@ class NormalizationJobHandler(EventHandler):
                 )
                 resolved_end = end_time or datetime.now(timezone.utc).isoformat()
 
+            # Guard against inverted windows (can occur if lastNormalizedAt > lastCollectedAt)
+            if resolved_start and resolved_end and resolved_start > resolved_end:
+                self.logger.warning(
+                    "⚠️ Inverted normalization window detected; adjusting",
+                    extra={
+                        "shop_id": shop_id,
+                        "data_type": data_type,
+                        "original_start": resolved_start,
+                        "original_end": resolved_end,
+                    },
+                )
+                # Swap to ensure start <= end
+                resolved_start, resolved_end = resolved_end, resolved_start
+
             self.logger.info(
                 "🕒 Normalization window resolved",
                 extra={
@@ -460,8 +474,16 @@ class NormalizationJobHandler(EventHandler):
         if end_time:
             time_filter["lte"] = end_time
         if time_filter:
-            where_conditions["extractedAt"] = time_filter
-        self.logger.info(f"🔍 Time filter on extractedAt: {start_time} to {end_time}")
+            # Use shopifyUpdatedAt for GraphQL data, extractedAt otherwise
+            time_field = (
+                "shopifyUpdatedAt"
+                if (format_type or "").lower() == "graphql"
+                else "extractedAt"
+            )
+            where_conditions[time_field] = time_filter
+        self.logger.info(
+            f"🔍 Time filter on {'shopifyUpdatedAt' if (format_type or '').lower() == 'graphql' else 'extractedAt'}: {start_time} to {end_time}"
+        )
 
         self.logger.info(f"🔍 Querying {data_type} with conditions: {where_conditions}")
 
@@ -472,6 +494,15 @@ class NormalizationJobHandler(EventHandler):
         last_extracted_iso: Optional[str] = None
 
         while True:
+            self.logger.info(
+                "📥 Fetching raw batch",
+                extra={
+                    "data_type": data_type,
+                    "offset": offset,
+                    "page_size": page_size,
+                },
+            )
+
             raw_records = await raw_table.find_many(
                 where=where_conditions,
                 skip=offset,
@@ -483,7 +514,12 @@ class NormalizationJobHandler(EventHandler):
                 break
 
             self.logger.info(
-                f"📄 Processing {len(raw_records)} {data_type} records (offset: {offset})"
+                "📄 Processing batch",
+                extra={
+                    "data_type": data_type,
+                    "batch_count": len(raw_records),
+                    "offset": offset,
+                },
             )
 
             # Process records in parallel
@@ -521,8 +557,25 @@ class NormalizationJobHandler(EventHandler):
             )
             total_processed += successful
 
+            failures = len(raw_records) - successful
+            if failures:
+                self.logger.warning(
+                    "⚠️ Some records failed during normalization",
+                    extra={
+                        "data_type": data_type,
+                        "successful": successful,
+                        "failed": failures,
+                        "offset": offset,
+                    },
+                )
             self.logger.info(
-                f"✅ Processed {successful}/{len(raw_records)} records successfully"
+                "✅ Batch processed",
+                extra={
+                    "data_type": data_type,
+                    "successful": successful,
+                    "batch_size": len(raw_records),
+                    "cumulative_processed": total_processed,
+                },
             )
 
             # Check if we need to continue pagination
@@ -532,6 +585,11 @@ class NormalizationJobHandler(EventHandler):
             offset += page_size
 
         self.logger.info(
-            f"🎉 Normalization complete: {total_processed} {data_type} records processed"
+            "🎉 Normalization complete",
+            extra={
+                "data_type": data_type,
+                "total_processed": total_processed,
+                "last_extracted_iso": last_extracted_iso,
+            },
         )
         return last_extracted_iso
