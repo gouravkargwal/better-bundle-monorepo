@@ -134,9 +134,22 @@ class FeatureComputationJobHandler(EventHandler):
             # Extract message data
             job_id = event.get("job_id")
             shop_id = event.get("shop_id")
-            features_ready_raw = event.get("features_ready", "False")
-            # Parse boolean from string
-            features_ready = features_ready_raw.lower() in ("true", "1", "yes", "on")
+            features_ready_raw = event.get("features_ready", False)
+            # Robust boolean parsing (handles bool/str/int)
+            if isinstance(features_ready_raw, bool):
+                features_ready = features_ready_raw
+            elif isinstance(features_ready_raw, (int, float)):
+                features_ready = bool(features_ready_raw)
+            else:
+                try:
+                    features_ready = str(features_ready_raw).strip().lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
+                except Exception:
+                    features_ready = False
             metadata = event.get("metadata", {})
 
             self.logger.info(

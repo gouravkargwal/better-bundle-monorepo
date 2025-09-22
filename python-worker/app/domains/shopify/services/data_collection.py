@@ -77,10 +77,22 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if not config:
             raise ValueError(f"Unsupported data type: {data_type}")
 
-        # Check if full collection needed
-        should_do_full = await self._should_do_full_collection(
-            shop_domain, data_type, force_full_collection
+        # Resolve shop and db
+        db = await get_database()
+        shop = await self.data_storage.get_shop_by_domain(shop_domain)
+        if not shop:
+            logger.warning(
+                f"Shop not found for domain {shop_domain}, skipping {data_type}"
+            )
+            return []
+        shop_id = shop.id
+
+        # Decide full vs incremental using PipelineWatermark (and force flag)
+        force_full_collection = bool(force_full_collection)
+        pw = await db.pipelinewatermark.find_unique(
+            where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}}
         )
+        should_do_full = force_full_collection or (pw is None)
 
         if should_do_full:
             logger.info(f"Full collection for {data_type}")
@@ -94,113 +106,56 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 since_id=since_id,
             )
         else:
-            # Incremental collection - Only collect recent data
+            # Incremental collection - Only collect recent data using PipelineWatermark
             logger.info(f"Incremental collection for {data_type}")
-            last_updated = await self._get_last_collection_time(shop_domain, data_type)
+            from datetime import timedelta
 
-            if last_updated:
-                # Calculate time window for incremental collection (last 7 days)
-                from datetime import timedelta
-
-                query_since = max(last_updated, now_utc() - timedelta(days=7))
-                query_filter = f"{config['field']}:>='{query_since.isoformat()}'"
-
-                logger.info(f"📅 Incremental query since: {query_since.isoformat()}")
-
-                result = await self._collect_data_generic(
-                    shop_domain=shop_domain,
-                    data_type=data_type,
-                    api_method=config["api"],
-                    query_since=query_since,
-                    query=query_filter,
-                    limit=limit,
-                    since_id=since_id,
-                )
-
-                # If incremental finds data, return it
-                if result and len(result) > 0:
-                    logger.info(
-                        f"✅ Incremental collection found {len(result)} new/updated {data_type}"
-                    )
-                    return result
-                else:
-                    logger.info(
-                        f"📭 No new/updated data found for {data_type} in incremental collection"
-                    )
-                    return (
-                        []
-                    )  # Return empty list instead of falling back to full collection
-            else:
-                # No last collection time, do full collection
-                logger.info(
-                    f"🔄 No last collection time found, doing full collection for {data_type}"
-                )
-                return await self._collect_data_generic(
-                    shop_domain=shop_domain,
-                    data_type=data_type,
-                    api_method=config["api"],
-                    query_since=None,
-                    query=None,
-                    limit=limit,
-                    since_id=since_id,
-                )
-
-    async def _should_do_full_collection(
-        self, shop_domain: str, data_type: str, force_full_collection: bool
-    ) -> bool:
-        """Determine if we should do full collection - Fixed Logic"""
-        if force_full_collection:
-            logger.info(f"🔄 Force full collection requested for {data_type}")
-            return True
-
-        # Check if we have any data for this data type
-        try:
-            shop = await self.data_storage.get_shop_by_domain(shop_domain)
-            if not shop:
-                logger.info(f"🔄 No shop found, doing full collection for {data_type}")
-                return True
-
-            # Check if we have any raw data for this data type
-            has_data = await self._has_any_raw_data(shop.id, data_type)
-            if not has_data:
-                logger.info(
-                    f"🔄 No existing data found, doing full collection for {data_type}"
-                )
-                return True
-
-            # Check if we have recent data (within last 24 hours) - if yes, do incremental
-            last_collection_time = await self._get_last_collection_time(
-                shop_domain, data_type
+            # Read watermark
+            last_collected = pw.lastCollectedAt if pw else None
+            # Add epsilon and clamp to last 7 days
+            safe_since = (
+                (last_collected + timedelta(seconds=1)) if last_collected else None
             )
-            if last_collection_time:
-                from datetime import timedelta
+            query_since = (
+                max(safe_since, now_utc() - timedelta(days=7))
+                if safe_since
+                else now_utc() - timedelta(days=7)
+            )
+            # Use strict greater-than for GraphQL-style filters
+            query_filter = f"{config['field']}:>'{query_since.isoformat()}'"
 
-                hours_since_last = (
-                    now_utc() - last_collection_time
-                ).total_seconds() / 3600
-                if (
-                    hours_since_last < 24
-                ):  # If collected within last 24 hours, do incremental
-                    logger.info(
-                        f"📈 Recent data found ({hours_since_last:.1f}h ago), doing incremental collection for {data_type}"
-                    )
-                    return False
-                else:
-                    logger.info(
-                        f"🔄 Data is old ({hours_since_last:.1f}h ago), doing full collection for {data_type}"
-                    )
-                    return True
+            logger.info(
+                "📅 Collection watermark window",
+                extra={
+                    "data_type": data_type,
+                    "lastCollectedAt": (
+                        last_collected.isoformat() if last_collected else None
+                    ),
+                    "query_since": query_since.isoformat(),
+                    "filter": query_filter,
+                },
+            )
+
+            result = await self._collect_data_generic(
+                shop_domain=shop_domain,
+                data_type=data_type,
+                api_method=config["api"],
+                query_since=query_since,
+                query=query_filter,
+                limit=limit,
+                since_id=since_id,
+            )
+
+            if result and len(result) > 0:
+                logger.info(
+                    f"✅ Incremental collection found {len(result)} new/updated {data_type}"
+                )
+                return result
             else:
                 logger.info(
-                    f"🔄 No last collection time found, doing full collection for {data_type}"
+                    f"📭 No new/updated data found for {data_type} in incremental collection"
                 )
-                return True
-
-        except Exception as e:
-            logger.warning(
-                f"⚠️ Error checking existing data for {data_type}: {e}, defaulting to full collection"
-            )
-            return True
+                return []
 
     async def _has_any_raw_data(self, shop_id: str, data_type: str) -> bool:
         """Check if we have any raw data for this data type."""
@@ -366,7 +321,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     async def _trigger_normalization(
         self, shop_id: str, data_types: List[str], collection_start_time: datetime
     ):
-        """Trigger normalization for processed data types using Kafka with per-data-type time tracking"""
+        """Trigger normalization for processed data types using Kafka with per-data-type watermarks"""
         if not data_types:
             return
 
@@ -379,40 +334,62 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 data_types=data_types,
             )
 
-            # Get per-data-type time ranges for data collected in this session
-            data_type_time_ranges = await self._get_per_data_type_session_time_ranges(
-                shop_id, data_types, collection_start_time
-            )
-
-            if not data_type_time_ranges:
-                logger.warning(
-                    f"⚠️ No new data found for shop {shop_id} in this collection session, skipping normalization"
-                )
-                return
-
             # Initialize event publisher
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
 
             try:
-                # Send separate normalization events for each data type with its specific time range
-                for data_type, time_range in data_type_time_ranges.items():
-                    if not time_range:
-                        logger.warning(f"⚠️ No time range for {data_type}, skipping")
+                # For each data type, compute the latest collected end (from RAW) and upsert watermark
+                db = await get_database()
+                for data_type in data_types:
+                    raw_table = {
+                        "orders": db.raworder,
+                        "products": db.rawproduct,
+                        "customers": db.rawcustomer,
+                        "collections": db.rawcollection,
+                    }.get(data_type)
+
+                    if not raw_table:
+                        logger.warning(
+                            f"⚠️ Unknown data type for normalization trigger: {data_type}"
+                        )
                         continue
 
+                    # Find the latest shopifyUpdatedAt we've stored
+                    latest = await raw_table.find_first(
+                        where={"shopId": shop_id},
+                        order={"shopifyUpdatedAt": "desc"},
+                    )
+
+                    if not latest or not getattr(latest, "shopifyUpdatedAt", None):
+                        logger.warning(
+                            f"⚠️ No collected window found for {data_type}, skipping watermark update"
+                        )
+                    else:
+                        end_iso = latest.shopifyUpdatedAt.isoformat()
+                        # Upsert collection watermark to PipelineWatermark
+                        await self._upsert_processing_watermark(
+                            shop_id=shop_id, data_type=data_type, iso_time=end_iso
+                        )
+                        logger.info(
+                            "💾 Collection watermark updated",
+                            extra={
+                                "shop_id": shop_id,
+                                "data_type": data_type,
+                                "lastCollectedAt": end_iso,
+                            },
+                        )
+
+                    # Publish normalization event (window will be derived from watermark by consumer)
                     normalization_event = {
                         "event_type": "normalize_data",
                         "shop_id": shop_id,
-                        "data_type": data_type,  # Process specific data type
+                        "data_type": data_type,
                         "format": "graphql",
-                        "start_time": time_range["start_time"],
-                        "end_time": time_range["end_time"],
                         "timestamp": now_utc().isoformat(),
                         "source": "data_collection_service",
                     }
 
-                    # Publish to normalization-jobs topic
                     message_id = await publisher.publish_normalization_event(
                         normalization_event
                     )
@@ -421,7 +398,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         f"✅ Normalization event published for {data_type}",
                         shop_id=shop_id,
                         data_type=data_type,
-                        time_range=time_range,
                         message_id=message_id,
                     )
 
@@ -431,157 +407,29 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         except Exception as e:
             logger.error(f"❌ Failed to trigger normalization via Kafka: {e}")
 
-    async def _get_per_data_type_session_time_ranges(
-        self, shop_id: str, data_types: List[str], collection_start_time: datetime
-    ) -> Dict[str, Optional[Dict[str, str]]]:
-        """Get per-data-type time ranges for data collected in this specific session"""
-        data_type_time_ranges = {}
+    async def _upsert_processing_watermark(
+        self, shop_id: str, data_type: str, iso_time: str
+    ) -> None:
+        """Common watermark writer used by collection to mark last collected window end.
+        Uses existing NormalizationWatermark table to avoid schema churn.
+        """
+        db = await get_database()
+        from datetime import datetime
 
-        try:
-            db = await get_database()
-
-            for data_type in data_types:
-                raw_table = {
-                    "orders": db.raworder,
-                    "products": db.rawproduct,
-                    "customers": db.rawcustomer,
-                    "collections": db.rawcollection,
-                }.get(data_type)
-
-                if not raw_table:
-                    logger.warning(f"⚠️ Unknown data type: {data_type}")
-                    data_type_time_ranges[data_type] = None
-                    continue
-
-                # Get data collected in this session for this specific data type
-                # Use a time window approach: look for data collected within the last 10 minutes
-                from datetime import timedelta
-
-                time_window_start = collection_start_time - timedelta(minutes=10)
-
-                logger.info(
-                    f"🔍 Looking for {data_type} data between {time_window_start.isoformat()} and now"
-                )
-
-                records = await raw_table.find_many(
-                    where={
-                        "shopId": shop_id,
-                        "extractedAt": {"gte": time_window_start},
-                    },
-                    order={"extractedAt": "asc"},
-                )
-
-                if not records:
-                    logger.info(
-                        f"📊 No new {data_type} data collected in this session for shop {shop_id}"
-                    )
-                    data_type_time_ranges[data_type] = None
-                    continue
-
-                # Get the earliest and latest extractedAt times for this data type in this session
-                earliest = await raw_table.find_first(
-                    where={
-                        "shopId": shop_id,
-                        "extractedAt": {"gte": time_window_start},
-                    },
-                    order={"extractedAt": "asc"},
-                )
-                latest = await raw_table.find_first(
-                    where={
-                        "shopId": shop_id,
-                        "extractedAt": {"gte": time_window_start},
-                    },
-                    order={"extractedAt": "desc"},
-                )
-
-                if earliest and latest:
-                    time_range = {
-                        "start_time": earliest.extractedAt.isoformat(),
-                        "end_time": latest.extractedAt.isoformat(),
-                    }
-                    data_type_time_ranges[data_type] = time_range
-                    logger.info(
-                        f"📊 {data_type}: {len(records)} records, time range: {time_range}"
-                    )
-                else:
-                    logger.warning(f"⚠️ Could not determine time range for {data_type}")
-                    data_type_time_ranges[data_type] = None
-
-            # Log summary
-            successful_types = [
-                dt for dt, tr in data_type_time_ranges.items() if tr is not None
-            ]
-            failed_types = [
-                dt for dt, tr in data_type_time_ranges.items() if tr is None
-            ]
-
-            if successful_types:
-                logger.info(f"✅ Per-data-type time ranges: {successful_types}")
-            if failed_types:
-                logger.warning(f"⚠️ Failed data types: {failed_types}")
-
-            return data_type_time_ranges
-
-        except Exception as e:
-            logger.error(f"❌ Failed to get per-data-type session time ranges: {e}")
-            return {data_type: None for data_type in data_types}
-
-    async def _get_last_collection_time(
-        self, shop_domain: str, data_type: str
-    ) -> Optional[datetime]:
-        """Get the last collection timestamp for incremental updates"""
-        try:
-            # Get the shop ID first
-            shop = await self.data_storage.get_shop_by_domain(shop_domain)
-            if not shop:
-                return None
-
-            # Get the most recent record for this data type from RAW tables (not main tables)
-            if data_type == "products":
-                latest_record = await self.data_storage.get_latest_product_update(
-                    shop.id
-                )
-            elif data_type == "orders":
-                latest_record = await self.data_storage.get_latest_order_update(shop.id)
-            elif data_type == "customers":
-                latest_record = await self.data_storage.get_latest_customer_update(
-                    shop.id
-                )
-            elif data_type == "collections":
-                latest_record = await self.data_storage.get_latest_collection_update(
-                    shop.id
-                )
-            else:
-                return None
-
-            # Log latest record timestamps for transparency
-            if latest_record:
-                shopify_updated = getattr(latest_record, "shopifyUpdatedAt", None)
-                extracted_at = getattr(latest_record, "extractedAt", None)
-                logger.info(
-                    "Resolved incremental watermark",
-                    extra={
-                        "shop_id": shop.id,
-                        "data_type": data_type,
-                        "shopifyUpdatedAt": (
-                            shopify_updated.isoformat() if shopify_updated else None
-                        ),
-                        "extractedAt": (
-                            extracted_at.isoformat() if extracted_at else None
-                        ),
-                    },
-                )
-
-            if latest_record and hasattr(latest_record, "shopifyUpdatedAt"):
-                return latest_record.shopifyUpdatedAt
-            elif latest_record and hasattr(latest_record, "extractedAt"):
-                # Fallback to extractedAt if shopifyUpdatedAt is not available
-                return latest_record.extractedAt
-            return None
-
-        except Exception as e:
-            logger.warning(f"Failed to get last collection time for {data_type}: {e}")
-            return None
+        # Accept both Z and +00:00 formats
+        last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        await db.pipelinewatermark.upsert(
+            where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}},
+            data={
+                "update": {"lastCollectedAt": last_dt, "lastWindowEnd": last_dt},
+                "create": {
+                    "shopId": shop_id,
+                    "dataType": data_type,
+                    "lastCollectedAt": last_dt,
+                    "lastWindowEnd": last_dt,
+                },
+            },
+        )
 
     async def _collect_data_generic(
         self,

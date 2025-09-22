@@ -57,43 +57,57 @@ class KafkaProducer:
                 "topic": topic,
             }
 
-            # Determine partition
-            partition = self._get_partition(topic, message_with_metadata)
-            logger.debug(
-                f"🔍 Partition strategy result: partition={partition}, topic={topic}"
+            # Decide partitioning strategy: default to key-based (no explicit partition)
+            use_explicit_partition = self.config.get("producer_config", {}).get(
+                "use_explicit_partition", False
             )
 
-            # Send message - try with partition first, fallback to no partition
             record_metadata = None
-            if partition is not None:
-                try:
-                    future = self._producer.send(
-                        topic, value=message_with_metadata, key=key, partition=partition
-                    )
-                    record_metadata = await future
-                except Exception as partition_error:
-                    # If partition-specific error, retry without specifying partition
-                    if (
-                        "partition" in str(partition_error).lower()
-                        or "unrecognized" in str(partition_error).lower()
-                    ):
-                        logger.warning(
-                            f"⚠️ Partition error for {topic}, retrying without partition: {partition_error}"
-                        )
-                        logger.info(
-                            f"🔍 Partition details: requested_partition={partition}, topic={topic}"
-                        )
-                        logger.info(
-                            f"🔍 Message details: key={key}, has_key={bool(key)}"
-                        )
+            if use_explicit_partition:
+                # Determine partition only if explicitly enabled
+                partition = self._get_partition(topic, message_with_metadata)
+                logger.debug(
+                    f"🔍 Partition strategy result: partition={partition}, topic={topic}"
+                )
+
+                if partition is not None:
+                    try:
                         future = self._producer.send(
-                            topic, value=message_with_metadata, key=key
+                            topic,
+                            value=message_with_metadata,
+                            key=key,
+                            partition=partition,
                         )
                         record_metadata = await future
-                    else:
-                        raise
+                    except Exception as partition_error:
+                        # If partition-specific error, retry without specifying partition
+                        if (
+                            "partition" in str(partition_error).lower()
+                            or "unrecognized" in str(partition_error).lower()
+                        ):
+                            logger.warning(
+                                f"⚠️ Partition error for {topic}, retrying without partition: {partition_error}"
+                            )
+                            logger.info(
+                                f"🔍 Partition details: requested_partition={partition}, topic={topic}"
+                            )
+                            logger.info(
+                                f"🔍 Message details: key={key}, has_key={bool(key)}"
+                            )
+                            future = self._producer.send(
+                                topic, value=message_with_metadata, key=key
+                            )
+                            record_metadata = await future
+                        else:
+                            raise
+                else:
+                    # No partition determined, let Kafka choose
+                    future = self._producer.send(
+                        topic, value=message_with_metadata, key=key
+                    )
+                    record_metadata = await future
             else:
-                # No partition specified, let Kafka choose
+                # Industry practice: rely on key-based partitioning; do not specify partition
                 future = self._producer.send(
                     topic, value=message_with_metadata, key=key
                 )
@@ -104,7 +118,7 @@ class KafkaProducer:
             partition_info = getattr(record_metadata, "partition", "unknown")
             offset_info = getattr(record_metadata, "offset", "unknown")
             logger.debug(
-                f"Message sent to {topic}:{partition_info} at offset {offset_info}"
+                f"Message sent to {topic}:{partition_info} at offset {offset_info} (explicit_partition={use_explicit_partition})"
             )
 
             return str(getattr(record_metadata, "offset", "unknown"))

@@ -5,7 +5,7 @@ Kafka-based normalization consumer for processing entity normalization jobs
 import json
 import asyncio
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.messaging.event_subscriber import EventSubscriber
@@ -127,7 +127,7 @@ class NormalizationJobHandler(EventHandler):
             return False
 
     async def _handle_unified_normalization(self, payload: Dict[str, Any]):
-        """Simple, unified normalization handler - always requires time range"""
+        """Simple, unified normalization handler"""
         self.logger.info(f"🔄 Starting unified normalization: {payload}")
 
         shop_id = payload.get("shop_id")
@@ -135,6 +135,7 @@ class NormalizationJobHandler(EventHandler):
         format_type = payload.get("format", "graphql")
         start_time = payload.get("start_time")
         end_time = payload.get("end_time")
+        shopify_id = payload.get("shopify_id")
 
         if not shop_id or not data_type:
             self.logger.error(
@@ -142,25 +143,179 @@ class NormalizationJobHandler(EventHandler):
             )
             return
 
-        # Always require time range for both real-time and batch
-        if not start_time and not end_time:
-            self.logger.error(
-                "❌ Invalid normalization event: start_time or end_time is required"
+        # If REST single-entity event with explicit shopify_id, process only that entity
+        if (format_type or "").lower() == "rest" and shopify_id:
+            await self._process_rest_entity(shop_id, data_type, shopify_id)
+            # Feature computation for this type
+            await self.consumer.feature_service.trigger_feature_computation(
+                shop_id, data_type
+            )
+            self.logger.info(
+                f"✅ Feature computation triggered for {data_type} (REST single entity)"
             )
             return
 
-        # Process data with time range filtering
+        # Process data with time range filtering (GraphQL or REST without id falls back to window)
         await self._process_normalization_simple(
             shop_id, data_type, format_type, start_time, end_time
         )
+
+    async def _process_rest_entity(self, shop_id: str, data_type: str, shopify_id: str):
+        """Process a single REST entity by shopify_id (real-time)."""
+        try:
+            db = await get_database()
+            raw_table = {
+                "orders": db.raworder,
+                "products": db.rawproduct,
+                "customers": db.rawcustomer,
+                "collections": db.rawcollection,
+            }.get(data_type)
+
+            if not raw_table:
+                self.logger.error(f"❌ Unknown data type for REST entity: {data_type}")
+                return
+
+            raw = await raw_table.find_first(
+                where={"shopId": shop_id, "shopifyId": str(shopify_id)}
+            )
+            if not raw:
+                self.logger.warning(
+                    "REST entity not found in RAW",
+                    shopify_id=shopify_id,
+                    shop_id=shop_id,
+                    data_type=data_type,
+                )
+                return
+
+            # Normalize according to data type
+            if data_type == "orders":
+                await self.consumer.order_service.normalize_order(
+                    raw, shop_id, is_webhook=True
+                )
+            else:
+                await self.consumer.entity_service.normalize_entity(
+                    raw, shop_id, data_type
+                )
+
+            # Update PipelineWatermark.lastNormalizedAt with raw.extractedAt if available
+            if getattr(raw, "extractedAt", None):
+                await self._upsert_watermark(
+                    shop_id=shop_id,
+                    data_type=data_type,
+                    iso_time=raw.extractedAt.isoformat(),
+                    format_type="graphql",  # we store in PipelineWatermark to unify tracking
+                )
+
+            self.logger.info(
+                f"✅ REST entity normalized",
+                extra={
+                    "shop_id": shop_id,
+                    "data_type": data_type,
+                    "shopify_id": shopify_id,
+                },
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Failed REST entity normalization: {e}",
+                shop_id=shop_id,
+                data_type=data_type,
+                shopify_id=shopify_id,
+            )
+            raise
+
+    async def _resolve_window_from_watermark(
+        self,
+        shop_id: str,
+        data_type: str,
+        start_time: Optional[str],
+        end_time: Optional[str],
+        format_type: Optional[str] = None,
+    ) -> (Optional[str], Optional[str]):
+        """Resolve normalization window using watermark when event window is missing.
+        For GraphQL format, use PipelineWatermark; otherwise, fall back to NormalizationWatermark.
+        """
+        if start_time and end_time:
+            return start_time, end_time
+        try:
+            db = await get_database()
+
+            if (format_type or "").lower() == "graphql":
+                # Prefer the unified PipelineWatermark
+                pw = await db.pipelinewatermark.find_unique(
+                    where={
+                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
+                    }
+                )
+                # Start from last normalized, else last window start; end at last collected/window end, else now
+                from datetime import datetime, timezone
+
+                resolved_start = start_time or (
+                    (
+                        pw.lastNormalizedAt.isoformat()
+                        if pw and pw.lastNormalizedAt
+                        else None
+                    )
+                    or (
+                        pw.lastWindowStart.isoformat()
+                        if pw and pw.lastWindowStart
+                        else None
+                    )
+                )
+                resolved_end = end_time or (
+                    (
+                        pw.lastCollectedAt.isoformat()
+                        if pw and pw.lastCollectedAt
+                        else None
+                    )
+                    or (
+                        pw.lastWindowEnd.isoformat()
+                        if pw and pw.lastWindowEnd
+                        else None
+                    )
+                    or datetime.now(timezone.utc).isoformat()
+                )
+            else:
+                # Legacy path: NormalizationWatermark table
+                watermark = await db.normalizationwatermark.find_unique(
+                    where={
+                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
+                    }
+                )
+                from datetime import datetime, timezone
+
+                resolved_start = start_time or (
+                    watermark.lastNormalizedAt.isoformat() if watermark else None
+                )
+                resolved_end = end_time or datetime.now(timezone.utc).isoformat()
+
+            self.logger.info(
+                "🕒 Normalization window resolved",
+                extra={
+                    "shop_id": shop_id,
+                    "data_type": data_type,
+                    "start_time": resolved_start,
+                    "end_time": resolved_end,
+                    "source": (
+                        "PipelineWatermark"
+                        if (format_type or "").lower() == "graphql"
+                        else "NormalizationWatermark"
+                    ),
+                },
+            )
+            return resolved_start, resolved_end
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to resolve watermark for {shop_id}/{data_type}: {e}"
+            )
+            return start_time, end_time
 
     async def _process_normalization_simple(
         self,
         shop_id: str,
         data_type: str,
         format_type: str,
-        start_time: str,
-        end_time: str,
+        start_time: Optional[str],
+        end_time: Optional[str],
     ):
         """Simple, industry-standard normalization processing"""
         self.logger.info(f"🔄 Processing {data_type} for shop {shop_id}")
@@ -171,34 +326,118 @@ class NormalizationJobHandler(EventHandler):
             self.logger.info(f"🔄 Processing all data types: {data_types}")
 
             for dt in data_types:
-                await self._process_single_data_type(
-                    shop_id, dt, format_type, start_time, end_time
+                # Resolve window per data type (watermark-aware)
+                dt_start, dt_end = await self._resolve_window_from_watermark(
+                    shop_id, dt, start_time, end_time, format_type
+                )
+                last_extracted = await self._process_single_data_type(
+                    shop_id, dt, format_type, dt_start, dt_end
                 )
                 # Trigger feature computation after each data type (independent processing)
                 await self.consumer.feature_service.trigger_feature_computation(
                     shop_id, dt
                 )
+                # Upsert watermark to the max of last_extracted and dt_end
+                if dt_end or last_extracted:
+                    await self._upsert_watermark(
+                        shop_id, dt, last_extracted or dt_end, format_type
+                    )
                 self.logger.info(f"✅ Feature computation triggered for {dt}")
         else:
-            # Process single data type
-            await self._process_single_data_type(
-                shop_id, data_type, format_type, start_time, end_time
+            # Resolve window for single data type
+            res_start, res_end = await self._resolve_window_from_watermark(
+                shop_id, data_type, start_time, end_time, format_type
+            )
+            last_extracted = await self._process_single_data_type(
+                shop_id, data_type, format_type, res_start, res_end
             )
             # Trigger feature computation after this data type
             await self.consumer.feature_service.trigger_feature_computation(
                 shop_id, data_type
             )
+            # Upsert watermark
+            if res_end or last_extracted:
+                await self._upsert_watermark(
+                    shop_id, data_type, last_extracted or res_end, format_type
+                )
             self.logger.info(f"✅ Feature computation triggered for {data_type}")
+
+    async def _upsert_watermark(
+        self,
+        shop_id: str,
+        data_type: str,
+        iso_time: str,
+        format_type: Optional[str] = None,
+    ):
+        """Persist last normalized time for incremental normalization.
+        Writes to PipelineWatermark for GraphQL; else NormalizationWatermark.
+        """
+        try:
+            db = await get_database()
+            from datetime import datetime
+
+            last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+            if (format_type or "").lower() == "graphql":
+                await db.pipelinewatermark.upsert(
+                    where={
+                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
+                    },
+                    data={
+                        "update": {
+                            "lastNormalizedAt": last_dt,
+                            "lastWindowEnd": last_dt,
+                        },
+                        "create": {
+                            "shopId": shop_id,
+                            "dataType": data_type,
+                            "lastNormalizedAt": last_dt,
+                            "lastWindowEnd": last_dt,
+                        },
+                    },
+                )
+            else:
+                await db.normalizationwatermark.upsert(
+                    where={
+                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
+                    },
+                    data={
+                        "update": {"lastNormalizedAt": last_dt},
+                        "create": {
+                            "shopId": shop_id,
+                            "dataType": data_type,
+                            "lastNormalizedAt": last_dt,
+                        },
+                    },
+                )
+            self.logger.info(
+                "💾 Watermark updated",
+                extra={
+                    "shop_id": shop_id,
+                    "data_type": data_type,
+                    "lastNormalizedAt": iso_time,
+                    "table": (
+                        "PipelineWatermark"
+                        if (format_type or "").lower() == "graphql"
+                        else "NormalizationWatermark"
+                    ),
+                },
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Failed to upsert normalization watermark: {e}",
+                shop_id=shop_id,
+                data_type=data_type,
+            )
 
     async def _process_single_data_type(
         self,
         shop_id: str,
         data_type: str,
         format_type: str,
-        start_time: str,
-        end_time: str,
-    ):
-        """Process a single data type - simple and efficient"""
+        start_time: Optional[str],
+        end_time: Optional[str],
+    ) -> Optional[str]:
+        """Process a single data type - simple and efficient. Returns last processed extractedAt (ISO) if available."""
         db = await get_database()
         raw_table = {
             "orders": db.raworder,
@@ -209,7 +448,7 @@ class NormalizationJobHandler(EventHandler):
 
         if not raw_table:
             self.logger.error(f"❌ Unknown data type: {data_type}")
-            return
+            return None
 
         # Simple query - get data for this shop and data type
         where_conditions = {"shopId": shop_id}
@@ -220,7 +459,8 @@ class NormalizationJobHandler(EventHandler):
             time_filter["gte"] = start_time
         if end_time:
             time_filter["lte"] = end_time
-        where_conditions["extractedAt"] = time_filter
+        if time_filter:
+            where_conditions["extractedAt"] = time_filter
         self.logger.info(f"🔍 Time filter on extractedAt: {start_time} to {end_time}")
 
         self.logger.info(f"🔍 Querying {data_type} with conditions: {where_conditions}")
@@ -229,6 +469,7 @@ class NormalizationJobHandler(EventHandler):
         page_size = 100
         offset = 0
         total_processed = 0
+        last_extracted_iso: Optional[str] = None
 
         while True:
             raw_records = await raw_table.find_many(
@@ -248,6 +489,19 @@ class NormalizationJobHandler(EventHandler):
             # Process records in parallel
             tasks = []
             for raw_record in raw_records:
+                # track max extractedAt seen
+                if getattr(raw_record, "extractedAt", None):
+                    try:
+                        last_extracted_iso = (
+                            max(
+                                last_extracted_iso or "",
+                                raw_record.extractedAt.isoformat(),
+                            )
+                            or raw_record.extractedAt.isoformat()
+                        )
+                    except Exception:
+                        last_extracted_iso = raw_record.extractedAt.isoformat()
+
                 if format_type == "graphql":
                     raw_record.format = "graphql"
 
@@ -280,3 +534,4 @@ class NormalizationJobHandler(EventHandler):
         self.logger.info(
             f"🎉 Normalization complete: {total_processed} {data_type} records processed"
         )
+        return last_extracted_iso

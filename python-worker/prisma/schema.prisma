@@ -117,6 +117,26 @@ model NormalizationWatermark {
   @@map("NormalizationWatermark")
 }
 
+model PipelineWatermark {
+  id                     String   @id @default(cuid())
+  shopId                 String
+  dataType               String   @db.VarChar(50)
+  lastCollectedAt        DateTime?
+  lastNormalizedAt       DateTime?
+  lastFeaturesComputedAt DateTime?
+  lastGorseSyncedAt      DateTime?
+  status                 String?  @db.VarChar(20)
+  lastError              String?
+  lastSessionId          String?  @db.VarChar(100)
+  lastWindowStart        DateTime?
+  lastWindowEnd          DateTime?
+  updatedAt              DateTime @updatedAt
+
+  @@unique([shopId, dataType])
+  @@index([shopId])
+  @@map("PipelineWatermark")
+}
+
 model OrderData {
   id                      String         @id @default(cuid())
   shopId                  String
