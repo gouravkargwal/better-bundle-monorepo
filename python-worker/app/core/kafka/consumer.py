@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, AsyncIterator
 from aiokafka import AIOKafkaConsumer
+from aiokafka.structs import TopicPartition
 from aiokafka.errors import KafkaError, KafkaTimeoutError
 import asyncio
 
@@ -141,8 +142,6 @@ class KafkaConsumer:
                 for topic in topics_to_seek:
                     partitions = self._consumer.partitions_for_topic(topic)
                     if partitions:
-                        from kafka import TopicPartition
-
                         topic_partitions = [
                             TopicPartition(topic, p) for p in partitions
                         ]

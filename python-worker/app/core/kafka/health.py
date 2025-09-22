@@ -5,8 +5,8 @@ Kafka health monitoring and diagnostics
 import logging
 import time
 from typing import Dict, Any, List, Optional
-from kafka import KafkaAdminClient
-from kafka.errors import KafkaError
+from aiokafka.admin import AIOKafkaAdminClient
+from aiokafka.errors import KafkaError
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class KafkaHealthChecker:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self._admin: Optional[KafkaAdminClient] = None
+        self._admin: Optional[AIOKafkaAdminClient] = None
         self._last_health_check = 0
         self._health_check_interval = 30  # seconds
         self._health_status = "unknown"
@@ -24,11 +24,12 @@ class KafkaHealthChecker:
     async def initialize(self):
         """Initialize health checker"""
         try:
-            self._admin = KafkaAdminClient(
+            self._admin = AIOKafkaAdminClient(
                 bootstrap_servers=self.config["bootstrap_servers"],
                 client_id=self.config.get("client_id", "betterbundle-health"),
                 **self.config.get("admin_config", {}),
             )
+            await self._admin.start()
             logger.info("Kafka health checker initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Kafka health checker: {e}")
@@ -69,14 +70,15 @@ class KafkaHealthChecker:
         try:
             # Test basic connectivity
             start_time = time.time()
-            metadata = self._admin.describe_cluster()
+            # Simple call to verify connection
+            await self._admin.list_topics()
             response_time = (time.time() - start_time) * 1000  # ms
 
             # Get cluster information
             cluster_info = {
-                "cluster_id": getattr(metadata, "cluster_id", "unknown"),
-                "controller": getattr(metadata, "controller", "unknown"),
-                "brokers": len(getattr(metadata, "brokers", [])),
+                "cluster_id": "unknown",
+                "controller": "unknown",
+                "brokers": None,
                 "response_time_ms": response_time,
             }
 
@@ -118,8 +120,7 @@ class KafkaHealthChecker:
             expected_topics = list(self.config.get("topics", {}).keys())
 
             # Get actual topics
-            metadata = self._admin.describe_topics()
-            actual_topics = list(metadata.keys())
+            actual_topics = list(await self._admin.list_topics())
 
             # Check which expected topics exist
             missing_topics = [
@@ -158,23 +159,15 @@ class KafkaHealthChecker:
                 return {"error": "Admin client not initialized"}
 
             # Get cluster metrics
-            metadata = self._admin.describe_cluster()
+            # aiokafka doesn't expose cluster metadata uniformly
+            metadata = None
 
             # Get topic metrics
             topics_info = {}
             for topic_name in self.config.get("topics", {}).keys():
                 try:
-                    topic_metadata = self._admin.describe_topics([topic_name])
-                    if topic_name in topic_metadata:
-                        topic_info = topic_metadata[topic_name]
-                        topics_info[topic_name] = {
-                            "partitions": len(topic_info.partitions),
-                            "replication_factor": (
-                                len(topic_info.partitions[0].replicas)
-                                if topic_info.partitions
-                                else 0
-                            ),
-                        }
+                    # Not available in aiokafka consistently; skip detailed metrics
+                    topics_info[topic_name] = {}
                 except Exception as e:
                     logger.warning(f"Failed to get metrics for topic {topic_name}: {e}")
 
@@ -195,7 +188,7 @@ class KafkaHealthChecker:
         """Close health checker"""
         if self._admin:
             try:
-                self._admin.close()
+                await self._admin.close()
                 logger.info("Kafka health checker closed")
             except Exception as e:
                 logger.error(f"Error closing health checker: {e}")

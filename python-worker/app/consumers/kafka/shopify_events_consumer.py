@@ -310,15 +310,22 @@ class ShopifyEventHandler(EventHandler):
                 # Check if order exists
                 existing_order = await db.raworder.find_first(
                     where={"shopId": shop_id, "shopifyId": order_id},
-                    select={"id": True, "payload": True}
+                    select={"id": True, "payload": True},
                 )
 
                 if existing_order:
                     # Update existing order with refund information
-                    existing_payload = existing_order.payload if isinstance(existing_order.payload, dict) else {}
+                    existing_payload = (
+                        existing_order.payload
+                        if isinstance(existing_order.payload, dict)
+                        else {}
+                    )
                     updated_payload = {
-                        ...existing_payload,
-                        "refunds": [...(existing_payload.get("refunds", [])), raw_payload],
+                        **existing_payload,
+                        "refunds": [
+                            *(existing_payload.get("refunds", [])),
+                            raw_payload,
+                        ],
                     }
 
                     await db.raworder.update(
@@ -329,13 +336,17 @@ class ShopifyEventHandler(EventHandler):
                             "source": "webhook",
                             "format": "rest",
                             "receivedAt": now_dt,
-                        }
+                        },
                     )
-                    self.logger.info(f"✅ Updated existing order {order_id} with refund {refund_id}")
+                    self.logger.info(
+                        f"✅ Updated existing order {order_id} with refund {refund_id}"
+                    )
                 else:
                     # Create minimal order record with refund data
-                    self.logger.info(f"⚠️ Order {order_id} not found, creating minimal record with refund data")
-                    
+                    self.logger.info(
+                        f"⚠️ Order {order_id} not found, creating minimal record with refund data"
+                    )
+
                     minimal_order_payload = {
                         "refunds": [raw_payload],
                         "id": order_id,
@@ -357,7 +368,9 @@ class ShopifyEventHandler(EventHandler):
                             "receivedAt": now_dt,
                         }
                     )
-                    self.logger.info(f"✅ Created minimal order record for {order_id} with refund {refund_id}")
+                    self.logger.info(
+                        f"✅ Created minimal order record for {order_id} with refund {refund_id}"
+                    )
 
             except Exception as raw_err:
                 self.logger.error(f"❌ Failed to store refund in RawOrder: {raw_err}")
@@ -398,10 +411,14 @@ class ShopifyEventHandler(EventHandler):
                         },
                     },
                 )
-                self.logger.info("✅ Recorded refund as user interaction and updated watermark")
+                self.logger.info(
+                    "✅ Recorded refund as user interaction and updated watermark"
+                )
 
             except Exception as persist_err:
-                self.logger.error(f"❌ Failed to persist user interaction: {persist_err}")
+                self.logger.error(
+                    f"❌ Failed to persist user interaction: {persist_err}"
+                )
 
             # 3. Publish refund normalization event
             refund_normalize_job = {
@@ -418,7 +435,9 @@ class ShopifyEventHandler(EventHandler):
                     message=refund_normalize_job,
                     key=f"{shop_id}_{order_id}_{refund_id}",
                 )
-                self.logger.info(f"✅ Published refund normalization job for order {order_id}, refund {refund_id}")
+                self.logger.info(
+                    f"✅ Published refund normalization job for order {order_id}, refund {refund_id}"
+                )
 
             except Exception as e:
                 self.logger.error(f"❌ Failed to publish refund normalization job: {e}")

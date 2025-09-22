@@ -19,18 +19,6 @@ from app.domains.shopify.services import (
 )
 
 
-from app.consumers.consumer_manager import consumer_manager
-from app.consumers.data_collection_consumer import DataCollectionConsumer
-from app.consumers.normalization_consumer import NormalizationConsumer
-from app.consumers.purchase_attribution_consumer import PurchaseAttributionConsumer
-
-from app.consumers.feature_computation_consumer import FeatureComputationConsumer
-
-from app.consumers.customer_linking_consumer import CustomerLinkingConsumer
-from app.consumers.shopify_events_consumer import ShopifyEventsConsumer
-from app.consumers.refund_normalization_consumer import RefundNormalizationConsumer
-from app.consumers.refund_attribution_consumer import RefundAttributionConsumer
-
 from app.core.kafka.consumer_manager import KafkaConsumerManager
 
 
@@ -55,7 +43,7 @@ async def lifespan(app: FastAPI):
     global kafka_consumer_manager
     if kafka_consumer_manager:
         logger.info("🔄 Starting Kafka consumers...")
-        await kafka_consumer_manager.start_all()
+        await kafka_consumer_manager.start_all_consumers()
         logger.info("✅ Kafka consumers started successfully")
 
     logger.info("BetterBundle Python Worker started successfully")
@@ -68,7 +56,7 @@ async def lifespan(app: FastAPI):
     # Stop Kafka consumers first
     if kafka_consumer_manager:
         logger.info("🔄 Stopping Kafka consumers...")
-        await kafka_consumer_manager.stop_all()
+        await kafka_consumer_manager.stop_all_consumers()
         logger.info("✅ Kafka consumers stopped")
 
     # Close topic manager
@@ -142,19 +130,6 @@ async def initialize_services():
         )
         logger.info("✅ Shopify services initialized")
 
-        # Initialize consumers
-        services["data_collection_consumer"] = DataCollectionConsumer(
-            services["shopify"]
-        )
-        services["normalization_consumer"] = NormalizationConsumer()
-        services["purchase_attribution_consumer"] = PurchaseAttributionConsumer()
-        services["feature_computation_consumer"] = FeatureComputationConsumer()
-        services["customer_linking_consumer"] = CustomerLinkingConsumer()
-        services["shopify_events_consumer"] = ShopifyEventsConsumer()
-        services["refund_normalization_consumer"] = RefundNormalizationConsumer()
-        services["refund_attribution_consumer"] = RefundAttributionConsumer()
-        logger.info("✅ Consumers initialized")
-
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager
 
@@ -165,22 +140,10 @@ async def initialize_services():
         # Initialize Kafka Consumer Manager
         global kafka_consumer_manager
         kafka_consumer_manager = KafkaConsumerManager()
-        await kafka_consumer_manager.initialize(services)
+        await kafka_consumer_manager.initialize()
         logger.info("✅ Kafka Consumer Manager initialized")
 
-        # Register and start consumers
-        consumer_manager.register_consumers(
-            data_collection_consumer=services["data_collection_consumer"],
-            normalization_consumer=services["normalization_consumer"],
-            purchase_attribution_consumer=services["purchase_attribution_consumer"],
-            feature_computation_consumer=services["feature_computation_consumer"],
-            customer_linking_consumer=services["customer_linking_consumer"],
-            shopify_events_consumer=services["shopify_events_consumer"],
-            refund_normalization_consumer=services["refund_normalization_consumer"],
-            refund_attribution_consumer=services["refund_attribution_consumer"],
-        )
-
-        await consumer_manager.start()
+        # Kafka consumers are managed by kafka_consumer_manager
 
         logger.info("Essential services initialized successfully")
 
@@ -193,8 +156,7 @@ async def cleanup_services():
     """Cleanup all services"""
     try:
 
-        # Stop consumer manager
-        await consumer_manager.stop()
+        # Kafka consumers are stopped by kafka_consumer_manager in lifespan
 
         # Shutdown database connection
         from app.core.database.simple_db_client import close_database
@@ -408,7 +370,7 @@ async def get_consumers_status():
         # Add Kafka consumer manager status
         global kafka_consumer_manager
         if kafka_consumer_manager:
-            kafka_status = await kafka_consumer_manager.health_check()
+            kafka_status = await kafka_consumer_manager.get_health_status()
             consumer_status["kafka_consumer_manager"] = kafka_status
         else:
             consumer_status["kafka_consumer_manager"] = {"status": "not_initialized"}

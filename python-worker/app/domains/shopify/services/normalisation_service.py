@@ -5,7 +5,6 @@ import time
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from app.consumers.base_consumer import BaseConsumer
 from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
