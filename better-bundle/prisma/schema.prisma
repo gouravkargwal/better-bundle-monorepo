@@ -7,6 +7,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RawSourceType {
+  webhook
+  backfill
+}
+
+enum RawDataFormat {
+  rest
+  graphql
+}
+
 model RawOrder {
   id               String         @id @default(cuid())
   shopId           String
@@ -103,6 +113,26 @@ model NormalizationWatermark {
   @@unique([shopId, dataType])
   @@index([shopId])
   @@map("NormalizationWatermark")
+}
+
+model PipelineWatermark {
+  id                     String   @id @default(cuid())
+  shopId                 String
+  dataType               String   @db.VarChar(50)
+  lastCollectedAt        DateTime?
+  lastNormalizedAt       DateTime?
+  lastFeaturesComputedAt DateTime?
+  lastGorseSyncedAt      DateTime?
+  status                 String?  @db.VarChar(20)
+  lastError              String?
+  lastSessionId          String?  @db.VarChar(100)
+  lastWindowStart        DateTime?
+  lastWindowEnd          DateTime?
+  updatedAt              DateTime @updatedAt
+
+  @@unique([shopId, dataType])
+  @@index([shopId])
+  @@map("PipelineWatermark")
 }
 
 model OrderData {
@@ -327,7 +357,7 @@ model Shop {
   currencyCode                 String?                       @db.VarChar(10)
   moneyFormat                  String?                       @db.VarChar(100)
   isActive                     Boolean                       @default(true)
-  onboardingCompleted                     Boolean                       @default(false)
+  onboardingCompleted          Boolean                       @default(false)
   email                        String?                       @db.VarChar(255)
   createdAt                    DateTime                      @default(now())
   updatedAt                    DateTime                      @updatedAt
@@ -351,6 +381,7 @@ model Shop {
   userInteractions             UserInteraction[]
   userSessions                 UserSession[]
   extensionActivities          ExtensionActivity[]
+
 
   @@index([shopDomain])
   @@index([isActive])
@@ -391,7 +422,7 @@ model UserFeatures {
   refundedOrders              Int      @default(0)
   refundRate                  Float    @default(0.0)
   totalRefundedAmount         Float    @default(0.0)
-  netLifetimeValue            Float    @default(0.0)
+  netLifetimeValue             Float    @default(0.0)
   // NEW: Customer demographic features from CustomerData table
   customerEmail               String?  @db.VarChar(255)
   customerFirstName           String?  @db.VarChar(100)
@@ -997,16 +1028,6 @@ model BillingEvent {
   @@index([occurredAt])
   @@index([processedAt])
   @@map("billing_events")
-}
-
-enum RawSourceType {
-  webhook
-  backfill
-}
-
-enum RawDataFormat {
-  rest
-  graphql
 }
 
 enum BillingPlanType {

@@ -31,10 +31,12 @@ logger = get_logger(__name__)
 class KafkaConsumerManager:
     """Manages all Kafka consumers and their lifecycle"""
 
-    def __init__(self):
+    def __init__(self, shopify_service: Any | None = None):
         self.consumers: Dict[str, Any] = {}
         self._initialized = False
         self._running = False
+        # Optional dependencies for specific consumers
+        self.shopify_service = shopify_service
 
     async def initialize(self):
         """Initialize all Kafka consumers"""
@@ -50,7 +52,10 @@ class KafkaConsumerManager:
                 "shopify_events": ShopifyEventsKafkaConsumer(),
                 "normalization": NormalizationKafkaConsumer(),
                 "feature_computation": FeatureComputationKafkaConsumer(),
-                "data_collection": DataCollectionKafkaConsumer(),
+                # Pass shopify service dependency to data collection consumer
+                "data_collection": DataCollectionKafkaConsumer(
+                    shopify_service=self.shopify_service
+                ),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
                 "refund_normalization": RefundNormalizationKafkaConsumer(),
                 "refund_attribution": RefundAttributionKafkaConsumer(),

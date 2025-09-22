@@ -137,9 +137,11 @@ async def initialize_services():
         await topic_manager.create_topics_if_not_exist()
         logger.info("✅ Kafka topics created/verified")
 
-        # Initialize Kafka Consumer Manager
+        # Initialize Kafka Consumer Manager and pass Shopify service
         global kafka_consumer_manager
-        kafka_consumer_manager = KafkaConsumerManager()
+        kafka_consumer_manager = KafkaConsumerManager(
+            shopify_service=services.get("shopify")
+        )
         await kafka_consumer_manager.initialize()
         logger.info("✅ Kafka Consumer Manager initialized")
 
