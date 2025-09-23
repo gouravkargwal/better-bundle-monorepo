@@ -12,6 +12,8 @@ from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.messaging.interfaces import EventHandler
 from app.core.logging import get_logger
 from app.core.database.simple_db_client import get_database
+
+# Using string values directly for database insertion
 from datetime import datetime, timezone
 
 logger = get_logger(__name__)

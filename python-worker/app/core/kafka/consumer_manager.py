@@ -37,6 +37,9 @@ class KafkaConsumerManager:
         self._running = False
         # Optional dependencies for specific consumers
         self.shopify_service = shopify_service
+        # Circuit breaker for restart loops
+        self._restart_counts: Dict[str, int] = {}
+        self._last_restart: Dict[str, float] = {}
 
     async def initialize(self):
         """Initialize all Kafka consumers"""
@@ -49,26 +52,33 @@ class KafkaConsumerManager:
 
             # Initialize all consumers
             self.consumers = {
-                "shopify_events": ShopifyEventsKafkaConsumer(),
-                "normalization": NormalizationKafkaConsumer(),
-                "feature_computation": FeatureComputationKafkaConsumer(),
+                # "shopify_events": ShopifyEventsKafkaConsumer(),
+                # "normalization": NormalizationKafkaConsumer(),
+                # "feature_computation": FeatureComputationKafkaConsumer(),
                 # Pass shopify service dependency to data collection consumer
                 "data_collection": DataCollectionKafkaConsumer(
                     shopify_service=self.shopify_service
                 ),
-                "purchase_attribution": PurchaseAttributionKafkaConsumer(),
-                "refund_normalization": RefundNormalizationKafkaConsumer(),
-                "refund_attribution": RefundAttributionKafkaConsumer(),
+                # "purchase_attribution": PurchaseAttributionKafkaConsumer(),
+                # "refund_normalization": RefundNormalizationKafkaConsumer(),
+                # "refund_attribution": RefundAttributionKafkaConsumer(),
             }
 
-            # Initialize each consumer
-            for name, consumer in self.consumers.items():
+            # Initialize each consumer in parallel to reduce overall startup time
+            async def _init_one(name: str, consumer: Any):
                 try:
                     await consumer.initialize()
                     logger.info(f"✅ Initialized {name} consumer")
                 except Exception as e:
-                    logger.error(f"❌ Failed to initialize {name} consumer: {e}")
+                    logger.exception(f"❌ Failed to initialize {name} consumer: {e}")
                     raise
+
+            await asyncio.gather(
+                *(
+                    _init_one(name, consumer)
+                    for name, consumer in self.consumers.items()
+                )
+            )
 
             self._initialized = True
             logger.info("🎉 All Kafka consumers initialized successfully")
@@ -108,14 +118,51 @@ class KafkaConsumerManager:
 
     async def _run_consumer(self, name: str, consumer: Any):
         """Run a single consumer with error handling and restart logic"""
-        while True:
+        import time
+
+        while self._running:
             try:
                 logger.info(f"🔄 Starting {name} consumer...")
                 await consumer.start_consuming()
             except Exception as e:
-                logger.error(f"❌ {name} consumer failed: {e}")
-                logger.info(f"🔄 Restarting {name} consumer in 5 seconds...")
-                await asyncio.sleep(5)
+                # Check if this is a ConsumerStoppedError (normal during shutdown)
+                if "ConsumerStoppedError" in str(type(e).__name__):
+                    logger.debug(f"🛑 {name} consumer stopped (normal during shutdown)")
+                    break
+
+                logger.exception(f"❌ {name} consumer failed: {e}")
+                if self._running:
+                    # Circuit breaker logic
+                    current_time = time.time()
+                    last_restart = self._last_restart.get(name, 0)
+                    restart_count = self._restart_counts.get(name, 0)
+
+                    # Reset counter if it's been more than 5 minutes since last restart
+                    if current_time - last_restart > 300:  # 5 minutes
+                        restart_count = 0
+
+                    restart_count += 1
+                    self._restart_counts[name] = restart_count
+                    self._last_restart[name] = current_time
+
+                    # Exponential backoff with circuit breaker
+                    if restart_count > 10:  # Circuit breaker threshold
+                        logger.error(
+                            f"🚨 Circuit breaker activated for {name} consumer after {restart_count} failures"
+                        )
+                        await asyncio.sleep(60)  # Wait 1 minute before trying again
+                        restart_count = 0  # Reset counter
+                        self._restart_counts[name] = restart_count
+                    else:
+                        # Exponential backoff: 5s, 10s, 20s, 40s, max 60s
+                        delay = min(5 * (2 ** min(restart_count - 1, 4)), 60)
+                        logger.info(
+                            f"🔄 Restarting {name} consumer in {delay} seconds... (attempt {restart_count})"
+                        )
+                        await asyncio.sleep(delay)
+                else:
+                    logger.info(f"🛑 Stopping {name} consumer (manager shutting down)")
+                    break
 
     async def stop_all_consumers(self):
         """Stop all consumers gracefully"""
@@ -125,20 +172,22 @@ class KafkaConsumerManager:
 
         try:
             logger.info("Stopping all Kafka consumers...")
+            self._running = False  # Signal consumers to stop
 
-            # Close each consumer
+            # Close each consumer with timeout
             for name, consumer in self.consumers.items():
                 try:
-                    await consumer.close()
+                    await asyncio.wait_for(consumer.close(), timeout=10.0)
                     logger.info(f"✅ Stopped {name} consumer")
+                except asyncio.TimeoutError:
+                    logger.warning(f"⚠️ Timeout stopping {name} consumer")
                 except Exception as e:
-                    logger.error(f"❌ Error stopping {name} consumer: {e}")
+                    logger.exception(f"❌ Error stopping {name} consumer: {e}")
 
-            self._running = False
             logger.info("🎉 All Kafka consumers stopped")
 
         except Exception as e:
-            logger.error(f"Error stopping consumers: {e}")
+            logger.exception(f"Error stopping consumers: {e}")
 
     async def close(self):
         """Close all consumers and cleanup"""
@@ -188,7 +237,7 @@ class KafkaConsumerManager:
             logger.info(f"✅ {consumer_name} consumer restarted")
 
         except Exception as e:
-            logger.error(f"❌ Failed to restart {consumer_name} consumer: {e}")
+            logger.exception(f"❌ Failed to restart {consumer_name} consumer: {e}")
             raise
 
 

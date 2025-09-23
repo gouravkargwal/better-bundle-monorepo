@@ -8,7 +8,17 @@ from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context
+from app.core.database.models import (
+    PipelineWatermark,
+    RawOrder,
+    RawProduct,
+    RawCustomer,
+    RawCollection,
+)
+
+# Removed enum imports - using string values directly
+from sqlalchemy import select, func
 
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
@@ -77,8 +87,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if not config:
             raise ValueError(f"Unsupported data type: {data_type}")
 
-        # Resolve shop and db
-        db = await get_database()
+        # Resolve shop
         shop = await self.data_storage.get_shop_by_domain(shop_domain)
         if not shop:
             logger.warning(
@@ -89,9 +98,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
         # Decide full vs incremental using PipelineWatermark (and force flag)
         force_full_collection = bool(force_full_collection)
-        pw = await db.pipelinewatermark.find_unique(
-            where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}}
-        )
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(PipelineWatermark).where(
+                    (PipelineWatermark.shopId == shop_id)
+                    & (PipelineWatermark.dataType == data_type)
+                )
+            )
+            pw = result.scalar_one_or_none()
         should_do_full = force_full_collection or (pw is None)
 
         if should_do_full:
@@ -111,7 +125,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             from datetime import timedelta
 
             # Read watermark
-            last_collected = pw.lastCollectedAt if pw else None
+            last_collected = pw.last_collected_at if pw else None
             # Add epsilon and clamp to last 7 days
             safe_since = (
                 (last_collected + timedelta(seconds=1)) if last_collected else None
@@ -160,20 +174,34 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     async def _has_any_raw_data(self, shop_id: str, data_type: str) -> bool:
         """Check if we have any raw data for this data type."""
         try:
-            from app.core.database.simple_db_client import get_database
-
-            db = await get_database()
-
-            if data_type == "products":
-                count = await db.rawproduct.count(where={"shopId": shop_id})
-            elif data_type == "orders":
-                count = await db.raworder.count(where={"shopId": shop_id})
-            elif data_type == "customers":
-                count = await db.rawcustomer.count(where={"shopId": shop_id})
-            elif data_type == "collections":
-                count = await db.rawcollection.count(where={"shopId": shop_id})
-            else:
-                return False
+            async with get_session_context() as session:
+                if data_type == "products":
+                    result = await session.execute(
+                        select(func.count())
+                        .select_from(RawProduct)
+                        .where(RawProduct.shopId == shop_id)
+                    )
+                elif data_type == "orders":
+                    result = await session.execute(
+                        select(func.count())
+                        .select_from(RawOrder)
+                        .where(RawOrder.shopId == shop_id)
+                    )
+                elif data_type == "customers":
+                    result = await session.execute(
+                        select(func.count())
+                        .select_from(RawCustomer)
+                        .where(RawCustomer.shopId == shop_id)
+                    )
+                elif data_type == "collections":
+                    result = await session.execute(
+                        select(func.count())
+                        .select_from(RawCollection)
+                        .where(RawCollection.shopId == shop_id)
+                    )
+                else:
+                    return False
+                count = result.scalar_one()
 
             logger.info(f"🔍 Raw {data_type} count for shop {shop_id}: {count}")
             return count > 0
@@ -340,66 +368,69 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
             try:
                 # For each data type, compute the latest collected end (from RAW) and upsert watermark
-                db = await get_database()
-                for data_type in data_types:
-                    raw_table = {
-                        "orders": db.raworder,
-                        "products": db.rawproduct,
-                        "customers": db.rawcustomer,
-                        "collections": db.rawcollection,
-                    }.get(data_type)
+                async with get_session_context() as session:
+                    for data_type in data_types:
+                        model = {
+                            "orders": RawOrder,
+                            "products": RawProduct,
+                            "customers": RawCustomer,
+                            "collections": RawCollection,
+                        }.get(data_type)
 
-                    if not raw_table:
-                        logger.warning(
-                            f"⚠️ Unknown data type for normalization trigger: {data_type}"
-                        )
-                        continue
+                        if not model:
+                            logger.warning(
+                                f"⚠️ Unknown data type for normalization trigger: {data_type}"
+                            )
+                            continue
 
-                    # Find the latest shopifyUpdatedAt we've stored
-                    latest = await raw_table.find_first(
-                        where={"shopId": shop_id},
-                        order={"shopifyUpdatedAt": "desc"},
-                    )
+                        # Find the latest shopify_updated_at we've stored
+                        result = await session.execute(
+                            select(model.shopifyUpdatedAt)
+                            .where(model.shopId == shop_id)
+                            .order_by(model.shopifyUpdatedAt.desc())
+                            .limit(1)
+                        )
+                        latest = result.scalar_one_or_none()
 
-                    if not latest or not getattr(latest, "shopifyUpdatedAt", None):
-                        logger.warning(
-                            f"⚠️ No collected window found for {data_type}, skipping watermark update"
+                        if not latest:
+                            logger.warning(
+                                f"⚠️ No collected window found for {data_type}, skipping watermark update"
+                            )
+                        else:
+                            end_iso = latest.isoformat()
+                            # Upsert collection watermark to PipelineWatermark
+                            await self._upsert_processing_watermark(
+                                shop_id=shop_id, data_type=data_type, iso_time=end_iso
+                            )
+                            logger.info(
+                                "💾 Collection watermark updated",
+                                extra={
+                                    "shop_id": shop_id,
+                                    "data_type": data_type,
+                                    "lastCollectedAt": end_iso,
+                                },
+                            )
+
+                        # Publish normalization event (window will be derived from watermark by consumer)
+                        normalization_event = {
+                            "event_type": "normalize_data",
+                            "shop_id": shop_id,
+                            "data_type": data_type,
+                            "format": "graphql",
+                            "timestamp": now_utc().isoformat(),
+                            "source": "data_collection_service",
+                        }
+
+                        message_id = await publisher.publish_normalization_event(
+                            normalization_event
                         )
-                    else:
-                        end_iso = latest.shopifyUpdatedAt.isoformat()
-                        # Upsert collection watermark to PipelineWatermark
-                        await self._upsert_processing_watermark(
-                            shop_id=shop_id, data_type=data_type, iso_time=end_iso
-                        )
+
                         logger.info(
-                            "💾 Collection watermark updated",
-                            extra={
-                                "shop_id": shop_id,
-                                "data_type": data_type,
-                                "lastCollectedAt": end_iso,
-                            },
+                            f"✅ Normalization event published for {data_type}",
+                            shop_id=shop_id,
+                            data_type=data_type,
+                            message_id=message_id,
                         )
-
-                    # Publish normalization event (window will be derived from watermark by consumer)
-                    normalization_event = {
-                        "event_type": "normalize_data",
-                        "shop_id": shop_id,
-                        "data_type": data_type,
-                        "format": "graphql",
-                        "timestamp": now_utc().isoformat(),
-                        "source": "data_collection_service",
-                    }
-
-                    message_id = await publisher.publish_normalization_event(
-                        normalization_event
-                    )
-
-                    logger.info(
-                        f"✅ Normalization event published for {data_type}",
-                        shop_id=shop_id,
-                        data_type=data_type,
-                        message_id=message_id,
-                    )
 
             finally:
                 await publisher.close()
@@ -413,23 +444,32 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         """Common watermark writer used by collection to mark last collected window end.
         Uses existing NormalizationWatermark table to avoid schema churn.
         """
-        db = await get_database()
         from datetime import datetime
 
         # Accept both Z and +00:00 formats
         last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
-        await db.pipelinewatermark.upsert(
-            where={"shopId_dataType": {"shopId": shop_id, "dataType": data_type}},
-            data={
-                "update": {"lastCollectedAt": last_dt, "lastWindowEnd": last_dt},
-                "create": {
-                    "shopId": shop_id,
-                    "dataType": data_type,
-                    "lastCollectedAt": last_dt,
-                    "lastWindowEnd": last_dt,
-                },
-            },
-        )
+        async with get_session_context() as session:
+            # Try to find existing watermark
+            result = await session.execute(
+                select(PipelineWatermark).where(
+                    (PipelineWatermark.shopId == shop_id)
+                    & (PipelineWatermark.dataType == data_type)
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.last_collected_at = last_dt
+                existing.last_window_end = last_dt
+            else:
+                wm = PipelineWatermark(
+                    shopId=shop_id,
+                    dataType=data_type,
+                    last_collected_at=last_dt,
+                    last_window_end=last_dt,
+                )
+                session.add(wm)
+            await session.commit()
 
     async def _collect_data_generic(
         self,

@@ -120,18 +120,26 @@ class EventSubscriber:
 
     async def consume_and_handle(self, topics: List[str], group_id: str):
         """Consume messages and handle them automatically"""
-        async for message in self.subscribe(topics, group_id):
-            try:
-                success = await self.handle_message(message)
-                if success:
-                    await self._consumer.commit(message)
-                    logger.debug(f"Message {message.message_id} handled and committed")
-                else:
-                    logger.error(
-                        f"Message {message.message_id} handling failed, not committing"
+        try:
+            async for message in self.subscribe(topics, group_id):
+                try:
+                    success = await self.handle_message(message)
+                    if success:
+                        await self._consumer.commit(message)
+                        logger.debug(
+                            f"Message {message.message_id} handled and committed"
+                        )
+                    else:
+                        logger.error(
+                            f"Message {message.message_id} handling failed, not committing"
+                        )
+                except Exception as e:
+                    logger.exception(
+                        f"Error processing message {message.message_id}: {e}"
                     )
-            except Exception as e:
-                logger.error(f"Error processing message {message.message_id}: {e}")
+        except Exception as e:
+            logger.exception(f"Error in consume_and_handle for topics {topics}: {e}")
+            raise
 
     async def close(self):
         """Close event subscriber"""

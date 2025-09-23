@@ -17,6 +17,11 @@ class KafkaSettings(BaseSettings):
     client_id: str = Field(default="betterbundle", env="KAFKA_CLIENT_ID")
     worker_id: str = Field(default="worker-1", env="KAFKA_WORKER_ID")
 
+    # Static membership settings to reduce rebalancing
+    group_instance_id: str = Field(
+        default="betterbundle-worker-1", env="KAFKA_GROUP_INSTANCE_ID"
+    )
+
     # Producer settings (aiokafka compatible)
     producer_config: Dict[str, Any] = Field(
         default={
@@ -35,10 +40,12 @@ class KafkaSettings(BaseSettings):
             "auto_offset_reset": "latest",
             "enable_auto_commit": False,
             "max_poll_records": 500,
-            "session_timeout_ms": 15000,  # Balanced: not too fast, not too slow
-            "heartbeat_interval_ms": 5000,  # Balanced: allows parallel init
+            "session_timeout_ms": 30000,  # Increased from 10s to 30s
+            "heartbeat_interval_ms": 10000,  # Increased from 3s to 10s (1/3 of session timeout)
             "max_poll_interval_ms": 300000,
-            "request_timeout_ms": 20000,  # Increased for parallel initialization
+            "request_timeout_ms": 30000,  # Increased from 10s to 30s
+            "rebalance_timeout_ms": 60000,  # Added rebalance timeout
+            "group_instance_id": "betterbundle-worker-1",  # Static membership
         }
     )
 
@@ -74,59 +81,10 @@ class KafkaSettings(BaseSettings):
                 "compression_type": "snappy",
                 "cleanup_policy": "delete",
             },
-            "ml-training": {
-                "partitions": 2,
-                "replication_factor": 3,
-                "retention_ms": 86400000,  # 1 day
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "behavioral-events": {
-                "partitions": 8,
-                "replication_factor": 3,
-                "retention_ms": 259200000,  # 3 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
             "billing-events": {
                 "partitions": 4,
                 "replication_factor": 3,
                 "retention_ms": 259200000,  # 3 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "access-control": {
-                "partitions": 6,
-                "replication_factor": 3,
-                "retention_ms": 604800000,  # 7 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "analytics-events": {
-                "partitions": 4,
-                "replication_factor": 3,
-                "retention_ms": 259200000,  # 3 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "notification-events": {
-                "partitions": 6,
-                "replication_factor": 3,
-                "retention_ms": 86400000,  # 1 day
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "integration-events": {
-                "partitions": 4,
-                "replication_factor": 3,
-                "retention_ms": 259200000,  # 3 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
-            "audit-events": {
-                "partitions": 2,
-                "replication_factor": 3,
-                "retention_ms": 2592000000,  # 30 days
                 "compression_type": "snappy",
                 "cleanup_policy": "delete",
             },
@@ -167,14 +125,7 @@ class KafkaSettings(BaseSettings):
             "shopify-events-processors": "shopify-events",
             "data-collection-processors": "data-collection-jobs",
             "normalization-processors": "normalization-jobs",
-            "ml-training-processors": "ml-training",
-            "behavioral-events-processors": "behavioral-events",
             "billing-processors": "billing-events",
-            "access-control-processors": "access-control",
-            "analytics-processors": "analytics-events",
-            "notification-processors": "notification-events",
-            "integration-processors": "integration-events",
-            "audit-processors": "audit-events",
             "feature-computation-processors": "feature-computation-jobs",
             "customer-linking-processors": "customer-linking-jobs",
             "purchase-attribution-processors": "purchase-attribution-jobs",

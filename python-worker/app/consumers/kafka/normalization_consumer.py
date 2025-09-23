@@ -10,7 +10,18 @@ from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.messaging.interfaces import EventHandler
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context, get_transaction_context
+from app.core.database.models import (
+    Shop,
+    RawOrder,
+    RawProduct,
+    RawCustomer,
+    RawCollection,
+    PipelineWatermark,
+)
+
+# Removed enum imports - using string values directly
+from sqlalchemy import select, update, insert
 from app.core.logging import get_logger
 from app.domains.shopify.services.normalisation_service import (
     EntityNormalizationService,
@@ -144,7 +155,7 @@ class NormalizationJobHandler(EventHandler):
             return
 
         # If REST single-entity event with explicit shopify_id, process only that entity
-        if (format_type or "").lower() == "rest" and shopify_id:
+        if format_type == "rest" and shopify_id:
             await self._process_rest_entity(shop_id, data_type, shopify_id)
             # Feature computation for this type
             await self.consumer.feature_service.trigger_feature_computation(
@@ -163,21 +174,26 @@ class NormalizationJobHandler(EventHandler):
     async def _process_rest_entity(self, shop_id: str, data_type: str, shopify_id: str):
         """Process a single REST entity by shopify_id (real-time)."""
         try:
-            db = await get_database()
-            raw_table = {
-                "orders": db.raworder,
-                "products": db.rawproduct,
-                "customers": db.rawcustomer,
-                "collections": db.rawcollection,
+            model_class = {
+                "orders": RawOrder,
+                "products": RawProduct,
+                "customers": RawCustomer,
+                "collections": RawCollection,
             }.get(data_type)
 
-            if not raw_table:
+            if not model_class:
                 self.logger.error(f"❌ Unknown data type for REST entity: {data_type}")
                 return
 
-            raw = await raw_table.find_first(
-                where={"shopId": shop_id, "shopifyId": str(shopify_id)}
-            )
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(model_class).where(
+                        (model_class.shopId == shop_id)
+                        & (model_class.shopifyId == str(shopify_id))
+                    )
+                )
+                raw = result.scalar_one_or_none()
+
             if not raw:
                 self.logger.warning(
                     "REST entity not found in RAW",
@@ -198,11 +214,11 @@ class NormalizationJobHandler(EventHandler):
                 )
 
             # Update PipelineWatermark.lastNormalizedAt with raw.extractedAt if available
-            if getattr(raw, "extractedAt", None):
+            if getattr(raw, "extracted_at", None):
                 await self._upsert_watermark(
                     shop_id=shop_id,
                     data_type=data_type,
-                    iso_time=raw.extractedAt.isoformat(),
+                    iso_time=raw.extracted_at.isoformat(),
                     format_type="graphql",  # we store in PipelineWatermark to unify tracking
                 )
 
@@ -237,56 +253,45 @@ class NormalizationJobHandler(EventHandler):
         if start_time and end_time:
             return start_time, end_time
         try:
-            db = await get_database()
-
-            if (format_type or "").lower() == "graphql":
+            if format_type == "graphql":
                 # Prefer the unified PipelineWatermark
-                pw = await db.pipelinewatermark.find_unique(
-                    where={
-                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
-                    }
-                )
+                async with get_session_context() as session:
+                    result = await session.execute(
+                        select(PipelineWatermark).where(
+                            (PipelineWatermark.shopId == shop_id)
+                            & (PipelineWatermark.dataType == data_type)
+                        )
+                    )
+                    pw = result.scalar_one_or_none()
+
                 # Start from last normalized, else last window start; end at last collected/window end, else now
                 from datetime import datetime, timezone
 
                 resolved_start = start_time or (
                     (
-                        pw.lastNormalizedAt.isoformat()
-                        if pw and pw.lastNormalizedAt
+                        pw.last_normalized_at.isoformat()
+                        if pw and pw.last_normalized_at
                         else None
                     )
                     or (
-                        pw.lastWindowStart.isoformat()
-                        if pw and pw.lastWindowStart
+                        pw.last_window_start.isoformat()
+                        if pw and pw.last_window_start
                         else None
                     )
                 )
                 resolved_end = end_time or (
                     (
-                        pw.lastCollectedAt.isoformat()
-                        if pw and pw.lastCollectedAt
+                        pw.last_collected_at.isoformat()
+                        if pw and pw.last_collected_at
                         else None
                     )
                     or (
-                        pw.lastWindowEnd.isoformat()
-                        if pw and pw.lastWindowEnd
+                        pw.last_window_end.isoformat()
+                        if pw and pw.last_window_end
                         else None
                     )
                     or datetime.now(timezone.utc).isoformat()
                 )
-            else:
-                # Legacy path: NormalizationWatermark table
-                watermark = await db.normalizationwatermark.find_unique(
-                    where={
-                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
-                    }
-                )
-                from datetime import datetime, timezone
-
-                resolved_start = start_time or (
-                    watermark.lastNormalizedAt.isoformat() if watermark else None
-                )
-                resolved_end = end_time or datetime.now(timezone.utc).isoformat()
 
             # Guard against inverted windows (can occur if lastNormalizedAt > lastCollectedAt)
             if resolved_start and resolved_end and resolved_start > resolved_end:
@@ -311,7 +316,7 @@ class NormalizationJobHandler(EventHandler):
                     "end_time": resolved_end,
                     "source": (
                         "PipelineWatermark"
-                        if (format_type or "").lower() == "graphql"
+                        if format_type == "graphql"
                         else "NormalizationWatermark"
                     ),
                 },
@@ -387,42 +392,33 @@ class NormalizationJobHandler(EventHandler):
         Writes to PipelineWatermark for GraphQL; else NormalizationWatermark.
         """
         try:
-            db = await get_database()
             from datetime import datetime
 
             last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
-            if (format_type or "").lower() == "graphql":
-                await db.pipelinewatermark.upsert(
-                    where={
-                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
-                    },
-                    data={
-                        "update": {
-                            "lastNormalizedAt": last_dt,
-                            "lastWindowEnd": last_dt,
-                        },
-                        "create": {
-                            "shopId": shop_id,
-                            "dataType": data_type,
-                            "lastNormalizedAt": last_dt,
-                            "lastWindowEnd": last_dt,
-                        },
-                    },
-                )
-            else:
-                await db.normalizationwatermark.upsert(
-                    where={
-                        "shopId_dataType": {"shopId": shop_id, "dataType": data_type}
-                    },
-                    data={
-                        "update": {"lastNormalizedAt": last_dt},
-                        "create": {
-                            "shopId": shop_id,
-                            "dataType": data_type,
-                            "lastNormalizedAt": last_dt,
-                        },
-                    },
-                )
+            if format_type == "graphql":
+                async with get_transaction_context() as session:
+                    # Try to find existing watermark
+                    result = await session.execute(
+                        select(PipelineWatermark).where(
+                            (PipelineWatermark.shopId == shop_id)
+                            & (PipelineWatermark.dataType == data_type)
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+
+                    if existing:
+                        existing.last_normalized_at = last_dt
+                        existing.last_window_end = last_dt
+                    else:
+                        wm = PipelineWatermark(
+                            shopId=shop_id,
+                            dataType=data_type,
+                            last_normalized_at=last_dt,
+                            last_window_end=last_dt,
+                        )
+                        session.add(wm)
+                    await session.commit()
+
             self.logger.info(
                 "💾 Watermark updated",
                 extra={
@@ -431,7 +427,7 @@ class NormalizationJobHandler(EventHandler):
                     "lastNormalizedAt": iso_time,
                     "table": (
                         "PipelineWatermark"
-                        if (format_type or "").lower() == "graphql"
+                        if format_type == "graphql"
                         else "NormalizationWatermark"
                     ),
                 },
@@ -452,40 +448,36 @@ class NormalizationJobHandler(EventHandler):
         end_time: Optional[str],
     ) -> Optional[str]:
         """Process a single data type - simple and efficient. Returns last processed extractedAt (ISO) if available."""
-        db = await get_database()
-        raw_table = {
-            "orders": db.raworder,
-            "products": db.rawproduct,
-            "customers": db.rawcustomer,
-            "collections": db.rawcollection,
+        model_class = {
+            "orders": RawOrder,
+            "products": RawProduct,
+            "customers": RawCustomer,
+            "collections": RawCollection,
         }.get(data_type)
 
-        if not raw_table:
+        if not model_class:
             self.logger.error(f"❌ Unknown data type: {data_type}")
             return None
 
-        # Simple query - get data for this shop and data type
-        where_conditions = {"shopId": shop_id}
+        # Build query conditions
+        query = select(model_class).where(model_class.shopId == shop_id)
 
         # Always add time filters (required for all events)
-        time_filter = {}
-        if start_time:
-            time_filter["gte"] = start_time
-        if end_time:
-            time_filter["lte"] = end_time
-        if time_filter:
-            # Use shopifyUpdatedAt for GraphQL data, extractedAt otherwise
+        if start_time or end_time:
+            # Use shopify_updated_at for GraphQL data, extracted_at otherwise
             time_field = (
-                "shopifyUpdatedAt"
-                if (format_type or "").lower() == "graphql"
-                else "extractedAt"
+                model_class.shopifyUpdatedAt
+                if format_type == "graphql"
+                else model_class.extractedAt
             )
-            where_conditions[time_field] = time_filter
-        self.logger.info(
-            f"🔍 Time filter on {'shopifyUpdatedAt' if (format_type or '').lower() == 'graphql' else 'extractedAt'}: {start_time} to {end_time}"
-        )
+            if start_time:
+                query = query.where(time_field >= start_time)
+            if end_time:
+                query = query.where(time_field <= end_time)
 
-        self.logger.info(f"🔍 Querying {data_type} with conditions: {where_conditions}")
+        self.logger.info(
+            f"🔍 Time filter on {'shopify_updated_at' if format_type == 'graphql' else 'extracted_at'}: {start_time} to {end_time}"
+        )
 
         # Process data in batches
         page_size = 100
@@ -503,12 +495,13 @@ class NormalizationJobHandler(EventHandler):
                 },
             )
 
-            raw_records = await raw_table.find_many(
-                where=where_conditions,
-                skip=offset,
-                take=page_size,
-                order={"extractedAt": "desc"},  # Most recent first
-            )
+            async with get_session_context() as session:
+                result = await session.execute(
+                    query.order_by(model_class.extractedAt.desc())
+                    .offset(offset)
+                    .limit(page_size)
+                )
+                raw_records = result.scalars().all()
 
             if not raw_records:
                 break
@@ -522,39 +515,56 @@ class NormalizationJobHandler(EventHandler):
                 },
             )
 
-            # Process records in parallel
-            tasks = []
-            for raw_record in raw_records:
-                # track max extractedAt seen
-                if getattr(raw_record, "extractedAt", None):
-                    try:
-                        last_extracted_iso = (
-                            max(
-                                last_extracted_iso or "",
-                                raw_record.extractedAt.isoformat(),
+            # Process records: batch for orders; parallel per-record for others
+            if data_type == "orders":
+                successful = await self.consumer.order_service.normalize_orders_batch(
+                    raw_records, shop_id, is_webhook=False
+                )
+                # track max extracted_at seen across the page
+                for raw_record in raw_records:
+                    if getattr(raw_record, "extracted_at", None):
+                        try:
+                            last_extracted_iso = (
+                                max(
+                                    last_extracted_iso or "",
+                                    raw_record.extracted_at.isoformat(),
+                                )
+                                or raw_record.extracted_at.isoformat()
                             )
-                            or raw_record.extractedAt.isoformat()
-                        )
-                    except Exception:
-                        last_extracted_iso = raw_record.extractedAt.isoformat()
+                        except Exception:
+                            last_extracted_iso = raw_record.extracted_at.isoformat()
+            else:
+                tasks = []
+                for raw_record in raw_records:
+                    # track max extracted_at seen
+                    if getattr(raw_record, "extracted_at", None):
+                        try:
+                            last_extracted_iso = (
+                                max(
+                                    last_extracted_iso or "",
+                                    raw_record.extracted_at.isoformat(),
+                                )
+                                or raw_record.extracted_at.isoformat()
+                            )
+                        except Exception:
+                            last_extracted_iso = raw_record.extracted_at.isoformat()
 
-                if format_type == "graphql":
-                    raw_record.format = "graphql"
+                    if format_type == "graphql":
+                        raw_record.format = "graphql"
 
-                if data_type == "orders":
-                    task = self.consumer.order_service.normalize_order(
-                        raw_record, shop_id, is_webhook=False
-                    )
-                else:
                     task = self.consumer.entity_service.normalize_entity(
                         raw_record, shop_id, data_type
                     )
-                tasks.append(task)
+                    tasks.append(task)
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            successful = len(
-                [r for r in results if r is not None and not isinstance(r, Exception)]
-            )
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                successful = len(
+                    [
+                        r
+                        for r in results
+                        if r is not None and not isinstance(r, Exception)
+                    ]
+                )
             total_processed += successful
 
             failures = len(raw_records) - successful

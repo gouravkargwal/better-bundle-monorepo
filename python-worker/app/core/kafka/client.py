@@ -25,14 +25,7 @@ class KafkaClientManager:
     async def initialize(self):
         """Initialize Kafka connections"""
         try:
-            # Test connection by creating a temporary producer
-            test_producer = AIOKafkaProducer(
-                bootstrap_servers=self.config["bootstrap_servers"],
-                client_id=self.config.get("client_id", "betterbundle-test"),
-            )
-            await test_producer.start()
-            await test_producer.stop()
-
+            # Mark as connected; defer actual client startup to get_producer/get_consumer
             self._connected = True
             self._connection_retries = 0
             logger.info("Kafka client manager initialized successfully")

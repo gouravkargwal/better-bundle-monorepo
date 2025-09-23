@@ -10,8 +10,10 @@ from app.core.config.kafka_settings import kafka_settings
 from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.messaging.interfaces import EventHandler
 from app.domains.shopify.services import ShopifyDataCollectionService
+from app.core.database.session import get_session_context
+from app.core.database.models import Shop
+from sqlalchemy import select
 from app.core.logging import get_logger
-from app.core.database import get_database
 
 logger = get_logger(__name__)
 
@@ -66,7 +68,7 @@ class DataCollectionKafkaConsumer:
             logger.info("✅ Data collection Kafka consumer fully initialized")
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize data collection consumer: {e}")
+            logger.exception(f"❌ Failed to initialize data collection consumer: {e}")
             raise
 
     async def start_consuming(self):
@@ -83,7 +85,7 @@ class DataCollectionKafkaConsumer:
                 topics=["data-collection-jobs"], group_id="data-collection-processors"
             )
         except Exception as e:
-            logger.error(f"❌ Error in data collection consumer: {e}")
+            logger.exception(f"❌ Error in data collection consumer: {e}")
             raise
 
     async def close(self):
@@ -155,6 +157,15 @@ class DataCollectionJobHandler(EventHandler):
 
     async def handle(self, event: Dict[str, Any]) -> bool:
         try:
+            # Support both flat payload and nested under 'event_data'
+            if isinstance(event, dict) and isinstance(event.get("event_data"), dict):
+                nested = event.get("event_data") or {}
+                # Do not overwrite top-level event_type if present
+                event = {
+                    **nested,
+                    **{k: v for k, v in event.items() if k != "event_data"},
+                }
+
             self.logger.info(
                 "🔄 DataCollectionJobHandler received event",
                 event_keys=list(event.keys()),
@@ -193,10 +204,11 @@ class DataCollectionJobHandler(EventHandler):
                 return False
 
             # Verify shop exists in database
-            db = await get_database()
-            shop_record = await db.shop.find_unique(
-                where={"id": shop_id, "isActive": True}
-            )
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(Shop).where((Shop.id == shop_id) & (Shop.is_active == True))
+                )
+                shop_record = result.scalar_one_or_none()
 
             if not shop_record:
                 self.logger.error(
@@ -208,13 +220,13 @@ class DataCollectionJobHandler(EventHandler):
 
             # Optional: cross-check domain mismatch (proceed with a warning)
             if (
-                getattr(shop_record, "shopDomain", None)
-                and shop_record.shopDomain != shop_domain
+                getattr(shop_record, "shop_domain", None)
+                and shop_record.shop_domain != shop_domain
             ):
                 self.logger.warning(
                     "⚠️ shop_domain mismatch between event and DB",
                     event_shop_domain=shop_domain,
-                    db_shop_domain=shop_record.shopDomain,
+                    db_shop_domain=shop_record.shop_domain,
                     shop_id=shop_id,
                 )
 
@@ -244,7 +256,7 @@ class DataCollectionJobHandler(EventHandler):
             return True
 
         except Exception as e:
-            self.logger.error(
+            self.logger.exception(
                 f"Failed to process data collection message",
                 job_id=event.get("job_id"),
                 error=str(e),
@@ -304,7 +316,7 @@ class DataCollectionJobHandler(EventHandler):
                 self.consumer.active_jobs[job_id]["completed_at"] = datetime.utcnow()
 
         except Exception as e:
-            self.logger.error(
+            self.logger.exception(
                 f"Data collection job failed",
                 job_id=job_id,
                 shop_id=shop_id,

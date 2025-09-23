@@ -48,12 +48,15 @@ from app.core.exceptions import ConfigurationError, EnvironmentVariableError
 class DatabaseSettings(BaseSettings):
     """Database configuration settings"""
 
-    DATABASE_URL: str = Field(default="sqlite:///./betterbundle.db", env="DATABASE_URL")
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5433/betterbundle",
+        env="DATABASE_URL",
+    )
 
     @validator("DATABASE_URL")
     def validate_database_url(cls, v):
         if not v:
-            return "sqlite:///./betterbundle.db"
+            return "postgresql+asyncpg://postgres:postgres@localhost:5433/betterbundle"
         return v
 
 

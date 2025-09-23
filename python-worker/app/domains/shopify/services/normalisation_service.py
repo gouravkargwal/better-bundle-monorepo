@@ -8,11 +8,21 @@ from datetime import datetime
 from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context, get_transaction_context
+from app.core.database.models import (
+    Shop,
+    OrderData,
+    LineItemData,
+    ProductData,
+    CustomerData,
+    CollectionData,
+)
+
+# Removed enum imports - using string values directly
+from sqlalchemy import select, update, delete, insert
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
-from prisma import Json
 
 logger = get_logger(__name__)
 
@@ -135,8 +145,8 @@ class PersistenceMapper:
         cfg = PersistenceMapper.CONFIG.get(entity, {})
         main_data: Dict[str, Any] = canonical.copy()
 
-        # Use relation connect syntax for all entities
-        main_data["shop"] = {"connect": {"id": shop_id}}
+        # Set shop_id directly for SQLAlchemy
+        main_data["shop_id"] = shop_id
 
         # Timestamp mapping
         ts_map: Dict[str, str] = cfg.get("timestamp_map", {})
@@ -145,10 +155,10 @@ class PersistenceMapper:
                 main_data[dst] = main_data[src]
 
         # Ensure required timestamps
-        if "createdAt" not in main_data or main_data.get("createdAt") is None:
-            main_data["createdAt"] = now_utc()
-        if "updatedAt" not in main_data or main_data.get("updatedAt") is None:
-            main_data["updatedAt"] = now_utc()
+        if "created_at" not in main_data or main_data.get("created_at") is None:
+            main_data["created_at"] = now_utc()
+        if "updated_at" not in main_data or main_data.get("updated_at") is None:
+            main_data["updated_at"] = now_utc()
 
         # Provide safe defaults for known json-ish nullable fields
         json_default_fields = {
@@ -162,20 +172,8 @@ class PersistenceMapper:
             if jf in main_data and (main_data[jf] is None or main_data[jf] == {}):
                 main_data[jf] = {}
 
-        # Wrap configured JSON fields using prisma.Json
-        json_fields: set = cfg.get("json_fields", set())
-        for field in json_fields:
-            if field in main_data and main_data[field] is not None:
-                try:
-                    main_data[field] = Json(main_data[field])
-                except (TypeError, ValueError):
-                    # Fallback to empty container of appropriate type
-                    if isinstance(main_data[field], (list, tuple)):
-                        main_data[field] = Json([])
-                    elif isinstance(main_data[field], dict):
-                        main_data[field] = Json({})
-                    else:
-                        main_data[field] = None
+        # JSON fields are handled directly by SQLAlchemy with JSONB columns
+        # No need for special wrapping like Prisma
 
         # Remove internal/canonical-only fields and scalar shopId
         for rf in cfg.get("remove_fields", set()):
@@ -218,16 +216,21 @@ class EntityNormalizationService:
             if not main_data:
                 return False
 
-            # Get database and table
-            db = await get_database()
-            main_table = self._get_main_table(db, data_type)
+            # Get model class
+            model_class = self._get_model_class(data_type)
 
             # Check for existing record and idempotency
-            id_field = f"{data_type[:-1]}Id"
-            id_value = canonical.get(id_field)
-            existing = await main_table.find_first(
-                where={"shopId": shop_id, id_field: id_value}
-            )
+            id_field = f"{data_type[:-1]}_id"
+            id_value = canonical.get(f"{data_type[:-1]}Id")
+
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(model_class).where(
+                        (model_class.shop_id == shop_id)
+                        & (getattr(model_class, id_field) == id_value)
+                    )
+                )
+                existing = result.scalar_one_or_none()
 
             if self._should_skip_update(existing, canonical):
                 # Even if we skip normalization, we should still trigger feature computation
@@ -247,10 +250,13 @@ class EntityNormalizationService:
                         "shop_id": shop_id,
                     },
                 )
-                await main_table.update(
-                    where={"id": existing.id},
-                    data=main_data,
-                )
+                async with get_transaction_context() as session:
+                    await session.execute(
+                        update(model_class)
+                        .where(model_class.id == existing.id)
+                        .values(**main_data)
+                    )
+                    await session.commit()
             else:
                 self.logger.info(
                     "🆕 Creating new entity",
@@ -260,7 +266,10 @@ class EntityNormalizationService:
                         "shop_id": shop_id,
                     },
                 )
-                await main_table.create(data=main_data)
+                async with get_transaction_context() as session:
+                    model_instance = model_class(**main_data)
+                    session.add(model_instance)
+                    await session.commit()
 
             return True
 
@@ -339,15 +348,15 @@ class EntityNormalizationService:
         main_data = PersistenceMapper.apply(data_type, canonical, shop_id)
         return main_data
 
-    def _get_main_table(self, db, data_type: str):
-        """Get the appropriate main table for data type."""
-        table_map = {
-            "orders": db.orderdata,
-            "products": db.productdata,
-            "customers": db.customerdata,
-            "collections": db.collectiondata,
+    def _get_model_class(self, data_type: str):
+        """Get the appropriate model class for data type."""
+        model_map = {
+            "orders": OrderData,
+            "products": ProductData,
+            "customers": CustomerData,
+            "collections": CollectionData,
         }
-        return table_map[data_type]
+        return model_map[data_type]
 
     def _should_skip_update(self, existing, canonical: Dict) -> bool:
         """Check if update should be skipped based on idempotency."""
@@ -362,41 +371,27 @@ class EntityNormalizationService:
         if not incoming_updated_at:
             return False
 
+        # Ensure both are datetime objects for comparison
+        if isinstance(incoming_updated_at, str):
+            try:
+                from datetime import datetime
+
+                # Parse string timestamp to datetime
+                if incoming_updated_at.endswith("Z"):
+                    incoming_updated_at = datetime.fromisoformat(
+                        incoming_updated_at.replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                else:
+                    incoming_updated_at = datetime.fromisoformat(incoming_updated_at)
+            except Exception as e:
+                self.logger.warning(f"Failed to parse incoming timestamp: {e}")
+                return False
+
         return incoming_updated_at <= existing.shopifyUpdatedAt
 
     def _serialize_json_fields(self, main_data: Dict[str, Any]):
-        """Convert JSON fields to prisma.Json() for proper Prisma handling."""
-        json_fields = [
-            "metafields",
-            "tags",
-            "addresses",
-            "defaultAddress",
-            "location",
-            "shippingAddress",
-            "billingAddress",
-            "discountApplications",
-            "fulfillments",
-            "transactions",
-            "variants",
-            "images",
-            "media",
-            "options",
-            "noteAttributes",
-            "extras",
-        ]
-
-        for field in json_fields:
-            if field in main_data and main_data[field] is not None:
-                try:
-                    # Use prisma.Json() to properly handle JSON fields
-                    main_data[field] = Json(main_data[field])
-                except (TypeError, ValueError):
-                    if isinstance(main_data[field], (list, tuple)):
-                        main_data[field] = Json([])
-                    elif isinstance(main_data[field], dict):
-                        main_data[field] = Json({})
-            else:
-                main_data[field] = None
+        """No-op for SQLAlchemy: JSON fields are stored as native JSON/JSONB."""
+        return
 
     def _clean_internal_fields(self, main_data: Dict):
         """Remove internal/canonical fields not in DB schema."""
@@ -441,19 +436,22 @@ class OrderNormalizationService:
                 return False
 
             # Process in transaction
-            db = await get_database()
             order_record_id = None
 
-            async with db.tx() as transaction:
+            async with get_transaction_context() as session:
                 self.logger.info(
                     "🔐 Order normalization transaction started",
                     extra={"orderId": canonical.get("orderId"), "shop_id": shop_id},
                 )
-                # Upsert main order record
-                order_table = transaction.orderdata
-                existing = await order_table.find_first(
-                    where={"shopId": shop_id, "orderId": canonical.get("orderId")}
+
+                # Check for existing order
+                result = await session.execute(
+                    select(OrderData).where(
+                        (OrderData.shop_id == shop_id)
+                        & (OrderData.order_id == canonical.get("orderId"))
+                    )
                 )
+                existing = result.scalar_one_or_none()
 
                 if existing:
                     self.logger.info(
@@ -464,9 +462,10 @@ class OrderNormalizationService:
                             "shop_id": shop_id,
                         },
                     )
-                    await order_table.update(
-                        where={"id": existing.id},
-                        data=main_data,
+                    await session.execute(
+                        update(OrderData)
+                        .where(OrderData.id == existing.id)
+                        .values(**main_data)
                     )
                     order_record_id = existing.id
                 else:
@@ -477,8 +476,10 @@ class OrderNormalizationService:
                             "shop_id": shop_id,
                         },
                     )
-                    created_record = await order_table.create(data=main_data)
-                    order_record_id = created_record.id
+                    order_instance = OrderData(**main_data)
+                    session.add(order_instance)
+                    await session.flush()  # Get the ID without committing
+                    order_record_id = order_instance.id
 
                 # Create line items
                 if line_items:
@@ -489,9 +490,9 @@ class OrderNormalizationService:
                             "line_items_count": len(line_items),
                         },
                     )
-                    await self._create_line_items(
-                        transaction, order_record_id, line_items
-                    )
+                    await self._create_line_items(session, order_record_id, line_items)
+
+                await session.commit()
 
             # Only publish events for webhook processing (not historical batch processing)
             if is_webhook:
@@ -518,6 +519,84 @@ class OrderNormalizationService:
             "validation error",
         ]
         return any(pattern in error_str for pattern in non_retryable_patterns)
+
+    async def normalize_orders_batch(
+        self, raw_records: List[Any], shop_id: str, is_webhook: bool = False
+    ) -> int:
+        """Normalize a batch of orders in a single transaction for efficiency.
+        Returns number of successfully processed orders.
+        """
+        if not raw_records:
+            return 0
+
+        processed_count = 0
+
+        async with get_transaction_context() as session:
+            for raw_record in raw_records:
+                try:
+                    payload = self._parse_payload(raw_record)
+                    if not payload:
+                        continue
+
+                    data_format = self._detect_format(raw_record, payload)
+                    adapter = get_adapter(data_format, "orders")
+                    canonical = adapter.to_canonical(payload, shop_id)
+
+                    line_items = canonical.get("lineItems", [])
+                    main_data = await self._prepare_order_data(canonical, shop_id)
+                    if not main_data:
+                        continue
+
+                    # Upsert order
+                    result = await session.execute(
+                        select(OrderData).where(
+                            (OrderData.shop_id == shop_id)
+                            & (OrderData.order_id == canonical.get("orderId"))
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+
+                    if existing:
+                        await session.execute(
+                            update(OrderData)
+                            .where(OrderData.id == existing.id)
+                            .values(**main_data)
+                        )
+                        order_record_id = existing.id
+                    else:
+                        order_instance = OrderData(**main_data)
+                        session.add(order_instance)
+                        await session.flush()
+                        order_record_id = order_instance.id
+
+                    # Replace line items
+                    if line_items:
+                        await self._create_line_items(
+                            session, order_record_id, line_items
+                        )
+
+                    processed_count += 1
+                except Exception:
+                    # Skip this order, continue with others
+                    continue
+
+            await session.commit()
+
+        # Publish events after commit for webhook-only processing
+        if is_webhook:
+            for raw_record in raw_records:
+                try:
+                    payload = self._parse_payload(raw_record)
+                    if not payload:
+                        continue
+                    data_format = self._detect_format(raw_record, payload)
+                    adapter = get_adapter(data_format, "orders")
+                    canonical = adapter.to_canonical(payload, shop_id)
+                    await self._publish_order_events(shop_id, canonical.get("orderId"))
+                except Exception:
+                    continue
+
+        return processed_count
 
     def _parse_payload(self, raw_record: Any) -> Optional[Dict]:
         """Parse order payload."""
@@ -555,10 +634,11 @@ class OrderNormalizationService:
     async def _prepare_order_data(
         self, canonical: Dict, shop_id: str
     ) -> Optional[Dict]:
-        """Prepare order data for database using declarative mapper."""
-        # Ensure shop exists (connect will fail otherwise)
-        db = await get_database()
-        shop_exists = await db.shop.find_first(where={"id": shop_id})
+        """Prepare order data for database using declarative mapper (SQLAlchemy)."""
+        # Ensure shop exists
+        async with get_session_context() as session:
+            result = await session.execute(select(Shop).where(Shop.id == shop_id))
+            shop_exists = result.scalar_one_or_none()
         if not shop_exists:
             self.logger.error(f"Shop {shop_id} not found")
             return None
@@ -571,37 +651,40 @@ class OrderNormalizationService:
         return main_data
 
     async def _create_line_items(
-        self, db_client: Any, order_record_id: str, line_items: List[Any]
+        self, session: Any, order_record_id: str, line_items: List[Any]
     ):
-        """Create line items for an order."""
+        """Replace line items for an order using one delete + bulk insert."""
         if not line_items:
             return
 
         try:
-            # Clear existing line items
-            await db_client.lineitemdata.delete_many(where={"orderId": order_record_id})
+            # Clear existing line items for the order
+            await session.execute(
+                delete(LineItemData).where(LineItemData.order_id == order_record_id)
+            )
 
-            # Prepare bulk data
-            bulk_data = []
+            # Prepare bulk data (snake_case fields)
+            bulk_rows: List[Dict[str, Any]] = []
             for item in line_items:
                 try:
-                    line_item_data = {
-                        "orderId": order_record_id,
-                        "productId": item.get("productId"),
-                        "variantId": item.get("variantId"),
-                        "title": item.get("title"),
-                        "quantity": int(item.get("quantity", 0)),
-                        "price": float(item.get("price", 0.0)),
-                        "properties": Json(item.get("properties", {})),
-                    }
-                    bulk_data.append(line_item_data)
+                    bulk_rows.append(
+                        {
+                            "order_id": order_record_id,
+                            "product_id": item.get("productId"),
+                            "variant_id": item.get("variantId"),
+                            "title": item.get("title"),
+                            "quantity": int(item.get("quantity", 0)),
+                            "price": float(item.get("price", 0.0)),
+                            "properties": item.get("properties", {}),
+                        }
+                    )
                 except (ValueError, TypeError) as e:
                     self.logger.warning(f"Skipping invalid line item: {e}")
                     continue
 
-            # Bulk create
-            if bulk_data:
-                await db_client.lineitemdata.create_many(data=bulk_data)
+            if bulk_rows:
+                # Use bulk insert for efficiency
+                await session.execute(insert(LineItemData).values(bulk_rows))
 
         except Exception as e:
             self.logger.error(f"Failed to create line items: {e}")
@@ -626,38 +709,8 @@ class OrderNormalizationService:
             self.logger.error(f"Failed to publish order events: {e}")
 
     def _serialize_json_fields(self, main_data: Dict[str, Any]):
-        """Serialize JSON fields using prisma.Json() for proper Prisma handling."""
-        json_fields = [
-            "metafields",
-            "tags",
-            "addresses",
-            "defaultAddress",
-            "location",
-            "shippingAddress",
-            "billingAddress",
-            "discountApplications",
-            "fulfillments",
-            "transactions",
-            "variants",
-            "images",
-            "media",
-            "options",
-            "noteAttributes",
-            "extras",
-        ]
-
-        for field in json_fields:
-            if field in main_data and main_data[field] is not None:
-                try:
-                    # Use prisma.Json() to properly handle JSON fields
-                    main_data[field] = Json(main_data[field])
-                except (TypeError, ValueError):
-                    if isinstance(main_data[field], (list, tuple)):
-                        main_data[field] = Json([])
-                    elif isinstance(main_data[field], dict):
-                        main_data[field] = Json({})
-                    else:
-                        main_data[field] = None
+        """No-op for SQLAlchemy: JSON fields are stored as native JSON/JSONB."""
+        return
 
     def _clean_internal_fields(self, main_data: Dict):
         """Remove internal fields."""

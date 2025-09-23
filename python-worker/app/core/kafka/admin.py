@@ -5,7 +5,6 @@ Kafka admin operations for topic management
 import logging
 from typing import Dict, Any, List, Optional
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-from aiokafka.errors import KafkaError
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class KafkaAdmin:
             await self._admin.start()
             logger.info("Kafka admin client initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize Kafka admin: {e}")
+            logger.exception(f"Failed to initialize Kafka admin: {e}")
             raise
 
     async def create_topics(self, topics: Dict[str, Dict[str, Any]]) -> Dict[str, bool]:
@@ -59,7 +58,7 @@ class KafkaAdmin:
                     logger.info(f"Topic '{topic_name}' already exists")
                 else:
                     results[topic_name] = False
-                    logger.error(f"Failed to create topic '{topic_name}': {e}")
+                    logger.exception(f"Failed to create topic '{topic_name}': {e}")
 
         return results
 
@@ -76,7 +75,7 @@ class KafkaAdmin:
                 results[topic_name] = True
                 logger.info(f"Topic '{topic_name}' deleted successfully")
         except Exception as e:
-            logger.error(f"Failed to delete topics: {e}")
+            logger.exception(f"Failed to delete topics: {e}")
             for topic_name in topic_names:
                 results[topic_name] = False
 
@@ -91,7 +90,7 @@ class KafkaAdmin:
             topics = await self._admin.list_topics()
             return list(topics)
         except Exception as e:
-            logger.error(f"Failed to list topics: {e}")
+            logger.exception(f"Failed to list topics: {e}")
             return []
 
     async def get_topic_info(self, topic_name: str) -> Optional[Dict[str, Any]]:
@@ -105,7 +104,7 @@ class KafkaAdmin:
             if topic_name in topics:
                 return {"name": topic_name}
         except Exception as e:
-            logger.error(f"Failed to get topic info for '{topic_name}': {e}")
+            logger.exception(f"Failed to get topic info for '{topic_name}': {e}")
 
         return None
 
@@ -142,4 +141,4 @@ class KafkaAdmin:
                 await self._admin.close()
                 logger.info("Kafka admin client closed")
             except Exception as e:
-                logger.error(f"Error closing admin client: {e}")
+                logger.exception(f"Error closing admin client: {e}")

@@ -7,7 +7,17 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from app.core.logging import get_logger
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context, get_transaction_context
+from app.core.database.models import (
+    Shop,
+    RawOrder,
+    RawProduct,
+    RawCustomer,
+    RawCollection,
+)
+
+# Using string values directly for database insertion
+from sqlalchemy import select, update, insert
 from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
@@ -85,9 +95,12 @@ class ShopifyDataStorageService:
                 if isinstance(result, Exception):
                     logger.error(f"Batch processing failed for {data_type}: {result}")
                     continue
-                else:
+
+                if isinstance(result, dict):
                     total_new += result.get("new", 0)
                     total_updated += result.get("updated", 0)
+                else:
+                    logger.warning(f"Unexpected batch result type: {type(result)}")
 
             return {"new": total_new, "updated": total_updated}
 
@@ -100,19 +113,18 @@ class ShopifyDataStorageService:
     ) -> Dict[str, int]:
         """Generic batch processor for any data type"""
         try:
-            db = await get_database()
             return await self._process_items_simple(
-                db, data_type, items, shop_id, incremental
+                data_type, items, shop_id, incremental
             )
         except Exception as e:
             logger.error(f"{data_type.title()} batch processing failed: {e}")
             return {"new": 0, "updated": 0}
 
     async def _process_items_simple(
-        self, db, data_type: str, items: List[Any], shop_id: str, incremental: bool
+        self, data_type: str, items: List[Any], shop_id: str, incremental: bool
     ) -> Dict[str, int]:
         """Generic method to process any type of items with essential batching"""
-        current_time = now_utc()
+        current_time = datetime.utcnow()
 
         # Store raw data with full GraphQL ID - no extraction here
         item_data_map = {}
@@ -124,12 +136,12 @@ class ShopifyDataStorageService:
 
             created_at, updated_at = self._extract_shopify_timestamps(item)
             item_data_map[full_id] = {
-                "shopId": shop_id,
+                "shopId": shop_id,  # Use camelCase to match Prisma schema
                 "payload": self._serialize_item_generic(item),
-                "extractedAt": current_time,
-                "shopifyId": full_id,  # Store full GraphQL ID
-                "shopifyCreatedAt": created_at,
-                "shopifyUpdatedAt": updated_at,
+                "extractedAt": current_time,  # Use camelCase to match Prisma schema
+                "shopifyId": full_id,  # Use camelCase to match Prisma schema
+                "shopifyCreatedAt": created_at,  # Use camelCase to match Prisma schema
+                "shopifyUpdatedAt": updated_at,  # Use camelCase to match Prisma schema
                 # Correctly mark collected data as GraphQL backfill (not webhook/rest)
                 "source": "backfill",
                 "format": "graphql",
@@ -140,7 +152,7 @@ class ShopifyDataStorageService:
 
         # Batch lookup existing items using full GraphQL IDs
         existing_items = await self._batch_lookup_existing_items(
-            db, data_type, shop_id, list(item_data_map.keys())
+            data_type, shop_id, list(item_data_map.keys())
         )
 
         # Separate new vs updated
@@ -155,57 +167,74 @@ class ShopifyDataStorageService:
             elif item_data["shopifyUpdatedAt"] > existing.shopifyUpdatedAt:
                 updated_items.append(item_data)
 
-        # Batch operations using generic table names
-        table_name = self._get_table_name(data_type)
+        # Batch operations using SQLAlchemy models
+        model_class = self._get_model_class(data_type)
 
         if new_items:
-            await getattr(db, table_name).create_many(data=new_items)
+            async with get_transaction_context() as session:
+                for item_data in new_items:
+                    model_instance = model_class(**item_data)
+                    session.add(model_instance)
+                await session.commit()
 
         if updated_items:
-            # Simple batch update
-            for item_data in updated_items:
-                await getattr(db, table_name).update_many(
-                    where={"shopId": shop_id, "shopifyId": item_data["shopifyId"]},
-                    data={
-                        "payload": item_data["payload"],
-                        "extractedAt": item_data["extractedAt"],
-                        "shopifyUpdatedAt": item_data["shopifyUpdatedAt"],
-                        "source": "backfill",
-                        "format": "graphql",
-                    },
-                )
+            async with get_transaction_context() as session:
+                for item_data in updated_items:
+                    await session.execute(
+                        update(model_class)
+                        .where(
+                            (model_class.shopId == shop_id)
+                            & (model_class.shopifyId == item_data["shopifyId"])
+                        )
+                        .values(
+                            payload=item_data["payload"],
+                            extractedAt=item_data["extractedAt"],
+                            shopifyUpdatedAt=item_data["shopifyUpdatedAt"],
+                            source="backfill",
+                            format="graphql",
+                        )
+                    )
+                await session.commit()
 
         return {"new": len(new_items), "updated": len(updated_items)}
 
-    def _get_table_name(self, data_type: str) -> str:
-        """Get the database table name for a data type"""
-        table_mapping = {
-            "products": "rawproduct",
-            "orders": "raworder",
-            "customers": "rawcustomer",
-            "collections": "rawcollection",
+    def _get_model_class(self, data_type: str) -> type:
+        """Get the SQLAlchemy model class for a data type"""
+        model_mapping = {
+            "products": RawProduct,
+            "orders": RawOrder,
+            "customers": RawCustomer,
+            "collections": RawCollection,
         }
-        return table_mapping.get(data_type, f"raw{data_type}")
+        model_class = model_mapping.get(data_type)
+        if not model_class:
+            raise ValueError(f"Unknown data type: {data_type}")
+        return model_class
 
-    def _serialize_item_generic(self, item: Any) -> str:
-        """Generic serialization for any item type"""
-        return self._serialize_product(item)  # All use the same serialization logic
+    def _serialize_item_generic(self, item: Any) -> Dict[str, Any]:
+        """Generic serialization for any item type - return dict for JSON column"""
+        return self._serialize_to_dict(item)
 
     async def _batch_lookup_existing_items(
-        self, db, data_type: str, shop_id: str, item_ids: List[str]
+        self, data_type: str, shop_id: str, item_ids: List[str]
     ) -> Dict[str, Any]:
         """Generic batch lookup for any data type"""
         existing_items = {}
-        table_name = self._get_table_name(data_type)
+        model_class = self._get_model_class(data_type)
 
         # Process in chunks to avoid query timeouts
         for i in range(0, len(item_ids), self.chunk_size):
             chunk_ids = item_ids[i : i + self.chunk_size]
-            existing_records = await getattr(db, table_name).find_many(
-                where={"shopId": shop_id, "shopifyId": {"in": chunk_ids}}
-            )
-            for record in existing_records:
-                existing_items[record.shopifyId] = record
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(model_class).where(
+                        (model_class.shopId == shop_id)
+                        & (model_class.shopifyId.in_(chunk_ids))
+                    )
+                )
+                existing_records = result.scalars().all()
+                for record in existing_records:
+                    existing_items[record.shopifyId] = record
 
         return existing_items
 
@@ -213,33 +242,27 @@ class ShopifyDataStorageService:
         """Create batches from a list of items"""
         return [items[i : i + batch_size] for i in range(0, len(items), batch_size)]
 
-    def _serialize_product(self, product: Any) -> str:
-        """Serialize product to JSON string for storage"""
+    def _serialize_to_dict(self, item: Any) -> Dict[str, Any]:
+        """Serialize item to dictionary for JSON column storage"""
         try:
-            if isinstance(product, str):
-                # Already a JSON string, validate and return
-                json.loads(product)  # Validate it's valid JSON
-                return product
-            elif hasattr(product, "dict"):
+            if isinstance(item, str):
+                # JSON string - parse and return as dict
+                return json.loads(item)
+            elif hasattr(item, "dict"):
                 # Pydantic model
-                return json.dumps(product.dict(), default=str)
-            elif isinstance(product, dict):
+                return item.dict()
+            elif isinstance(item, dict):
                 # Already a dictionary
-                return json.dumps(product, default=str)
-            elif hasattr(product, "__dict__"):
+                return item
+            elif hasattr(item, "__dict__"):
                 # Object with __dict__ attribute
-                return json.dumps(product.__dict__, default=str)
+                return item.__dict__
             else:
                 # Fallback: try to serialize as-is
-                return json.dumps(product, default=str)
+                return dict(item) if hasattr(item, "__iter__") else {"data": str(item)}
         except (TypeError, ValueError, json.JSONDecodeError) as e:
-            # If all else fails, convert to string representation
-            logger.warning(
-                f"Failed to serialize product, using string representation: {e}"
-            )
-            return json.dumps(
-                {"error": "serialization_failed", "data": str(product)}, default=str
-            )
+            logger.warning(f"Failed to serialize item: {e}")
+            return {"error": "serialization_failed", "data": str(item)}
 
     def _get_full_graphql_id(self, item: Any) -> Optional[str]:
         """Get the full GraphQL ID from Shopify item without extraction"""
@@ -248,8 +271,7 @@ class ShopifyDataStorageService:
                 return str(item.id)
             elif isinstance(item, dict) and "id" in item:
                 return str(item["id"])
-            else:
-                return None
+            return None
         except Exception as e:
             logger.warning(f"Failed to get GraphQL ID: {e}")
             return None
@@ -258,50 +280,37 @@ class ShopifyDataStorageService:
         self, data: Any
     ) -> tuple[Optional[datetime], Optional[datetime]]:
         """Extract createdAt and updatedAt timestamps from Shopify GraphQL data"""
-        created_at = None
-        updated_at = None
+        created_at = self._extract_timestamp(data, ["created_at", "createdAt"])
+        updated_at = self._extract_timestamp(data, ["updated_at", "updatedAt"])
+        return created_at, updated_at
 
+    def _extract_timestamp(
+        self, data: Any, field_names: List[str]
+    ) -> Optional[datetime]:
+        """Extract timestamp from data using multiple possible field names"""
         try:
-            # Handle Pydantic models (snake_case) - this is what we get from data collection
-            if hasattr(data, "created_at") and data.created_at:
-                if isinstance(data.created_at, datetime):
-                    created_at = data.created_at
-                else:
-                    created_at = self._parse_shopify_timestamp(str(data.created_at))
-            elif isinstance(data, dict) and "created_at" in data and data["created_at"]:
-                if isinstance(data["created_at"], datetime):
-                    created_at = data["created_at"]
-                else:
-                    created_at = self._parse_shopify_timestamp(str(data["created_at"]))
+            for field_name in field_names:
+                # Handle object attributes
+                if hasattr(data, field_name):
+                    timestamp_value = getattr(data, field_name)
+                    if timestamp_value:
+                        return self._parse_timestamp_value(timestamp_value)
 
-            # Handle raw GraphQL data (camelCase) - fallback for direct API responses
-            elif hasattr(data, "createdAt") and data.createdAt:
-                created_at = self._parse_shopify_timestamp(str(data.createdAt))
-            elif isinstance(data, dict) and "createdAt" in data and data["createdAt"]:
-                created_at = self._parse_shopify_timestamp(str(data["createdAt"]))
-
-            # Handle Pydantic models (snake_case) - this is what we get from data collection
-            if hasattr(data, "updated_at") and data.updated_at:
-                if isinstance(data.updated_at, datetime):
-                    updated_at = data.updated_at
-                else:
-                    updated_at = self._parse_shopify_timestamp(str(data.updated_at))
-            elif isinstance(data, dict) and "updated_at" in data and data["updated_at"]:
-                if isinstance(data["updated_at"], datetime):
-                    updated_at = data["updated_at"]
-                else:
-                    updated_at = self._parse_shopify_timestamp(str(data["updated_at"]))
-
-            # Handle raw GraphQL data (camelCase) - fallback for direct API responses
-            elif hasattr(data, "updatedAt") and data.updatedAt:
-                updated_at = self._parse_shopify_timestamp(str(data.updatedAt))
-            elif isinstance(data, dict) and "updatedAt" in data and data["updatedAt"]:
-                updated_at = self._parse_shopify_timestamp(str(data["updatedAt"]))
+                # Handle dictionary keys
+                elif isinstance(data, dict) and field_name in data and data[field_name]:
+                    return self._parse_timestamp_value(data[field_name])
 
         except Exception as e:
-            logger.warning(f"Failed to extract timestamps: {e}")
+            logger.warning(f"Failed to extract timestamp from {field_names}: {e}")
 
-        return created_at, updated_at
+        return None
+
+    def _parse_timestamp_value(self, timestamp_value: Any) -> Optional[datetime]:
+        """Parse a timestamp value to datetime object"""
+        if isinstance(timestamp_value, datetime):
+            return timestamp_value
+        else:
+            return self._parse_shopify_timestamp(str(timestamp_value))
 
     def _parse_shopify_timestamp(self, timestamp_str: str) -> Optional[datetime]:
         """Parse Shopify timestamp string to datetime object"""
@@ -309,11 +318,13 @@ class ShopifyDataStorageService:
             if isinstance(timestamp_str, str):
                 # Handle various Shopify timestamp formats
                 if timestamp_str.endswith("Z"):
-                    # ISO format with Z
-                    return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                    # ISO format with Z - convert to timezone-naive
+                    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                    return dt.replace(tzinfo=None)
                 elif "+" in timestamp_str or timestamp_str.endswith("T"):
-                    # ISO format with timezone
-                    return datetime.fromisoformat(timestamp_str)
+                    # ISO format with timezone - convert to timezone-naive
+                    dt = datetime.fromisoformat(timestamp_str)
+                    return dt.replace(tzinfo=None)
                 else:
                     # Try parsing as ISO format
                     return datetime.fromisoformat(timestamp_str)
@@ -324,9 +335,12 @@ class ShopifyDataStorageService:
     async def get_shop_by_domain(self, shop_domain: str) -> Optional[Any]:
         """Get shop by domain for incremental collection"""
         try:
-            db = await get_database()
-            shop = await db.shop.find_first(where={"shopDomain": shop_domain})
-            return shop
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(Shop).where(Shop.shop_domain == shop_domain)
+                )
+                shop = result.scalar_one_or_none()
+                return shop
         except Exception as e:
             logger.error(f"Failed to get shop by domain {shop_domain}: {e}")
             return None
@@ -334,9 +348,10 @@ class ShopifyDataStorageService:
     async def get_shop_by_id(self, shop_id: str) -> Optional[Any]:
         """Get shop by ID for validation"""
         try:
-            db = await get_database()
-            shop = await db.shop.find_first(where={"id": shop_id})
-            return shop
+            async with get_session_context() as session:
+                result = await session.execute(select(Shop).where(Shop.id == shop_id))
+                shop = result.scalar_one_or_none()
+                return shop
         except Exception as e:
             logger.error(f"Failed to get shop by ID {shop_id}: {e}")
             return None
@@ -344,12 +359,16 @@ class ShopifyDataStorageService:
     async def _get_latest_update(self, data_type: str, shop_id: str) -> Optional[Any]:
         """Generic method to get latest update for any data type"""
         try:
-            db = await get_database()
-            table_name = self._get_table_name(data_type)
-            latest_record = await getattr(db, table_name).find_first(
-                where={"shopId": shop_id}, order={"extractedAt": "desc"}
-            )
-            return latest_record
+            model_class = self._get_model_class(data_type)
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(model_class)
+                    .where(model_class.shopId == shop_id)
+                    .order_by(model_class.extractedAt.desc())
+                    .limit(1)
+                )
+                latest_record = result.scalar_one_or_none()
+                return latest_record
         except Exception as e:
             logger.error(
                 f"Failed to get latest {data_type} update for shop {shop_id}: {e}"

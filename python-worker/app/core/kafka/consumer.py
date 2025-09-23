@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, List, Optional, AsyncIterator
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
-from aiokafka.errors import KafkaError, KafkaTimeoutError
+from aiokafka.errors import KafkaError, KafkaTimeoutError, ConsumerStoppedError
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class KafkaConsumer:
                 f"Kafka consumer initialized for topics: {topics}, group: {group_id}"
             )
         except Exception as e:
-            logger.error(f"Failed to initialize Kafka consumer: {e}")
+            logger.exception(f"Failed to initialize Kafka consumer: {e}")
             raise
 
     async def consume(self, timeout_ms: int = 1000) -> AsyncIterator[Dict[str, Any]]:
@@ -86,13 +86,12 @@ class KafkaConsumer:
         except KafkaTimeoutError as e:
             logger.debug(f"Consumer timeout: {e}")
             # This is normal, just continue
-        except KafkaError as e:
-            self._error_count += 1
-            logger.error(f"Kafka consumer error: {e}")
-            raise
+        except ConsumerStoppedError as e:
+            logger.debug(f"Consumer stopped (normal during shutdown): {e}")
+            return  # Exit gracefully
         except Exception as e:
             self._error_count += 1
-            logger.error(f"Unexpected consumer error: {e}")
+            logger.exception(f"Unexpected consumer error: {e}")
             raise
 
     async def commit(self, message=None) -> bool:
@@ -118,7 +117,7 @@ class KafkaConsumer:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Failed to commit offset: {e}")
+            logger.exception(f"Failed to commit offset: {e}")
             return False
 
     async def commit_sync(self) -> bool:
@@ -131,7 +130,7 @@ class KafkaConsumer:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Failed to sync commit: {e}")
+            logger.exception(f"Failed to sync commit: {e}")
             return False
 
     async def seek_to_beginning(self, topics: Optional[List[str]] = None):
@@ -148,18 +147,21 @@ class KafkaConsumer:
                         self._consumer.seek_to_beginning(*topic_partitions)
                         logger.info(f"Seeked to beginning of topic: {topic}")
         except Exception as e:
-            logger.error(f"Failed to seek to beginning: {e}")
+            logger.exception(f"Failed to seek to beginning: {e}")
 
     async def close(self):
         """Close consumer"""
         if self._consumer:
             try:
                 await self._consumer.stop()
+                await self._consumer.close()  # Ensure proper cleanup
+                self._consumer = None
                 logger.info(
                     f"Consumer closed. Processed {self._message_count} messages, {self._error_count} errors, {self._committed_count} commits"
                 )
             except Exception as e:
-                logger.error(f"Error closing consumer: {e}")
+                logger.exception(f"Error closing consumer: {e}")
+                self._consumer = None
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""
