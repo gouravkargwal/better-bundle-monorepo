@@ -39,9 +39,11 @@ class ShopifyEventsKafkaConsumer:
             # Initialize Kafka producer for publishing normalization jobs
             await self.producer.initialize()
 
-            # Initialize event subscriber
+            # Initialize event subscriber with existing consumer to avoid duplicate consumers
             await self.event_subscriber.initialize(
-                topics=["shopify-events"], group_id="shopify-events-processors"
+                topics=["shopify-events"],
+                group_id="shopify-events-processors",
+                existing_consumer=self.consumer,  # Reuse existing consumer
             )
 
             # Add event handlers

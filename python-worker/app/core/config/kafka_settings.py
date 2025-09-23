@@ -18,6 +18,7 @@ class KafkaSettings(BaseSettings):
     worker_id: str = Field(default="worker-1", env="KAFKA_WORKER_ID")
 
     # Static membership settings to reduce rebalancing
+    # Use worker_id to ensure unique instance IDs
     group_instance_id: str = Field(
         default="betterbundle-worker-1", env="KAFKA_GROUP_INSTANCE_ID"
     )
@@ -40,12 +41,14 @@ class KafkaSettings(BaseSettings):
             "auto_offset_reset": "latest",
             "enable_auto_commit": False,
             "max_poll_records": 500,
-            "session_timeout_ms": 30000,  # Increased from 10s to 30s
-            "heartbeat_interval_ms": 10000,  # Increased from 3s to 10s (1/3 of session timeout)
-            "max_poll_interval_ms": 300000,
-            "request_timeout_ms": 30000,  # Increased from 10s to 30s
-            "rebalance_timeout_ms": 60000,  # Added rebalance timeout
-            "group_instance_id": "betterbundle-worker-1",  # Static membership
+            "session_timeout_ms": 60000,  # Increased to 60s for better stability
+            "heartbeat_interval_ms": 20000,  # Increased to 20s (1/3 of session timeout)
+            "max_poll_interval_ms": 300000,  # 5 minutes
+            "request_timeout_ms": 30000,  # 30 seconds
+            "rebalance_timeout_ms": 120000,  # 2 minutes for rebalancing
+            "fetch_min_bytes": 1,
+            "fetch_max_wait_ms": 500,  # Reduced from default 500ms
+            # group_instance_id will be set dynamically in the consumer
         }
     )
 

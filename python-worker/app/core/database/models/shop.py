@@ -4,7 +4,7 @@ Shop model for SQLAlchemy
 Represents a Shopify shop with all its configuration and relationships.
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .base import BaseModel
 
@@ -15,9 +15,7 @@ class Shop(BaseModel):
     __tablename__ = "Shop"
 
     # Core shop information
-    shop_domain = Column(
-        "shopDomain", String(255), unique=True, nullable=False, index=True
-    )
+    shop_domain = Column("shopDomain", String(255), nullable=False, index=True)
     custom_domain = Column("customDomain", String(255), nullable=True)
     access_token = Column("accessToken", String(1000), nullable=False)
 
@@ -52,9 +50,6 @@ class Shop(BaseModel):
     )
     customer_data = relationship(
         "CustomerData", back_populates="shop", cascade="all, delete-orphan"
-    )
-    feature_computations = relationship(
-        "FeatureComputation", back_populates="shop", cascade="all, delete-orphan"
     )
     interaction_features = relationship(
         "InteractionFeatures", back_populates="shop", cascade="all, delete-orphan"
@@ -100,6 +95,9 @@ class Shop(BaseModel):
     extension_activities = relationship(
         "ExtensionActivity", back_populates="shop", cascade="all, delete-orphan"
     )
+
+    # Table constraints
+    __table_args__ = (UniqueConstraint("shopDomain", name="shop_domain_unique"),)
 
     def __repr__(self) -> str:
         return f"<Shop(domain={self.shop_domain}, plan={self.plan_type})>"

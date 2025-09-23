@@ -102,18 +102,6 @@ model RawCollection {
   @@map("RawCollection")
 }
 
-model NormalizationWatermark {
-  id               String   @id @default(cuid())
-  shopId           String
-  dataType         String   @db.VarChar(50)
-  lastNormalizedAt DateTime
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@unique([shopId, dataType])
-  @@index([shopId])
-  @@map("NormalizationWatermark")
-}
 
 model PipelineWatermark {
   id                     String   @id @default(cuid())
@@ -797,23 +785,6 @@ model UserIdentityLink {
   @@index([shopId, clientId])
   @@index([shopId, customerId])
   @@map("UserIdentityLink")
-}
-
-model FeatureComputation {
-  id           String    @id @default(cuid())
-  shopId       String
-  jobId        String
-  status       String    @default("pending")
-  featureCount Int       @default(0)
-  metadata     Json?
-  createdAt    DateTime  @default(now())
-  completedAt  DateTime?
-  shop         Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([shopId, status])
-  @@index([shopId, createdAt])
-  @@index([shopId, status, createdAt])
-  @@map("FeatureComputation")
 }
 
 model UserSession {

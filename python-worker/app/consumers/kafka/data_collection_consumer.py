@@ -52,10 +52,12 @@ class DataCollectionKafkaConsumer:
             )
             logger.info("✅ Kafka consumer initialized")
 
-            # Initialize event subscriber
+            # Initialize event subscriber with existing consumer to avoid duplicate consumers
             logger.info("🔄 Initializing event subscriber...")
             await self.event_subscriber.initialize(
-                topics=["data-collection-jobs"], group_id="data-collection-processors"
+                topics=["data-collection-jobs"],
+                group_id="data-collection-processors",
+                existing_consumer=self.consumer,  # Reuse existing consumer
             )
             logger.info("✅ Event subscriber initialized")
 

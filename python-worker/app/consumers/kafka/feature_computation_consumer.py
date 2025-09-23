@@ -38,10 +38,11 @@ class FeatureComputationKafkaConsumer:
                 group_id="feature-computation-processors",
             )
 
-            # Initialize event subscriber
+            # Initialize event subscriber with existing consumer to avoid duplicate consumers
             await self.event_subscriber.initialize(
                 topics=["feature-computation-jobs"],
                 group_id="feature-computation-processors",
+                existing_consumer=self.consumer,  # Reuse existing consumer
             )
 
             # Add event handlers

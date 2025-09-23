@@ -31,18 +31,23 @@ class KafkaConsumer:
             self._topics = topics
             self._group_id = group_id
 
+            # Create static group instance ID using worker_id only (no object ID)
+            worker_id = self.config.get("worker_id", "worker-1")
+            static_group_instance_id = f"betterbundle-{worker_id}"
+
             consumer_config = {
                 "bootstrap_servers": self.config["bootstrap_servers"],
                 "group_id": group_id,
                 "value_deserializer": lambda m: json.loads(m.decode("utf-8")),
                 "key_deserializer": lambda k: k.decode("utf-8") if k else None,
+                "group_instance_id": static_group_instance_id,  # Static instance ID
                 **self.config.get("consumer_config", {}),
             }
 
             self._consumer = AIOKafkaConsumer(*topics, **consumer_config)
             await self._consumer.start()
             logger.info(
-                f"Kafka consumer initialized for topics: {topics}, group: {group_id}"
+                f"Kafka consumer initialized for topics: {topics}, group: {group_id}, instance_id: {static_group_instance_id}"
             )
         except Exception as e:
             logger.exception(f"Failed to initialize Kafka consumer: {e}")

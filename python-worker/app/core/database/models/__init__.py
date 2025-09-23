@@ -53,9 +53,8 @@ from .features import (
     SearchProductFeatures,
 )
 
-# Identity and computation models
+# Identity models
 from .identity import UserIdentityLink
-from .computation import FeatureComputation
 
 # Session and interaction models
 from .user_session import UserSession
@@ -117,9 +116,8 @@ __all__ = [
     "SessionFeatures",
     "ProductPairFeatures",
     "SearchProductFeatures",
-    # Identity and computation
+    # Identity
     "UserIdentityLink",
-    "FeatureComputation",
     # Session and interaction
     "UserSession",
     "UserInteraction",

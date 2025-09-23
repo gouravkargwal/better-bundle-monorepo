@@ -21,6 +21,7 @@ export const triggerFullAnalysis = async (shopDomain: string) => {
     const jobId = `analysis_${shopDomain}_${Date.now()}`;
 
     const jobData = {
+      event_type: "data_collection",
       job_id: jobId,
       shop_id: shop.id,
       shop_domain: shopDomain,

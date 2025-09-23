@@ -34,7 +34,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("Starting BetterBundle Python Worker...")
+    logger.info("🚀 Starting BetterBundle Python Worker...")
 
     # Initialize services
     await initialize_services()
@@ -129,6 +129,13 @@ async def initialize_services():
             permission_service=services["shopify_permissions"],
         )
         logger.info("✅ Shopify services initialized")
+
+        # Initialize database and create tables
+        from app.core.database.create_tables import create_all_tables
+
+        logger.info("🔄 Creating database tables...")
+        await create_all_tables()
+        logger.info("✅ Database tables created/verified")
 
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager

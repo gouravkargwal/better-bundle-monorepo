@@ -28,9 +28,11 @@ class BillingKafkaConsumer:
                 topics=["billing-events"], group_id="billing-processors"
             )
 
-            # Initialize event subscriber
+            # Initialize event subscriber with existing consumer to avoid duplicate consumers
             await self.event_subscriber.initialize(
-                topics=["billing-events"], group_id="billing-processors"
+                topics=["billing-events"],
+                group_id="billing-processors",
+                existing_consumer=self.consumer,  # Reuse existing consumer
             )
 
             # Add event handlers

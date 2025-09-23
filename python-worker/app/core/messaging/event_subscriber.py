@@ -20,15 +20,29 @@ class EventSubscriber:
         self._filters: List[EventFilter] = []
         self._initialized = False
 
-    async def initialize(self, topics: List[str], group_id: str):
+    async def initialize(
+        self,
+        topics: List[str],
+        group_id: str,
+        existing_consumer: Optional[KafkaConsumer] = None,
+    ):
         """Initialize event subscriber"""
         try:
-            self._consumer = KafkaConsumer(self.config)
-            await self._consumer.initialize(topics, group_id)
+            if existing_consumer:
+                # Reuse existing consumer to avoid creating multiple consumers in same group
+                self._consumer = existing_consumer
+                logger.info(
+                    f"Event subscriber reusing existing consumer for topics: {topics}, group: {group_id}"
+                )
+            else:
+                # Create new consumer only if none provided
+                self._consumer = KafkaConsumer(self.config)
+                await self._consumer.initialize(topics, group_id)
+                logger.info(
+                    f"Event subscriber created new consumer for topics: {topics}, group: {group_id}"
+                )
+
             self._initialized = True
-            logger.info(
-                f"Event subscriber initialized for topics: {topics}, group: {group_id}"
-            )
         except Exception as e:
             logger.error(f"Failed to initialize event subscriber: {e}")
             raise
