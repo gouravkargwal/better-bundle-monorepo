@@ -4,18 +4,12 @@ Billing models for SQLAlchemy
 Represents billing plans, invoices, and events.
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, Index
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import DECIMAL
 from .base import BaseModel, ShopMixin
-from .enums import (
-    BillingPlanType,
-    BillingPlanStatus,
-    BillingCycle,
-    InvoiceStatus,
-    BillingEventType,
-)
+from .enums import BillingPlanStatus, InvoiceStatus
 
 
 class BillingPlan(BaseModel, ShopMixin):
@@ -23,10 +17,7 @@ class BillingPlan(BaseModel, ShopMixin):
 
     __tablename__ = "billing_plans"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
-
-    # Plan identification - matching Prisma schema
+    # Plan identification
     shop_domain = Column("shop_domain", String(255), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     type = Column(String, nullable=False)  # BillingPlanType enum
@@ -34,19 +25,15 @@ class BillingPlan(BaseModel, ShopMixin):
         String, default=BillingPlanStatus.ACTIVE, nullable=False, index=True
     )
 
-    # Plan configuration - matching Prisma schema
+    # Plan configuration
     configuration = Column(JSON, default={}, nullable=False)
-    effective_from = Column("effective_from", DateTime, nullable=False, index=True)
-    effective_until = Column("effective_until", DateTime, nullable=True)
+    effective_from = Column(DateTime, nullable=False, index=True)
+    effective_until = Column(DateTime, nullable=True)
 
-    # Trial information - matching Prisma schema
-    is_trial_active = Column("is_trial_active", Boolean, default=True, nullable=False)
-    trial_threshold = Column(
-        "trial_threshold", DECIMAL(10, 2), default=200.00, nullable=False
-    )
-    trial_revenue = Column(
-        "trial_revenue", DECIMAL(12, 2), default=0.00, nullable=False
-    )
+    # Trial information
+    is_trial_active = Column(Boolean, default=True, nullable=False)
+    trial_threshold = Column(DECIMAL(10, 2), default=200.00, nullable=False)
+    trial_revenue = Column(DECIMAL(12, 2), default=0.00, nullable=False)
 
     # Relationships
     events = relationship(
@@ -73,31 +60,28 @@ class BillingInvoice(BaseModel, ShopMixin):
 
     __tablename__ = "billing_invoices"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
-
-    # Invoice identification - matching Prisma schema
-    plan_id = Column("plan_id", String, ForeignKey("billing_plans.id"), nullable=False)
-    invoice_number = Column("invoice_number", String(50), unique=True, nullable=False)
+    # Invoice identification
+    plan_id = Column(String, ForeignKey("billing_plans.id"), nullable=False)
+    invoice_number = Column(String(50), unique=True, nullable=False)
     status = Column(String, default=InvoiceStatus.PENDING, nullable=False, index=True)
 
-    # Financial details - matching Prisma schema
+    # Financial details
     subtotal = Column(DECIMAL(10, 2), nullable=False)
     taxes = Column(DECIMAL(10, 2), nullable=False)
     discounts = Column(DECIMAL(10, 2), nullable=False)
     total = Column(DECIMAL(10, 2), nullable=False)
     currency = Column(String(3), nullable=False)
 
-    # Billing period - matching Prisma schema
-    period_start = Column("period_start", DateTime, nullable=False)
-    period_end = Column("period_end", DateTime, nullable=False)
-    metrics_id = Column("metrics_id", String(255), nullable=False)
-    due_date = Column("due_date", DateTime, nullable=False, index=True)
+    # Billing period
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    metrics_id = Column(String(255), nullable=False)
+    due_date = Column(DateTime, nullable=False, index=True)
 
-    # Payment information - matching Prisma schema
-    paid_at = Column("paid_at", DateTime, nullable=True, index=True)
-    payment_method = Column("payment_method", String(50), nullable=True)
-    payment_reference = Column("payment_reference", String(255), nullable=True)
+    # Payment information
+    paid_at = Column(DateTime, nullable=True, index=True)
+    payment_method = Column(String(50), nullable=True)
+    payment_reference = Column(String(255), nullable=True)
 
     # Relationships
     plan = relationship("BillingPlan", back_populates="invoices")
@@ -120,22 +104,17 @@ class BillingEvent(BaseModel, ShopMixin):
 
     __tablename__ = "billing_events"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
+    # Foreign key to BillingPlan
+    plan_id = Column(String, ForeignKey("billing_plans.id"), nullable=False, index=True)
 
-    # Foreign key to BillingPlan - matching Prisma schema
-    plan_id = Column(
-        "plan_id", String, ForeignKey("billing_plans.id"), nullable=False, index=True
-    )
-
-    # Event identification - matching Prisma schema
+    # Event identification
     type = Column(String, nullable=False, index=True)  # BillingEventType enum
     data = Column(JSON, default={}, nullable=False)
-    billing_metadata = Column("billing_metadata", JSON, default={}, nullable=False)
+    billing_metadata = Column(JSON, default={}, nullable=False)
 
-    # Timing - matching Prisma schema
-    occurred_at = Column("occurred_at", DateTime, nullable=False, index=True)
-    processed_at = Column("processed_at", DateTime, nullable=False, index=True)
+    # Timing
+    occurred_at = Column(DateTime, nullable=False, index=True)
+    processed_at = Column(DateTime, nullable=False, index=True)
 
     # Relationships
     plan = relationship("BillingPlan", back_populates="events")

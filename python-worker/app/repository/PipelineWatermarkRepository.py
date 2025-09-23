@@ -41,3 +41,32 @@ class PipelineWatermarkRepository:
             )
             result = await session.execute(statement)
             return result.scalar_one_or_none()
+
+    async def upsert_collection_watermark(
+        self, shop_id: str, data_type: str, last_dt
+    ) -> PipelineWatermark:
+        """Insert or update collection watermark window for a shop and data type."""
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(PipelineWatermark).where(
+                    (PipelineWatermark.shop_id == shop_id)
+                    & (PipelineWatermark.data_type == data_type)
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.last_collected_at = last_dt
+                existing.last_window_end = last_dt
+                wm = existing
+            else:
+                wm = PipelineWatermark(
+                    shop_id=shop_id,
+                    data_type=data_type,
+                    last_collected_at=last_dt,
+                    last_window_end=last_dt,
+                )
+                session.add(wm)
+
+            await session.commit()
+            return wm

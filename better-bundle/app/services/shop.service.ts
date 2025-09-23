@@ -35,8 +35,8 @@ const getShopInfoFromShopify = async (admin: any) => {
 };
 
 const getShop = async (shopDomain: string) => {
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain },
+  const shop = await prisma.shops.findUnique({
+    where: { shop_domain: shopDomain },
   });
   return shop;
 };
@@ -44,15 +44,15 @@ const getShop = async (shopDomain: string) => {
 const getShopOnboardingCompleted = async (shopDomain: string) => {
   try {
     console.log("🔍 Checking shop onboarding status for:", shopDomain);
-    const shop = await prisma.shop.findUnique({
-      where: { shopDomain },
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: shopDomain },
     });
     console.log("📊 Shop record found:", !!shop);
     if (!shop) {
       console.log("❌ No shop record found, onboarding not completed");
       return false;
     }
-    const onboardingStatus = (shop as any)?.onboardingCompleted;
+    const onboardingStatus = (shop as any)?.onboarding_completed;
     console.log("📊 Onboarding status from DB:", onboardingStatus);
     console.log("📊 Final onboarding result:", !!onboardingStatus);
     return !!onboardingStatus; // Ensure boolean return
@@ -70,66 +70,66 @@ const createShopAndSetOnboardingCompleted = async (
   const db = tx || prisma;
 
   // Check if this is a reinstall (shop exists but was inactive)
-  const existingShop = await db.shop.findUnique({
-    where: { shopDomain: shopData.myshopifyDomain },
+  const existingShop = await db.shops.findUnique({
+    where: { shop_domain: shopData.myshopifyDomain },
     include: {
       // Include billing plan to check if it was previously active
     },
   });
 
-  const isReinstall = existingShop && !existingShop.isActive;
+  const isReinstall = existingShop && !existingShop.is_active;
 
   if (isReinstall) {
     console.log(`🔄 Reactivating shop: ${shopData.myshopifyDomain}`);
     console.log(`   - Previous status: inactive`);
     console.log(
-      `   - Previous onboarding: ${existingShop.onboardingCompleted}`,
+      `   - Previous onboarding: ${existingShop.onboarding_completed}`,
     );
   } else {
     console.log(`🆕 Creating new shop: ${shopData.myshopifyDomain}`);
   }
 
-  const shop = await db.shop.upsert({
-    where: { shopDomain: shopData.myshopifyDomain },
+  const shop = await db.shops.upsert({
+    where: { shop_domain: shopData.myshopifyDomain },
     update: {
-      accessToken: session.accessToken,
-      currencyCode: shopData.currencyCode,
+      access_token: session.accessToken,
+      currency_code: shopData.currency_code,
       email: shopData.email,
-      planType: shopData.plan.displayName,
-      isActive: true,
+      plan_type: shopData.plan.displayName,
+      is_active: true,
       // For reinstalls, preserve onboarding status if it was completed
-      ...(isReinstall && existingShop.onboardingCompleted
+      ...(isReinstall && existingShop.onboarding_completed
         ? {}
-        : { onboardingCompleted: false as any }),
+        : { onboarding_completed: false as any }),
     },
     create: {
-      shopDomain: shopData.myshopifyDomain,
-      accessToken: session.accessToken,
-      currencyCode: shopData.currencyCode,
+      shop_domain: shopData.myshopifyDomain,
+      access_token: session.accessToken,
+      currency_code: shopData.currency_code,
       email: shopData.email,
-      planType: shopData.plan.displayName,
-      isActive: true,
-      onboardingCompleted: false as any, // Start as false, will be set to true later
+      plan_type: shopData.plan.displayName,
+      is_active: true,
+      onboarding_completed: false as any, // Start as false, will be set to true later
     },
   });
 
   // Create billing event for reactivation if it's a reinstall
   if (isReinstall) {
-    await db.billingEvent.create({
+    await db.billing_events.create({
       data: {
-        shopId: shop.id,
+        shop_id: shop.id,
         type: "billing_reactivated",
         data: {
           reason: "app_reinstalled",
-          reactivatedAt: new Date().toISOString(),
-          shopDomain: shopData.myshopifyDomain,
-          preservedOnboarding: existingShop.onboardingCompleted,
+          reactivated_at: new Date().toISOString(),
+          shop_domain: shopData.myshopifyDomain,
+          preserved_onboarding: existingShop.onboarding_completed,
         },
         metadata: {
-          processedAt: new Date().toISOString(),
-          isReinstall: true,
+          processed_at: new Date().toISOString(),
+          is_reinstall: true,
         },
-        occurredAt: new Date(),
+        occurred_at: new Date(),
       },
     });
   }
@@ -138,8 +138,8 @@ const createShopAndSetOnboardingCompleted = async (
 };
 
 const getBillingPlan = async (shopDomain: string) => {
-  const billingPlan = await prisma.billingPlan.findFirst({
-    where: { shopDomain, status: "active" },
+  const billingPlan = await prisma.billing_plans.findFirst({
+    where: { shop_domain: shopDomain, status: "active" },
   });
   return billingPlan;
 };
@@ -156,11 +156,11 @@ const activateTrialBillingPlan = async (
 
   // Convert to shop currency for display and storage
   const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
-    shopRecord.currencyCode,
+    shopRecord.currency_code,
   );
 
-  const billingPlan = await db.billingPlan.upsert({
-    where: { shopId: shopRecord.id },
+  const billingPlan = await db.billing_plans.upsert({
+    where: { shop_id: shopRecord.id },
     update: {
       status: "active",
       configuration: {
@@ -169,17 +169,17 @@ const activateTrialBillingPlan = async (
         trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
-        currency: shopRecord.currencyCode,
+        currency: shopRecord.currency_code,
         subscription_pending: true,
         trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
-      isTrialActive: true,
-      trialThreshold: trialThresholdInShopCurrency,
-      trialRevenue: 0.0,
+      is_trial_active: true,
+      trial_threshold: trialThresholdInShopCurrency,
+      trial_revenue: 0.0,
     },
     create: {
-      shopId: shopRecord.id,
-      shopDomain: shopDomain,
+      shop_id: shopRecord.id,
+      shop_domain: shopDomain,
       name: "Trial Plan",
       type: "usage_based",
       status: "active",
@@ -189,23 +189,23 @@ const activateTrialBillingPlan = async (
         trial_threshold: trialThresholdInShopCurrency,
         trial_revenue: 0.0,
         revenue_share_rate: 0.03,
-        currency: shopRecord.currencyCode,
+        currency: shopRecord.currency_code,
         subscription_pending: true,
         trial_threshold_usd: TRIAL_THRESHOLD_USD,
       },
-      effectiveFrom: new Date(),
-      isTrialActive: true,
-      trialThreshold: trialThresholdInShopCurrency,
-      trialRevenue: 0.0,
+      effective_from: new Date(),
+      is_trial_active: true,
+      trial_threshold: trialThresholdInShopCurrency,
+      trial_revenue: 0.0,
     },
   });
 
   console.log(`✅ Trial billing plan activated for ${shopDomain}:`);
   console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
   console.log(
-    `   - Trial threshold in shop currency: ${trialThresholdInShopCurrency} ${shopRecord.currencyCode}`,
+    `   - Trial threshold in shop currency: ${trialThresholdInShopCurrency} ${shopRecord.currency_code}`,
   );
-  console.log(`   - Shop currency: ${shopRecord.currencyCode}`);
+  console.log(`   - Shop currency: ${shopRecord.currency_code}`);
   console.log(`   - Revenue share rate: 3%`);
 
   return billingPlan;
@@ -213,9 +213,9 @@ const activateTrialBillingPlan = async (
 
 const markOnboardingCompleted = async (shopDomain: string, tx?: any) => {
   const db = tx || prisma;
-  await db.shop.update({
-    where: { shopDomain },
-    data: { onboardingCompleted: true } as any,
+  await db.shops.update({
+    where: { shop_domain: shopDomain },
+    data: { onboarding_completed: true } as any,
   });
 };
 
@@ -364,45 +364,45 @@ const deactivateShopBilling = async (
     console.log(`🔄 Deactivating billing for shop: ${shopDomain}`);
 
     // 1. Mark shop as inactive
-    await prisma.shop.updateMany({
-      where: { shopDomain },
+    await prisma.shops.updateMany({
+      where: { shop_domain: shopDomain },
       data: {
-        isActive: false,
-        updatedAt: new Date(),
+        is_active: false,
+        updated_at: new Date(),
       },
     });
 
     // 2. Deactivate all billing plans for this shop
-    const updatedPlans = await prisma.billingPlan.updateMany({
-      where: { shopDomain },
+    const updatedPlans = await prisma.billing_plans.updateMany({
+      where: { shop_domain: shopDomain },
       data: {
         status: "inactive",
-        effectiveUntil: new Date(),
-        updatedAt: new Date(),
+        effective_until: new Date(),
+        updated_at: new Date(),
       },
     });
 
     // 3. Create billing event to track the deactivation
-    const billingPlan = await prisma.billingPlan.findFirst({
-      where: { shopDomain },
+    const billingPlan = await prisma.billing_plans.findFirst({
+      where: { shop_domain: shopDomain },
       select: { id: true },
     });
 
     if (billingPlan) {
-      await prisma.billingEvent.create({
+      await prisma.billing_events.create({
         data: {
-          shopId: shopDomain,
+          shop_id: billingPlan.id,
           type: "billing_suspended",
           data: {
             reason,
-            deactivatedAt: new Date().toISOString(),
-            shopDomain,
+            deactivated_at: new Date().toISOString(),
+            shop_domain: billingPlan.shop_domain,
           },
           metadata: {
-            processedAt: new Date().toISOString(),
-            plansAffected: updatedPlans.count,
+            processed_at: new Date().toISOString(),
+            plans_affected_count: updatedPlans.count,
           },
-          occurredAt: new Date(),
+          occurred_at: new Date(),
         },
       });
     }
@@ -414,7 +414,7 @@ const deactivateShopBilling = async (
 
     return {
       success: true,
-      plansDeactivated: updatedPlans.count,
+      plans_deactivated_count: updatedPlans.count,
       reason,
     };
   } catch (error) {

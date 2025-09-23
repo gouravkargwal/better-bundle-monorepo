@@ -4,7 +4,7 @@ Watermark models for SQLAlchemy
 Represents processing watermarks for data pipelines.
 """
 
-from sqlalchemy import Column, String, DateTime, Index, ForeignKey, func
+from sqlalchemy import Column, String, DateTime, Index, func
 from .base import Base, ShopMixin, IDMixin
 
 
@@ -13,30 +13,27 @@ class PipelineWatermark(Base, IDMixin, ShopMixin):
 
     __tablename__ = "pipeline_watermarks"
 
-    # Watermark information - matching Prisma schema exactly
+    # Watermark information
     data_type = Column("data_type", String(50), nullable=False)
-    last_collected_at = Column("last_collected_at", DateTime, nullable=True)
-    last_normalized_at = Column("last_normalized_at", DateTime, nullable=True)
-    last_features_computed_at = Column(
-        "last_features_computed_at", DateTime, nullable=True
-    )
-    last_gorse_synced_at = Column("last_gorse_synced_at", DateTime, nullable=True)
+    last_collected_at = Column(DateTime, nullable=True)
+    last_normalized_at = Column(DateTime, nullable=True)
+    last_features_computed_at = Column(DateTime, nullable=True)
+    last_gorse_synced_at = Column(DateTime, nullable=True)
 
     # Status and error tracking
     status = Column(String(20), nullable=True)
-    last_error = Column("last_error", String, nullable=True)
-    last_session_id = Column("last_session_id", String(100), nullable=True)
+    last_error = Column(String, nullable=True)
+    last_session_id = Column(String(100), nullable=True)
 
     # Window information
-    last_window_start = Column("last_window_start", DateTime, nullable=True)
-    last_window_end = Column("last_window_end", DateTime, nullable=True)
+    last_window_start = Column(DateTime, nullable=True)
+    last_window_end = Column(DateTime, nullable=True)
 
     # Only updatedAt exists in Prisma schema, no createdAt
     updated_at = Column(
-        "updated_at", DateTime, default=func.now(), onupdate=func.now(), nullable=False
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    # Indexes - matching Prisma schema
     __table_args__ = (
         Index(
             "ix_pipeline_watermark_shop_id_data_type",
