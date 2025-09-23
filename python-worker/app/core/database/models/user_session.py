@@ -55,23 +55,23 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index(
             "ix_user_session_shop_id_customer_id_browser_session_id",
-            "shopId",
+            "shop_id",
             "customer_id",
             "browser_session_id",
             unique=True,
         ),
-        Index("ix_user_session_shop_id", "shopId"),
+        Index("ix_user_session_shop_id", "shop_id"),
         Index("ix_user_session_customer_id", "customer_id"),
         Index("ix_user_session_status", "status"),
         Index("ix_user_session_expires_at", "expires_at"),
-        Index("ix_user_session_shop_id_status", "shopId", "status"),
+        Index("ix_user_session_shop_id_status", "shop_id", "status"),
         Index(
             "ix_user_session_shop_id_customer_id_status",
-            "shopId",
+            "shop_id",
             "customer_id",
             "status",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<UserSession(shop_id={self.shopId}, customer_id={self.customer_id}, browser_session_id={self.browser_session_id})>"
+        return f"<UserSession(shop_id={self.shop_id}, customer_id={self.customer_id}, browser_session_id={self.browser_session_id})>"

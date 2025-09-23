@@ -50,23 +50,25 @@ class PurchaseAttribution(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index(
             "ix_purchase_attribution_shop_id_order_id",
-            "shopId",
+            "shop_id",
             "order_id",
             unique=True,
         ),
         Index("ix_purchase_attribution_session_id", "session_id"),
         Index("ix_purchase_attribution_order_id", "order_id"),
         Index("ix_purchase_attribution_customer_id", "customer_id"),
-        Index("ix_purchase_attribution_shop_id", "shopId"),
+        Index("ix_purchase_attribution_shop_id", "shop_id"),
         Index("ix_purchase_attribution_purchase_at", "purchase_at"),
-        Index("ix_purchase_attribution_shop_id_purchase_at", "shopId", "purchase_at"),
+        Index("ix_purchase_attribution_shop_id_purchase_at", "shop_id", "purchase_at"),
         Index(
             "ix_purchase_attribution_shop_id_customer_id_purchase_at",
-            "shopId",
+            "shop_id",
             "customer_id",
             "purchase_at",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<PurchaseAttribution(shop_id={self.shopId}, order_id={self.order_id})>"
+        return (
+            f"<PurchaseAttribution(shop_id={self.shop_id}, order_id={self.order_id})>"
+        )

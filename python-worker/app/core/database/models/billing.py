@@ -58,14 +58,14 @@ class BillingPlan(BaseModel, ShopMixin):
 
     # Indexes
     __table_args__ = (
-        Index("ix_billing_plan_shop_id", "shopId", unique=True),
+        Index("ix_billing_plan_shop_id", "shop_id", unique=True),
         Index("ix_billing_plan_shop_domain", "shop_domain"),
         Index("ix_billing_plan_status", "status"),
         Index("ix_billing_plan_effective_from", "effective_from"),
     )
 
     def __repr__(self) -> str:
-        return f"<BillingPlan(shop_id={self.shopId}, name={self.name}, status={self.status})>"
+        return f"<BillingPlan(shop_id={self.shop_id}, name={self.name}, status={self.status})>"
 
 
 class BillingInvoice(BaseModel, ShopMixin):
@@ -104,15 +104,15 @@ class BillingInvoice(BaseModel, ShopMixin):
 
     # Indexes
     __table_args__ = (
-        Index("ix_billing_invoice_shop_id", "shopId"),
+        Index("ix_billing_invoice_shop_id", "shop_id"),
         Index("ix_billing_invoice_plan_id", "plan_id"),
         Index("ix_billing_invoice_status", "status"),
         Index("ix_billing_invoice_due_date", "due_date"),
-        Index("ix_billing_invoice_created_at", "createdAt"),
+        Index("ix_billing_invoice_created_at", "created_at"),
     )
 
     def __repr__(self) -> str:
-        return f"<BillingInvoice(shop_id={self.shopId}, invoice_number={self.invoice_number}, status={self.status})>"
+        return f"<BillingInvoice(shop_id={self.shop_id}, invoice_number={self.invoice_number}, status={self.status})>"
 
 
 class BillingEvent(BaseModel, ShopMixin):
@@ -142,11 +142,11 @@ class BillingEvent(BaseModel, ShopMixin):
 
     # Indexes
     __table_args__ = (
-        Index("ix_billing_event_shop_id", "shopId"),
+        Index("ix_billing_event_shop_id", "shop_id"),
         Index("ix_billing_event_type", "type"),
         Index("ix_billing_event_occurred_at", "occurred_at"),
         Index("ix_billing_event_processed_at", "processed_at"),
     )
 
     def __repr__(self) -> str:
-        return f"<BillingEvent(shop_id={self.shopId}, type={self.type})>"
+        return f"<BillingEvent(shop_id={self.shop_id}, type={self.type})>"

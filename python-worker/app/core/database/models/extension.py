@@ -13,7 +13,7 @@ from .enums import AppBlockTarget
 class ExtensionActivity(BaseModel, ShopMixin):
     """Extension activity model for tracking extension usage"""
 
-    __tablename__ = "ExtensionActivity"
+    __tablename__ = "extension_activities"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -39,15 +39,15 @@ class ExtensionActivity(BaseModel, ShopMixin):
     __table_args__ = (
         Index(
             "ix_extension_activity_shop_id_extension_type_extension_uid",
-            "shopId",
+            "shop_id",
             "extension_type",
             "extension_uid",
             unique=True,
         ),
-        Index("ix_extension_activity_shop_id", "shopId"),
+        Index("ix_extension_activity_shop_id", "shop_id"),
         Index("ix_extension_activity_extension_type", "extension_type"),
         Index("ix_extension_activity_last_seen", "last_seen"),
-        Index("ix_extension_activity_shop_id_last_seen", "shopId", "last_seen"),
+        Index("ix_extension_activity_shop_id_last_seen", "shop_id", "last_seen"),
         Index(
             "ix_extension_activity_extension_type_last_seen",
             "extension_type",
@@ -56,4 +56,4 @@ class ExtensionActivity(BaseModel, ShopMixin):
     )
 
     def __repr__(self) -> str:
-        return f"<ExtensionActivity(shop_id={self.shopId}, extension_type={self.extension_type}, extension_uid={self.extension_uid})>"
+        return f"<ExtensionActivity(shop_id={self.shop_id}, extension_type={self.extension_type}, extension_uid={self.extension_uid})>"

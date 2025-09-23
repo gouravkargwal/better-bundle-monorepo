@@ -12,31 +12,27 @@ from .base import BaseModel
 class Shop(BaseModel):
     """Shop model representing a Shopify store"""
 
-    __tablename__ = "Shop"
+    __tablename__ = "shops"
 
     # Core shop information
-    shop_domain = Column("shopDomain", String(255), nullable=False, index=True)
-    custom_domain = Column("customDomain", String(255), nullable=True)
-    access_token = Column("accessToken", String(1000), nullable=False)
+    shop_domain = Column(String(255), nullable=False, index=True)
+    custom_domain = Column(String(255), nullable=True)
+    access_token = Column(String(1000), nullable=False)
 
     # Plan and billing information
-    plan_type = Column(
-        "planType", String(50), default="Free", nullable=False, index=True
-    )
-    currency_code = Column("currencyCode", String(10), nullable=True)
-    money_format = Column("moneyFormat", String(100), nullable=True)
+    plan_type = Column(String(50), default="Free", nullable=False, index=True)
+    currency_code = Column(String(10), nullable=True)
+    money_format = Column(String(100), nullable=True)
 
     # Status flags
-    is_active = Column("isActive", Boolean, default=True, nullable=False, index=True)
-    onboarding_completed = Column(
-        "onboardingCompleted", Boolean, default=False, nullable=False
-    )
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
 
     # Contact information
     email = Column(String(255), nullable=True)
 
     # Analysis tracking
-    last_analysis_at = Column("lastAnalysisAt", DateTime, nullable=True, index=True)
+    last_analysis_at = Column(DateTime, nullable=True, index=True)
 
     # Relationships
     collection_data = relationship(
@@ -97,7 +93,7 @@ class Shop(BaseModel):
     )
 
     # Table constraints
-    __table_args__ = (UniqueConstraint("shopDomain", name="shop_domain_unique"),)
+    __table_args__ = (UniqueConstraint("shop_domain", name="shop_domain_unique"),)
 
     def __repr__(self) -> str:
         return f"<Shop(domain={self.shop_domain}, plan={self.plan_type})>"

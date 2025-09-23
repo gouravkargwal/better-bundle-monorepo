@@ -43,13 +43,13 @@ class RefundData(BaseModel, ShopMixin):
 
     # Indexes
     __table_args__ = (
-        Index("ix_refund_data_shop_id_refund_id", "shopId", "refund_id", unique=True),
-        Index("ix_refund_data_shop_id_order_id", "shopId", "order_id"),
+        Index("ix_refund_data_shop_id_refund_id", "shop_id", "refund_id", unique=True),
+        Index("ix_refund_data_shop_id_order_id", "shop_id", "order_id"),
         Index("ix_refund_data_refunded_at", "refunded_at"),
     )
 
     def __repr__(self) -> str:
-        return f"<RefundData(shop_id={self.shopId}, refund_id={self.refund_id})>"
+        return f"<RefundData(shop_id={self.shop_id}, refund_id={self.refund_id})>"
 
 
 class RefundLineItemData(BaseModel):
@@ -115,15 +115,15 @@ class RefundAttributionAdjustment(BaseModel, ShopMixin):
     __table_args__ = (
         Index(
             "ix_refund_attribution_adjustment_shop_id_refund_id",
-            "shopId",
+            "shop_id",
             "refund_id",
             unique=True,
         ),
         Index(
-            "ix_refund_attribution_adjustment_shop_id_order_id", "shopId", "order_id"
+            "ix_refund_attribution_adjustment_shop_id_order_id", "shop_id", "order_id"
         ),
         Index("ix_refund_attribution_adjustment_computed_at", "computed_at"),
     )
 
     def __repr__(self) -> str:
-        return f"<RefundAttributionAdjustment(shop_id={self.shopId}, refund_id={self.refund_id})>"
+        return f"<RefundAttributionAdjustment(shop_id={self.shop_id}, refund_id={self.refund_id})>"

@@ -11,7 +11,7 @@ from .base import BaseModel, ShopMixin
 class UserIdentityLink(BaseModel, ShopMixin):
     """User identity link model for cross-session customer linking"""
 
-    __tablename__ = "UserIdentityLink"
+    __tablename__ = "user_identity_links"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -25,14 +25,14 @@ class UserIdentityLink(BaseModel, ShopMixin):
     __table_args__ = (
         Index(
             "ix_user_identity_link_shop_id_client_id_customer_id",
-            "shopId",
+            "shop_id",
             "client_id",
             "customer_id",
             unique=True,
         ),
-        Index("ix_user_identity_link_shop_id_client_id", "shopId", "client_id"),
-        Index("ix_user_identity_link_shop_id_customer_id", "shopId", "customer_id"),
+        Index("ix_user_identity_link_shop_id_client_id", "shop_id", "client_id"),
+        Index("ix_user_identity_link_shop_id_customer_id", "shop_id", "customer_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<UserIdentityLink(shop_id={self.shopId}, client_id={self.client_id}, customer_id={self.customer_id})>"
+        return f"<UserIdentityLink(shop_id={self.shop_id}, client_id={self.client_id}, customer_id={self.customer_id})>"

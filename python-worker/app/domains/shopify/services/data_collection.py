@@ -16,14 +16,14 @@ from app.core.database.models import (
     RawCustomer,
     RawCollection,
 )
-
-# Removed enum imports - using string values directly
 from sqlalchemy import select, func
-
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
 from ..interfaces.permission_service import IShopifyPermissionService
 from .data_storage import ShopifyDataStorageService
+from app.repository.PipelineWatermarkRepository import (
+    PipelineWatermarkRepository,
+)
 
 logger = get_logger(__name__)
 
@@ -36,9 +36,13 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         api_client: IShopifyAPIClient,
         permission_service: IShopifyPermissionService,
         data_storage: ShopifyDataStorageService = None,
+        pipeline_watermark_repository: PipelineWatermarkRepository = None,
     ):
         self.api_client = api_client
         self.permission_service = permission_service
+        self.pipeline_watermark_repository = (
+            pipeline_watermark_repository or PipelineWatermarkRepository()
+        )
 
         # Inject storage service or create default
         self.data_storage = data_storage or ShopifyDataStorageService()
@@ -77,6 +81,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self,
         data_type: str,
         shop_domain: str,
+        shop_id: str,
         access_token: str = None,
         limit: Optional[int] = None,
         since_id: Optional[str] = None,
@@ -87,25 +92,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if not config:
             raise ValueError(f"Unsupported data type: {data_type}")
 
-        # Resolve shop
-        shop = await self.data_storage.get_shop_by_domain(shop_domain)
-        if not shop:
-            logger.warning(
-                f"Shop not found for domain {shop_domain}, skipping {data_type}"
-            )
-            return []
-        shop_id = shop.id
-
-        # Decide full vs incremental using PipelineWatermark (and force flag)
         force_full_collection = bool(force_full_collection)
-        async with get_session_context() as session:
-            result = await session.execute(
-                select(PipelineWatermark).where(
-                    (PipelineWatermark.shopId == shop_id)
-                    & (PipelineWatermark.dataType == data_type)
-                )
-            )
-            pw = result.scalar_one_or_none()
+
+        pw = await self.pipeline_watermark_repository.get_by_shop_and_data_type(
+            shop_id=shop_id, data_type=data_type
+        )
         should_do_full = force_full_collection or (pw is None)
 
         if should_do_full:
@@ -222,21 +213,13 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     async def collect_all_data(
         self,
         shop_domain: str,
-        access_token: str = None,
-        shop_id: str = None,
-        include_products: bool = True,
-        include_orders: bool = True,
-        include_customers: bool = True,
-        include_collections: bool = True,
+        access_token: str,
+        shop_id: str,
     ) -> Dict[str, Any]:
         """Collect all available data from Shopify API with session tracking"""
         # Start collection session
         collection_start_time = now_utc()
         session_id = f"collection_{shop_id}_{int(collection_start_time.timestamp())}"
-
-        logger.info(
-            f"🚀 Starting data collection session: {session_id} for {shop_domain}"
-        )
 
         try:
             # 1. Check permissions
@@ -244,10 +227,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             collectable_data = self._get_collectable_data_types(
                 permissions,
                 {
-                    "products": include_products,
-                    "orders": include_orders,
-                    "customers": include_customers,
-                    "collections": include_collections,
+                    "products": True,
+                    "orders": True,
+                    "customers": True,
+                    "collections": True,
                 },
             )
 
@@ -257,19 +240,13 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     "message": "No permissions for data collection",
                 }
 
-            # 2. Validate shop
-            if not shop_id:
-                return {"success": False, "message": "Shop ID required"}
-
-            # 3. Collect & Store data
             results = await self._collect_and_store_data(
                 shop_domain, access_token, shop_id, collectable_data
             )
 
-            # 4. Trigger normalization with session tracking
-            await self._trigger_normalization(
-                shop_id, results.get("processed_types", []), collection_start_time
-            )
+            # await self._trigger_normalization(
+            #     shop_id, results.get("processed_types", []), collection_start_time
+            # )
 
             total_items = sum(
                 len(data) for data in results.get("collected_data", {}).values() if data

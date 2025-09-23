@@ -25,7 +25,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "read_products",
             "read_orders",
             "read_customers",
-            "read_customer_events",
         ]
 
         # Scope to data type mapping
@@ -39,7 +38,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             ],
             "read_orders": ["orders", "line_items", "financials"],
             "read_customers": ["customers", "customer_addresses"],
-            "read_customer_events": ["customer_events", "browsing_behavior"],
         }
 
         # Redis cache service for permissions
@@ -68,7 +66,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 "orders": True,
                 "customers": True,
                 "collections": True,
-                "customer_events": True,
                 "has_access": True,
             }
 
@@ -97,18 +94,12 @@ class ShopifyPermissionService(IShopifyPermissionService):
             collections_permission = any(
                 scope in ["read_products", "write_products"] for scope in scopes
             )
-            # Customer events use read_customer_events scope
-            customer_events_permission = any(
-                scope in ["read_customer_events", "write_customer_events"]
-                for scope in scopes
-            )
 
             permissions = {
                 "products": products_permission,
                 "orders": orders_permission,
                 "customers": customers_permission,
                 "collections": collections_permission,
-                "customer_events": customer_events_permission,
             }
 
             # Check overall access
@@ -150,11 +141,7 @@ class ShopifyPermissionService(IShopifyPermissionService):
         if not permissions.get("customers"):
             missing_scopes.append("read_customers")
         if not permissions.get("collections"):
-            missing_scopes.append(
-                "read_products"
-            )  # Collections are part of read_products
-        if not permissions.get("customer_events"):
-            missing_scopes.append("read_customer_events")
+            missing_scopes.append("read_products")
 
         return missing_scopes
 
@@ -231,8 +218,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             collectable_data.append("customers")
         if permissions.get("collections"):
             collectable_data.append("collections")
-        if permissions.get("customer_events"):
-            collectable_data.append("customer_events")
 
         # Determine collection priority
         collection_priority = self._get_collection_priority(collectable_data)
@@ -312,11 +297,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 "Request 'read_products' scope to access product collections and categorization"
             )
 
-        if "read_customer_events" in missing_scopes:
-            recommendations.append(
-                "Request 'read_customer_events' scope to access customer browsing behavior and engagement data"
-            )
-
         if len(missing_scopes) >= 3:
             recommendations.append(
                 "Consider requesting all missing scopes for comprehensive data collection and ML training"
@@ -332,7 +312,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "orders",
             "customers",
             "collections",
-            "customer_events",
         ]
 
         # Filter to only include collectable data and maintain priority order
@@ -348,7 +327,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "orders": {"minutes": 10, "complexity": "high"},
             "customers": {"minutes": 3, "complexity": "low"},
             "collections": {"minutes": 2, "complexity": "low"},
-            "customer_events": {"minutes": 3, "complexity": "medium"},
         }
 
         total_minutes = sum(

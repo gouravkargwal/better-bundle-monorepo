@@ -24,7 +24,7 @@ from .base import BaseModel, ShopMixin, CustomerMixin, ProductMixin
 class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     """User features model for customer analytics"""
 
-    __tablename__ = "UserFeatures"
+    __tablename__ = "user_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -94,38 +94,38 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index(
             "ix_user_features_shop_id_customer_id",
-            "shopId",
+            "shop_id",
             "customer_id",
             unique=True,
         ),
-        Index("ix_user_features_shop_id_total_spent", "shopId", "total_spent"),
+        Index("ix_user_features_shop_id_total_spent", "shop_id", "total_spent"),
         Index(
             "ix_user_features_shop_id_days_since_last_order",
-            "shopId",
+            "shop_id",
             "days_since_last_order",
         ),
-        Index("ix_user_features_shop_id_refund_rate", "shopId", "refund_rate"),
+        Index("ix_user_features_shop_id_refund_rate", "shop_id", "refund_rate"),
         Index(
             "ix_user_features_shop_id_net_lifetime_value",
-            "shopId",
+            "shop_id",
             "net_lifetime_value",
         ),
         Index(
             "ix_user_features_shop_id_lifetime_value_days_since_last_order",
-            "shopId",
+            "shop_id",
             "lifetime_value",
             "days_since_last_order",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<UserFeatures(shop_id={self.shopId}, customer_id={self.customer_id})>"
+        return f"<UserFeatures(shop_id={self.shop_id}, customer_id={self.customer_id})>"
 
 
 class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     """Product features model for product analytics"""
 
-    __tablename__ = "ProductFeatures"
+    __tablename__ = "product_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -213,45 +213,51 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     __table_args__ = (
         Index(
             "ix_product_features_shop_id_product_id",
-            "shopId",
+            "shop_id",
             "product_id",
             unique=True,
         ),
         Index(
             "ix_product_features_shop_id_popularity_score",
-            "shopId",
+            "shop_id",
             "popularity_score",
         ),
-        Index("ix_product_features_shop_id_trending_score", "shopId", "trending_score"),
-        Index("ix_product_features_shop_id_view_count_30d", "shopId", "view_count_30d"),
+        Index(
+            "ix_product_features_shop_id_trending_score", "shop_id", "trending_score"
+        ),
+        Index(
+            "ix_product_features_shop_id_view_count_30d", "shop_id", "view_count_30d"
+        ),
         Index(
             "ix_product_features_shop_id_purchase_count_30d",
-            "shopId",
+            "shop_id",
             "purchase_count_30d",
         ),
-        Index("ix_product_features_shop_id_refund_rate", "shopId", "refund_rate"),
+        Index("ix_product_features_shop_id_refund_rate", "shop_id", "refund_rate"),
         Index(
             "ix_product_features_shop_id_refund_risk_score",
-            "shopId",
+            "shop_id",
             "refund_risk_score",
         ),
-        Index("ix_product_features_shop_id_net_revenue", "shopId", "net_revenue"),
+        Index("ix_product_features_shop_id_net_revenue", "shop_id", "net_revenue"),
         Index(
             "ix_product_features_shop_id_popularity_trending",
-            "shopId",
+            "shop_id",
             "popularity_score",
             "trending_score",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<ProductFeatures(shop_id={self.shopId}, product_id={self.product_id})>"
+        return (
+            f"<ProductFeatures(shop_id={self.shop_id}, product_id={self.product_id})>"
+        )
 
 
 class CollectionFeatures(BaseModel, ShopMixin):
     """Collection features model for collection analytics"""
 
-    __tablename__ = "CollectionFeatures"
+    __tablename__ = "collection_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -305,34 +311,34 @@ class CollectionFeatures(BaseModel, ShopMixin):
     __table_args__ = (
         Index(
             "ix_collection_features_shop_id_collection_id",
-            "shopId",
+            "shop_id",
             "collection_id",
             unique=True,
         ),
         Index(
-            "ix_collection_features_shop_id_product_count", "shopId", "product_count"
+            "ix_collection_features_shop_id_product_count", "shop_id", "product_count"
         ),
         Index(
             "ix_collection_features_shop_id_performance_score",
-            "shopId",
+            "shop_id",
             "performance_score",
         ),
         Index(
             "ix_collection_features_shop_id_view_count_30d_performance",
-            "shopId",
+            "shop_id",
             "view_count_30d",
             "performance_score",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<CollectionFeatures(shop_id={self.shopId}, collection_id={self.collection_id})>"
+        return f"<CollectionFeatures(shop_id={self.shop_id}, collection_id={self.collection_id})>"
 
 
 class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     """Interaction features model for customer-product interactions"""
 
-    __tablename__ = "InteractionFeatures"
+    __tablename__ = "interaction_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -373,45 +379,45 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     __table_args__ = (
         Index(
             "ix_interaction_features_shop_id_customer_id_product_id",
-            "shopId",
+            "shop_id",
             "customer_id",
             "product_id",
             unique=True,
         ),
-        Index("ix_interaction_features_shop_id_customer_id", "shopId", "customer_id"),
-        Index("ix_interaction_features_shop_id_product_id", "shopId", "product_id"),
+        Index("ix_interaction_features_shop_id_customer_id", "shop_id", "customer_id"),
+        Index("ix_interaction_features_shop_id_product_id", "shop_id", "product_id"),
         Index(
             "ix_interaction_features_shop_id_interaction_score",
-            "shopId",
+            "shop_id",
             "interaction_score",
         ),
-        Index("ix_interaction_features_shop_id_refund_rate", "shopId", "refund_rate"),
+        Index("ix_interaction_features_shop_id_refund_rate", "shop_id", "refund_rate"),
         Index(
             "ix_interaction_features_shop_id_refund_risk_score",
-            "shopId",
+            "shop_id",
             "refund_risk_score",
         ),
         Index(
             "ix_interaction_features_shop_id_net_purchase_value",
-            "shopId",
+            "shop_id",
             "net_purchase_value",
         ),
         Index(
             "ix_interaction_features_shop_id_customer_id_interaction_score",
-            "shopId",
+            "shop_id",
             "customer_id",
             "interaction_score",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<InteractionFeatures(shop_id={self.shopId}, customer_id={self.customer_id}, product_id={self.product_id})>"
+        return f"<InteractionFeatures(shop_id={self.shop_id}, customer_id={self.customer_id}, product_id={self.product_id})>"
 
 
 class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
     """Session features model for session analytics"""
 
-    __tablename__ = "SessionFeatures"
+    __tablename__ = "session_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -468,33 +474,35 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index(
             "ix_session_features_shop_id_session_id",
-            "shopId",
+            "shop_id",
             "session_id",
             unique=True,
         ),
-        Index("ix_session_features_shop_id_customer_id", "shopId", "customer_id"),
-        Index("ix_session_features_shop_id_start_time", "shopId", "start_time"),
+        Index("ix_session_features_shop_id_customer_id", "shop_id", "customer_id"),
+        Index("ix_session_features_shop_id_start_time", "shop_id", "start_time"),
         Index(
             "ix_session_features_shop_id_checkout_completed",
-            "shopId",
+            "shop_id",
             "checkout_completed",
         ),
         Index(
             "ix_session_features_shop_id_start_time_checkout_completed",
-            "shopId",
+            "shop_id",
             "start_time",
             "checkout_completed",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<SessionFeatures(shop_id={self.shopId}, session_id={self.session_id})>"
+        return (
+            f"<SessionFeatures(shop_id={self.shop_id}, session_id={self.session_id})>"
+        )
 
 
 class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     """Product pair features model for product co-occurrence analytics"""
 
-    __tablename__ = "ProductPairFeatures"
+    __tablename__ = "product_pair_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -525,34 +533,34 @@ class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     __table_args__ = (
         Index(
             "ix_product_pair_features_shop_id_product_id1_product_id2",
-            "shopId",
+            "shop_id",
             "product_id1",
             "product_id2",
             unique=True,
         ),
-        Index("ix_product_pair_features_shop_id_product_id1", "shopId", "product_id1"),
-        Index("ix_product_pair_features_shop_id_product_id2", "shopId", "product_id2"),
+        Index("ix_product_pair_features_shop_id_product_id1", "shop_id", "product_id1"),
+        Index("ix_product_pair_features_shop_id_product_id2", "shop_id", "product_id2"),
         Index(
             "ix_product_pair_features_shop_id_co_purchase_count",
-            "shopId",
+            "shop_id",
             "co_purchase_count",
         ),
         Index(
             "ix_product_pair_features_shop_id_product_id1_co_purchase_count",
-            "shopId",
+            "shop_id",
             "product_id1",
             "co_purchase_count",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<ProductPairFeatures(shop_id={self.shopId}, product_id1={self.product_id1}, product_id2={self.product_id2})>"
+        return f"<ProductPairFeatures(shop_id={self.shop_id}, product_id1={self.product_id1}, product_id2={self.product_id2})>"
 
 
 class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
     """Search product features model for search analytics"""
 
-    __tablename__ = "SearchProductFeatures"
+    __tablename__ = "search_product_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -581,36 +589,36 @@ class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
     __table_args__ = (
         Index(
             "ix_search_product_features_shop_id_search_query_product_id",
-            "shopId",
+            "shop_id",
             "search_query",
             "product_id",
             unique=True,
         ),
         Index(
-            "ix_search_product_features_shop_id_search_query", "shopId", "search_query"
+            "ix_search_product_features_shop_id_search_query", "shop_id", "search_query"
         ),
-        Index("ix_search_product_features_shop_id_product_id", "shopId", "product_id"),
+        Index("ix_search_product_features_shop_id_product_id", "shop_id", "product_id"),
         Index(
             "ix_search_product_features_shop_id_click_through_rate",
-            "shopId",
+            "shop_id",
             "click_through_rate",
         ),
         Index(
             "ix_search_product_features_shop_id_search_query_ctr",
-            "shopId",
+            "shop_id",
             "search_query",
             "click_through_rate",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<SearchProductFeatures(shop_id={self.shopId}, search_query={self.search_query}, product_id={self.product_id})>"
+        return f"<SearchProductFeatures(shop_id={self.shop_id}, search_query={self.search_query}, product_id={self.product_id})>"
 
 
 class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     """Customer behavior features model for behavioral analytics"""
 
-    __tablename__ = "CustomerBehaviorFeatures"
+    __tablename__ = "customer_behavior_features"
 
     # Foreign key to Shop
     # shop_id provided by ShopMixin
@@ -706,47 +714,47 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index(
             "ix_customer_behavior_features_shop_id_customer_id",
-            "shopId",
+            "shop_id",
             "customer_id",
             unique=True,
         ),
         Index(
             "ix_customer_behavior_features_shop_id_engagement_score",
-            "shopId",
+            "shop_id",
             "engagement_score",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_behavioral_score",
-            "shopId",
+            "shop_id",
             "behavioral_score",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_days_since_last_event",
-            "shopId",
+            "shop_id",
             "days_since_last_event",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_total_unified_sessions",
-            "shopId",
+            "shop_id",
             "total_unified_sessions",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_ext_engagement",
-            "shopId",
+            "shop_id",
             "extension_engagement_score",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_multi_touch_attr",
-            "shopId",
+            "shop_id",
             "multi_touch_attribution_score",
         ),
         Index(
             "ix_customer_behavior_features_shop_id_engagement_behavioral",
-            "shopId",
+            "shop_id",
             "engagement_score",
             "behavioral_score",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<CustomerBehaviorFeatures(shop_id={self.shopId}, customer_id={self.customer_id})>"
+        return f"<CustomerBehaviorFeatures(shop_id={self.shop_id}, customer_id={self.customer_id})>"

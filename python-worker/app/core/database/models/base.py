@@ -19,9 +19,9 @@ Base = declarative_base()
 class TimestampMixin:
     """Mixin for models that need created_at and updated_at timestamps"""
 
-    created_at = Column("createdAt", DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column("created_at", DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
-        "updatedAt",
+        "updated_at",
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
@@ -74,7 +74,9 @@ class BaseModel(Base, IDMixin, TimestampMixin):
 class ShopMixin:
     """Mixin for models that belong to a shop"""
 
-    shopId = Column("shopId", String, ForeignKey("Shop.id"), nullable=False, index=True)
+    shop_id = Column(
+        "shop_id", String, ForeignKey("shops.id"), nullable=False, index=True
+    )
 
     @declared_attr
     def shop(cls):

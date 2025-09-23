@@ -38,23 +38,25 @@ class UserInteraction(BaseModel, ShopMixin, CustomerMixin):
     __table_args__ = (
         Index("ix_user_interaction_session_id", "session_id"),
         Index("ix_user_interaction_customer_id", "customer_id"),
-        Index("ix_user_interaction_shop_id", "shopId"),
+        Index("ix_user_interaction_shop_id", "shop_id"),
         Index("ix_user_interaction_extension_type", "extension_type"),
         Index("ix_user_interaction_interaction_type", "interaction_type"),
-        Index("ix_user_interaction_created_at", "createdAt"),
-        Index("ix_user_interaction_shop_id_extension_type", "shopId", "extension_type"),
+        Index("ix_user_interaction_created_at", "created_at"),
+        Index(
+            "ix_user_interaction_shop_id_extension_type", "shop_id", "extension_type"
+        ),
         Index(
             "ix_user_interaction_shop_id_interaction_type",
-            "shopId",
+            "shop_id",
             "interaction_type",
         ),
         Index(
             "ix_user_interaction_shop_id_customer_id_created_at",
-            "shopId",
+            "shop_id",
             "customer_id",
-            "createdAt",
+            "created_at",
         ),
     )
 
     def __repr__(self) -> str:
-        return f"<UserInteraction(shop_id={self.shopId}, extension_type={self.extension_type}, interaction_type={self.interaction_type})>"
+        return f"<UserInteraction(shop_id={self.shop_id}, extension_type={self.extension_type}, interaction_type={self.interaction_type})>"
