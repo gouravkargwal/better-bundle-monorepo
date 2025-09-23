@@ -85,8 +85,8 @@ class GraphQLOrderAdapter(BaseAdapter):
                 props_dict = {}
             line_items.append(
                 CanonicalLineItem(
-                    product_id=_extract_numeric_gid(product.get("id")),
-                    variant_id=_extract_numeric_gid(variant.get("id")),
+                    productId=_extract_numeric_gid(product.get("id")),
+                    variantId=_extract_numeric_gid(variant.get("id")),
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
                     price=_to_float(variant.get("price")),
@@ -128,7 +128,7 @@ class GraphQLOrderAdapter(BaseAdapter):
             updated_at=updated_at,
             currency_code=payload.get("currencyCode"),
             presentment_currency_code=payload.get("presentmentCurrencyCode"),
-            totalAmount=total_amount,
+            total_amount=total_amount,
             subtotal_amount=subtotal_amount,
             total_tax_amount=total_tax_amount,
             total_shipping_amount=total_shipping_amount,
@@ -150,7 +150,7 @@ class GraphQLOrderAdapter(BaseAdapter):
             tags=tags,
             note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
-            line_items=line_items,
+            lineItems=line_items,
             billing_address=payload.get("billingAddress"),
             shipping_address=payload.get("shippingAddress"),
             discount_applications=(payload.get("discountApplications", {}) or {}).get(

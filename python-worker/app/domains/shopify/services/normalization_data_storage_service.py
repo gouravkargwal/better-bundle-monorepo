@@ -192,16 +192,31 @@ class NormalizationDataStorageService:
         if not canonical_data_list:
             return 0
 
+        self.logger.info(
+            f"🔄 Upserting {len(canonical_data_list)} orders for shop {shop_id}"
+        )
         processed_count = 0
+        upsert_errors = 0
 
         async with get_transaction_context() as session:
-            for canonical_data in canonical_data_list:
+            for i, canonical_data in enumerate(canonical_data_list):
                 try:
                     order_id = canonical_data.get("order_id")
                     if not order_id:
+                        self.logger.warning(
+                            f"Missing order_id in canonical data {i+1}: {list(canonical_data.keys())}"
+                        )
+                        upsert_errors += 1
                         continue
 
+                    self.logger.debug(
+                        f"Processing order {i+1}/{len(canonical_data_list)}: {order_id}"
+                    )
+
                     line_items = canonical_data.get("lineItems", [])
+                    self.logger.debug(
+                        f"Order {order_id} has {len(line_items)} line items"
+                    )
 
                     # Use canonical data directly - it's already aligned with DB schema
                     order_data = canonical_data.copy()
@@ -209,6 +224,9 @@ class NormalizationDataStorageService:
                     # Remove line items since they're handled separately
                     order_data.pop("lineItems", None)
                     order_data.pop("line_items", None)
+
+                    # Remove fields that don't exist in OrderData model
+                    order_data.pop("refunds", None)
 
                     # Clean internal fields
                     self._clean_internal_fields(order_data)
@@ -223,6 +241,7 @@ class NormalizationDataStorageService:
                     existing = result.scalar_one_or_none()
 
                     if existing:
+                        self.logger.debug(f"Updating existing order {order_id}")
                         await session.execute(
                             update(OrderData)
                             .where(OrderData.id == existing.id)
@@ -230,6 +249,7 @@ class NormalizationDataStorageService:
                         )
                         order_record_id = existing.id
                     else:
+                        self.logger.debug(f"Creating new order {order_id}")
                         order_instance = OrderData(**order_data)
                         session.add(order_instance)
                         await session.flush()
@@ -237,17 +257,28 @@ class NormalizationDataStorageService:
 
                     # Replace line items
                     if line_items:
+                        self.logger.debug(
+                            f"Creating {len(line_items)} line items for order {order_id}"
+                        )
                         await self._create_line_items(
                             session, order_record_id, line_items
                         )
 
                     processed_count += 1
-                except Exception:
-                    # Skip this order, continue with others
+                    self.logger.debug(f"Successfully processed order {order_id}")
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to upsert order {i+1}: {e}", exc_info=True
+                    )
+                    upsert_errors += 1
                     continue
 
             await session.commit()
 
+        self.logger.info(
+            f"✅ Order batch upsert completed: {processed_count} orders, {upsert_errors} errors"
+        )
         return processed_count
 
     async def upsert_entities_batch(
@@ -402,37 +433,84 @@ class NormalizationDataStorageService:
         if not line_items:
             return
 
+        self.logger.debug(
+            f"Creating {len(line_items)} line items for order {order_record_id}"
+        )
+
         try:
             # Clear existing line items for the order
             await session.execute(
                 delete(LineItemData).where(LineItemData.order_id == order_record_id)
             )
+            self.logger.debug(
+                f"Cleared existing line items for order {order_record_id}"
+            )
 
             # Prepare bulk data (snake_case fields)
             bulk_rows: List[Dict[str, Any]] = []
-            for item in line_items:
+            line_item_errors = 0
+
+            for i, item in enumerate(line_items):
                 try:
-                    bulk_rows.append(
-                        {
-                            "order_id": order_record_id,
-                            "product_id": item.get("productId"),
-                            "variant_id": item.get("variantId"),
-                            "title": item.get("title"),
-                            "quantity": int(item.get("quantity", 0)),
-                            "price": float(item.get("price", 0.0)),
-                            "properties": item.get("properties", {}),
-                        }
+                    # Canonical uses snake_case; allow camelCase fallback just in case
+                    product_id_value = item.get("product_id") or item.get("productId")
+                    variant_id_value = item.get("variant_id") or item.get("variantId")
+
+                    line_item_data = {
+                        "order_id": order_record_id,
+                        "product_id": product_id_value,
+                        "variant_id": variant_id_value,
+                        "title": item.get("title"),
+                        "quantity": int(item.get("quantity", 0)),
+                        "price": float(item.get("price", 0.0)),
+                        "properties": item.get("properties", {}),
+                    }
+
+                    # Validate required fields - allow line items without product_id
+                    # Some line items (like gift cards, custom items) don't have product IDs
+                    if (
+                        not line_item_data["product_id"]
+                        and not line_item_data["variant_id"]
+                    ):
+                        self.logger.warning(
+                            f"Missing both product_id and variant_id in line item {i+1}: {item}"
+                        )
+                        line_item_errors += 1
+                        continue
+
+                    bulk_rows.append(line_item_data)
+                    identifier = (
+                        line_item_data["product_id"]
+                        or line_item_data["variant_id"]
+                        or "no-id"
                     )
+                    self.logger.debug(f"Prepared line item {i+1}: {identifier}")
+
                 except (ValueError, TypeError) as e:
-                    self.logger.warning(f"Skipping invalid line item: {e}")
+                    self.logger.warning(
+                        f"Skipping invalid line item {i+1}: {e} - {item}"
+                    )
+                    line_item_errors += 1
                     continue
+
+            self.logger.debug(
+                f"Prepared {len(bulk_rows)} line items, {line_item_errors} errors"
+            )
 
             if bulk_rows:
                 # Use bulk insert for efficiency
                 await session.execute(insert(LineItemData).values(bulk_rows))
+                self.logger.debug(f"Successfully inserted {len(bulk_rows)} line items")
+            else:
+                self.logger.warning(
+                    f"No valid line items to insert for order {order_record_id}"
+                )
 
         except Exception as e:
-            self.logger.error(f"Failed to create line items: {e}")
+            self.logger.error(
+                f"Failed to create line items for order {order_record_id}: {e}",
+                exc_info=True,
+            )
 
     def _clean_internal_fields(self, main_data: Dict):
         """Remove internal/canonical fields not in DB schema."""
@@ -443,6 +521,7 @@ class NormalizationDataStorageService:
             "customerCreatedAt",
             "customerUpdatedAt",
             "isActive",
+            "refunds",  # Not in OrderData model
         ]
         for field in fields_to_remove:
             main_data.pop(field, None)

@@ -224,26 +224,74 @@ class OrderNormalizationService:
         if not raw_records:
             return 0
 
+        self.logger.info(
+            f"🔄 Processing {len(raw_records)} order records for shop {shop_id}"
+        )
+
         # Convert raw records to canonical data
         canonical_data_list = []
-        for raw_record in raw_records:
+        conversion_errors = 0
+
+        for i, raw_record in enumerate(raw_records):
             try:
+                self.logger.debug(f"Processing order record {i+1}/{len(raw_records)}")
+
                 payload = self._parse_payload(raw_record)
                 if not payload:
+                    self.logger.warning(f"Skipping order record {i+1}: no payload")
+                    conversion_errors += 1
                     continue
 
                 data_format = self._detect_format(raw_record, payload)
+                self.logger.debug(
+                    f"Detected format: {data_format} for order record {i+1}"
+                )
+
                 adapter = get_adapter(data_format, "orders")
                 canonical = adapter.to_canonical(payload, shop_id)
+
+                # Validate canonical data
+                if not canonical.get("order_id"):
+                    self.logger.error(
+                        f"Missing order_id in canonical data for record {i+1}: {list(canonical.keys())}"
+                    )
+                    conversion_errors += 1
+                    continue
+
                 canonical_data_list.append(canonical)
-            except Exception:
-                # Skip this order, continue with others
+                self.logger.debug(
+                    f"Successfully converted order record {i+1} to canonical"
+                )
+
+            except Exception as e:
+                # Log the actual error for debugging
+                self.logger.error(
+                    f"Failed to convert order record {i+1} to canonical: {e}",
+                    exc_info=True,
+                )
+                conversion_errors += 1
                 continue
 
-        # Use data storage service for batch upsert
-        processed_count = await self.data_storage.upsert_orders_batch(
-            canonical_data_list, shop_id
+        self.logger.info(
+            f"📊 Order conversion results: {len(canonical_data_list)} successful, {conversion_errors} failed"
         )
+
+        if not canonical_data_list:
+            self.logger.warning("No valid canonical order data to process")
+            return 0
+
+        # Use data storage service for batch upsert
+        try:
+            processed_count = await self.data_storage.upsert_orders_batch(
+                canonical_data_list, shop_id
+            )
+            self.logger.info(
+                f"✅ Order batch upsert completed: {processed_count} orders saved"
+            )
+            return processed_count
+        except Exception as e:
+            self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
+            return 0
 
         # Publish events after commit for webhook-only processing
         if is_webhook:
@@ -785,37 +833,24 @@ class NormalizationService:
                     successful = await self.entity_service.normalize_entities_batch(
                         raw_records, shop_id, data_type
                     )
-
-                # track max extracted_at seen across the page
-                for raw_record in raw_records:
-                    if getattr(raw_record, "extracted_at", None):
-                        try:
-                            last_extracted_iso = (
-                                max(
-                                    last_extracted_iso or "",
-                                    raw_record.extracted_at.isoformat(),
+                # Only advance window if something actually succeeded
+                if successful > 0:
+                    for raw_record in raw_records:
+                        if getattr(raw_record, "extracted_at", None):
+                            try:
+                                last_extracted_iso = (
+                                    max(
+                                        last_extracted_iso or "",
+                                        raw_record.extracted_at.isoformat(),
+                                    )
+                                    or raw_record.extracted_at.isoformat()
                                 )
-                                or raw_record.extracted_at.isoformat()
-                            )
-                        except Exception:
-                            last_extracted_iso = raw_record.extracted_at.isoformat()
+                            except Exception:
+                                last_extracted_iso = raw_record.extracted_at.isoformat()
             else:
                 # REST individual processing for real-time updates
                 tasks = []
                 for raw_record in raw_records:
-                    # track max extracted_at seen
-                    if getattr(raw_record, "extracted_at", None):
-                        try:
-                            last_extracted_iso = (
-                                max(
-                                    last_extracted_iso or "",
-                                    raw_record.extracted_at.isoformat(),
-                                )
-                                or raw_record.extracted_at.isoformat()
-                            )
-                        except Exception:
-                            last_extracted_iso = raw_record.extracted_at.isoformat()
-
                     if data_type == "orders":
                         task = self.order_service.normalize_order(
                             raw_record, shop_id, is_webhook=True
@@ -827,13 +862,21 @@ class NormalizationService:
                     tasks.append(task)
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                successful = len(
-                    [
-                        r
-                        for r in results
-                        if r is not None and not isinstance(r, Exception)
-                    ]
-                )
+                successful = 0
+                for raw_record, result in zip(raw_records, results):
+                    if result is not None and not isinstance(result, Exception):
+                        successful += 1
+                        if getattr(raw_record, "extracted_at", None):
+                            try:
+                                last_extracted_iso = (
+                                    max(
+                                        last_extracted_iso or "",
+                                        raw_record.extracted_at.isoformat(),
+                                    )
+                                    or raw_record.extracted_at.isoformat()
+                                )
+                            except Exception:
+                                last_extracted_iso = raw_record.extracted_at.isoformat()
             total_processed += successful
 
             failures = len(raw_records) - successful
