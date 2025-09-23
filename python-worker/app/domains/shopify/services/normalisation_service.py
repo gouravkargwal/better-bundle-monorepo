@@ -6,16 +6,9 @@ from typing import Any, Dict, List, Optional
 from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
-from app.core.database.session import get_session_context, get_transaction_context
-from app.core.database.models import (
-    OrderData,
-    LineItemData,
-    ProductData,
-    CustomerData,
-    CollectionData,
+from app.domains.shopify.services.normalization_data_storage_service import (
+    NormalizationDataStorageService,
 )
-
-from sqlalchemy import select, update, delete, insert
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
@@ -28,6 +21,7 @@ class EntityNormalizationService:
 
     def __init__(self):
         self.logger = get_logger(__name__)
+        self.data_storage = NormalizationDataStorageService()
 
     async def normalize_entity(
         self, raw_record: Any, shop_id: str, data_type: str
@@ -52,67 +46,15 @@ class EntityNormalizationService:
                 },
             )
 
-            # Prepare main data
-            main_data = self._prepare_main_data(canonical, shop_id, data_type)
-            if not main_data:
-                return False
-
-            # Get model class
-            model_class = self._get_model_class(data_type)
-
-            # Check for existing record and idempotency
-            id_field = f"{data_type[:-1]}_id"
-            id_value = canonical.get(f"{data_type[:-1]}Id")
-
-            async with get_session_context() as session:
-                result = await session.execute(
-                    select(model_class).where(
-                        (model_class.shop_id == shop_id)
-                        & (getattr(model_class, id_field) == id_value)
-                    )
-                )
-                existing = result.scalar_one_or_none()
-
-            if self._should_skip_update(existing, canonical):
-                # Even if we skip normalization, we should still trigger feature computation
-                # because new behavioral data might have been collected
+            # Check for idempotency before storage
+            if self._should_skip_update_by_canonical(canonical, data_type):
                 self.logger.info(
-                    f"Skipping normalization for {data_type} {canonical.get(f'{data_type[:-1]}Id')} - no updates needed, but triggering feature computation"
+                    f"Skipping normalization for {data_type} {canonical.get(f'{data_type[:-1]}Id')} - no updates needed"
                 )
                 return True
 
-            # Upsert main record
-            if existing:
-                self.logger.info(
-                    "✏️ Updating existing entity",
-                    extra={
-                        "data_type": data_type,
-                        "id": id_value,
-                        "shop_id": shop_id,
-                    },
-                )
-                async with get_transaction_context() as session:
-                    await session.execute(
-                        update(model_class)
-                        .where(model_class.id == existing.id)
-                        .values(**main_data)
-                    )
-                    await session.commit()
-            else:
-                self.logger.info(
-                    "🆕 Creating new entity",
-                    extra={
-                        "data_type": data_type,
-                        "id": id_value,
-                        "shop_id": shop_id,
-                    },
-                )
-                async with get_transaction_context() as session:
-                    model_instance = model_class(**main_data)
-                    session.add(model_instance)
-                    await session.commit()
-
-            return True
+            # Use data storage service for upsert
+            return await self.data_storage.upsert_entity(data_type, canonical, shop_id)
 
         except Exception as e:
             self.logger.error(f"Entity normalization failed: {e}")
@@ -175,84 +117,47 @@ class EntityNormalizationService:
             data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
         return data_format
 
-    def _prepare_main_data(
-        self, canonical: Dict, shop_id: str, data_type: str
-    ) -> Optional[Dict]:
-        """Simplified - canonical already matches database schema"""
-        id_field = f"{data_type[:-1]}_id"
-        if not canonical.get(id_field):
-            self.logger.error(f"Missing primary id: {id_field}")
-            return None
+    def _should_skip_update_by_canonical(self, canonical: Dict, data_type: str) -> bool:
+        """Check if update should be skipped based on canonical data idempotency."""
+        # For now, we'll let the data storage service handle idempotency
+        # This could be enhanced to check against existing records if needed
+        return False
 
-        # Just ensure timestamps are set
-        main_data = canonical.copy()
-        if "created_at" not in main_data or not main_data["created_at"]:
-            main_data["created_at"] = now_utc()
-        if "updated_at" not in main_data or not main_data["updated_at"]:
-            main_data["updated_at"] = now_utc()
+    async def normalize_entities_batch(
+        self, raw_records: List[Any], shop_id: str, data_type: str
+    ) -> int:
+        """Normalize a batch of entities (products, customers, collections) for efficiency.
+        Returns number of successfully processed entities.
+        """
+        if not raw_records:
+            return 0
 
-        # Remove line_items since they're handled separately
-        main_data.pop("line_items", None)
-
-        return main_data
-
-    def _get_model_class(self, data_type: str):
-        """Get the appropriate model class for data type."""
-        model_map = {
-            "orders": OrderData,
-            "products": ProductData,
-            "customers": CustomerData,
-            "collections": CollectionData,
-        }
-        return model_map[data_type]
-
-    def _should_skip_update(self, existing, canonical: Dict) -> bool:
-        """Check if update should be skipped based on idempotency."""
-        if (
-            not existing
-            or not hasattr(existing, "shopifyUpdatedAt")
-            or not existing.shopifyUpdatedAt
-        ):
-            return False
-
-        incoming_updated_at = canonical.get("shopifyUpdatedAt")
-        if not incoming_updated_at:
-            return False
-
-        # Ensure both are datetime objects for comparison
-        if isinstance(incoming_updated_at, str):
+        # Convert raw records to canonical data
+        canonical_data_list = []
+        for raw_record in raw_records:
             try:
-                from datetime import datetime
+                payload = self._parse_payload(raw_record)
+                if not payload:
+                    self.logger.warning(f"Skipping {data_type} record: no payload")
+                    continue
 
-                # Parse string timestamp to datetime
-                if incoming_updated_at.endswith("Z"):
-                    incoming_updated_at = datetime.fromisoformat(
-                        incoming_updated_at.replace("Z", "+00:00")
-                    ).replace(tzinfo=None)
-                else:
-                    incoming_updated_at = datetime.fromisoformat(incoming_updated_at)
+                data_format = self._detect_format(raw_record, payload)
+                adapter = get_adapter(data_format, data_type)
+                canonical = adapter.to_canonical(payload, shop_id)
+                canonical_data_list.append(canonical)
             except Exception as e:
-                self.logger.warning(f"Failed to parse incoming timestamp: {e}")
-                return False
+                # Log the actual error for debugging
+                self.logger.error(
+                    f"Failed to convert {data_type} record to canonical: {e}"
+                )
+                continue
 
-        return incoming_updated_at <= existing.shopifyUpdatedAt
+        # Use data storage service for batch upsert
+        processed_count = await self.data_storage.upsert_entities_batch(
+            data_type, canonical_data_list, shop_id
+        )
 
-    def _serialize_json_fields(self, main_data: Dict[str, Any]):
-        """No-op for SQLAlchemy: JSON fields are stored as native JSON/JSONB."""
-        return
-
-    def _clean_internal_fields(self, main_data: Dict):
-        """Remove internal/canonical fields not in DB schema."""
-        fields_to_remove = [
-            "entityId",
-            "canonicalVersion",
-            "originalGid",
-            "customerCreatedAt",
-            "customerUpdatedAt",
-            "isActive",
-        ]
-        for field in fields_to_remove:
-            main_data.pop(field, None)
+        return processed_count
 
 
 class OrderNormalizationService:
@@ -260,6 +165,7 @@ class OrderNormalizationService:
 
     def __init__(self):
         self.logger = get_logger(__name__)
+        self.data_storage = NormalizationDataStorageService()
 
     async def normalize_order(
         self, raw_record: Any, shop_id: str, is_webhook: bool = True
@@ -275,72 +181,13 @@ class OrderNormalizationService:
             adapter = get_adapter(data_format, "orders")
             canonical = adapter.to_canonical(payload, shop_id)
 
-            # Extract line items BEFORE applying PersistenceMapper
-            line_items = canonical.get("lineItems", [])
+            # Use data storage service for upsert
+            success = await self.data_storage.upsert_order_with_line_items(
+                canonical, shop_id
+            )
 
-            # Prepare main data
-            main_data = await self._prepare_order_data(canonical, shop_id)
-            if not main_data:
+            if not success:
                 return False
-
-            # Process in transaction
-            order_record_id = None
-
-            async with get_transaction_context() as session:
-                self.logger.info(
-                    "🔐 Order normalization transaction started",
-                    extra={"orderId": canonical.get("orderId"), "shop_id": shop_id},
-                )
-
-                # Check for existing order
-                result = await session.execute(
-                    select(OrderData).where(
-                        (OrderData.shop_id == shop_id)
-                        & (OrderData.order_id == canonical.get("orderId"))
-                    )
-                )
-                existing = result.scalar_one_or_none()
-
-                if existing:
-                    self.logger.info(
-                        "✏️ Updating existing order",
-                        extra={
-                            "orderId": canonical.get("orderId"),
-                            "record_id": existing.id,
-                            "shop_id": shop_id,
-                        },
-                    )
-                    await session.execute(
-                        update(OrderData)
-                        .where(OrderData.id == existing.id)
-                        .values(**main_data)
-                    )
-                    order_record_id = existing.id
-                else:
-                    self.logger.info(
-                        "🆕 Creating new order",
-                        extra={
-                            "orderId": canonical.get("orderId"),
-                            "shop_id": shop_id,
-                        },
-                    )
-                    order_instance = OrderData(**main_data)
-                    session.add(order_instance)
-                    await session.flush()  # Get the ID without committing
-                    order_record_id = order_instance.id
-
-                # Create line items
-                if line_items:
-                    self.logger.info(
-                        "🧾 Replacing line items",
-                        extra={
-                            "orderId": canonical.get("orderId"),
-                            "line_items_count": len(line_items),
-                        },
-                    )
-                    await self._create_line_items(session, order_record_id, line_items)
-
-                await session.commit()
 
             # Only publish events for webhook processing (not historical batch processing)
             if is_webhook:
@@ -377,69 +224,31 @@ class OrderNormalizationService:
         if not raw_records:
             return 0
 
-        processed_count = 0
-
-        async with get_transaction_context() as session:
-            for raw_record in raw_records:
-                try:
-                    payload = self._parse_payload(raw_record)
-                    if not payload:
-                        continue
-
-                    data_format = self._detect_format(raw_record, payload)
-                    adapter = get_adapter(data_format, "orders")
-                    canonical = adapter.to_canonical(payload, shop_id)
-
-                    line_items = canonical.get("lineItems", [])
-                    main_data = await self._prepare_order_data(canonical, shop_id)
-                    if not main_data:
-                        continue
-
-                    # Upsert order
-                    result = await session.execute(
-                        select(OrderData).where(
-                            (OrderData.shop_id == shop_id)
-                            & (OrderData.order_id == canonical.get("orderId"))
-                        )
-                    )
-                    existing = result.scalar_one_or_none()
-
-                    if existing:
-                        await session.execute(
-                            update(OrderData)
-                            .where(OrderData.id == existing.id)
-                            .values(**main_data)
-                        )
-                        order_record_id = existing.id
-                    else:
-                        order_instance = OrderData(**main_data)
-                        session.add(order_instance)
-                        await session.flush()
-                        order_record_id = order_instance.id
-
-                    # Replace line items
-                    if line_items:
-                        await self._create_line_items(
-                            session, order_record_id, line_items
-                        )
-
-                    processed_count += 1
-                except Exception:
-                    # Skip this order, continue with others
+        # Convert raw records to canonical data
+        canonical_data_list = []
+        for raw_record in raw_records:
+            try:
+                payload = self._parse_payload(raw_record)
+                if not payload:
                     continue
 
-            await session.commit()
+                data_format = self._detect_format(raw_record, payload)
+                adapter = get_adapter(data_format, "orders")
+                canonical = adapter.to_canonical(payload, shop_id)
+                canonical_data_list.append(canonical)
+            except Exception:
+                # Skip this order, continue with others
+                continue
+
+        # Use data storage service for batch upsert
+        processed_count = await self.data_storage.upsert_orders_batch(
+            canonical_data_list, shop_id
+        )
 
         # Publish events after commit for webhook-only processing
         if is_webhook:
-            for raw_record in raw_records:
+            for canonical in canonical_data_list:
                 try:
-                    payload = self._parse_payload(raw_record)
-                    if not payload:
-                        continue
-                    data_format = self._detect_format(raw_record, payload)
-                    adapter = get_adapter(data_format, "orders")
-                    canonical = adapter.to_canonical(payload, shop_id)
                     await self._publish_order_events(shop_id, canonical.get("orderId"))
                 except Exception:
                     continue
@@ -479,55 +288,6 @@ class OrderNormalizationService:
             data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
         return data_format
 
-    async def _prepare_order_data(self, canonical: Dict) -> Optional[Dict]:
-        """Data is already in the right format from canonical model."""
-        if not canonical.get("order_id"):
-            self.logger.error("Missing order_id in canonical data")
-            return None
-
-        main_data = canonical.copy()
-        main_data.pop("line_items", None)
-        return main_data
-
-    async def _create_line_items(
-        self, session: Any, order_record_id: str, line_items: List[Any]
-    ):
-        """Replace line items for an order using one delete + bulk insert."""
-        if not line_items:
-            return
-
-        try:
-            # Clear existing line items for the order
-            await session.execute(
-                delete(LineItemData).where(LineItemData.order_id == order_record_id)
-            )
-
-            # Prepare bulk data (snake_case fields)
-            bulk_rows: List[Dict[str, Any]] = []
-            for item in line_items:
-                try:
-                    bulk_rows.append(
-                        {
-                            "order_id": order_record_id,
-                            "product_id": item.get("productId"),
-                            "variant_id": item.get("variantId"),
-                            "title": item.get("title"),
-                            "quantity": int(item.get("quantity", 0)),
-                            "price": float(item.get("price", 0.0)),
-                            "properties": item.get("properties", {}),
-                        }
-                    )
-                except (ValueError, TypeError) as e:
-                    self.logger.warning(f"Skipping invalid line item: {e}")
-                    continue
-
-            if bulk_rows:
-                # Use bulk insert for efficiency
-                await session.execute(insert(LineItemData).values(bulk_rows))
-
-        except Exception as e:
-            self.logger.error(f"Failed to create line items: {e}")
-
     async def _publish_order_events(self, shop_id: str, order_id: str):
         """Publish events after successful order processing."""
         try:
@@ -546,23 +306,6 @@ class OrderNormalizationService:
                 await publisher.close()
         except Exception as e:
             self.logger.error(f"Failed to publish order events: {e}")
-
-    def _serialize_json_fields(self, main_data: Dict[str, Any]):
-        """No-op for SQLAlchemy: JSON fields are stored as native JSON/JSONB."""
-        return
-
-    def _clean_internal_fields(self, main_data: Dict):
-        """Remove internal fields."""
-        fields_to_remove = [
-            "entityId",
-            "canonicalVersion",
-            "originalGid",
-            "customerCreatedAt",
-            "customerUpdatedAt",
-            "isActive",
-        ]
-        for field in fields_to_remove:
-            main_data.pop(field, None)
 
 
 class FeatureComputationService:
@@ -693,3 +436,439 @@ class EntityDeletionService:
         except Exception as e:
             self.logger.error(f"Failed to handle entity deletion: {e}")
             raise
+
+
+class NormalizationService:
+    """Unified service that handles all normalization logic from the consumer."""
+
+    def __init__(self):
+        self.logger = get_logger(__name__)
+        self.entity_service = EntityNormalizationService()
+        self.order_service = OrderNormalizationService()
+        self.feature_service = FeatureComputationService()
+        self.deletion_service = EntityDeletionService()
+        self.data_storage = NormalizationDataStorageService()
+
+    async def process_rest_entity(
+        self, shop_id: str, data_type: str, shopify_id: str
+    ) -> bool:
+        """Process a single REST entity by shopify_id (real-time)."""
+        try:
+            from app.core.database.session import get_session_context
+            from app.core.database.models import (
+                RawOrder,
+                RawProduct,
+                RawCustomer,
+                RawCollection,
+            )
+            from sqlalchemy import select
+
+            model_class = {
+                "orders": RawOrder,
+                "products": RawProduct,
+                "customers": RawCustomer,
+                "collections": RawCollection,
+            }.get(data_type)
+
+            if not model_class:
+                self.logger.error(f"❌ Unknown data type for REST entity: {data_type}")
+                return False
+
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(model_class).where(
+                        (model_class.shop_id == shop_id)
+                        & (model_class.shopify_id == str(shopify_id))
+                    )
+                )
+                raw = result.scalar_one_or_none()
+
+            if not raw:
+                self.logger.warning(
+                    "REST entity not found in RAW",
+                    shopify_id=shopify_id,
+                    shop_id=shop_id,
+                    data_type=data_type,
+                )
+                return False
+
+            # Normalize according to data type
+            if data_type == "orders":
+                success = await self.order_service.normalize_order(
+                    raw, shop_id, is_webhook=True
+                )
+            else:
+                success = await self.entity_service.normalize_entity(
+                    raw, shop_id, data_type
+                )
+
+            if success:
+                # Update PipelineWatermark.lastNormalizedAt with raw.extractedAt if available
+                if getattr(raw, "extracted_at", None):
+                    await self.data_storage.upsert_watermark(
+                        shop_id=shop_id,
+                        data_type=data_type,
+                        iso_time=raw.extracted_at.isoformat(),
+                        format_type="graphql",  # we store in PipelineWatermark to unify tracking
+                    )
+
+                self.logger.info(
+                    f"✅ REST entity normalized",
+                    extra={
+                        "shop_id": shop_id,
+                        "data_type": data_type,
+                        "shopify_id": shopify_id,
+                    },
+                )
+
+            return success
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed REST entity normalization: {e}",
+                shop_id=shop_id,
+                data_type=data_type,
+                shopify_id=shopify_id,
+            )
+            return False
+
+    async def process_normalization_window(
+        self,
+        shop_id: str,
+        data_type: str,
+        format_type: str,
+        start_time: Optional[str],
+        end_time: Optional[str],
+    ) -> bool:
+        """Process normalization for a time window."""
+        try:
+            self.logger.info(f"🔄 Processing {data_type} for shop {shop_id}")
+
+            # Handle "all" data types
+            if data_type == "all":
+                data_types = ["products", "orders", "customers", "collections"]
+                self.logger.info(f"🔄 Processing all data types: {data_types}")
+
+                for dt in data_types:
+                    # Resolve window per data type (watermark-aware)
+                    dt_start, dt_end = await self._resolve_window_from_watermark(
+                        shop_id, dt, start_time, end_time, format_type
+                    )
+                    last_extracted = await self._process_single_data_type(
+                        shop_id, dt, format_type, dt_start, dt_end
+                    )
+                    # Trigger feature computation after each data type (independent processing)
+                    await self.feature_service.trigger_feature_computation(shop_id, dt)
+                    # Upsert watermark to the max of last_extracted and dt_end
+                    if dt_end or last_extracted:
+                        await self.data_storage.upsert_watermark(
+                            shop_id, dt, last_extracted or dt_end, format_type
+                        )
+                    self.logger.info(f"✅ Feature computation triggered for {dt}")
+            else:
+                # Resolve window for single data type
+                res_start, res_end = await self._resolve_window_from_watermark(
+                    shop_id, data_type, start_time, end_time, format_type
+                )
+                last_extracted = await self._process_single_data_type(
+                    shop_id, data_type, format_type, res_start, res_end
+                )
+                # Trigger feature computation after this data type
+                await self.feature_service.trigger_feature_computation(
+                    shop_id, data_type
+                )
+                # Upsert watermark
+                if res_end or last_extracted:
+                    await self.data_storage.upsert_watermark(
+                        shop_id, data_type, last_extracted or res_end, format_type
+                    )
+                self.logger.info(f"✅ Feature computation triggered for {data_type}")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to process normalization window: {e}")
+            return False
+
+    async def _resolve_window_from_watermark(
+        self,
+        shop_id: str,
+        data_type: str,
+        start_time: Optional[str],
+        end_time: Optional[str],
+        format_type: Optional[str] = None,
+    ) -> (Optional[str], Optional[str]):
+        """Resolve normalization window using watermark when event window is missing."""
+        if start_time and end_time:
+            return start_time, end_time
+
+        try:
+            if format_type == "graphql":
+                # Get watermark from data storage service
+                watermark = await self.data_storage.get_watermark(
+                    shop_id, data_type, format_type
+                )
+
+                # Start from last normalized, else last window start; end at last collected/window end, else now
+                from datetime import datetime, timezone
+
+                resolved_start = start_time or (
+                    (
+                        watermark.last_normalized_at.isoformat()
+                        if watermark and watermark.last_normalized_at
+                        else None
+                    )
+                    or (
+                        watermark.last_window_start.isoformat()
+                        if watermark and watermark.last_window_start
+                        else None
+                    )
+                )
+                resolved_end = end_time or (
+                    (
+                        watermark.last_collected_at.isoformat()
+                        if watermark and watermark.last_collected_at
+                        else None
+                    )
+                    or (
+                        watermark.last_window_end.isoformat()
+                        if watermark and watermark.last_window_end
+                        else None
+                    )
+                    or datetime.now(timezone.utc).isoformat()
+                )
+
+            # Guard against inverted windows (can occur if lastNormalizedAt > lastCollectedAt)
+            if resolved_start and resolved_end and resolved_start > resolved_end:
+                self.logger.warning(
+                    "⚠️ Inverted normalization window detected; adjusting",
+                    extra={
+                        "shop_id": shop_id,
+                        "data_type": data_type,
+                        "original_start": resolved_start,
+                        "original_end": resolved_end,
+                    },
+                )
+                # Swap to ensure start <= end
+                resolved_start, resolved_end = resolved_end, resolved_start
+
+            self.logger.info(
+                "🕒 Normalization window resolved",
+                extra={
+                    "shop_id": shop_id,
+                    "data_type": data_type,
+                    "start_time": resolved_start,
+                    "end_time": resolved_end,
+                    "source": (
+                        "PipelineWatermark"
+                        if format_type == "graphql"
+                        else "NormalizationWatermark"
+                    ),
+                },
+            )
+            return resolved_start, resolved_end
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to resolve watermark for {shop_id}/{data_type}: {e}"
+            )
+            return start_time, end_time
+
+    async def _process_single_data_type(
+        self,
+        shop_id: str,
+        data_type: str,
+        format_type: str,
+        start_time: Optional[str],
+        end_time: Optional[str],
+    ) -> Optional[str]:
+        """Process a single data type - simple and efficient. Returns last processed extractedAt (ISO) if available."""
+        import asyncio
+        from app.core.database.session import get_session_context
+        from app.core.database.models import (
+            RawOrder,
+            RawProduct,
+            RawCustomer,
+            RawCollection,
+        )
+        from sqlalchemy import select
+        from datetime import datetime, timezone
+
+        model_class = {
+            "orders": RawOrder,
+            "products": RawProduct,
+            "customers": RawCustomer,
+            "collections": RawCollection,
+        }.get(data_type)
+
+        if not model_class:
+            self.logger.error(f"❌ Unknown data type: {data_type}")
+            return None
+
+        # Build query conditions
+        query = select(model_class).where(model_class.shop_id == shop_id)
+
+        # Always add time filters (required for all events)
+        if start_time or end_time:
+            # Use shopify_updated_at for GraphQL data, extracted_at otherwise
+            time_field = (
+                model_class.shopify_updated_at
+                if format_type == "graphql"
+                else model_class.extracted_at
+            )
+
+            # Parse ISO strings to timezone-aware UTC datetimes to avoid varchar comparisons
+            def _parse_iso_to_aware(dt_str: Optional[str]) -> Optional[datetime]:
+                if not dt_str:
+                    return None
+                try:
+                    dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    return None
+
+            parsed_start = _parse_iso_to_aware(start_time)
+            parsed_end = _parse_iso_to_aware(end_time)
+
+            if parsed_start:
+                query = query.where(time_field >= parsed_start)
+            if parsed_end:
+                query = query.where(time_field <= parsed_end)
+
+        self.logger.info(
+            f"🔍 Time filter on {'shopify_updated_at' if format_type == 'graphql' else 'extracted_at'}: {start_time} to {end_time}"
+        )
+
+        # Process data in batches
+        page_size = 100
+        offset = 0
+        total_processed = 0
+        last_extracted_iso: Optional[str] = None
+
+        while True:
+            self.logger.info(
+                "📥 Fetching raw batch",
+                extra={
+                    "data_type": data_type,
+                    "offset": offset,
+                    "page_size": page_size,
+                },
+            )
+
+            async with get_session_context() as session:
+                result = await session.execute(
+                    query.order_by(model_class.extracted_at.desc())
+                    .offset(offset)
+                    .limit(page_size)
+                )
+                raw_records = result.scalars().all()
+
+            if not raw_records:
+                break
+
+            self.logger.info(
+                "📄 Processing batch",
+                extra={
+                    "data_type": data_type,
+                    "batch_count": len(raw_records),
+                    "offset": offset,
+                },
+            )
+
+            # Process records: batch for GraphQL, individual for REST
+            if format_type == "graphql":
+                # GraphQL batch processing for efficiency
+                if data_type == "orders":
+                    successful = await self.order_service.normalize_orders_batch(
+                        raw_records, shop_id, is_webhook=False
+                    )
+                else:
+                    successful = await self.entity_service.normalize_entities_batch(
+                        raw_records, shop_id, data_type
+                    )
+
+                # track max extracted_at seen across the page
+                for raw_record in raw_records:
+                    if getattr(raw_record, "extracted_at", None):
+                        try:
+                            last_extracted_iso = (
+                                max(
+                                    last_extracted_iso or "",
+                                    raw_record.extracted_at.isoformat(),
+                                )
+                                or raw_record.extracted_at.isoformat()
+                            )
+                        except Exception:
+                            last_extracted_iso = raw_record.extracted_at.isoformat()
+            else:
+                # REST individual processing for real-time updates
+                tasks = []
+                for raw_record in raw_records:
+                    # track max extracted_at seen
+                    if getattr(raw_record, "extracted_at", None):
+                        try:
+                            last_extracted_iso = (
+                                max(
+                                    last_extracted_iso or "",
+                                    raw_record.extracted_at.isoformat(),
+                                )
+                                or raw_record.extracted_at.isoformat()
+                            )
+                        except Exception:
+                            last_extracted_iso = raw_record.extracted_at.isoformat()
+
+                    if data_type == "orders":
+                        task = self.order_service.normalize_order(
+                            raw_record, shop_id, is_webhook=True
+                        )
+                    else:
+                        task = self.entity_service.normalize_entity(
+                            raw_record, shop_id, data_type
+                        )
+                    tasks.append(task)
+
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                successful = len(
+                    [
+                        r
+                        for r in results
+                        if r is not None and not isinstance(r, Exception)
+                    ]
+                )
+            total_processed += successful
+
+            failures = len(raw_records) - successful
+            if failures:
+                self.logger.warning(
+                    "⚠️ Some records failed during normalization",
+                    extra={
+                        "data_type": data_type,
+                        "successful": successful,
+                        "failed": failures,
+                        "offset": offset,
+                    },
+                )
+            self.logger.info(
+                "✅ Batch processed",
+                extra={
+                    "data_type": data_type,
+                    "successful": successful,
+                    "batch_size": len(raw_records),
+                    "cumulative_processed": total_processed,
+                },
+            )
+
+            # Check if we need to continue pagination
+            if len(raw_records) < page_size:
+                break
+
+            offset += page_size
+
+        self.logger.info(
+            "🎉 Normalization complete",
+            extra={
+                "data_type": data_type,
+                "total_processed": total_processed,
+                "last_extracted_iso": last_extracted_iso,
+            },
+        )
+        return last_extracted_iso
