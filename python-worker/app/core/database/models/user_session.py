@@ -7,14 +7,11 @@ Represents user sessions and their relationships.
 from sqlalchemy import (
     Column,
     String,
-    Boolean,
-    DateTime,
     Integer,
-    ForeignKey,
     Index,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin, CustomerMixin
 
@@ -24,23 +21,15 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
 
     __tablename__ = "user_sessions"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
-
-    # Session identification - matching Prisma schema
-    browser_session_id = Column("browser_session_id", String(255), nullable=False)
+    browser_session_id = Column(String(255), nullable=False)
     status = Column(String(50), default="active", nullable=False, index=True)
-    last_active = Column("last_active", DateTime, nullable=False, default=func.now())
-    expires_at = Column("expires_at", DateTime, nullable=True, index=True)
-
-    # Session metadata - matching Prisma schema
-    user_agent = Column("user_agent", String, nullable=True)
-    ip_address = Column("ip_address", String(45), nullable=True)
+    last_active = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String(45), nullable=True)
     referrer = Column(String, nullable=True)
-    extensions_used = Column("extensions_used", JSON, default=[], nullable=False)
-    total_interactions = Column(
-        "total_interactions", Integer, default=0, nullable=False
-    )
+    extensions_used = Column(JSON, default=[], nullable=False)
+    total_interactions = Column(Integer, default=0, nullable=False)
 
     # Relationships
     shop = relationship("Shop", back_populates="user_sessions")

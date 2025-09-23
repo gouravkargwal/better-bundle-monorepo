@@ -5,7 +5,7 @@ Represents product information from Shopify.
 """
 
 from sqlalchemy import Column, String, Float, Boolean, DateTime, Text, Integer
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 
@@ -34,8 +34,8 @@ class ProductData(BaseModel, ShopMixin):
     image_url = Column(String(1000), nullable=True)
     image_alt = Column(String(500), nullable=True)
 
-    product_created_at = Column(DateTime, nullable=True)
-    product_updated_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     online_store_url = Column(String(1000), nullable=True)
     online_store_preview_url = Column(String(1000), nullable=True)

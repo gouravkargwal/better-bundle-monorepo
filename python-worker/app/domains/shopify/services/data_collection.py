@@ -3,7 +3,7 @@ Shopify data collection service implementation for BetterBundle Python Worker
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
@@ -70,6 +70,16 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             },
         }
 
+    def _ensure_aware_utc(self, dt: Optional[datetime]) -> Optional[datetime]:
+        """Normalize a datetime to timezone-aware UTC. If naive, assume UTC.
+        Returns None if input is None.
+        """
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     async def _collect_data_by_type(
         self,
         data_type: str,
@@ -108,8 +118,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             logger.info(f"Incremental collection for {data_type}")
             from datetime import timedelta
 
-            # Read watermark
-            last_collected = pw.last_collected_at if pw else None
+            # Read watermark and normalize to aware UTC
+            last_collected = (
+                self._ensure_aware_utc(pw.last_collected_at) if pw else None
+            )
             # Add epsilon and clamp to last 7 days
             safe_since = (
                 (last_collected + timedelta(seconds=1)) if last_collected else None
@@ -127,7 +139,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 extra={
                     "data_type": data_type,
                     "lastCollectedAt": (
-                        last_collected.isoformat() if last_collected else None
+                        self._ensure_aware_utc(last_collected).isoformat()
+                        if last_collected
+                        else None
                     ),
                     "query_since": query_since.isoformat(),
                     "filter": query_filter,
@@ -171,7 +185,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         max_days_back = now - timedelta(days=self.MAX_DAYS_BACK)
 
         if last_updated_at:
-            return max(last_updated_at, max_days_back)
+            last_aware = self._ensure_aware_utc(last_updated_at)
+            return max(last_aware, max_days_back)
         else:
             return max_days_back
 
@@ -323,7 +338,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                             f"⚠️ No collected window found for {data_type}, skipping watermark update"
                         )
                     else:
-                        end_iso = latest.isoformat()
+                        latest_aware = self._ensure_aware_utc(latest)
+                        end_iso = latest_aware.isoformat()
                         # Upsert collection watermark to PipelineWatermark
                         await self._upsert_processing_watermark(
                             shop_id=shop_id, data_type=data_type, iso_time=end_iso
@@ -372,6 +388,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         """
         # Accept both Z and +00:00 formats
         last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        # Normalize to aware UTC
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        else:
+            last_dt = last_dt.astimezone(timezone.utc)
         # Delegate to repository for upsert
         await self.pipeline_watermark_repository.upsert_collection_watermark(
             shop_id=shop_id, data_type=data_type, last_dt=last_dt

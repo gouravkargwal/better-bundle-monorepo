@@ -27,8 +27,6 @@ class CanonicalOrder(BaseModel):
     customer_display_name: Optional[str] = None  # customerDisplayName
     customer_state: Optional[str] = None  # customerState
     customer_verified_email: Optional[bool] = False  # customerVerifiedEmail
-    customer_created_at: Optional[datetime] = None  # customerCreatedAt
-    customer_updated_at: Optional[datetime] = None  # customerUpdatedAt
     customer_default_address: Optional[Dict[str, Any]] = None  # customerDefaultAddress
     total_amount: float = 0.0  # totalAmount
     subtotal_amount: Optional[float] = 0.0  # subtotalAmount
@@ -92,7 +90,7 @@ class CanonicalProduct(BaseModel):
     handle: str  # handle (required)
     description: Optional[str] = None  # description
     description_html: Optional[str] = None  # descriptionHtml
-    productType: Optional[str] = ""  # productType
+    product_type: Optional[str] = ""  # productType
     vendor: Optional[str] = ""  # vendor
     tags: Any = Field(default_factory=list)  # tags (JSON)
     status: Optional[str] = "ACTIVE"  # status
@@ -102,8 +100,8 @@ class CanonicalProduct(BaseModel):
     inventory: Optional[int] = 0  # inventory
     image_url: Optional[str] = None  # imageUrl
     image_alt: Optional[str] = None  # imageAlt
-    product_created_at: Optional[datetime] = None  # productCreatedAt
-    product_updated_at: Optional[datetime] = None  # productUpdatedAt
+    created_at: Optional[datetime] = None  # createdAt
+    updated_at: Optional[datetime] = None  # updatedAt
     online_store_url: Optional[str] = None  # onlineStoreUrl
     online_store_preview_url: Optional[str] = None  # onlineStorePreviewUrl
     seo_title: Optional[str] = None  # seoTitle
@@ -116,8 +114,8 @@ class CanonicalProduct(BaseModel):
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
-    created_at: datetime  # Used for productCreatedAt
-    updated_at: datetime  # Used for productUpdatedAt
+    created_at: datetime  # Used for createdAt
+    updated_at: datetime  # Used for updatedAt
     is_active: bool = True  # For soft deletes
     extras: Any = Field(default_factory=dict)
 
@@ -159,8 +157,6 @@ class CanonicalCustomer(BaseModel):
     order_count: int = 0  # orderCount
     last_order_date: Optional[datetime] = None  # lastOrderDate
     tags: Any = Field(default_factory=list)  # tags (JSON)
-    customer_created_at: Optional[datetime] = None  # Rename this
-    customer_updated_at: Optional[datetime] = None  # Rename this
     last_order_id: Optional[str] = None  # lastOrderId
     location: Any = Field(default_factory=dict)  # location (JSON)
     metafields: Any = Field(default_factory=list)  # metafields (JSON)

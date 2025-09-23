@@ -4,8 +4,9 @@ Watermark models for SQLAlchemy
 Represents processing watermarks for data pipelines.
 """
 
-from sqlalchemy import Column, String, DateTime, Index, func
+from sqlalchemy import Column, String, Index, func
 from .base import Base, ShopMixin, IDMixin
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 
 
 class PipelineWatermark(Base, IDMixin, ShopMixin):
@@ -14,11 +15,11 @@ class PipelineWatermark(Base, IDMixin, ShopMixin):
     __tablename__ = "pipeline_watermarks"
 
     # Watermark information
-    data_type = Column("data_type", String(50), nullable=False)
-    last_collected_at = Column(DateTime, nullable=True)
-    last_normalized_at = Column(DateTime, nullable=True)
-    last_features_computed_at = Column(DateTime, nullable=True)
-    last_gorse_synced_at = Column(DateTime, nullable=True)
+    data_type = Column(String(50), nullable=False)
+    last_collected_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_normalized_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_features_computed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_gorse_synced_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # Status and error tracking
     status = Column(String(20), nullable=True)
@@ -26,12 +27,15 @@ class PipelineWatermark(Base, IDMixin, ShopMixin):
     last_session_id = Column(String(100), nullable=True)
 
     # Window information
-    last_window_start = Column(DateTime, nullable=True)
-    last_window_end = Column(DateTime, nullable=True)
+    last_window_start = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_window_end = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # Only updatedAt exists in Prisma schema, no createdAt
     updated_at = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+        TIMESTAMP(timezone=True),
+        default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     __table_args__ = (

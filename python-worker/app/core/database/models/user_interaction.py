@@ -15,20 +15,10 @@ class UserInteraction(BaseModel, ShopMixin, CustomerMixin):
 
     __tablename__ = "user_interactions"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
-
-    # Interaction identification - matching Prisma schema
-    session_id = Column(
-        "session_id", String(255), ForeignKey("user_sessions.id"), nullable=False
-    )
-    extension_type = Column("extension_type", String(50), nullable=False, index=True)
-    interaction_type = Column(
-        "interaction_type", String(50), nullable=False, index=True
-    )
-
-    # Interaction data - matching Prisma schema
-    interaction_metadata = Column("metadata", JSON, default={}, nullable=False)
+    session_id = Column(String(255), ForeignKey("user_sessions.id"), nullable=False)
+    extension_type = Column(String(50), nullable=False, index=True)
+    interaction_type = Column(String(50), nullable=False, index=True)
+    interaction_metadata = Column(JSON, default={}, nullable=False)
 
     # Relationships
     session = relationship("UserSession", back_populates="interactions")

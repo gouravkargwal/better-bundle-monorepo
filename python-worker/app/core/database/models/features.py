@@ -16,7 +16,7 @@ from sqlalchemy import (
     func,
 )
 
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin, CustomerMixin, ProductMixin
 
@@ -705,7 +705,9 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     device_consistency = Column(Float, nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="customer_behavior_features")

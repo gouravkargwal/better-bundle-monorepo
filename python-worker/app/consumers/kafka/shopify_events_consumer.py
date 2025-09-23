@@ -226,9 +226,9 @@ class ShopifyEventHandler(EventHandler):
                     now_dt = datetime.now(timezone.utc)
                     await db.pipelinewatermark.upsert(
                         where={
-                            "shop_id_dataType": {
+                            "shop_id_data_type": {
                                 "shop_id": str(shop_id),
-                                "dataType": "user_interactions",
+                                "data_type": "user_interactions",
                             }
                         },
                         data={
@@ -238,7 +238,7 @@ class ShopifyEventHandler(EventHandler):
                             },
                             "create": {
                                 "shop_id": str(shop_id),
-                                "dataType": "user_interactions",
+                                "data_type": "user_interactions",
                                 "lastCollectedAt": now_dt,
                                 "lastWindowEnd": now_dt,
                             },
@@ -397,9 +397,9 @@ class ShopifyEventHandler(EventHandler):
                 # Update PipelineWatermark for user_interactions
                 await db.pipelinewatermark.upsert(
                     where={
-                        "shop_id_dataType": {
+                        "shop_id_data_type": {
                             "shop_id": str(shop_id),
-                            "dataType": "user_interactions",
+                            "data_type": "user_interactions",
                         }
                     },
                     data={
@@ -409,7 +409,7 @@ class ShopifyEventHandler(EventHandler):
                         },
                         "create": {
                             "shop_id": str(shop_id),
-                            "dataType": "user_interactions",
+                            "data_type": "user_interactions",
                             "lastCollectedAt": now_dt,
                             "lastWindowEnd": now_dt,
                         },

@@ -9,12 +9,11 @@ from sqlalchemy import (
     String,
     Float,
     Boolean,
-    DateTime,
     Text,
     ForeignKey,
     Integer,
 )
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 
@@ -31,8 +30,6 @@ class OrderData(BaseModel, ShopMixin):
     customer_display_name = Column(String(255), nullable=True)
     customer_state = Column(String(50), nullable=True, index=True)
     customer_verified_email = Column(Boolean, default=False, nullable=True)
-    customer_created_at = Column(DateTime, nullable=True)
-    customer_updated_at = Column(DateTime, nullable=True)
     customer_default_address = Column(JSON, default={}, nullable=True)
     total_amount = Column(Float, default=0.0, nullable=False, index=True)
     subtotal_amount = Column(Float, default=0.0, nullable=True)
@@ -40,9 +37,9 @@ class OrderData(BaseModel, ShopMixin):
     total_shipping_amount = Column(Float, default=0.0, nullable=True)
     total_refunded_amount = Column(Float, default=0.0, nullable=True)
     total_outstanding_amount = Column(Float, default=0.0, nullable=True)
-    order_date = Column(DateTime, nullable=False, index=True)
-    processed_at = Column(DateTime, nullable=True)
-    cancelled_at = Column(DateTime, nullable=True)
+    order_date = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    processed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True)
     cancel_reason = Column(String(500), default="", nullable=True)
     order_locale = Column(String(10), default="en", nullable=True)
     currency_code = Column(String(10), default="USD", nullable=True, index=True)
@@ -68,9 +65,11 @@ class OrderData(BaseModel, ShopMixin):
     line_items = relationship(
         "LineItemData", back_populates="order", cascade="all, delete-orphan"
     )
+    created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     def __repr__(self) -> str:
-        return f"<OrderData(order_id={self.order_id}, shop_id={self.shopId})>"
+        return f"<OrderData(order_id={self.order_id}, shop_id={self.shop_id})>"
 
 
 class LineItemData(BaseModel):

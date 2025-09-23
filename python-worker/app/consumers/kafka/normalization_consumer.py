@@ -190,8 +190,8 @@ class NormalizationJobHandler(EventHandler):
             async with get_session_context() as session:
                 result = await session.execute(
                     select(model_class).where(
-                        (model_class.shopId == shop_id)
-                        & (model_class.shopifyId == str(shopify_id))
+                        (model_class.shop_id == shop_id)
+                        & (model_class.shopify_id == str(shopify_id))
                     )
                 )
                 raw = result.scalar_one_or_none()
@@ -260,8 +260,8 @@ class NormalizationJobHandler(EventHandler):
                 async with get_session_context() as session:
                     result = await session.execute(
                         select(PipelineWatermark).where(
-                            (PipelineWatermark.shopId == shop_id)
-                            & (PipelineWatermark.dataType == data_type)
+                            (PipelineWatermark.shop_id == shop_id)
+                            & (PipelineWatermark.data_type == data_type)
                         )
                     )
                     pw = result.scalar_one_or_none()
@@ -402,8 +402,8 @@ class NormalizationJobHandler(EventHandler):
                     # Try to find existing watermark
                     result = await session.execute(
                         select(PipelineWatermark).where(
-                            (PipelineWatermark.shopId == shop_id)
-                            & (PipelineWatermark.dataType == data_type)
+                            (PipelineWatermark.shop_id == shop_id)
+                            & (PipelineWatermark.data_type == data_type)
                         )
                     )
                     existing = result.scalar_one_or_none()
@@ -413,8 +413,8 @@ class NormalizationJobHandler(EventHandler):
                         existing.last_window_end = last_dt
                     else:
                         wm = PipelineWatermark(
-                            shopId=shop_id,
-                            dataType=data_type,
+                            shop_id=shop_id,
+                            data_type=data_type,
                             last_normalized_at=last_dt,
                             last_window_end=last_dt,
                         )
@@ -426,7 +426,7 @@ class NormalizationJobHandler(EventHandler):
                 extra={
                     "shop_id": shop_id,
                     "data_type": data_type,
-                    "lastNormalizedAt": iso_time,
+                    "last_normalized_at": iso_time,
                     "table": (
                         "PipelineWatermark"
                         if format_type == "graphql"
@@ -462,20 +462,34 @@ class NormalizationJobHandler(EventHandler):
             return None
 
         # Build query conditions
-        query = select(model_class).where(model_class.shopId == shop_id)
+        query = select(model_class).where(model_class.shop_id == shop_id)
 
         # Always add time filters (required for all events)
         if start_time or end_time:
             # Use shopify_updated_at for GraphQL data, extracted_at otherwise
             time_field = (
-                model_class.shopifyUpdatedAt
+                model_class.shopify_updated_at
                 if format_type == "graphql"
-                else model_class.extractedAt
+                else model_class.extracted_at
             )
-            if start_time:
-                query = query.where(time_field >= start_time)
-            if end_time:
-                query = query.where(time_field <= end_time)
+
+            # Parse ISO strings to timezone-aware UTC datetimes to avoid varchar comparisons
+            def _parse_iso_to_aware(dt_str: Optional[str]) -> Optional[datetime]:
+                if not dt_str:
+                    return None
+                try:
+                    dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    return None
+
+            parsed_start = _parse_iso_to_aware(start_time)
+            parsed_end = _parse_iso_to_aware(end_time)
+
+            if parsed_start:
+                query = query.where(time_field >= parsed_start)
+            if parsed_end:
+                query = query.where(time_field <= parsed_end)
 
         self.logger.info(
             f"🔍 Time filter on {'shopify_updated_at' if format_type == 'graphql' else 'extracted_at'}: {start_time} to {end_time}"
@@ -499,7 +513,7 @@ class NormalizationJobHandler(EventHandler):
 
             async with get_session_context() as session:
                 result = await session.execute(
-                    query.order_by(model_class.extractedAt.desc())
+                    query.order_by(model_class.extracted_at.desc())
                     .offset(offset)
                     .limit(page_size)
                 )

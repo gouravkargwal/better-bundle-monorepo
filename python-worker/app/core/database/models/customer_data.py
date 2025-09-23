@@ -5,7 +5,7 @@ Represents customer information from Shopify.
 """
 
 from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 
@@ -23,7 +23,6 @@ class CustomerData(BaseModel, ShopMixin):
     order_count = Column(Integer, default=0, nullable=False)
     last_order_date = Column(DateTime, nullable=True, index=True)
     tags = Column(JSON, default=[], nullable=True)
-    created_at_shopify = Column(DateTime, nullable=True)
     last_order_id = Column(String(100), nullable=True)
     location = Column(JSON, default={}, nullable=True)
     metafields = Column(JSON, default=[], nullable=True)
@@ -35,6 +34,8 @@ class CustomerData(BaseModel, ShopMixin):
     currency_code = Column(String(10), default="USD", nullable=True)
     customer_locale = Column(String(10), default="en", nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     extras = Column(JSON, default={}, nullable=True)
     shop = relationship("Shop", back_populates="customer_data")
 

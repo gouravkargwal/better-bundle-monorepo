@@ -75,7 +75,7 @@ class GraphQLProductAdapter(BaseAdapter):
             total_inventory = sum([vi.inventory or 0 for vi in variants])
 
         price = variants[0].price if variants else None
-        compare_at = variants[0].compareAtPrice if variants else None
+        compare_at = variants[0].compare_at_price if variants else None
 
         # Images/media/options via edges → arrays of nodes with extracted IDs
         def _edges_to_nodes_with_extracted_ids(
@@ -109,13 +109,11 @@ class GraphQLProductAdapter(BaseAdapter):
 
         # Canonical internal timestamps (required)
         created_at = _parse_iso(payload.get("createdAt"))
-        updated_at = _parse_iso(payload.get("updatedAt"))
+        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
 
         model = CanonicalProduct(
             shop_id=shop_id,
             product_id=entity_id,
-            product_created_at=_parse_iso(payload.get("createdAt")),
-            product_updated_at=_parse_iso(payload.get("updatedAt")),
             created_at=created_at,
             updated_at=updated_at,
             title=payload.get("title") or "Untitled Product",

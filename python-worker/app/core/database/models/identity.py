@@ -4,7 +4,8 @@ Identity models for SQLAlchemy
 Represents user identity linking and computation tracking.
 """
 
-from sqlalchemy import Column, String, DateTime, Index, func, ForeignKey
+from sqlalchemy import Column, String, Index, func, ForeignKey
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from .base import BaseModel, ShopMixin
 
 
@@ -19,7 +20,7 @@ class UserIdentityLink(BaseModel, ShopMixin):
     # Identity information
     client_id = Column(String, nullable=False, index=True)
     customer_id = Column(String, nullable=False, index=True)
-    linked_at = Column(DateTime, nullable=False, default=func.now())
+    linked_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
 
     # Indexes
     __table_args__ = (

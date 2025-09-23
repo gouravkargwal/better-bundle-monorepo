@@ -46,8 +46,6 @@ class GraphQLCustomerAdapter(BaseAdapter):
             order_count=int(payload.get("ordersCount") or 0),
             last_order_date=_parse_iso(payload.get("lastOrderDate")),
             tags=payload.get("tags") or [],
-            customer_created_at=created_at,
-            customer_updated_at=updated_at,
             last_order_id=_extract_numeric_gid(payload.get("lastOrderId")),
             location=payload.get("defaultAddress"),
             metafields=payload.get("metafields") or [],

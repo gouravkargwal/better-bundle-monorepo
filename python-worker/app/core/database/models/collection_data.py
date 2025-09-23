@@ -4,8 +4,8 @@ Collection data model for SQLAlchemy
 Represents collection information from Shopify.
 """
 
-from sqlalchemy import Column, String, Boolean, Text, Integer
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy import Column, String, Boolean, Text, Integer, DateTime
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 
@@ -29,6 +29,8 @@ class CollectionData(BaseModel, ShopMixin):
     is_active = Column(Boolean, default=True, nullable=False)
     metafields = Column(JSON, default=[], nullable=True)
     extras = Column(JSON, default={}, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     shop = relationship("Shop", back_populates="collection_data")
 
     def __repr__(self) -> str:

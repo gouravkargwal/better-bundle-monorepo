@@ -47,7 +47,7 @@ class RestProductAdapter(BaseAdapter):
                     variantId=str(v.get("id")) if v.get("id") is not None else None,
                     title=v.get("title"),
                     price=_to_float(v.get("price")),
-                    compareAtPrice=_to_float(v.get("compare_at_price")),
+                    compare_at_price=_to_float(v.get("compare_at_price")),
                     sku=v.get("sku"),
                     barcode=v.get("barcode"),
                     inventory=(
@@ -68,7 +68,7 @@ class RestProductAdapter(BaseAdapter):
         compare_at = None
         if variants:
             price = variants[0].price
-            compare_at = variants[0].compareAtPrice
+            compare_at = variants[0].compare_at_price
 
         # Parse timestamps
         created_at = _parse_iso(payload.get("created_at")) or datetime.utcnow()
@@ -81,23 +81,20 @@ class RestProductAdapter(BaseAdapter):
         image_alt = primary_image.get("alt") if primary_image else None
 
         model = CanonicalProduct(
-            shopId=shop_id,
-            productId=product_id,  # Fixed: use productId instead of entityId
-            originalGid=payload.get("admin_graphql_api_id"),
-            productCreatedAt=created_at,
-            productUpdatedAt=updated_at,
-            createdAt=created_at,  # Required field
-            updatedAt=updated_at,  # Required field
+            shop_id=shop_id,
+            product_id=product_id,  # Fixed: use productId instead of entityId
+            created_at=created_at,  # Required field
+            updated_at=updated_at,  # Required field
             title=payload.get("title") or "",  # Required field
             handle=payload.get("handle") or "",  # Required field
             description=payload.get("body_html"),
             vendor=payload.get("vendor"),
-            productType=payload.get("product_type"),
+            product_type=payload.get("product_type"),
             status=payload.get("status"),
             tags=tags,
             price=price or 0.0,  # Required field with default
-            compareAtPrice=compare_at,
-            totalInventory=total_inventory,
+            compare_at_price=compare_at,
+            total_inventory=total_inventory,
             imageUrl=image_url,  # Extract primary image URL
             imageAlt=image_alt,  # Extract primary image alt text
             isActive=True if payload.get("status") != "archived" else False,

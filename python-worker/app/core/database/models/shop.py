@@ -4,7 +4,8 @@ Shop model for SQLAlchemy
 Represents a Shopify shop with all its configuration and relationships.
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel
 
@@ -32,7 +33,7 @@ class Shop(BaseModel):
     email = Column(String(255), nullable=True)
 
     # Analysis tracking
-    last_analysis_at = Column(DateTime, nullable=True, index=True)
+    last_analysis_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     # Relationships
     collection_data = relationship(

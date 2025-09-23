@@ -5,7 +5,8 @@ Converts GraphQL refund payloads to canonical refund models.
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+from decimal import Decimal
 
 from app.domains.shopify.normalization.base_adapter import BaseAdapter
 from app.domains.shopify.normalization.canonical_models import (

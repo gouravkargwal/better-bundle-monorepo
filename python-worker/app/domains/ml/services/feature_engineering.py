@@ -545,7 +545,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             def _get_pw(data_type: str):
                 for r in pw_rows:
-                    if getattr(r, "dataType", None) == data_type:
+                    if getattr(r, "data_type", None) == data_type:
                         return r
                 return None
 
@@ -817,16 +817,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         ):
                             await db.pipelinewatermark.upsert(
                                 where={
-                                    "shopId_dataType": {
+                                    "shopId_data_type": {
                                         "shopId": shop_id,
-                                        "dataType": dtype,
+                                        "data_type": dtype,
                                     }
                                 },
                                 data={
                                     "update": {"lastFeaturesComputedAt": window_end},
                                     "create": {
                                         "shopId": shop_id,
-                                        "dataType": dtype,
+                                        "data_type": dtype,
                                         "lastFeaturesComputedAt": window_end,
                                     },
                                 },
