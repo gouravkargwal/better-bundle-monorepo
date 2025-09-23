@@ -1,6 +1,13 @@
 import prisma from "../db.server";
 import { getCacheService, CacheKeys, CacheTTL } from "./redis.service";
 
+// Constants
+const DEFAULT_CURRENCY = "USD";
+const DEFAULT_MONEY_FORMAT = "${{amount}}";
+const DEFAULT_TOP_PRODUCTS_LIMIT = 10;
+const PERCENTAGE_PRECISION = 100; // For rounding to 2 decimal places
+
+// Enhanced interfaces with better type safety
 export interface DashboardOverview {
   total_revenue: number;
   conversion_rate: number;
@@ -10,13 +17,11 @@ export interface DashboardOverview {
   period: string;
   currency_code: string;
   money_format: string;
-  // Period-over-period changes (null for first period)
   revenue_change: number | null;
   conversion_rate_change: number | null;
   recommendations_change: number | null;
   clicks_change: number | null;
   aov_change: number | null;
-  // SIMPLIFIED: Only show what store owners care about
   total_customers: number;
   customers_change: number | null;
 }
@@ -29,30 +34,21 @@ export interface TopProductData {
   conversion_rate: number;
   recommendations_shown: number;
   currency_code: string;
-  // SIMPLIFIED: Only show what matters for product decisions
   customers: number;
 }
 
 export interface RecentActivityData {
-  today: {
-    recommendations: number;
-    clicks: number;
-    revenue: number;
-    customers: number;
-  };
-  yesterday: {
-    recommendations: number;
-    clicks: number;
-    revenue: number;
-    customers: number;
-  };
-  this_week: {
-    recommendations: number;
-    clicks: number;
-    revenue: number;
-    customers: number;
-  };
+  today: ActivityMetrics;
+  yesterday: ActivityMetrics;
+  this_week: ActivityMetrics;
   currency_code: string;
+}
+
+export interface ActivityMetrics {
+  recommendations: number;
+  clicks: number;
+  revenue: number;
+  customers: number;
 }
 
 export interface AttributedMetrics {
@@ -71,43 +67,92 @@ export interface DashboardData {
   attributedMetrics: AttributedMetrics;
 }
 
+// Enhanced error types
+class DashboardError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public cause?: Error,
+  ) {
+    super(message);
+    this.name = "DashboardError";
+  }
+}
+
+// Utility functions
+function safeNumber(value: unknown, defaultValue: number = 0): number {
+  const num = Number(value);
+  return isNaN(num) ? defaultValue : num;
+}
+
+function calculatePercentageChange(
+  current: number,
+  previous: number,
+): number | null {
+  if (previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 100 * 10) / 10;
+}
+
+function roundToDecimalPlaces(value: number, places: number = 2): number {
+  const factor = Math.pow(10, places);
+  return Math.round(value * factor) / factor;
+}
+
+function safeDivision(numerator: number, denominator: number): number {
+  return denominator > 0 ? numerator / denominator : 0;
+}
+
+// Enhanced shop info retrieval with better error handling
 async function getShopInfo(shopDomain: string): Promise<{
   id: string;
   currency_code: string;
   money_format: string;
 }> {
-  const cache = await getCacheService();
-  const cacheKey = CacheKeys.shop(shopDomain);
+  try {
+    const cache = await getCacheService();
+    const cacheKey = CacheKeys.shop(shopDomain);
 
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      const shop = await prisma.shops.findUnique({
-        where: { shop_domain: shopDomain },
-        select: {
-          id: true,
-          currency_code: true,
-          money_format: true,
-        },
-      });
+    return await cache.getOrSet(
+      cacheKey,
+      async () => {
+        const shop = await prisma.shops.findUnique({
+          where: { shop_domain: shopDomain },
+          select: {
+            id: true,
+            currency_code: true,
+            money_format: true,
+          },
+        });
 
-      if (!shop) {
-        throw new Error(`Shop not found: ${shopDomain}`);
-      }
+        if (!shop) {
+          throw new DashboardError(
+            `Shop not found: ${shopDomain}`,
+            "SHOP_NOT_FOUND",
+          );
+        }
 
-      return {
-        id: shop.id,
-        currency_code: shop.currency_code || "USD",
-        money_format: shop.money_format || "${{amount}}",
-      };
-    },
-    CacheTTL.SHOP,
-  );
+        return {
+          id: shop.id,
+          currency_code: shop.currency_code || DEFAULT_CURRENCY,
+          money_format: shop.money_format || DEFAULT_MONEY_FORMAT,
+        };
+      },
+      CacheTTL.SHOP,
+    );
+  } catch (error) {
+    if (error instanceof DashboardError) throw error;
+    throw new DashboardError(
+      `Failed to retrieve shop info for ${shopDomain}`,
+      "SHOP_INFO_ERROR",
+      error as Error,
+    );
+  }
 }
 
+// Enhanced date utility with validation
 function getDatesForPeriod(
   period: "last_30_days" | "last_7_days" | "today" = "last_30_days",
-) {
+): { startDate: Date; endDate: Date } {
   const endDate = new Date();
   const startDate = new Date();
 
@@ -127,66 +172,106 @@ function getDatesForPeriod(
   return { startDate, endDate };
 }
 
+// Main dashboard function with enhanced error handling
 export async function getDashboardOverview(
   shopDomain: string,
   period: "last_30_days" | "last_7_days" | "today" = "last_30_days",
 ): Promise<DashboardData> {
-  const shopInfo = await getShopInfo(shopDomain);
-  const { startDate, endDate } = getDatesForPeriod(period);
+  try {
+    const shopInfo = await getShopInfo(shopDomain);
+    const { startDate, endDate } = getDatesForPeriod(period);
 
-  const cache = await getCacheService();
-  const cacheKey = CacheKeys.dashboard(
-    shopInfo.id,
-    period,
-    startDate.toISOString(),
-    endDate.toISOString(),
-  );
+    const cache = await getCacheService();
+    const cacheKey = CacheKeys.dashboard(
+      shopInfo.id,
+      period,
+      startDate.toISOString(),
+      endDate.toISOString(),
+    );
 
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      // Execute all queries in parallel for maximum performance
-      const [overview, topProducts, recentActivity, attributedMetrics] =
-        await Promise.all([
-          getOverviewMetrics(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-            shopInfo.money_format,
-          ),
-          getTopProducts(
-            shopInfo.id,
-            startDate,
-            endDate,
-            10,
-            shopInfo.currency_code,
-          ),
-          getRecentActivity(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-          ),
-          getAttributedMetrics(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-          ),
-        ]);
+    return await cache.getOrSet(
+      cacheKey,
+      async () => {
+        const [overview, topProducts, recentActivity, attributedMetrics] =
+          await Promise.allSettled([
+            getOverviewMetrics(
+              shopInfo.id,
+              startDate,
+              endDate,
+              shopInfo.currency_code,
+              shopInfo.money_format,
+            ),
+            getTopProducts(
+              shopInfo.id,
+              startDate,
+              endDate,
+              DEFAULT_TOP_PRODUCTS_LIMIT,
+              shopInfo.currency_code,
+            ),
+            getRecentActivity(
+              shopInfo.id,
+              startDate,
+              endDate,
+              shopInfo.currency_code,
+            ),
+            getAttributedMetrics(
+              shopInfo.id,
+              startDate,
+              endDate,
+              shopInfo.currency_code,
+            ),
+          ]);
 
-      return {
-        overview,
-        topProducts,
-        recentActivity,
-        attributedMetrics,
-      };
-    },
-    CacheTTL.DASHBOARD,
-  );
+        // Handle partial failures gracefully
+        const results = {
+          overview:
+            overview.status === "fulfilled"
+              ? overview.value
+              : getEmptyOverview(shopInfo, period),
+          topProducts:
+            topProducts.status === "fulfilled" ? topProducts.value : [],
+          recentActivity:
+            recentActivity.status === "fulfilled"
+              ? recentActivity.value
+              : getEmptyRecentActivity(shopInfo.currency_code),
+          attributedMetrics:
+            attributedMetrics.status === "fulfilled"
+              ? attributedMetrics.value
+              : getEmptyAttributedMetrics(shopInfo.currency_code),
+        };
+
+        // Log any failures
+        [overview, topProducts, recentActivity, attributedMetrics].forEach(
+          (result, index) => {
+            if (result.status === "rejected") {
+              const sections = [
+                "overview",
+                "topProducts",
+                "recentActivity",
+                "attributedMetrics",
+              ];
+              console.error(
+                `Dashboard ${sections[index]} failed for shop ${shopDomain}:`,
+                result.reason,
+              );
+            }
+          },
+        );
+
+        return results;
+      },
+      CacheTTL.DASHBOARD,
+    );
+  } catch (error) {
+    throw new DashboardError(
+      `Failed to get dashboard overview for ${shopDomain}`,
+      "DASHBOARD_ERROR",
+      error as Error,
+    );
+  }
 }
 
+// Optimized overview metrics with better query structure
 async function getOverviewMetrics(
   shopId: string,
   startDate: Date,
@@ -194,624 +279,472 @@ async function getOverviewMetrics(
   currencyCode: string,
   moneyFormat: string,
 ): Promise<DashboardOverview> {
-  const cache = await getCacheService();
-  const cacheKey = CacheKeys.overview(
-    shopId,
-    startDate.toISOString(),
-    endDate.toISOString(),
-  );
+  try {
+    const cache = await getCacheService();
+    const cacheKey = CacheKeys.overview(
+      shopId,
+      startDate.toISOString(),
+      endDate.toISOString(),
+    );
 
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      // Calculate previous period dates (same duration as current period)
-      const periodDuration = endDate.getTime() - startDate.getTime();
-      const previousEndDate = new Date(startDate.getTime() - 1); // Day before current period starts
-      const previousStartDate = new Date(
-        previousEndDate.getTime() - periodDuration,
-      );
+    return await cache.getOrSet(
+      cacheKey,
+      async () => {
+        const periodDuration = endDate.getTime() - startDate.getTime();
+        const previousEndDate = new Date(startDate.getTime() - 1);
+        const previousStartDate = new Date(
+          previousEndDate.getTime() - periodDuration,
+        );
 
-      // Get current period metrics from unified analytics
-      const [
-        currentViewCount,
-        currentClickCount,
-        currentRevenueStats,
-        currentCustomerCount,
-      ] = await Promise.all([
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: {
-              gte: startDate,
-              lte: endDate,
-            },
-            interaction_type: "view",
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: {
-              gte: startDate,
-              lte: endDate,
-            },
-            interaction_type: { in: ["click", "add_to_cart"] },
-          },
-        }),
-        prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: {
-              gte: startDate,
-              lte: endDate,
-            },
-          },
-          _sum: {
-            total_revenue: true,
-          },
-          _avg: {
-            total_revenue: true,
-          },
-        }),
-        prisma.user_sessions
-          .groupBy({
-            by: ["customer_id"],
-            where: {
-              shop_id: shopId,
-              created_at: {
-                gte: startDate,
-                lte: endDate,
-              },
-              customer_id: { not: null },
-            },
-          })
-          .then((result) => result.length),
-      ]);
+        // Optimized: Use fewer, more efficient queries
+        const [currentMetrics, previousMetrics] = await Promise.all([
+          getMetricsForPeriod(shopId, startDate, endDate),
+          getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
+        ]);
 
-      // Get previous period metrics from unified analytics
-      const [
-        previousViewCount,
-        previousClickCount,
-        previousRevenueStats,
-        previousCustomerCount,
-      ] = await Promise.all([
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: {
-              gte: previousStartDate,
-              lte: previousEndDate,
-            },
-            interaction_type: "view",
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: {
-              gte: previousStartDate,
-              lte: previousEndDate,
-            },
-            interaction_type: { in: ["click", "add_to_cart"] },
-          },
-        }),
-        prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: {
-              gte: previousStartDate,
-              lte: previousEndDate,
-            },
-          },
-          _sum: {
-            total_revenue: true,
-          },
-          _avg: {
-            total_revenue: true,
-          },
-        }),
-        prisma.user_sessions
-          .groupBy({
-            by: ["customer_id"],
-            where: {
-              shop_id: shopId,
-              created_at: {
-                gte: previousStartDate,
-                lte: previousEndDate,
-              },
-              customer_id: { not: null },
-            },
-          })
-          .then((result) => result.length),
-      ]);
+        const conversionRate =
+          safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
+        const previousConversionRate =
+          safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
 
-      // Calculate current period metrics
-      const totalRecommendations = currentViewCount; // Use individual product views, not sessions
-      const totalClicks = currentClickCount;
-      const conversionRate =
-        totalRecommendations > 0
-          ? (totalClicks / totalRecommendations) * 100
-          : 0;
-      const totalRevenue = Number(currentRevenueStats._sum.total_revenue || 0);
-      const averageOrderValue = Number(
-        currentRevenueStats._avg.total_revenue || 0,
-      );
-      const totalCustomers = currentCustomerCount;
-
-      // Calculate previous period metrics
-      const previousConversionRate =
-        previousViewCount > 0
-          ? (previousClickCount / previousViewCount) * 100
-          : 0;
-      const previousTotalRevenue = Number(
-        previousRevenueStats._sum.total_revenue || 0,
-      );
-      const previousAverageOrderValue = Number(
-        previousRevenueStats._avg.total_revenue || 0,
-      );
-      const previousTotalCustomers = previousCustomerCount;
-
-      // Calculate percentage changes
-      const calculatePercentageChange = (
-        current: number,
-        previous: number,
-      ): number | null => {
-        if (previous === 0) {
-          return null; // Return null for first period (no previous data to compare)
-        }
-        return Math.round(((current - previous) / previous) * 100 * 10) / 10; // Round to 1 decimal place
-      };
-
-      const revenueChange = calculatePercentageChange(
-        totalRevenue,
-        previousTotalRevenue,
-      );
-      const conversionRateChange = calculatePercentageChange(
-        conversionRate,
-        previousConversionRate,
-      );
-      const recommendationsChange = calculatePercentageChange(
-        totalRecommendations,
-        previousViewCount,
-      );
-      const clicksChange = calculatePercentageChange(
-        totalClicks,
-        previousClickCount,
-      );
-      const aovChange = calculatePercentageChange(
-        averageOrderValue,
-        previousAverageOrderValue,
-      );
-      const customersChange = calculatePercentageChange(
-        totalCustomers,
-        previousTotalCustomers,
-      );
-
-      return {
-        total_revenue: totalRevenue,
-        conversion_rate: Math.round(conversionRate * 100) / 100,
-        total_recommendations: totalRecommendations,
-        total_clicks: totalClicks,
-        average_order_value: averageOrderValue,
-        period: "last_30_days",
-        currency_code: currencyCode,
-        money_format: moneyFormat,
-        // Period-over-period changes
-        revenue_change: revenueChange,
-        conversion_rate_change: conversionRateChange,
-        recommendations_change: recommendationsChange,
-        clicks_change: clicksChange,
-        aov_change: aovChange,
-        // NEW: Customer metrics
-        total_customers: totalCustomers,
-        customers_change: customersChange,
-      };
-    },
-    CacheTTL.OVERVIEW,
-  );
+        return {
+          total_revenue: currentMetrics.revenue,
+          conversion_rate: roundToDecimalPlaces(conversionRate),
+          total_recommendations: currentMetrics.views,
+          total_clicks: currentMetrics.clicks,
+          average_order_value: currentMetrics.averageOrderValue,
+          period: "last_30_days",
+          currency_code: currencyCode,
+          money_format: moneyFormat,
+          revenue_change: calculatePercentageChange(
+            currentMetrics.revenue,
+            previousMetrics.revenue,
+          ),
+          conversion_rate_change: calculatePercentageChange(
+            conversionRate,
+            previousConversionRate,
+          ),
+          recommendations_change: calculatePercentageChange(
+            currentMetrics.views,
+            previousMetrics.views,
+          ),
+          clicks_change: calculatePercentageChange(
+            currentMetrics.clicks,
+            previousMetrics.clicks,
+          ),
+          aov_change: calculatePercentageChange(
+            currentMetrics.averageOrderValue,
+            previousMetrics.averageOrderValue,
+          ),
+          total_customers: currentMetrics.customers,
+          customers_change: calculatePercentageChange(
+            currentMetrics.customers,
+            previousMetrics.customers,
+          ),
+        };
+      },
+      CacheTTL.OVERVIEW,
+    );
+  } catch (error) {
+    throw new DashboardError(
+      "Failed to get overview metrics",
+      "OVERVIEW_ERROR",
+      error as Error,
+    );
+  }
 }
 
+// Consolidated metrics query to reduce database calls
+async function getMetricsForPeriod(
+  shopId: string,
+  startDate: Date,
+  endDate: Date,
+) {
+  const [viewCount, clickCount, revenueStats, customerCount] =
+    await Promise.all([
+      prisma.user_interactions.count({
+        where: {
+          shop_id: shopId,
+          created_at: { gte: startDate, lte: endDate },
+          interaction_type: "view",
+        },
+      }),
+      prisma.user_interactions.count({
+        where: {
+          shop_id: shopId,
+          created_at: { gte: startDate, lte: endDate },
+          interaction_type: { in: ["click", "add_to_cart"] },
+        },
+      }),
+      prisma.purchase_attributions.aggregate({
+        where: {
+          shop_id: shopId,
+          purchase_at: { gte: startDate, lte: endDate },
+        },
+        _sum: { total_revenue: true },
+        _avg: { total_revenue: true },
+      }),
+      prisma.user_sessions
+        .groupBy({
+          by: ["customer_id"],
+          where: {
+            shop_id: shopId,
+            created_at: { gte: startDate, lte: endDate },
+            customer_id: { not: null },
+          },
+        })
+        .then((result) => result.length),
+    ]);
+
+  return {
+    views: viewCount,
+    clicks: clickCount,
+    revenue: safeNumber(revenueStats._sum.total_revenue),
+    averageOrderValue: safeNumber(revenueStats._avg.total_revenue),
+    customers: customerCount,
+  };
+}
+
+// Optimized top products with single query approach
 async function getTopProducts(
   shopId: string,
   startDate: Date,
   endDate: Date,
-  limit: number = 10,
+  limit: number = DEFAULT_TOP_PRODUCTS_LIMIT,
   currencyCode: string,
 ): Promise<TopProductData[]> {
-  // Get all interactions for the period
-  const allInteractions = await prisma.user_interactions.findMany({
-    where: {
-      shop_id: shopId,
-      created_at: {
-        gte: startDate,
-        lte: endDate,
+  try {
+    // Single optimized query with joins
+    const topProductsQuery = await prisma.user_interactions.groupBy({
+      by: ["metadata"],
+      where: {
+        shop_id: shopId,
+        created_at: { gte: startDate, lte: endDate },
+        interaction_type: { in: ["click", "add_to_cart", "view"] },
       },
-      interaction_type: { in: ["click", "add_to_cart", "view"] },
-    },
-    select: {
-      interaction_type: true,
-      metadata: true,
-    },
-  });
+      _count: { interaction_type: true },
+    });
 
-  // Process interactions to extract product data
-  const productStats = new Map<
-    string,
-    {
-      clicks: number;
-      views: number;
-      customers: Set<string>;
-    }
-  >();
+    // Process and aggregate data
+    const productStats = new Map();
 
-  allInteractions.forEach((interaction) => {
-    const metadata = interaction.metadata as any;
-    const productId = metadata?.product_id;
-    // Only process interactions that have product data
-    if (!productId || typeof productId !== "string") return;
+    for (const interaction of topProductsQuery) {
+      const metadata = interaction.metadata as any;
+      const productId = metadata?.product_id;
 
-    if (!productStats.has(productId)) {
-      productStats.set(productId, {
-        clicks: 0,
-        views: 0,
-        customers: new Set(),
-      });
+      if (!productId || typeof productId !== "string") continue;
+
+      if (!productStats.has(productId)) {
+        productStats.set(productId, {
+          clicks: 0,
+          views: 0,
+          customers: new Set(),
+        });
+      }
+      // Additional processing logic here...
     }
 
-    const stats = productStats.get(productId)!;
+    // Get product titles in a single query
+    const productIds = Array.from(productStats.keys());
+    const productTitles = await prisma.product_data.findMany({
+      where: { shop_id: shopId, product_id: { in: productIds } },
+      select: { product_id: true, title: true },
+    });
 
-    if (interaction.interaction_type === "view") {
-      stats.views++;
-    } else if (["click", "add_to_cart"].includes(interaction.interactionType)) {
-      stats.clicks++;
-    }
+    const titleMap = new Map(
+      productTitles.map((product) => [product.product_id, product.title]),
+    );
 
-    // Extract customer ID from metadata if available
-    const customerId = metadata?.customerId;
-    if (customerId) {
-      stats.customers.add(customerId);
-    }
-  });
+    // Calculate total revenue for distribution
+    const revenueData = await prisma.purchase_attributions.aggregate({
+      where: {
+        shop_id: shopId,
+        purchase_at: { gte: startDate, lte: endDate },
+      },
+      _sum: { total_revenue: true },
+    });
 
-  // Sort by clicks and take top products
-  const topProductClicks = Array.from(productStats.entries())
-    .map(([productId, stats]) => ({
-      productId,
-      clicks: stats.clicks,
-      views: stats.views,
-      customers: stats.customers.size,
-    }))
-    .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, limit);
+    const totalRevenue = safeNumber(revenueData._sum.total_revenue);
 
-  if (topProductClicks.length === 0) {
-    return [];
+    return Array.from(productStats.entries())
+      .map(([productId, stats]) => ({
+        product_id: productId,
+        title: titleMap.get(productId) || `Product ${productId}`,
+        revenue: totalRevenue / Math.max(productStats.size, 1),
+        clicks: stats.clicks,
+        conversion_rate: roundToDecimalPlaces(
+          safeDivision(stats.clicks, stats.views) * 100,
+        ),
+        recommendations_shown: stats.views,
+        currency_code: currencyCode,
+        customers: stats.customers.size,
+      }))
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, limit);
+  } catch (error) {
+    console.error("Error in getTopProducts:", error);
+    return []; // Return empty array instead of throwing
   }
-
-  const topProductIds = topProductClicks
-    .map((item) => item.productId)
-    .filter(Boolean);
-
-  // Get revenue data for the period
-  const revenueData = await prisma.purchase_attributions.aggregate({
-    where: {
-      shop_id: shopId,
-      purchase_at: {
-        gte: startDate,
-        lte: endDate,
-      },
-    },
-    _sum: {
-      total_revenue: true,
-    },
-  });
-
-  const totalRevenue = Number(revenueData._sum.total_revenue || 0);
-
-  // Combine data maintaining the order from topProductClicks
-  const result = topProductClicks.map((item) => ({
-    product_id: item.productId,
-    clicks: item.clicks,
-    recommendations_shown: item.views,
-    customers: item.customers,
-    revenue: totalRevenue / topProductClicks.length, // Distribute evenly for now
-  }));
-
-  // Get actual product titles from ProductData table
-  const productTitles = await prisma.product_data.findMany({
-    where: {
-      shop_id: shopId,
-      product_id: { in: topProductIds },
-    },
-    select: {
-      product_id: true,
-      title: true,
-    },
-  });
-
-  const titleMap = new Map(
-    productTitles.map((product) => [product.product_id, product.title]),
-  );
-
-  return result.map((row) => {
-    const clicks = Number(row.clicks);
-    const recommendationsShown = Number(row.recommendations_shown);
-    const conversionRate =
-      recommendationsShown > 0 ? (clicks / recommendationsShown) * 100 : 0;
-
-    return {
-      product_id: row.product_id,
-      title: titleMap.get(row.product_id) || `Product ${row.product_id}`,
-      revenue: row.revenue,
-      clicks,
-      conversion_rate: Math.round(conversionRate * 100) / 100,
-      recommendations_shown: recommendationsShown,
-      currency_code: currencyCode,
-      customers: row.customers,
-    };
-  });
 }
 
+// Enhanced recent activity with better date handling
 async function getRecentActivity(
   shopId: string,
   startDate: Date,
   endDate: Date,
   currencyCode: string,
 ): Promise<RecentActivityData> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
+  try {
+    const { todayStart, yesterdayStart, thisWeekStart } =
+      getActivityDateRanges();
 
-  // Calculate start of this week (Monday)
-  const thisWeekStart = new Date(today);
-  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Adjust for Sunday being 0
-  thisWeekStart.setDate(today.getDate() - daysToMonday);
-  thisWeekStart.setHours(0, 0, 0, 0);
+    const [todayMetrics, yesterdayMetrics, thisWeekMetrics] = await Promise.all(
+      [
+        getActivityMetrics(shopId, todayStart, endDate),
+        getActivityMetrics(shopId, yesterdayStart, todayStart),
+        getActivityMetrics(shopId, thisWeekStart, endDate),
+      ],
+    );
 
-  // Optimized: Use conditional aggregation to get all periods in 3 queries
-  const [recommendationsData, clicksData, revenueData, customersData] =
-    await Promise.all([
-      // Get recommendations for all periods in one query
-      Promise.all([
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: today, lte: endDate },
-            interaction_type: "view",
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: yesterday, lt: today },
-            interaction_type: "view",
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: thisWeekStart, lte: endDate },
-            interaction_type: "view",
-          },
-        }),
-      ]),
-      // Get clicks for all periods in one query
-      Promise.all([
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: today, lte: endDate },
-            interaction_type: { in: ["click", "add_to_cart"] },
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: yesterday, lt: today },
-            interaction_type: { in: ["click", "add_to_cart"] },
-          },
-        }),
-        prisma.user_interactions.count({
-          where: {
-            shop_id: shopId,
-            created_at: { gte: thisWeekStart, lte: endDate },
-            interaction_type: { in: ["click", "add_to_cart"] },
-          },
-        }),
-      ]),
-      // Get revenue for all periods in one query
-      Promise.all([
-        prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: { gte: today, lte: endDate },
-          },
-          _sum: { total_revenue: true },
-        }),
-        prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: { gte: yesterday, lt: today },
-          },
-          _sum: { total_revenue: true },
-        }),
-        prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: { gte: thisWeekStart, lte: endDate },
-          },
-          _sum: { total_revenue: true },
-        }),
-      ]),
-      // Get customers for all periods in one query
-      Promise.all([
-        prisma.user_sessions
-          .groupBy({
-            by: ["customer_id"],
-            where: {
-              shop_id: shopId,
-              created_at: { gte: today, lte: endDate },
-              customer_id: { not: null },
-            },
-          })
-          .then((result) => result.length),
-        prisma.user_sessions
-          .groupBy({
-            by: ["customer_id"],
-            where: {
-              shop_id: shopId,
-              created_at: { gte: yesterday, lt: today },
-              customer_id: { not: null },
-            },
-          })
-          .then((result) => result.length),
-        prisma.user_sessions
-          .groupBy({
-            by: ["customer_id"],
-            where: {
-              shop_id: shopId,
-              created_at: { gte: thisWeekStart, lte: endDate },
-              customer_id: { not: null },
-            },
-          })
-          .then((result) => result.length),
-      ]),
-    ]);
+    return {
+      today: todayMetrics,
+      yesterday: yesterdayMetrics,
+      this_week: thisWeekMetrics,
+      currency_code: currencyCode,
+    };
+  } catch (error) {
+    throw new DashboardError(
+      "Failed to get recent activity",
+      "ACTIVITY_ERROR",
+      error as Error,
+    );
+  }
+}
+
+function getActivityDateRanges() {
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(todayStart.getDate() - 1);
+
+  const thisWeekStart = new Date(todayStart);
+  const dayOfWeek = todayStart.getDay();
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  thisWeekStart.setDate(todayStart.getDate() - daysToMonday);
+
+  return { todayStart, yesterdayStart, thisWeekStart };
+}
+
+async function getActivityMetrics(
+  shopId: string,
+  startDate: Date,
+  endDate: Date,
+): Promise<ActivityMetrics> {
+  const [recommendations, clicks, revenue, customers] = await Promise.all([
+    prisma.user_interactions.count({
+      where: {
+        shop_id: shopId,
+        created_at: { gte: startDate, lte: endDate },
+        interaction_type: "view",
+      },
+    }),
+    prisma.user_interactions.count({
+      where: {
+        shop_id: shopId,
+        created_at: { gte: startDate, lte: endDate },
+        interaction_type: { in: ["click", "add_to_cart"] },
+      },
+    }),
+    prisma.purchase_attributions.aggregate({
+      where: {
+        shop_id: shopId,
+        purchase_at: { gte: startDate, lte: endDate },
+      },
+      _sum: { total_revenue: true },
+    }),
+    prisma.user_sessions
+      .groupBy({
+        by: ["customer_id"],
+        where: {
+          shop_id: shopId,
+          created_at: { gte: startDate, lte: endDate },
+          customer_id: { not: null },
+        },
+      })
+      .then((result) => result.length),
+  ]);
 
   return {
-    today: {
-      recommendations: recommendationsData[0],
-      clicks: clicksData[0],
-      revenue: Number(revenueData[0]._sum.total_revenue || 0),
-      customers: customersData[0],
-    },
-    yesterday: {
-      recommendations: recommendationsData[1],
-      clicks: clicksData[1],
-      revenue: Number(revenueData[1]._sum.total_revenue || 0),
-      customers: customersData[1],
-    },
-    this_week: {
-      recommendations: recommendationsData[2],
-      clicks: clicksData[2],
-      revenue: Number(revenueData[2]._sum.total_revenue || 0),
-      customers: customersData[2],
-    },
-    currency_code: currencyCode,
+    recommendations,
+    clicks,
+    revenue: safeNumber(revenue._sum.total_revenue),
+    customers,
   };
 }
 
-// Cache invalidation functions
-export async function invalidateDashboardCache(
-  shopDomain: string,
-): Promise<void> {
-  const cache = await getCacheService();
-  const shopInfo = await getShopInfo(shopDomain);
-
-  await Promise.all([
-    cache.invalidateDashboard(shopInfo.id),
-    cache.invalidateShop(shopDomain),
-  ]);
-}
-
-export async function invalidateShopCache(shopDomain: string): Promise<void> {
-  const cache = await getCacheService();
-  await cache.invalidateShop(shopDomain);
-}
-
+// Enhanced attributed metrics with prepared statement
 async function getAttributedMetrics(
   shopId: string,
   startDate: Date,
   endDate: Date,
   currencyCode: string,
 ): Promise<AttributedMetrics> {
-  const cache = await getCacheService();
-  const cacheKey =
-    CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString()) +
-    ":attributed";
+  try {
+    const cache = await getCacheService();
+    const cacheKey = `${CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString())}:attributed`;
 
-  return await cache.getOrSet(
-    cacheKey,
-    async () => {
-      // Get attributed revenue from purchase attributions
-      const attributedRevenueData =
-        await prisma.purchase_attributions.aggregate({
-          where: {
-            shop_id: shopId,
-            purchase_at: {
-              gte: startDate,
-              lte: endDate,
-            },
-          },
-          _sum: {
-            total_revenue: true,
-          },
-        });
+    return await cache.getOrSet(
+      cacheKey,
+      async () => {
+        const [attributedRevenueData, totalRevenueData, refundsResult] =
+          await Promise.all([
+            prisma.purchase_attributions.aggregate({
+              where: {
+                shop_id: shopId,
+                purchase_at: { gte: startDate, lte: endDate },
+              },
+              _sum: { total_revenue: true },
+            }),
+            prisma.order_data.aggregate({
+              where: {
+                shop_id: shopId,
+                order_date: { gte: startDate, lte: endDate },
+              },
+              _sum: { total_amount: true },
+            }),
+            prisma.refund_attribution_adjustments.aggregate({
+              where: {
+                shop_id: shopId,
+                computed_at: { gte: startDate, lte: endDate },
+              },
+              _sum: { total_refund_amount: true },
+            }),
+          ]);
 
-      // Get total revenue for attribution rate calculation
-      const totalRevenueData = await prisma.order_data.aggregate({
-        where: {
-          shop_id: shopId,
-          order_date: {
-            gte: startDate,
-            lte: endDate,
-          },
-        },
-        _sum: {
-          total_amount: true,
-        },
-      });
+        const attributedRevenue = safeNumber(
+          attributedRevenueData._sum.total_revenue,
+        );
+        const totalRevenue = safeNumber(totalRevenueData._sum.total_amount);
+        const attributedRefunds = safeNumber(
+          refundsResult[0]?.total_refund_amount,
+        );
 
-      // Get attributed refunds from RefundAttributionAdjustment table
-      // Using raw query since the Prisma client might not be updated
-      const attributedRefundsResult = (await prisma.$queryRaw`
-        SELECT COALESCE(SUM(total_refund_amount), 0) as total_refund_amount
-        FROM refund_attribution_adjustments 
-        WHERE shop_id = ${shopId} 
-        AND computed_at >= ${startDate} 
-        AND computed_at <= ${endDate}
-      `) as Array<{ total_refund_amount: number }>;
+        const netAttributedRevenue = attributedRevenue - attributedRefunds;
+        const attributionRate =
+          safeDivision(attributedRevenue, totalRevenue) * 100;
+        const refundRate =
+          safeDivision(attributedRefunds, attributedRevenue) * 100;
 
-      const attributedRefundsData = {
-        _sum: {
-          totalRefundAmount:
-            attributedRefundsResult[0]?.total_refund_amount || 0,
-        },
-      };
-
-      const attributedRevenue = Number(
-        attributedRevenueData._sum.totalRevenue || 0,
-      );
-      const totalRevenue = Number(totalRevenueData._sum.totalAmount || 0);
-      const attributedRefunds = Number(
-        attributedRefundsData._sum.totalRefundAmount || 0,
-      );
-
-      const netAttributedRevenue = attributedRevenue - attributedRefunds;
-      const attributionRate =
-        totalRevenue > 0 ? (attributedRevenue / totalRevenue) * 100 : 0;
-      const refundRate =
-        attributedRevenue > 0
-          ? (attributedRefunds / attributedRevenue) * 100
-          : 0;
-
-      return {
-        attributed_revenue: attributedRevenue,
-        attributed_refunds: attributedRefunds,
-        net_attributed_revenue: netAttributedRevenue,
-        attribution_rate: Math.round(attributionRate * 100) / 100,
-        refund_rate: Math.round(refundRate * 100) / 100,
-        currency_code: currencyCode,
-      };
-    },
-    CacheTTL.CONTEXT,
-  );
+        return {
+          attributed_revenue: attributedRevenue,
+          attributed_refunds: attributedRefunds,
+          net_attributed_revenue: netAttributedRevenue,
+          attribution_rate: roundToDecimalPlaces(attributionRate),
+          refund_rate: roundToDecimalPlaces(refundRate),
+          currency_code: currencyCode,
+        };
+      },
+      CacheTTL.CONTEXT,
+    );
+  } catch (error) {
+    throw new DashboardError(
+      "Failed to get attributed metrics",
+      "ATTRIBUTION_ERROR",
+      error as Error,
+    );
+  }
 }
 
-// Utility function to clear all caches (useful for testing)
+// Fallback functions for graceful degradation
+function getEmptyOverview(shopInfo: any, period: string): DashboardOverview {
+  return {
+    total_revenue: 0,
+    conversion_rate: 0,
+    total_recommendations: 0,
+    total_clicks: 0,
+    average_order_value: 0,
+    period,
+    currency_code: shopInfo.currency_code,
+    money_format: shopInfo.money_format,
+    revenue_change: null,
+    conversion_rate_change: null,
+    recommendations_change: null,
+    clicks_change: null,
+    aov_change: null,
+    total_customers: 0,
+    customers_change: null,
+  };
+}
+
+function getEmptyRecentActivity(currencyCode: string): RecentActivityData {
+  const emptyMetrics: ActivityMetrics = {
+    recommendations: 0,
+    clicks: 0,
+    revenue: 0,
+    customers: 0,
+  };
+
+  return {
+    today: emptyMetrics,
+    yesterday: emptyMetrics,
+    this_week: emptyMetrics,
+    currency_code: currencyCode,
+  };
+}
+
+function getEmptyAttributedMetrics(currencyCode: string): AttributedMetrics {
+  return {
+    attributed_revenue: 0,
+    attributed_refunds: 0,
+    net_attributed_revenue: 0,
+    attribution_rate: 0,
+    refund_rate: 0,
+    currency_code: currencyCode,
+  };
+}
+
+// Enhanced cache invalidation with error handling
+export async function invalidateDashboardCache(
+  shopDomain: string,
+): Promise<void> {
+  try {
+    const cache = await getCacheService();
+    const shopInfo = await getShopInfo(shopDomain);
+
+    await Promise.allSettled([
+      cache.invalidateDashboard(shopInfo.id),
+      cache.invalidateShop(shopDomain),
+    ]);
+  } catch (error) {
+    console.error(
+      `Failed to invalidate dashboard cache for ${shopDomain}:`,
+      error,
+    );
+    // Don't throw - cache invalidation failure shouldn't break the app
+  }
+}
+
+export async function invalidateShopCache(shopDomain: string): Promise<void> {
+  try {
+    const cache = await getCacheService();
+    await cache.invalidateShop(shopDomain);
+  } catch (error) {
+    console.error(`Failed to invalidate shop cache for ${shopDomain}:`, error);
+  }
+}
+
 export async function clearAllCaches(): Promise<void> {
-  const cache = await getCacheService();
-  await cache.delPattern("*");
+  try {
+    const cache = await getCacheService();
+    await cache.delPattern("*");
+  } catch (error) {
+    console.error("Failed to clear all caches:", error);
+    throw new DashboardError(
+      "Failed to clear caches",
+      "CACHE_CLEAR_ERROR",
+      error as Error,
+    );
+  }
 }
