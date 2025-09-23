@@ -248,7 +248,7 @@ class RawCollectionsGenerator(BaseDataGenerator):
             # Create raw collection record
             raw_collection = {
                 "id": f"raw_collection_{shop_id}_{collection_id}",
-                "shopId": shop_id,
+                "shop_id": shop_id,
                 "payload": collection,
                 # Align extractedAt with Shopify updated_at
                 "extractedAt": collection["updated_at"],

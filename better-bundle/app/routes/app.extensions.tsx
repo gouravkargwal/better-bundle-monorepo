@@ -30,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - 24);
 
-      const results = await (prisma as any).extension_activities.findMany({
+      const results = await prisma.extension_activities.findMany({
         where: {
           shop_id: shop.id,
           last_seen: {

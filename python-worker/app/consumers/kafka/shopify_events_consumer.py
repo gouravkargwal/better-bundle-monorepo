@@ -176,9 +176,9 @@ class ShopifyEventHandler(EventHandler):
                             # Upsert by (shopId, shopifyId)
                             await table.upsert(
                                 where={
-                                    "shopId_shopifyId": {
-                                        "shopId": str(shop_id),
-                                        "shopifyId": str(shopify_id),
+                                    "shop_id_shopify_id": {
+                                        "shop_id": str(shop_id),
+                                        "shopify_id": str(shopify_id),
                                     }
                                 },
                                 data={
@@ -189,9 +189,9 @@ class ShopifyEventHandler(EventHandler):
                                         "source": "webhook",
                                     },
                                     "create": {
-                                        "shopId": str(shop_id),
+                                        "shop_id": str(shop_id),
                                         "payload": raw_payload,
-                                        "shopifyId": str(shopify_id),
+                                        "shopify_id": str(shopify_id),
                                         "shopifyUpdatedAt": shopify_updated,
                                         "format": "rest",
                                         "source": "webhook",
@@ -202,8 +202,8 @@ class ShopifyEventHandler(EventHandler):
                                 "🗄️ RAW upsert complete",
                                 extra={
                                     "shop_id": shop_id,
-                                    "data_type": data_type,
                                     "shopify_id": shopify_id,
+                                    "data_type": data_type,
                                 },
                             )
                 except Exception as raw_err:
@@ -218,7 +218,7 @@ class ShopifyEventHandler(EventHandler):
                             "extensionType": "shopify_webhook",
                             "interactionType": event_type,
                             "customerId": None,
-                            "shopId": str(shop_id),
+                            "shop_id": str(shop_id),
                             "metadata": event,
                         }
                     )
@@ -226,8 +226,8 @@ class ShopifyEventHandler(EventHandler):
                     now_dt = datetime.now(timezone.utc)
                     await db.pipelinewatermark.upsert(
                         where={
-                            "shopId_dataType": {
-                                "shopId": str(shop_id),
+                            "shop_id_dataType": {
+                                "shop_id": str(shop_id),
                                 "dataType": "user_interactions",
                             }
                         },
@@ -237,7 +237,7 @@ class ShopifyEventHandler(EventHandler):
                                 "lastWindowEnd": now_dt,
                             },
                             "create": {
-                                "shopId": str(shop_id),
+                                "shop_id": str(shop_id),
                                 "dataType": "user_interactions",
                                 "lastCollectedAt": now_dt,
                                 "lastWindowEnd": now_dt,
@@ -313,7 +313,7 @@ class ShopifyEventHandler(EventHandler):
             try:
                 # Check if order exists
                 existing_order = await db.raworder.find_first(
-                    where={"shopId": shop_id, "shopifyId": order_id},
+                    where={"shop_id": shop_id, "shopify_id": order_id},
                     select={"id": True, "payload": True},
                 )
 
@@ -362,9 +362,9 @@ class ShopifyEventHandler(EventHandler):
 
                     await db.raworder.create(
                         data={
-                            "shopId": shop_id,
+                            "shop_id": shop_id,
                             "payload": minimal_order_payload,
-                            "shopifyId": order_id,
+                            "shopify_id": order_id,
                             "shopifyCreatedAt": now_dt,
                             "shopifyUpdatedAt": now_dt,
                             "source": "webhook",
@@ -388,7 +388,7 @@ class ShopifyEventHandler(EventHandler):
                         "extensionType": "shopify_webhook",
                         "interactionType": "refund_created",
                         "customerId": None,
-                        "shopId": str(shop_id),
+                        "shop_id": str(shop_id),
                         "metadata": event,
                         "createdAt": now_dt,
                     }
@@ -397,8 +397,8 @@ class ShopifyEventHandler(EventHandler):
                 # Update PipelineWatermark for user_interactions
                 await db.pipelinewatermark.upsert(
                     where={
-                        "shopId_dataType": {
-                            "shopId": str(shop_id),
+                        "shop_id_dataType": {
+                            "shop_id": str(shop_id),
                             "dataType": "user_interactions",
                         }
                     },
@@ -408,7 +408,7 @@ class ShopifyEventHandler(EventHandler):
                             "lastWindowEnd": now_dt,
                         },
                         "create": {
-                            "shopId": str(shop_id),
+                            "shop_id": str(shop_id),
                             "dataType": "user_interactions",
                             "lastCollectedAt": now_dt,
                             "lastWindowEnd": now_dt,

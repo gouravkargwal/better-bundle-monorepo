@@ -136,12 +136,12 @@ class ShopifyDataStorageService:
 
             created_at, updated_at = self._extract_shopify_timestamps(item)
             item_data_map[full_id] = {
-                "shopId": shop_id,  # Use camelCase to match Prisma schema
+                "shop_id": shop_id,  # Use camelCase to match Prisma schema
                 "payload": self._serialize_item_generic(item),
-                "extractedAt": current_time,  # Use camelCase to match Prisma schema
-                "shopifyId": full_id,  # Use camelCase to match Prisma schema
-                "shopifyCreatedAt": created_at,  # Use camelCase to match Prisma schema
-                "shopifyUpdatedAt": updated_at,  # Use camelCase to match Prisma schema
+                "extracted_at": current_time,  # Use camelCase to match Prisma schema
+                "shopify_id": full_id,  # Use camelCase to match Prisma schema
+                "shopify_created_at": created_at,  # Use camelCase to match Prisma schema
+                "shopify_updated_at": updated_at,  # Use camelCase to match Prisma schema
                 # Correctly mark collected data as GraphQL backfill (not webhook/rest)
                 "source": "backfill",
                 "format": "graphql",
@@ -164,7 +164,7 @@ class ShopifyDataStorageService:
 
             if not existing:
                 new_items.append(item_data)
-            elif item_data["shopifyUpdatedAt"] > existing.shopifyUpdatedAt:
+            elif item_data["shopify_updated_at"] > existing.shopify_updated_at:
                 updated_items.append(item_data)
 
         # Batch operations using SQLAlchemy models
@@ -183,13 +183,13 @@ class ShopifyDataStorageService:
                     await session.execute(
                         update(model_class)
                         .where(
-                            (model_class.shopId == shop_id)
-                            & (model_class.shopifyId == item_data["shopifyId"])
+                            (model_class.shop_id == shop_id)
+                            & (model_class.shopify_id == item_data["shopify_id"])
                         )
                         .values(
                             payload=item_data["payload"],
-                            extractedAt=item_data["extractedAt"],
-                            shopifyUpdatedAt=item_data["shopifyUpdatedAt"],
+                            extracted_at=item_data["extracted_at"],
+                            shopify_updated_at=item_data["shopify_updated_at"],
                             source="backfill",
                             format="graphql",
                         )
@@ -228,13 +228,13 @@ class ShopifyDataStorageService:
             async with get_session_context() as session:
                 result = await session.execute(
                     select(model_class).where(
-                        (model_class.shopId == shop_id)
-                        & (model_class.shopifyId.in_(chunk_ids))
+                        (model_class.shop_id == shop_id)
+                        & (model_class.shopify_id.in_(chunk_ids))
                     )
                 )
                 existing_records = result.scalars().all()
                 for record in existing_records:
-                    existing_items[record.shopifyId] = record
+                    existing_items[record.shopify_id] = record
 
         return existing_items
 
@@ -363,8 +363,8 @@ class ShopifyDataStorageService:
             async with get_session_context() as session:
                 result = await session.execute(
                     select(model_class)
-                    .where(model_class.shopId == shop_id)
-                    .order_by(model_class.extractedAt.desc())
+                    .where(model_class.shop_id == shop_id)
+                    .order_by(model_class.extracted_at.desc())
                     .limit(1)
                 )
                 latest_record = result.scalar_one_or_none()
