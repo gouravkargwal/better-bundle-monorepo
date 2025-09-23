@@ -12,9 +12,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     // Get shop record first to get the correct shop ID
-    const shopRecord = await prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { id: true, currencyCode: true },
+    const shopRecord = await prisma.shops.findUnique({
+      where: { shop_domain: shop },
+      select: { id: true, currency_code: true },
     });
 
     if (!shopRecord) {
@@ -22,26 +22,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     // Get billing plan using the correct shop ID
-    const billingPlan = await prisma.billingPlan.findFirst({
+    const billingPlan = await prisma.billing_plans.findFirst({
       where: {
-        shopId: shopRecord.id,
+        shop_id: shopRecord.id,
         status: "active",
       },
       orderBy: {
-        effectiveFrom: "desc",
+        effective_from: "desc",
       },
       select: {
         id: true,
-        shopId: true,
-        shopDomain: true,
+        shop_id: true,
+        shop_domain: true,
         name: true,
         type: true,
         status: true,
         configuration: true,
-        effectiveFrom: true,
-        effectiveUntil: true,
-        createdAt: true,
-        updatedAt: true,
+        effective_from: true,
+        effective_until: true,
+        created_at: true,
+        updated_at: true,
       },
     });
 
@@ -52,23 +52,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     // Get recent invoices
-    const recentInvoices = await prisma.billingInvoice.findMany({
+    const recentInvoices = await prisma.billing_invoices.findMany({
       where: {
-        shopId: shopRecord.id,
+        shop_id: shopRecord.id,
       },
       orderBy: {
-        createdAt: "desc",
+        created_at: "desc",
       },
       take: 5,
     });
 
     // Get recent billing events
-    const recentEvents = await prisma.billingEvent.findMany({
+    const recentEvents = await prisma.billing_events.findMany({
       where: {
-        shopId: shopRecord.id,
+        shop_id: shopRecord.id,
       },
       orderBy: {
-        occurredAt: "desc",
+        occurred_at: "desc",
       },
       take: 10,
     });
@@ -81,8 +81,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         type: billingPlan.type,
         status: billingPlan.status,
         configuration: billingPlan.configuration,
-        effective_from: billingPlan.effectiveFrom.toISOString(),
-        currency: shopRecord.currencyCode || "USD",
+        effective_from: billingPlan.effective_from.toISOString(),
+        currency: shopRecord.currency_code,
         trial_status: {
           is_trial_active:
             (billingPlan.configuration as any)?.trial_active || false,
@@ -105,20 +105,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
       recent_invoices: recentInvoices.map((invoice) => ({
         id: invoice.id,
-        invoice_number: invoice.invoiceNumber,
+        invoice_number: invoice.invoice_number,
         status: invoice.status,
         total: invoice.total,
         currency: invoice.currency,
-        period_start: invoice.periodStart.toISOString(),
-        period_end: invoice.periodEnd.toISOString(),
-        due_date: invoice.dueDate.toISOString(),
-        created_at: invoice.createdAt.toISOString(),
+        period_start: invoice.period_start.toISOString(),
+        period_end: invoice.period_end.toISOString(),
+        due_date: invoice.due_date.toISOString(),
+        created_at: invoice.created_at.toISOString(),
       })),
       recent_events: recentEvents.map((event) => ({
         id: event.id,
         type: event.type,
         data: event.data,
-        occurred_at: event.occurredAt.toISOString(),
+        occurred_at: event.occurred_at.toISOString(),
       })),
     };
 

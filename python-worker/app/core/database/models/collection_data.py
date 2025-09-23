@@ -13,7 +13,7 @@ from .base import BaseModel, ShopMixin
 class CollectionData(BaseModel, ShopMixin):
     """Collection data model representing Shopify collections"""
 
-    __tablename__ = "CollectionData"
+    __tablename__ = "collection_data"
 
     collection_id = Column(String, nullable=False, index=True)
     title = Column(String(500), nullable=False, index=True)

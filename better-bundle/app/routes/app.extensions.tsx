@@ -20,8 +20,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     // Get shop ID from database
-    const shop = await prisma.shop.findUnique({
-      where: { shopDomain: session.shop },
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: session.shop },
     });
 
     let extensions: Record<string, any> = {};
@@ -30,40 +30,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - 24);
 
-      const results = await (prisma as any).extensionActivity.findMany({
+      const results = await (prisma as any).extension_activities.findMany({
         where: {
-          shopId: shop.id,
-          lastSeen: {
+          shop_id: shop.id,
+          last_seen: {
             gt: cutoffTime,
           },
-          extensionType: {
+          extension_type: {
             in: ["apollo", "phoenix", "venus"],
           },
         },
         orderBy: {
-          lastSeen: "desc",
+          last_seen: "desc",
         },
       });
 
       // Group by extension type
       for (const result of results) {
-        const extType = result.extensionType;
+        const extType = result.extension_type;
 
         if (!extensions[extType]) {
           extensions[extType] = {
             active: true,
-            last_seen: result.lastSeen.toISOString(),
+            last_seen: result.last_seen.toISOString(),
             app_blocks: [],
           };
         }
 
         // Add app block info if available
-        if (result.appBlockTarget && result.appBlockLocation) {
+        if (result.app_block_target && result.app_block_location) {
           extensions[extType].app_blocks.push({
-            target: result.appBlockTarget,
-            location: result.appBlockLocation,
-            page_url: result.pageUrl,
-            extension_uid: result.extensionUid,
+            target: result.app_block_target,
+            location: result.app_block_location,
+            page_url: result.page_url,
+            extension_uid: result.extension_uid,
           });
         }
       }

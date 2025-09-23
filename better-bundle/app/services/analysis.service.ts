@@ -4,16 +4,16 @@ import { KafkaProducerService } from "./kafka/kafka-producer.service";
 export const triggerFullAnalysis = async (shopDomain: string) => {
   try {
     // Get shop information from database to retrieve shop_id and access_token
-    const shop = await prisma.shop.findUnique({
-      where: { shopDomain },
-      select: { id: true, accessToken: true },
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: shopDomain },
+      select: { id: true, access_token: true },
     });
 
     if (!shop) {
       throw new Error(`Shop not found for domain: ${shopDomain}`);
     }
 
-    if (!shop.accessToken) {
+    if (!shop.access_token) {
       throw new Error(`No access token found for shop: ${shopDomain}`);
     }
 
@@ -24,13 +24,8 @@ export const triggerFullAnalysis = async (shopDomain: string) => {
       event_type: "data_collection",
       job_id: jobId,
       shop_id: shop.id,
-      shop_domain: shopDomain,
-      access_token: shop.accessToken,
       job_type: "data_collection",
-      data_types: ["products", "orders", "customers", "collections"],
-      trigger_source: "manual_analysis",
       timestamp: new Date().toISOString(),
-      priority: "high",
     };
 
     const producer = await KafkaProducerService.getInstance();

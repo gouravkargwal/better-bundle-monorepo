@@ -22,14 +22,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     // Get shop information
-    const shop = await prisma.shop.findUnique({
-      where: { shopDomain: session.shop },
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: session.shop },
       select: {
         id: true,
-        shopDomain: true,
-        currencyCode: true,
-        planType: true,
-        createdAt: true,
+        shop_domain: true,
+        currency_code: true,
+        plan_type: true,
+        created_at: true,
       },
     });
 
@@ -38,9 +38,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     // Get billing plan information
-    const billingPlan = await prisma.billingPlan.findFirst({
+    const billingPlan = await prisma.billing_plans.findFirst({
       where: {
-        shopId: shop.id,
+        shop_id: shop.id,
         status: "active",
       },
       select: {
@@ -49,8 +49,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         type: true,
         status: true,
         configuration: true,
-        effectiveFrom: true,
-        effectiveUntil: true,
+        effective_from: true,
+        effective_until: true,
       },
     });
 

@@ -22,7 +22,7 @@ from .base import BaseModel, ShopMixin
 class OrderData(BaseModel, ShopMixin):
     """Order data model representing Shopify orders"""
 
-    __tablename__ = "OrderData"
+    __tablename__ = "order_data"
     order_id = Column(String, nullable=False, index=True)
     order_name = Column(String(100), nullable=True)
     customer_id = Column(String(100), nullable=True, index=True)
@@ -78,7 +78,7 @@ class LineItemData(BaseModel):
 
     __tablename__ = "line_item_data"
 
-    order_id = Column(String, ForeignKey("OrderData.id"), nullable=False)
+    order_id = Column(String, ForeignKey("order_data.id"), nullable=False)
     product_id = Column(String, nullable=True)
     variant_id = Column(String, nullable=True)
 

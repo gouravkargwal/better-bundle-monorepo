@@ -93,7 +93,7 @@ const createShopAndSetOnboardingCompleted = async (
     where: { shop_domain: shopData.myshopifyDomain },
     update: {
       access_token: session.accessToken,
-      currency_code: shopData.currency_code,
+      currency_code: shopData.currencyCode,
       email: shopData.email,
       plan_type: shopData.plan.displayName,
       is_active: true,
@@ -105,7 +105,7 @@ const createShopAndSetOnboardingCompleted = async (
     create: {
       shop_domain: shopData.myshopifyDomain,
       access_token: session.accessToken,
-      currency_code: shopData.currency_code,
+      currency_code: shopData.currencyCode,
       email: shopData.email,
       plan_type: shopData.plan.displayName,
       is_active: true,

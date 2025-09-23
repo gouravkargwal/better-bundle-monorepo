@@ -13,7 +13,7 @@ from .base import BaseModel, ShopMixin
 class CustomerData(BaseModel, ShopMixin):
     """Customer data model representing Shopify customers"""
 
-    __tablename__ = "CustomerData"
+    __tablename__ = "customer_data"
 
     customer_id = Column(String, nullable=False, index=True)
     email = Column(String(255), nullable=True, index=True)

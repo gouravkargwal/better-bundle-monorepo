@@ -88,6 +88,10 @@ class DataCollectionKafkaConsumer:
             )
             return False
 
+    def can_handle(self, event_type: str) -> bool:
+        """Indicate which event types this consumer can handle"""
+        return event_type == "data_collection"
+
     # Data collection business logic methods
     async def _process_data_collection_job(self, job_id: str, shop_id: str):
         """Process comprehensive data collection job"""

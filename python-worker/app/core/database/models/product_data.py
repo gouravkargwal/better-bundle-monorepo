@@ -13,7 +13,7 @@ from .base import BaseModel, ShopMixin
 class ProductData(BaseModel, ShopMixin):
     """Product data model representing Shopify products"""
 
-    __tablename__ = "ProductData"
+    __tablename__ = "product_data"
 
     product_id = Column(String, nullable=False, index=True)
     title = Column(String(500), nullable=False)
