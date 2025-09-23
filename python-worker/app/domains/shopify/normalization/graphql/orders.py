@@ -85,8 +85,8 @@ class GraphQLOrderAdapter(BaseAdapter):
                 props_dict = {}
             line_items.append(
                 CanonicalLineItem(
-                    productId=_extract_numeric_gid(product.get("id")),
-                    variantId=_extract_numeric_gid(variant.get("id")),
+                    product_id=_extract_numeric_gid(product.get("id")),
+                    variant_id=_extract_numeric_gid(variant.get("id")),
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
                     price=_to_float(variant.get("price")),
@@ -122,40 +122,38 @@ class GraphQLOrderAdapter(BaseAdapter):
         )
 
         model = CanonicalOrder(
-            shopId=shop_id,
-            orderId=entity_id,
-            originalGid=payload.get("id"),
-            # Canonical internal timestamps
-            createdAt=created_at,
-            updatedAt=updated_at,
-            currencyCode=payload.get("currencyCode"),
-            presentmentCurrencyCode=payload.get("presentmentCurrencyCode"),
+            shop_id=shop_id,
+            order_id=entity_id,
+            created_at=created_at,
+            updated_at=updated_at,
+            currency_code=payload.get("currencyCode"),
+            presentment_currency_code=payload.get("presentmentCurrencyCode"),
             totalAmount=total_amount,
-            subtotalAmount=subtotal_amount,
-            totalTaxAmount=total_tax_amount,
-            totalShippingAmount=total_shipping_amount,
-            totalRefundedAmount=total_refunded_amount,
-            totalOutstandingAmount=total_outstanding_amount,
-            orderDate=_parse_iso(payload.get("createdAt")) or created_at,
-            processedAt=_parse_iso(payload.get("processedAt")),
-            cancelledAt=_parse_iso(payload.get("cancelledAt")),
+            subtotal_amount=subtotal_amount,
+            total_tax_amount=total_tax_amount,
+            total_shipping_amount=total_shipping_amount,
+            total_refunded_amount=total_refunded_amount,
+            total_outstanding_amount=total_outstanding_amount,
+            order_date=_parse_iso(payload.get("createdAt")) or created_at,
+            processed_at=_parse_iso(payload.get("processedAt")),
+            cancelled_at=_parse_iso(payload.get("cancelledAt")),
             confirmed=payload.get("confirmed", False),
             test=payload.get("test", False),
-            orderName=payload.get("name"),
+            order_name=payload.get("name"),
             note=payload.get("note"),
-            customerEmail=payload.get("email"),
-            customerPhone=payload.get("phone"),
-            customerDisplayName=(payload.get("customer") or {}).get("displayName"),
-            financialStatus=payload.get("financialStatus") or None,
-            fulfillmentStatus=payload.get("fulfillmentStatus") or None,
-            customerId=customer_id,
+            customer_email=payload.get("email"),
+            customer_phone=payload.get("phone"),
+            customer_display_name=(payload.get("customer") or {}).get("displayName"),
+            financial_status=payload.get("financialStatus") or None,
+            fulfillment_status=payload.get("fulfillmentStatus") or None,
+            customer_id=customer_id,
             tags=tags,
-            noteAttributes=payload.get("customAttributes")
+            note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
-            lineItems=line_items,
-            billingAddress=payload.get("billingAddress"),
-            shippingAddress=payload.get("shippingAddress"),
-            discountApplications=(payload.get("discountApplications", {}) or {}).get(
+            line_items=line_items,
+            billing_address=payload.get("billingAddress"),
+            shipping_address=payload.get("shippingAddress"),
+            discount_applications=(payload.get("discountApplications", {}) or {}).get(
                 "edges", []
             ),
             metafields=(payload.get("metafields", {}) or {}).get("edges", []),
@@ -195,31 +193,30 @@ class GraphQLOrderAdapter(BaseAdapter):
                     line_item = rli.get("line_item", {})
 
                     refund_line_item = {
-                        "refundId": str(refund.get("id", "")),
-                        "orderId": str(payload.get("id", "")),
-                        "productId": str(line_item.get("product_id", "")),
-                        "variantId": str(line_item.get("variant_id", "")),
+                        "refund_id": str(refund.get("id", "")),
+                        "order_id": str(payload.get("id", "")),
+                        "product_id": str(line_item.get("product_id", "")),
+                        "variant_id": str(line_item.get("variant_id", "")),
                         "quantity": int(rli.get("quantity", 0)),
-                        "unitPrice": float(rli.get("subtotal", 0)),
-                        "refundAmount": float(rli.get("subtotal", 0)),
+                        "unit_price": float(rli.get("subtotal", 0)),
+                        "refund_amount": float(rli.get("subtotal", 0)),
                         "properties": line_item.get("properties", []),
                     }
                     refund_line_items.append(refund_line_item)
 
                 # Create refund data
                 refund_data = {
-                    "shopId": shop_id,
-                    "orderId": str(payload.get("id", "")),
-                    "refundId": str(refund.get("id", "")),
-                    "originalGid": refund.get("admin_graphql_api_id"),
-                    "refundedAt": self._parse_iso(refund.get("created_at")),
+                    "shop_id": shop_id,
+                    "order_id": str(payload.get("id", "")),
+                    "refund_id": str(refund.get("id", "")),
+                    "refunded_at": self._parse_iso(refund.get("created_at")),
                     "note": refund.get("note", ""),
                     "restock": refund.get("restock", False),
-                    "totalRefundAmount": total_refund_amount,
-                    "currencyCode": currency_code,
-                    "refundLineItems": refund_line_items,
-                    "createdAt": self._parse_iso(refund.get("created_at")),
-                    "updatedAt": self._parse_iso(refund.get("processed_at")),
+                    "total_refund_amount": total_refund_amount,
+                    "currency_code": currency_code,
+                    "refund_line_items": refund_line_items,
+                    "created_at": self._parse_iso(refund.get("created_at")),
+                    "updated_at": self._parse_iso(refund.get("processed_at")),
                     "extras": refund,
                 }
 

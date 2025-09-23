@@ -52,37 +52,36 @@ class GraphQLCollectionAdapter(BaseAdapter):
         updated_at = _parse_iso(payload.get("updatedAt")) or created_at
 
         model = CanonicalCollection(
-            shopId=shop_id,
-            collectionId=collectionId,
-            originalGid=payload.get("id"),
+            shop_id=shop_id,
+            collection_id=collectionId,
             title=payload.get("title") or "Untitled Collection",
             handle=payload.get("handle") or "untitled-collection",
             description=payload.get("description")
             or payload.get("descriptionHtml")
             or "",
-            templateSuffix=payload.get("templateSuffix") or "",
-            seoTitle=(payload.get("seo", {}) or {}).get("title"),
-            seoDescription=(payload.get("seo", {}) or {}).get("description"),
+            template_suffix=payload.get("templateSuffix") or "",
+            seo_title=(payload.get("seo", {}) or {}).get("title"),
+            seo_description=(payload.get("seo", {}) or {}).get("description"),
             imageUrl=(
                 (payload.get("image") or {}).get("url")
                 if isinstance(payload.get("image"), dict)
                 else None
             ),
-            imageAlt=(
+            image_alt=(
                 (payload.get("image") or {}).get("altText")
                 if isinstance(payload.get("image"), dict)
                 else None
             ),
-            productCount=(
+            product_count=(
                 len(payload.get("products") or [])
                 if isinstance(payload.get("products"), list)
                 else 0
             ),
-            isAutomated=bool(payload.get("ruleSet") is not None),
+            is_automated=bool(payload.get("ruleSet") is not None),
             metafields=self._normalize_metafields(payload.get("metafields")),
-            createdAt=created_at,
-            updatedAt=updated_at,
-            isActive=True,
+            created_at=created_at,
+            updated_at=updated_at,
+            is_active=True,
             extras={},
         )
 

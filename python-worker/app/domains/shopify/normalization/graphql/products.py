@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..base_adapter import BaseAdapter
-from ..canonical_models import CanonicalProduct, CanonicalVariant
+from app.domains.shopify.normalization.base_adapter import BaseAdapter
+from app.domains.shopify.normalization.canonical_models import (
+    CanonicalProduct,
+    CanonicalVariant,
+)
 
 
 def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
@@ -52,10 +55,10 @@ class GraphQLProductAdapter(BaseAdapter):
             node = edge.get("node", {})
             variants.append(
                 CanonicalVariant(
-                    variantId=_extract_numeric_gid(node.get("id")),
+                    variant_id=_extract_numeric_gid(node.get("id")),
                     title=node.get("title"),
                     price=_to_float(node.get("price")),
-                    compareAtPrice=_to_float(node.get("compareAtPrice")),
+                    compare_at_price=_to_float(node.get("compareAtPrice")),
                     sku=node.get("sku"),
                     barcode=node.get("barcode"),
                     inventory=(
@@ -105,35 +108,34 @@ class GraphQLProductAdapter(BaseAdapter):
         seo_description = seo.get("description")
 
         # Canonical internal timestamps (required)
-        created_at = _parse_iso(payload.get("createdAt")) or datetime.utcnow()
-        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
+        created_at = _parse_iso(payload.get("createdAt"))
+        updated_at = _parse_iso(payload.get("updatedAt"))
 
         model = CanonicalProduct(
-            shopId=shop_id,
-            productId=entity_id,
-            originalGid=payload.get("id"),
-            productCreatedAt=_parse_iso(payload.get("createdAt")),
-            productUpdatedAt=_parse_iso(payload.get("updatedAt")) or datetime.utcnow(),
-            createdAt=created_at,
-            updatedAt=updated_at,
+            shop_id=shop_id,
+            product_id=entity_id,
+            product_created_at=_parse_iso(payload.get("createdAt")),
+            product_updated_at=_parse_iso(payload.get("updatedAt")),
+            created_at=created_at,
+            updated_at=updated_at,
             title=payload.get("title") or "Untitled Product",
             handle=payload.get("handle") or "untitled-product",
             description=payload.get("description"),
             vendor=payload.get("vendor"),
-            productType=payload.get("productType"),
+            product_type=payload.get("productType"),
             status=payload.get("status"),
             tags=tags,
             price=price,
-            compareAtPrice=compare_at,
-            totalInventory=total_inventory,
-            isActive=True if payload.get("status") == "ACTIVE" else False,
+            compare_at_price=compare_at,
+            total_inventory=total_inventory,
+            is_active=True if payload.get("status") == "ACTIVE" else False,
             variants=variants,
             images=images,
             media=media,
             options=options,
-            seoTitle=seo_title,
-            seoDescription=seo_description,
-            templateSuffix=payload.get("templateSuffix"),
+            seo_title=seo_title,
+            seo_description=seo_description,
+            template_suffix=payload.get("templateSuffix"),
             extras={},
         )
 

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
 from app.domains.shopify.normalization.canonical_models import NormalizeJob
 from app.core.database.session import get_session_context, get_transaction_context
 from app.core.database.models import (
-    Shop,
     OrderData,
     LineItemData,
     ProductData,
@@ -18,168 +15,12 @@ from app.core.database.models import (
     CollectionData,
 )
 
-# Removed enum imports - using string values directly
 from sqlalchemy import select, update, delete, insert
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
-
-
-class PersistenceMapper:
-    """Declarative mapper: canonical DTO -> Prisma input data.
-
-    Centralizes DB-specific concerns: relations, JSON fields, timestamps, and field cleanup.
-    """
-
-    # Per-entity configuration
-    CONFIG = {
-        "products": {
-            "json_fields": {
-                "metafields",
-                "tags",
-                "variants",
-                "images",
-                "media",
-                "options",
-                "noteAttributes",
-                "extras",
-            },
-            "timestamp_map": {
-                "shopifyUpdatedAt": "updatedAt",
-                "shopifyCreatedAt": "createdAt",
-            },
-            "remove_fields": {
-                "entityId",
-                "canonicalVersion",
-                "originalGid",
-                "customerCreatedAt",
-                "customerUpdatedAt",
-                "isActive",
-                "shopId",
-            },
-        },
-        "customers": {
-            "json_fields": {
-                "metafields",
-                "tags",
-                "addresses",
-                "defaultAddress",
-                "customerDefaultAddress",
-                "location",
-                "noteAttributes",
-                "extras",
-            },
-            "timestamp_map": {
-                "shopifyUpdatedAt": "updatedAt",
-                "shopifyCreatedAt": "createdAt",
-            },
-            "remove_fields": {
-                "entityId",
-                "canonicalVersion",
-                "originalGid",
-                "customerCreatedAt",
-                "customerUpdatedAt",
-                "isActive",
-                "shopId",
-            },
-        },
-        "collections": {
-            "json_fields": {
-                "metafields",
-                "tags",
-                "images",
-                "noteAttributes",
-                "extras",
-            },
-            "timestamp_map": {
-                "shopifyUpdatedAt": "updatedAt",
-                "shopifyCreatedAt": "createdAt",
-            },
-            "remove_fields": {
-                "entityId",
-                "canonicalVersion",
-                "originalGid",
-                "customerCreatedAt",
-                "customerUpdatedAt",
-                "isActive",
-                "shopId",
-            },
-        },
-        "orders": {
-            "json_fields": {
-                "metafields",
-                "tags",
-                "discountApplications",
-                "fulfillments",
-                "transactions",
-                "shippingAddress",
-                "billingAddress",
-                "defaultAddress",
-                "customerDefaultAddress",
-                "location",
-                "noteAttributes",
-                "extras",
-            },
-            "timestamp_map": {
-                "shopifyUpdatedAt": "updatedAt",
-                "shopifyCreatedAt": "createdAt",
-            },
-            "remove_fields": {
-                "entityId",
-                "canonicalVersion",
-                "originalGid",
-                "customerCreatedAt",
-                "customerUpdatedAt",
-                "isActive",
-                "refunds",
-                "lineItems",
-                "shopId",
-            },
-        },
-    }
-
-    @staticmethod
-    def apply(entity: str, canonical: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
-        cfg = PersistenceMapper.CONFIG.get(entity, {})
-        main_data: Dict[str, Any] = canonical.copy()
-
-        # Set shop_id directly for SQLAlchemy
-        main_data["shop_id"] = shop_id
-
-        # Timestamp mapping
-        ts_map: Dict[str, str] = cfg.get("timestamp_map", {})
-        for src, dst in ts_map.items():
-            if src in main_data:
-                main_data[dst] = main_data[src]
-
-        # Ensure required timestamps
-        if "created_at" not in main_data or main_data.get("created_at") is None:
-            main_data["created_at"] = now_utc()
-        if "updated_at" not in main_data or main_data.get("updated_at") is None:
-            main_data["updated_at"] = now_utc()
-
-        # Provide safe defaults for known json-ish nullable fields
-        json_default_fields = {
-            "customerDefaultAddress",
-            "defaultAddress",
-            "shippingAddress",
-            "billingAddress",
-            "location",
-        }
-        for jf in json_default_fields:
-            if jf in main_data and (main_data[jf] is None or main_data[jf] == {}):
-                main_data[jf] = {}
-
-        # JSON fields are handled directly by SQLAlchemy with JSONB columns
-        # No need for special wrapping like Prisma
-
-        # Remove internal/canonical-only fields and scalar shopId
-        for rf in cfg.get("remove_fields", set()):
-            main_data.pop(rf, None)
-
-        return main_data
 
 
 class EntityNormalizationService:
@@ -337,15 +178,22 @@ class EntityNormalizationService:
     def _prepare_main_data(
         self, canonical: Dict, shop_id: str, data_type: str
     ) -> Optional[Dict]:
-        """Prepare main table data from canonical structure using declarative mapper."""
-        # Validate presence of primary id
-        id_field = f"{data_type[:-1]}Id"
+        """Simplified - canonical already matches database schema"""
+        id_field = f"{data_type[:-1]}_id"
         if not canonical.get(id_field):
-            self.logger.error(f"Missing primary id for canonical record: {id_field}")
+            self.logger.error(f"Missing primary id: {id_field}")
             return None
 
-        # Apply declarative mapping
-        main_data = PersistenceMapper.apply(data_type, canonical, shop_id)
+        # Just ensure timestamps are set
+        main_data = canonical.copy()
+        if "created_at" not in main_data or not main_data["created_at"]:
+            main_data["created_at"] = now_utc()
+        if "updated_at" not in main_data or not main_data["updated_at"]:
+            main_data["updated_at"] = now_utc()
+
+        # Remove line_items since they're handled separately
+        main_data.pop("line_items", None)
+
         return main_data
 
     def _get_model_class(self, data_type: str):
@@ -631,23 +479,14 @@ class OrderNormalizationService:
             data_format = "graphql" if str(entity_id).startswith("gid://") else "rest"
         return data_format
 
-    async def _prepare_order_data(
-        self, canonical: Dict, shop_id: str
-    ) -> Optional[Dict]:
-        """Prepare order data for database using declarative mapper (SQLAlchemy)."""
-        # Ensure shop exists
-        async with get_session_context() as session:
-            result = await session.execute(select(Shop).where(Shop.id == shop_id))
-            shop_exists = result.scalar_one_or_none()
-        if not shop_exists:
-            self.logger.error(f"Shop {shop_id} not found")
+    async def _prepare_order_data(self, canonical: Dict) -> Optional[Dict]:
+        """Data is already in the right format from canonical model."""
+        if not canonical.get("order_id"):
+            self.logger.error("Missing order_id in canonical data")
             return None
 
-        if not canonical.get("orderId"):
-            self.logger.error("Missing orderId in canonical data")
-            return None
-
-        main_data = PersistenceMapper.apply("orders", canonical, shop_id)
+        main_data = canonical.copy()
+        main_data.pop("line_items", None)
         return main_data
 
     async def _create_line_items(

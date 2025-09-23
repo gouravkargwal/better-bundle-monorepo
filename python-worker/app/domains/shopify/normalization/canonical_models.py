@@ -18,48 +18,45 @@ class CanonicalLineItem(BaseModel):
 class CanonicalOrder(BaseModel):
     """Canonical order model - matches OrderData table structure exactly"""
 
-    shopId: str
-    orderId: str  # Maps to orderId
-    originalGid: Optional[str] = None  # Shopify GraphQL ID
-
-    # Exact field mapping to OrderData table
-    orderName: Optional[str] = None  # orderName
-    customerId: Optional[str] = None  # customerId
-    customerEmail: Optional[str] = None  # customerEmail (was email)
-    customerPhone: Optional[str] = None  # customerPhone (was phone)
-    customerDisplayName: Optional[str] = None  # customerDisplayName
-    customerState: Optional[str] = None  # customerState
-    customerVerifiedEmail: Optional[bool] = False  # customerVerifiedEmail
-    customerCreatedAt: Optional[datetime] = None  # customerCreatedAt
-    customerUpdatedAt: Optional[datetime] = None  # customerUpdatedAt
-    customerDefaultAddress: Optional[Dict[str, Any]] = None  # customerDefaultAddress
-    totalAmount: float = 0.0  # totalAmount
-    subtotalAmount: Optional[float] = 0.0  # subtotalAmount
-    totalTaxAmount: Optional[float] = 0.0  # totalTaxAmount
-    totalShippingAmount: Optional[float] = 0.0  # totalShippingAmount
-    totalRefundedAmount: Optional[float] = 0.0  # totalRefundedAmount
-    totalOutstandingAmount: Optional[float] = 0.0  # totalOutstandingAmount
-    orderDate: datetime  # orderDate (shopifyCreatedAt)
-    processedAt: Optional[datetime] = None  # processedAt
-    cancelledAt: Optional[datetime] = None  # cancelledAt
-    cancelReason: Optional[str] = ""  # cancelReason
-    orderLocale: Optional[str] = "en"  # orderLocale
-    currencyCode: Optional[str] = "USD"  # currencyCode
-    presentmentCurrencyCode: Optional[str] = "USD"  # presentmentCurrencyCode
+    shop_id: str
+    order_id: str  # Maps to orderId
+    order_name: Optional[str] = None  # orderName
+    customer_id: Optional[str] = None  # customerId
+    customer_email: Optional[str] = None  # customerEmail (was email)
+    customer_phone: Optional[str] = None  # customerPhone (was phone)
+    customer_display_name: Optional[str] = None  # customerDisplayName
+    customer_state: Optional[str] = None  # customerState
+    customer_verified_email: Optional[bool] = False  # customerVerifiedEmail
+    customer_created_at: Optional[datetime] = None  # customerCreatedAt
+    customer_updated_at: Optional[datetime] = None  # customerUpdatedAt
+    customer_default_address: Optional[Dict[str, Any]] = None  # customerDefaultAddress
+    total_amount: float = 0.0  # totalAmount
+    subtotal_amount: Optional[float] = 0.0  # subtotalAmount
+    total_tax_amount: Optional[float] = 0.0  # totalTaxAmount
+    total_shipping_amount: Optional[float] = 0.0  # totalShippingAmount
+    total_refunded_amount: Optional[float] = 0.0  # totalRefundedAmount
+    total_outstanding_amount: Optional[float] = 0.0  # totalOutstandingAmount
+    order_date: datetime  # orderDate (shopifyCreatedAt)
+    processed_at: Optional[datetime] = None  # processedAt
+    cancelled_at: Optional[datetime] = None  # cancelledAt
+    cancel_reason: Optional[str] = ""  # cancelReason
+    order_locale: Optional[str] = "en"  # orderLocale
+    currency_code: Optional[str] = "USD"  # currencyCode
+    presentment_currency_code: Optional[str] = "USD"  # presentmentCurrencyCode
     confirmed: bool = False  # confirmed
     test: bool = False  # test
-    financialStatus: Optional[str] = None  # financialStatus
-    fulfillmentStatus: Optional[str] = None  # fulfillmentStatus
-    orderStatus: Optional[str] = None  # orderStatus
+    financial_status: Optional[str] = None  # financialStatus
+    fulfillment_status: Optional[str] = None  # fulfillmentStatus
+    order_status: Optional[str] = None  # orderStatus
     tags: Any = Field(default_factory=list)  # tags (JSON)
     note: Optional[str] = ""  # note
-    noteAttributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
+    note_attributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
     lineItems: List[CanonicalLineItem] = Field(
         default_factory=list
     )  # Extracted separately for LineItemData records
-    shippingAddress: Any = Field(default_factory=dict)  # shippingAddress (JSON)
-    billingAddress: Any = Field(default_factory=dict)  # billingAddress (JSON)
-    discountApplications: Any = Field(
+    shipping_address: Any = Field(default_factory=dict)  # shippingAddress (JSON)
+    billing_address: Any = Field(default_factory=dict)  # billingAddress (JSON)
+    discount_applications: Any = Field(
         default_factory=list
     )  # discountApplications (JSON)
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
@@ -70,18 +67,16 @@ class CanonicalOrder(BaseModel):
     )  # refunds from GraphQL orders
 
     # Internal fields
-    createdAt: datetime  # Used for orderDate
-    updatedAt: datetime
-
-    # Preserve unknown fields from raw payloads
+    created_at: datetime  # Used for orderDate
+    updated_at: datetime
     extras: Any = Field(default_factory=dict)
 
 
 class CanonicalVariant(BaseModel):
-    variantId: Optional[str] = None
+    variant_id: Optional[str] = None
     title: Optional[str] = None
     price: Optional[float] = None
-    compareAtPrice: Optional[float] = None
+    compare_at_price: Optional[float] = None
     sku: Optional[str] = None
     barcode: Optional[str] = None
     inventory: Optional[int] = None
@@ -90,32 +85,30 @@ class CanonicalVariant(BaseModel):
 class CanonicalProduct(BaseModel):
     """Canonical product model - matches ProductData table structure exactly"""
 
-    shopId: str
-    productId: str  # Maps to productId
-    originalGid: Optional[str] = None  # Shopify GraphQL ID
-
+    shop_id: str
+    product_id: str  # Maps to productId
     # Exact field mapping to ProductData table
     title: str  # title (required)
     handle: str  # handle (required)
     description: Optional[str] = None  # description
-    descriptionHtml: Optional[str] = None  # descriptionHtml
+    description_html: Optional[str] = None  # descriptionHtml
     productType: Optional[str] = ""  # productType
     vendor: Optional[str] = ""  # vendor
     tags: Any = Field(default_factory=list)  # tags (JSON)
     status: Optional[str] = "ACTIVE"  # status
-    totalInventory: Optional[int] = 0  # totalInventory
+    total_inventory: Optional[int] = 0  # totalInventory
     price: float = 0.0  # price
-    compareAtPrice: Optional[float] = 0.0  # compareAtPrice
+    compare_at_price: Optional[float] = 0.0  # compareAtPrice
     inventory: Optional[int] = 0  # inventory
-    imageUrl: Optional[str] = None  # imageUrl
-    imageAlt: Optional[str] = None  # imageAlt
-    productCreatedAt: Optional[datetime] = None  # productCreatedAt
-    productUpdatedAt: Optional[datetime] = None  # productUpdatedAt
-    onlineStoreUrl: Optional[str] = None  # onlineStoreUrl
-    onlineStorePreviewUrl: Optional[str] = None  # onlineStorePreviewUrl
-    seoTitle: Optional[str] = None  # seoTitle
-    seoDescription: Optional[str] = None  # seoDescription
-    templateSuffix: Optional[str] = None  # templateSuffix
+    image_url: Optional[str] = None  # imageUrl
+    image_alt: Optional[str] = None  # imageAlt
+    product_created_at: Optional[datetime] = None  # productCreatedAt
+    product_updated_at: Optional[datetime] = None  # productUpdatedAt
+    online_store_url: Optional[str] = None  # onlineStoreUrl
+    online_store_preview_url: Optional[str] = None  # onlineStorePreviewUrl
+    seo_title: Optional[str] = None  # seoTitle
+    seo_description: Optional[str] = None  # seoDescription
+    template_suffix: Optional[str] = None  # templateSuffix
     variants: Any = Field(default_factory=list)  # variants (JSON)
     images: Any = Field(default_factory=list)  # images (JSON)
     media: Any = Field(default_factory=list)  # media (JSON)
@@ -123,112 +116,102 @@ class CanonicalProduct(BaseModel):
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
-    createdAt: datetime  # Used for productCreatedAt
-    updatedAt: datetime  # Used for productUpdatedAt
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
+    created_at: datetime  # Used for productCreatedAt
+    updated_at: datetime  # Used for productUpdatedAt
+    is_active: bool = True  # For soft deletes
     extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCollection(BaseModel):
     """Canonical collection model - matches CollectionData table structure exactly"""
 
-    shopId: str
-    collectionId: str  # Maps to collectionId
-    originalGid: Optional[str] = None  # Shopify GraphQL ID
+    shop_id: str
+    collection_id: str  # Maps to collectionId
     title: str  # title (required)
     handle: str  # handle (required)
     description: Optional[str] = ""  # description
-    templateSuffix: Optional[str] = ""  # templateSuffix
-    seoTitle: Optional[str] = ""  # seoTitle
-    seoDescription: Optional[str] = ""  # seoDescription
+    template_suffix: Optional[str] = ""  # templateSuffix
+    seo_title: Optional[str] = ""  # seoTitle
+    seo_description: Optional[str] = ""  # seoDescription
     imageUrl: Optional[str] = None  # imageUrl
-    imageAlt: Optional[str] = None  # imageAlt
-    productCount: int = 0  # productCount
-    isAutomated: bool = False  # isAutomated
+    image_alt: Optional[str] = None  # imageAlt
+    product_count: int = 0  # productCount
+    is_automated: bool = False  # isAutomated
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
 
     # Internal fields
-    createdAt: datetime
-    updatedAt: datetime
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool = True  # For soft deletes
     extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCustomer(BaseModel):
     """Canonical customer model - matches CustomerData table structure exactly"""
 
-    shopId: str
-    customerId: str  # Maps to customerId
-    originalGid: Optional[str] = None  # Shopify GraphQL ID
-
+    shop_id: str
+    customer_id: str  # Maps to customerId
     # Exact field mapping to CustomerData table
     email: Optional[str] = None  # email
-    firstName: Optional[str] = None  # firstName
-    lastName: Optional[str] = None  # lastName
-    totalSpent: float = 0.0  # totalSpent
-    orderCount: int = 0  # orderCount
-    lastOrderDate: Optional[datetime] = None  # lastOrderDate
+    first_name: Optional[str] = None  # firstName
+    last_name: Optional[str] = None  # lastName
+    total_spent: float = 0.0  # totalSpent
+    order_count: int = 0  # orderCount
+    last_order_date: Optional[datetime] = None  # lastOrderDate
     tags: Any = Field(default_factory=list)  # tags (JSON)
-    customerCreatedAt: Optional[datetime] = None  # Rename this
-    customerUpdatedAt: Optional[datetime] = None  # Rename this
-    lastOrderId: Optional[str] = None  # lastOrderId
+    customer_created_at: Optional[datetime] = None  # Rename this
+    customer_updated_at: Optional[datetime] = None  # Rename this
+    last_order_id: Optional[str] = None  # lastOrderId
     location: Any = Field(default_factory=dict)  # location (JSON)
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
     state: Optional[str] = ""  # state
-    verifiedEmail: bool = False  # verifiedEmail
-    taxExempt: bool = False  # taxExempt
-    defaultAddress: Any = Field(default_factory=dict)  # defaultAddress (JSON)
+    verified_email: bool = False  # verifiedEmail
+    tax_exempt: bool = False  # taxExempt
+    default_address: Any = Field(default_factory=dict)  # defaultAddress (JSON)
     addresses: Any = Field(default_factory=list)  # addresses (JSON)
-    currencyCode: Optional[str] = "USD"  # currencyCode
-    customerLocale: Optional[str] = "en"  # customerLocale
+    currency_code: Optional[str] = "USD"  # currencyCode
+    customer_locale: Optional[str] = "en"  # customerLocale
 
     # Internal fields
-    createdAt: datetime  # Used for createdAt
-    updatedAt: datetime  # Used for updatedAt
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
+    created_at: datetime  # Used for createdAt
+    updated_at: datetime  # Used for updatedAt
+    is_active: bool = True  # For soft deletes
     extras: Any = Field(default_factory=dict)
 
 
 class CanonicalRefundLineItem(BaseModel):
     """Canonical refund line item model"""
 
-    refundId: str
-    orderId: str
-    productId: Optional[str] = None
-    variantId: Optional[str] = None
+    refund_id: str
+    order_id: str
+    product_id: Optional[str] = None
+    variant_id: Optional[str] = None
     quantity: int
-    unitPrice: float
-    refundAmount: float
+    unit_price: float
+    refund_amount: float
     properties: Any = Field(default_factory=dict)
 
 
 class CanonicalRefund(BaseModel):
     """Canonical refund model - matches RefundData table structure exactly"""
 
-    shopId: str
-    orderId: str  # Maps to orderId (BigInt)
-    refundId: str  # Maps to refundId
-    originalGid: Optional[str] = None  # Shopify GraphQL ID
+    shop_id: str
+    order_id: str  # Maps to orderId (BigInt)
+    refund_id: str  # Maps to refundId
 
     # Exact field mapping to RefundData table
-    refundedAt: datetime  # refundedAt
+    refunded_at: datetime  # refundedAt
     note: Optional[str] = ""  # note
     restock: bool = False  # restock
-    totalRefundAmount: float  # totalRefundAmount
-    currencyCode: str = "USD"  # currencyCode
+    total_refund_amount: float  # totalRefundAmount
+    currency_code: str = "USD"  # currencyCode
 
     # Line items for RefundLineItemData records
-    refundLineItems: List[CanonicalRefundLineItem] = Field(default_factory=list)
+    refund_line_items: List[CanonicalRefundLineItem] = Field(default_factory=list)
 
     # Internal fields
-    createdAt: datetime
-    updatedAt: datetime
+    created_at: datetime
+    updated_at: datetime
 
     # Preserve unknown fields from raw payloads
     extras: Any = Field(default_factory=dict)

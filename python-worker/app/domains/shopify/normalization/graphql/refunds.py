@@ -5,8 +5,7 @@ Converts GraphQL refund payloads to canonical refund models.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from decimal import Decimal
+from typing import Any, Dict, Optional
 
 from app.domains.shopify.normalization.base_adapter import BaseAdapter
 from app.domains.shopify.normalization.canonical_models import (
@@ -74,31 +73,30 @@ class GraphQLRefundAdapter(BaseAdapter):
             line_item = rli.get("line_item", {})
 
             refund_line_item = CanonicalRefundLineItem(
-                refundId=refund_id,
-                orderId=order_id,
+                refund_id=refund_id,
+                order_id=order_id,
                 productId=str(line_item.get("product_id", "")),
                 variantId=str(line_item.get("variant_id", "")),
                 quantity=int(rli.get("quantity", 0)),
-                unitPrice=float(rli.get("subtotal", 0)),
-                refundAmount=float(rli.get("subtotal", 0)),
+                unit_price=float(rli.get("subtotal", 0)),
+                refund_amount=float(rli.get("subtotal", 0)),
                 properties=line_item.get("properties", []),
             )
             refund_line_items.append(refund_line_item)
 
         # Create canonical refund model
         model = CanonicalRefund(
-            shopId=shop_id,
-            orderId=order_id,
-            refundId=refund_id,
-            originalGid=payload.get("admin_graphql_api_id"),
-            refundedAt=created_at or processed_at or now_utc(),
+            shop_id=shop_id,
+            order_id=order_id,
+            refund_id=refund_id,
+            refunded_at=created_at or processed_at or now_utc(),
             note=payload.get("note", ""),
             restock=payload.get("restock", False),
-            totalRefundAmount=total_refund_amount,
-            currencyCode=currency_code,
-            refundLineItems=refund_line_items,
-            createdAt=now_utc(),
-            updatedAt=now_utc(),
+            total_refund_amount=total_refund_amount,
+            currency_code=currency_code,
+            refund_line_items=refund_line_items,
+            created_at=now_utc(),
+            updated_at=now_utc(),
             extras=payload,
         )
 

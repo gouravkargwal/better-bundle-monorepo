@@ -209,9 +209,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 shop_domain, access_token, shop_id, collectable_data
             )
 
-            # await self._trigger_normalization(
-            #     shop_id, results.get("processed_types", []), collection_start_time
-            # )
+            await self._trigger_normalization(
+                shop_id, results.get("processed_types", []), collection_start_time
+            )
 
             total_items = sum(
                 len(data) for data in results.get("collected_data", {}).values() if data
