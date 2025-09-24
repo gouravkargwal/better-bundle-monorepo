@@ -5,15 +5,12 @@ This eliminates the need for bridge tables and ensures training is always trigge
 """
 
 import asyncio
-import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
-from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.shared.decorators import retry_with_exponential_backoff
 from app.shared.gorse_api_client import GorseApiClient
 from app.domains.ml.transformers.gorse_data_transformers import GorseDataTransformers
 
@@ -43,13 +40,6 @@ class UnifiedGorseService:
         self.gorse_client = GorseApiClient(gorse_base_url, gorse_api_key)
         self.transformers = GorseDataTransformers()
         self.batch_size = batch_size
-        self._db_client = None
-
-    async def _get_database(self):
-        """Get database client"""
-        if self._db_client is None:
-            self._db_client = await get_database()
-        return self._db_client
 
     async def _check_feature_table_has_data(
         self, table_name: str, shop_id: str, since_time: Optional[datetime] = None
@@ -216,7 +206,7 @@ class UnifiedGorseService:
             if sync_type in ["all", "sessions", "incremental"]:
                 # Check if session features exist before adding sync task
                 has_session_data = await self._check_feature_table_has_data(
-                    "sessionfeatures", shop_id, since_time
+                    "session_features", shop_id, since_time
                 )
                 if has_session_data:
                     sync_tasks.append(
@@ -234,7 +224,7 @@ class UnifiedGorseService:
             if sync_type in ["all", "product_pairs", "incremental"]:
                 # Check if product pair features exist before adding sync task
                 has_product_pair_data = await self._check_feature_table_has_data(
-                    "productpairfeatures", shop_id, since_time
+                    "product_pair_features", shop_id, since_time
                 )
                 if has_product_pair_data:
                     sync_tasks.append(
@@ -254,7 +244,7 @@ class UnifiedGorseService:
             if sync_type in ["all", "search_products", "incremental"]:
                 # Check if search product features exist before adding sync task
                 has_search_product_data = await self._check_feature_table_has_data(
-                    "searchproductfeatures", shop_id, since_time
+                    "search_product_features", shop_id, since_time
                 )
                 if has_search_product_data:
                     sync_tasks.append(
@@ -274,7 +264,7 @@ class UnifiedGorseService:
             if sync_type in ["all", "collections", "incremental"]:
                 # Check if collection features exist before adding sync task
                 has_collection_data = await self._check_feature_table_has_data(
-                    "collectionfeatures", shop_id, since_time
+                    "collection_features", shop_id, since_time
                 )
                 if has_collection_data:
                     sync_tasks.append(
@@ -294,7 +284,7 @@ class UnifiedGorseService:
             if sync_type in ["all", "customer_behaviors", "incremental"]:
                 # Check if customer behavior features exist before adding sync task
                 has_customer_behavior_data = await self._check_feature_table_has_data(
-                    "customerbehaviorfeatures", shop_id, since_time
+                    "customer_behavior_features", shop_id, since_time
                 )
                 if has_customer_behavior_data:
                     sync_tasks.append(
