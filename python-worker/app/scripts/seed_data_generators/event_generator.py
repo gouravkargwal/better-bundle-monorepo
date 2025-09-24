@@ -101,7 +101,19 @@ class EventGenerator(BaseGenerator):
                 "search_submitted",
                 client_id,
                 seq,
-                {"searchResult": {"query": "hoodie"}},
+                {
+                    "searchResult": {
+                        "query": "hoodie",
+                        "productVariants": [
+                            self._build_product_view_data(0, product_variant_ids)[
+                                "productVariant"
+                            ],
+                            self._build_product_view_data(2, product_variant_ids)[
+                                "productVariant"
+                            ],
+                        ],
+                    }
+                },
                 self.past_date(5),
                 "mobile",
             )

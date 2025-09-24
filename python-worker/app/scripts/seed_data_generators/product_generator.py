@@ -331,51 +331,49 @@ class ProductGenerator(BaseGenerator):
             )
 
             product_payload = {
-                "product": {
-                    "id": product_id,
-                    "title": config["title"],
-                    "handle": config["handle"],
-                    "description": config["description"],
-                    "productType": config["productType"],
-                    "vendor": self.get_vendor(config["productType"]),
-                    "totalInventory": inventory,
-                    "onlineStoreUrl": f"https://{self.shop_domain}/products/{config['handle']}",
-                    "onlineStorePreviewUrl": f"https://{self.shop_domain}/products/{config['handle']}",
-                    "seo": seo_data,
-                    "templateSuffix": (
-                        "custom-template" if config["seo_optimized"] else None
-                    ),
-                    "media": {"edges": media_edges},
-                    "variants": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "id": variant_id,
-                                    "title": "Default Title",
-                                    "sku": f"{config['handle'].upper().replace('-', '')}-001",
-                                    "price": str(price),
-                                    "inventoryQuantity": inventory,
-                                    "compareAtPrice": (
-                                        str(compare_at_price)
-                                        if compare_at_price
-                                        else None
-                                    ),
-                                    "taxable": True,
-                                    "inventoryPolicy": "DENY",
-                                    "position": 1,
-                                    "createdAt": self.past_date(
-                                        config["created_days_ago"]
-                                    ).isoformat(),
-                                    "updatedAt": self.past_date(
-                                        config["created_days_ago"]
-                                    ).isoformat(),
-                                }
+                "id": product_id,
+                "title": config["title"],
+                "handle": config["handle"],
+                "description": config["description"],
+                "productType": config["productType"],
+                "vendor": self.get_vendor(config["productType"]),
+                "totalInventory": inventory,
+                "onlineStoreUrl": f"https://{self.shop_domain}/products/{config['handle']}",
+                "onlineStorePreviewUrl": f"https://{self.shop_domain}/products/{config['handle']}",
+                "seo": seo_data,
+                "templateSuffix": (
+                    "custom-template" if config["seo_optimized"] else None
+                ),
+                "media": {"edges": media_edges},
+                "variants": {
+                    "edges": [
+                        {
+                            "node": {
+                                "id": variant_id,
+                                "title": "Default Title",
+                                "sku": f"{config['handle'].upper().replace('-', '')}-001",
+                                "price": str(price),
+                                "inventoryQuantity": inventory,
+                                "compareAtPrice": (
+                                    str(compare_at_price)
+                                    if compare_at_price
+                                    else None
+                                ),
+                                "taxable": True,
+                                "inventoryPolicy": "DENY",
+                                "position": 1,
+                                "createdAt": self.past_date(
+                                    config["created_days_ago"]
+                                ).isoformat(),
+                                "updatedAt": self.past_date(
+                                    config["created_days_ago"]
+                                ).isoformat(),
                             }
-                        ]
-                    },
-                    "tags": config["tags"],
-                    "createdAt": self.past_date(config["created_days_ago"]).isoformat(),
-                }
+                        }
+                    ]
+                },
+                "tags": config["tags"],
+                "createdAt": self.past_date(config["created_days_ago"]).isoformat(),
             }
 
             products.append(product_payload)

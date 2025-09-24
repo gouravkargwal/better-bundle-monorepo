@@ -142,21 +142,19 @@ class CustomerGenerator(BaseGenerator):
                 default_address = self._generate_default_address()
 
             customer_payload = {
-                "customer": {
-                    "id": customer_id,
-                    "email": config["email"],
-                    "firstName": first_name,
-                    "lastName": last_name,
-                    "displayName": config["name"],
-                    "totalSpent": str(config["total_spent"]),
-                    "ordersCount": config["orders_count"],
-                    "state": customer_state,
-                    "verifiedEmail": verified_email,
-                    "defaultAddress": default_address,
-                    "createdAt": self.past_date(config["created_days_ago"]).isoformat(),
-                    "updatedAt": self.past_date(config["created_days_ago"]).isoformat(),
-                    "tags": config["tags"],
-                }
+                "id": customer_id,
+                "email": config["email"],
+                "firstName": first_name,
+                "lastName": last_name,
+                "displayName": config["name"],
+                "totalSpent": str(config["total_spent"]),
+                "ordersCount": config["orders_count"],
+                "state": customer_state,
+                "verifiedEmail": verified_email,
+                "defaultAddress": default_address,
+                "createdAt": self.past_date(config["created_days_ago"]).isoformat(),
+                "updatedAt": self.past_date(config["created_days_ago"]).isoformat(),
+                "tags": config["tags"],
             }
 
             customers.append(customer_payload)

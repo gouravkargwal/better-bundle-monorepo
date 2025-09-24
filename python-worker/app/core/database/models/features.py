@@ -74,7 +74,7 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     customer_last_name = Column(String(100), nullable=True)
     customer_location = Column(JSON, default={}, nullable=True)
     customer_tags = Column(JSON, default=[], nullable=True)
-    customer_created_at_shopify = Column(DateTime, nullable=True)
+    customer_created_at_shopify = Column(TIMESTAMP(timezone=True), nullable=True)
     customer_last_order_id = Column(String(100), nullable=True)
     customer_metafields = Column(JSON, default=[], nullable=True)
     customer_verified_email = Column(Boolean, default=False, nullable=False)
@@ -85,7 +85,9 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     customer_locale = Column(String(10), nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="user_features")
@@ -148,9 +150,9 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     cart_view_to_purchase_rate = Column(Float, nullable=True)
 
     # Temporal features
-    last_viewed_at = Column(DateTime, nullable=True)
-    last_purchased_at = Column(DateTime, nullable=True)
-    first_purchased_at = Column(DateTime, nullable=True)
+    last_viewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_purchased_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    first_purchased_at = Column(TIMESTAMP(timezone=True), nullable=True)
     days_since_first_purchase = Column(Integer, nullable=True)
     days_since_last_purchase = Column(Integer, nullable=True)
 
@@ -204,7 +206,9 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     status_stability = Column(Float, nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="product_features")
@@ -301,8 +305,20 @@ class CollectionFeatures(BaseModel, ShopMixin):
     update_frequency = Column(Float, nullable=True)
     lifecycle_stage = Column(String(50), nullable=True)
 
+    # Additional fields from feature computation
+    handle = Column(String(255), nullable=True)
+    template_suffix = Column(String(100), nullable=True)
+    last_updated_days = Column(Integer, nullable=True)
+    metafield_count = Column(Integer, default=0, nullable=False)
+    extras_utilization = Column(Float, nullable=True)
+    maturity_score = Column(Float, nullable=True)
+    extras_count = Column(Integer, default=0, nullable=False)
+    metafield_utilization = Column(Float, nullable=True)
+
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="collection_features")
@@ -351,10 +367,10 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     purchase_count = Column(Integer, default=0, nullable=False)
 
     # Temporal features
-    first_view_date = Column(DateTime, nullable=True)
-    last_view_date = Column(DateTime, nullable=True)
-    first_purchase_date = Column(DateTime, nullable=True)
-    last_purchase_date = Column(DateTime, nullable=True)
+    first_view_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_view_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    first_purchase_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_purchase_date = Column(TIMESTAMP(timezone=True), nullable=True)
     view_to_purchase_days = Column(Integer, nullable=True)
     interaction_span_days = Column(Integer, nullable=True)
 
@@ -370,7 +386,9 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     refund_risk_score = Column(Float, default=0.0, nullable=False, index=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="interaction_features")
@@ -424,8 +442,8 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
 
     # Session identification
     session_id = Column(String, nullable=False, unique=True)
-    start_time = Column(DateTime, nullable=False, index=True)
-    end_time = Column(DateTime, nullable=False)
+    start_time = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    end_time = Column(TIMESTAMP(timezone=True), nullable=False)
     duration_seconds = Column(Integer, nullable=False)
 
     # Event counts
@@ -465,7 +483,9 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
     device_consistency = Column(Float, nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="session_features")
@@ -521,10 +541,12 @@ class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     # Association metrics
     support_score = Column(Float, nullable=True)
     lift_score = Column(Float, nullable=True)
-    last_co_occurrence = Column(DateTime, nullable=True)
+    last_co_occurrence = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="product_pair_features")
@@ -577,10 +599,12 @@ class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
     # Performance metrics
     click_through_rate = Column(Float, nullable=True, index=True)
     conversion_rate = Column(Float, nullable=True)
-    last_occurrence = Column(DateTime, nullable=True)
+    last_occurrence = Column(TIMESTAMP(timezone=True), nullable=True)
 
     # Computation tracking
-    last_computed_at = Column(DateTime, nullable=False, default=func.now())
+    last_computed_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="search_product_features")
