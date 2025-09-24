@@ -135,6 +135,33 @@ class EventGenerator(BaseGenerator):
         )
         seq += 1
 
+        # Phoenix recommendations (product page recommendations)
+        events.append(
+            self._create_event(
+                "recommendation_viewed",
+                client_id,
+                seq,
+                self._build_recommendation_data(
+                    "phoenix", "product_page", [1, 2, 3], product_variant_ids
+                ),
+                self.past_date(5),
+                "mobile",
+            )
+        )
+        seq += 1
+
+        events.append(
+            self._create_event(
+                "recommendation_clicked",
+                client_id,
+                seq,
+                self._build_recommendation_click_data(1, product_variant_ids),
+                self.past_date(5),
+                "mobile",
+            )
+        )
+        seq += 1
+
         events.append(
             self._create_event(
                 "product_viewed",
@@ -202,6 +229,35 @@ class EventGenerator(BaseGenerator):
                 client_id,
                 seq,
                 self._build_checkout_completed_data([0], product_variant_ids),
+                self.past_date(5),
+                "mobile",
+                customer_id,
+            )
+        )
+        seq += 1
+
+        # Apollo post-purchase upsell events
+        events.append(
+            self._create_event(
+                "upsell_viewed",
+                client_id,
+                seq,
+                self._build_upsell_data(
+                    "apollo", "post_purchase", [1, 2, 3], product_variant_ids
+                ),
+                self.past_date(5),
+                "mobile",
+                customer_id,
+            )
+        )
+        seq += 1
+
+        events.append(
+            self._create_event(
+                "upsell_clicked",
+                client_id,
+                seq,
+                self._build_recommendation_click_data(1, product_variant_ids),
                 self.past_date(5),
                 "mobile",
                 customer_id,
@@ -498,6 +554,33 @@ class EventGenerator(BaseGenerator):
                 client_id,
                 seq,
                 self._build_product_view_data(12, product_variant_ids),
+                self.past_date(7),
+                "desktop",
+            )
+        )
+        seq += 1
+
+        # Venus cross-sell events (frequently bought together)
+        events.append(
+            self._create_event(
+                "cross_sell_viewed",
+                client_id,
+                seq,
+                self._build_cross_sell_data(
+                    "venus", "product_page", [13, 14], product_variant_ids
+                ),
+                self.past_date(7),
+                "desktop",
+            )
+        )
+        seq += 1
+
+        events.append(
+            self._create_event(
+                "cross_sell_clicked",
+                client_id,
+                seq,
+                self._build_recommendation_click_data(13, product_variant_ids),
                 self.past_date(7),
                 "desktop",
             )
@@ -1426,15 +1509,21 @@ class EventGenerator(BaseGenerator):
         timestamp: datetime,
         device_type: str = "desktop",
         customer_id: str = None,
+        extension_type: str = None,
+        interaction_type: str = None,
     ) -> Dict[str, Any]:
-        """Create a behavioral event payload."""
+        """Create a behavioral event payload with new interaction and extension types."""
         base = {
             "id": f"e_{self.generate_client_id()}",
             "name": event_name,
+            "eventType": event_name,  # Add eventType for mapping
             "timestamp": timestamp.isoformat(),
             "clientId": client_id,
             "seq": seq,
             "type": "standard",
+            "extensionType": extension_type or self._get_extension_type(event_name),
+            "interactionType": interaction_type
+            or self._get_interaction_type(event_name),
             "context": {
                 "document": {
                     "location": {
@@ -1461,6 +1550,170 @@ class EventGenerator(BaseGenerator):
             base.update({"data": {}})
 
         return base
+
+    def _get_extension_type(self, event_name: str) -> str:
+        """Map event names to extension types."""
+        extension_mapping = {
+            # Standard Shopify events (tracked by Atlas)
+            "page_viewed": "atlas",
+            "product_viewed": "atlas",
+            "product_added_to_cart": "atlas",
+            "product_removed_from_cart": "atlas",
+            "cart_viewed": "atlas",
+            "collection_viewed": "atlas",
+            "search_submitted": "atlas",
+            "checkout_started": "atlas",
+            "checkout_completed": "atlas",
+            "customer_linked": "atlas",
+            # Recommendation events (tracked by Phoenix)
+            "recommendation_viewed": "phoenix",
+            "recommendation_clicked": "phoenix",
+            "recommendation_add_to_cart": "phoenix",
+            # Post-purchase events (tracked by Apollo)
+            "upsell_viewed": "apollo",
+            "upsell_clicked": "apollo",
+            "upsell_add_to_cart": "apollo",
+            # Cross-sell events (tracked by Venus)
+            "cross_sell_viewed": "venus",
+            "cross_sell_clicked": "venus",
+            "cross_sell_add_to_cart": "venus",
+        }
+        return extension_mapping.get(event_name, "atlas")
+
+    def _get_interaction_type(self, event_name: str) -> str:
+        """Map event names to interaction types."""
+        interaction_mapping = {
+            # Standard Shopify events
+            "page_viewed": "page_viewed",
+            "product_viewed": "product_viewed",
+            "product_added_to_cart": "product_added_to_cart",
+            "product_removed_from_cart": "product_removed_from_cart",
+            "cart_viewed": "cart_viewed",
+            "collection_viewed": "collection_viewed",
+            "search_submitted": "search_submitted",
+            "checkout_started": "checkout_started",
+            "checkout_completed": "checkout_completed",
+            "customer_linked": "customer_linked",
+            # Recommendation events
+            "recommendation_viewed": "recommendation_viewed",
+            "recommendation_clicked": "recommendation_clicked",
+            "recommendation_add_to_cart": "recommendation_add_to_cart",
+            # Post-purchase events
+            "upsell_viewed": "recommendation_viewed",
+            "upsell_clicked": "recommendation_clicked",
+            "upsell_add_to_cart": "recommendation_add_to_cart",
+            # Cross-sell events
+            "cross_sell_viewed": "recommendation_viewed",
+            "cross_sell_clicked": "recommendation_clicked",
+            "cross_sell_add_to_cart": "recommendation_add_to_cart",
+        }
+        return interaction_mapping.get(event_name, "page_viewed")
+
+    def _build_recommendation_data(
+        self,
+        extension_type: str,
+        context: str,
+        recommended_indices: List[int],
+        product_variant_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Build recommendation event data."""
+        recommended_products = []
+        for idx in recommended_indices:
+            if idx < len(product_variant_ids):
+                recommended_products.append(
+                    {
+                        "productId": product_variant_ids[idx],
+                        "variantId": product_variant_ids[idx],
+                        "title": f"Recommended Product {idx + 1}",
+                        "price": f"${(idx + 1) * 25}.00",
+                        "image": f"https://example.com/product{idx + 1}.jpg",
+                    }
+                )
+
+        return {
+            "extensionType": extension_type,
+            "context": context,
+            "recommendedProducts": recommended_products,
+            "recommendationEngine": "phoenix",
+            "algorithm": "collaborative_filtering",
+            "confidence": 0.85,
+        }
+
+    def _build_recommendation_click_data(
+        self, product_index: int, product_variant_ids: List[str]
+    ) -> Dict[str, Any]:
+        """Build recommendation click event data."""
+        return {
+            "clickedProduct": {
+                "productId": product_variant_ids[product_index],
+                "variantId": product_variant_ids[product_index],
+                "title": f"Recommended Product {product_index + 1}",
+                "price": f"${(product_index + 1) * 25}.00",
+            },
+            "recommendationContext": "product_page",
+            "position": product_index + 1,
+            "clickThroughRate": 0.12,
+        }
+
+    def _build_upsell_data(
+        self,
+        extension_type: str,
+        context: str,
+        upsell_indices: List[int],
+        product_variant_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Build upsell event data for Apollo."""
+        upsell_products = []
+        for idx in upsell_indices:
+            if idx < len(product_variant_ids):
+                upsell_products.append(
+                    {
+                        "productId": product_variant_ids[idx],
+                        "variantId": product_variant_ids[idx],
+                        "title": f"Upsell Product {idx + 1}",
+                        "price": f"${(idx + 1) * 50}.00",
+                        "discount": "20% off",
+                    }
+                )
+
+        return {
+            "extensionType": extension_type,
+            "context": context,
+            "upsellProducts": upsell_products,
+            "recommendationEngine": "apollo",
+            "algorithm": "post_purchase_upsell",
+            "confidence": 0.75,
+        }
+
+    def _build_cross_sell_data(
+        self,
+        extension_type: str,
+        context: str,
+        cross_sell_indices: List[int],
+        product_variant_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Build cross-sell event data for Venus."""
+        cross_sell_products = []
+        for idx in cross_sell_indices:
+            if idx < len(product_variant_ids):
+                cross_sell_products.append(
+                    {
+                        "productId": product_variant_ids[idx],
+                        "variantId": product_variant_ids[idx],
+                        "title": f"Cross-sell Product {idx + 1}",
+                        "price": f"${(idx + 1) * 30}.00",
+                        "category": "accessories",
+                    }
+                )
+
+        return {
+            "extensionType": extension_type,
+            "context": context,
+            "crossSellProducts": cross_sell_products,
+            "recommendationEngine": "venus",
+            "algorithm": "frequently_bought_together",
+            "confidence": 0.68,
+        }
 
     def _build_product_view_data(
         self, product_index: int, product_variant_ids: List[str]
