@@ -4,7 +4,7 @@ Simplified data storage service for Shopify data with essential batching and par
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from app.core.logging import get_logger
 from app.core.database.session import get_session_context, get_transaction_context
@@ -164,8 +164,25 @@ class ShopifyDataStorageService:
 
             if not existing:
                 new_items.append(item_data)
-            elif item_data["shopify_updated_at"] > existing.shopify_updated_at:
-                updated_items.append(item_data)
+            else:
+                # Ensure both datetimes are timezone-aware for comparison
+                item_updated_at = item_data["shopify_updated_at"]
+                existing_updated_at = existing.shopify_updated_at
+
+                # Make both timezone-aware (assume UTC if naive)
+                if item_updated_at and item_updated_at.tzinfo is None:
+                    item_updated_at = item_updated_at.replace(tzinfo=timezone.utc)
+                if existing_updated_at and existing_updated_at.tzinfo is None:
+                    existing_updated_at = existing_updated_at.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                if (
+                    item_updated_at
+                    and existing_updated_at
+                    and item_updated_at > existing_updated_at
+                ):
+                    updated_items.append(item_data)
 
         # Batch operations using SQLAlchemy models
         model_class = self._get_model_class(data_type)

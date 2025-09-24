@@ -5,9 +5,6 @@ Aligned with InteractionFeatures table schema
 
 import datetime
 from typing import Dict, Any, List, Optional
-import statistics
-from datetime import timedelta
-
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
@@ -93,29 +90,29 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             refund_metrics = self._compute_refund_metrics(product_purchases, orders)
 
             features = {
-                "shopId": shop_id,
-                "customerId": customer_id,
-                "productId": product_id,
-                "viewCount": view_count,
-                "cartAddCount": cart_add_count,
-                "cartViewCount": cart_view_count,
-                "cartRemoveCount": cart_remove_count,
-                "purchaseCount": purchase_count,
-                "firstViewDate": temporal_features.get("first_view_date"),
-                "lastViewDate": temporal_features.get("last_view_date"),
-                "firstPurchaseDate": temporal_features.get("first_purchase_date"),
-                "lastPurchaseDate": temporal_features.get("last_purchase_date"),
-                "viewToPurchaseDays": temporal_features.get("view_to_purchase_days"),
-                "interactionSpanDays": temporal_features.get("interaction_span_days"),
-                "interactionScore": interaction_score,
-                "affinityScore": affinity_score,
+                "shop_id": shop_id,
+                "customer_id": customer_id,
+                "product_id": product_id,
+                "view_count": view_count,
+                "cart_add_count": cart_add_count,
+                "cart_view_count": cart_view_count,
+                "cart_remove_count": cart_remove_count,
+                "purchase_count": purchase_count,
+                "first_view_date": temporal_features.get("first_view_date"),
+                "last_view_date": temporal_features.get("last_view_date"),
+                "first_purchase_date": temporal_features.get("first_purchase_date"),
+                "last_purchase_date": temporal_features.get("last_purchase_date"),
+                "view_to_purchase_days": temporal_features.get("view_to_purchase_days"),
+                "interaction_span_days": temporal_features.get("interaction_span_days"),
+                "interaction_score": interaction_score,
+                "affinity_score": affinity_score,
                 # Refund metrics (NEW)
-                "refundedPurchases": refund_metrics["refunded_purchases"],
-                "refundRate": refund_metrics["refund_rate"],
-                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
-                "netPurchaseValue": refund_metrics["net_purchase_value"],
-                "refundRiskScore": refund_metrics["refund_risk_score"],
-                "lastComputedAt": now_utc(),
+                "refunded_purchases": refund_metrics["refunded_purchases"],
+                "refund_rate": refund_metrics["refund_rate"],
+                "total_refunded_amount": refund_metrics["total_refunded_amount"],
+                "net_purchase_value": refund_metrics["net_purchase_value"],
+                "refund_risk_score": refund_metrics["refund_risk_score"],
+                "last_computed_at": now_utc(),
             }
 
             logger.debug(
@@ -402,27 +399,27 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Return default features when computation fails"""
         return {
-            "shopId": shop_id,
-            "customerId": customer_id,
-            "productId": product_id,
-            "viewCount": 0,
-            "cartAddCount": 0,
-            "purchaseCount": 0,
-            "firstViewDate": None,
-            "lastViewDate": None,
-            "firstPurchaseDate": None,
-            "lastPurchaseDate": None,
-            "viewToPurchaseDays": None,
-            "interactionSpanDays": None,
-            "interactionScore": 0.0,
-            "affinityScore": 0.0,
+            "shop_id": shop_id,
+            "customer_id": customer_id,
+            "product_id": product_id,
+            "view_count": 0,
+            "cart_add_count": 0,
+            "purchase_count": 0,
+            "first_view_date": None,
+            "last_view_date": None,
+            "first_purchase_date": None,
+            "last_purchase_date": None,
+            "view_to_purchase_days": None,
+            "interaction_span_days": None,
+            "interaction_score": 0.0,
+            "affinity_score": 0.0,
             # Refund metrics (NEW)
-            "refundedPurchases": 0,
-            "refundRate": 0.0,
-            "totalRefundedAmount": 0.0,
-            "netPurchaseValue": 0.0,
-            "refundRiskScore": 0.0,
-            "lastComputedAt": now_utc(),
+            "refunded_purchases": 0,
+            "refund_rate": 0.0,
+            "total_refunded_amount": 0.0,
+            "net_purchase_value": 0.0,
+            "refund_risk_score": 0.0,
+            "last_computed_at": now_utc(),
         }
 
     def _compute_refund_metrics(

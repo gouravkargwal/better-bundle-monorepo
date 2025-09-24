@@ -54,7 +54,7 @@ class KafkaConsumerManager:
             self.consumers = {
                 # "shopify_events": ShopifyEventsKafkaConsumer(),
                 "normalization": NormalizationKafkaConsumer(),
-                # "feature_computation": FeatureComputationKafkaConsumer(),
+                "feature_computation": FeatureComputationKafkaConsumer(),
                 # Pass shopify service dependency to data collection consumer
                 "data_collection": DataCollectionKafkaConsumer(
                     shopify_service=self.shopify_service

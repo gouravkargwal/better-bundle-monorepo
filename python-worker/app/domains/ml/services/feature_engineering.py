@@ -8,7 +8,8 @@ import asyncio
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context
+from sqlalchemy import select
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
 
@@ -527,21 +528,50 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             repository = FeatureRepository()
 
-            # Load shop data
+            # Load shop data using SQLAlchemy
             logger.info(f"🔍 Loading shop data for {shop_id}")
-            shop_data = await repository.get_shop_data(shop_id)
-            if not shop_data:
+            from app.core.database.models import Shop
+
+            async with get_session_context() as session:
+                result = await session.execute(select(Shop).where(Shop.id == shop_id))
+                shop_record = result.scalar_one_or_none()
+
+            if not shop_record:
                 logger.error(f"❌ Shop {shop_id} not found")
                 return {
                     "success": False,
                     "error": f"Shop {shop_id} not found",
                     "timestamp": now_utc().isoformat(),
                 }
+
+            # Convert SQLAlchemy model to dictionary
+            shop_data = {
+                "id": shop_record.id,
+                "shop_domain": shop_record.shop_domain,
+                "custom_domain": shop_record.custom_domain,
+                "access_token": shop_record.access_token,
+                "plan_type": shop_record.plan_type,
+                "currency_code": shop_record.currency_code,
+                "money_format": shop_record.money_format,
+                "is_active": shop_record.is_active,
+                "onboarding_completed": shop_record.onboarding_completed,
+                "email": shop_record.email,
+                "last_analysis_at": shop_record.last_analysis_at,
+                "created_at": shop_record.created_at,
+                "updated_at": shop_record.updated_at,
+            }
             logger.info(f"✅ Shop data loaded successfully")
 
             # Build per-entity incremental windows from PipelineWatermark
-            db = await get_database()
-            pw_rows = await db.pipelinewatermark.find_many(where={"shopId": shop_id})
+            from app.core.database.models import PipelineWatermark
+
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(PipelineWatermark).where(
+                        PipelineWatermark.shop_id == shop_id
+                    )
+                )
+                pw_rows = result.scalars().all()
 
             def _get_pw(data_type: str):
                 for r in pw_rows:
@@ -552,14 +582,14 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Resolve since timestamps per entity type (lastFeaturesComputedAt)
             # If None, we'll treat as full for that type
             products_since = getattr(
-                _get_pw("products"), "lastFeaturesComputedAt", None
+                _get_pw("products"), "last_features_computed_at", None
             )
             customers_since = getattr(
-                _get_pw("customers"), "lastFeaturesComputedAt", None
+                _get_pw("customers"), "last_features_computed_at", None
             )
-            orders_since = getattr(_get_pw("orders"), "lastFeaturesComputedAt", None)
+            orders_since = getattr(_get_pw("orders"), "last_features_computed_at", None)
             collections_since = getattr(
-                _get_pw("collections"), "lastFeaturesComputedAt", None
+                _get_pw("collections"), "last_features_computed_at", None
             )
 
             # Handle incremental vs full data loading with chunked processing
@@ -803,34 +833,34 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     from datetime import datetime, timezone
 
                     window_end = datetime.now(timezone.utc)
-                    # Update each present type
-                    for dtype, key in [
-                        ("products", "products"),
-                        ("customers", "users"),
-                        ("orders", "orders"),
-                        ("collections", "collections"),
-                    ]:
-                        if (
-                            key in save_results
-                            and isinstance(save_results[key], dict)
-                            and save_results[key].get("saved_count", 0) > 0
-                        ):
-                            await db.pipelinewatermark.upsert(
-                                where={
-                                    "shopId_data_type": {
-                                        "shopId": shop_id,
-                                        "data_type": dtype,
-                                    }
-                                },
-                                data={
-                                    "update": {"lastFeaturesComputedAt": window_end},
-                                    "create": {
-                                        "shopId": shop_id,
-                                        "data_type": dtype,
-                                        "lastFeaturesComputedAt": window_end,
-                                    },
-                                },
-                            )
+
+                    # Update each present type using SQLAlchemy session
+                    async with get_session_context() as session:
+                        from sqlalchemy.dialects.postgresql import insert
+
+                        for dtype, key in [
+                            ("products", "products"),
+                            ("customers", "users"),
+                            ("orders", "orders"),
+                            ("collections", "collections"),
+                        ]:
+                            if (
+                                key in save_results
+                                and isinstance(save_results[key], dict)
+                                and save_results[key].get("saved_count", 0) > 0
+                            ):
+                                # Use SQLAlchemy upsert for PipelineWatermark
+                                upsert_stmt = insert(PipelineWatermark).values(
+                                    shop_id=shop_id,
+                                    data_type=dtype,
+                                    last_features_computed_at=window_end,
+                                )
+                                upsert_stmt = upsert_stmt.on_conflict_do_update(
+                                    index_elements=["shop_id", "data_type"],
+                                    set_=dict(last_features_computed_at=window_end),
+                                )
+                                await session.execute(upsert_stmt)
+                        await session.commit()
                     logger.info(
                         "💾 Feature watermarks updated",
                         extra={
@@ -846,7 +876,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             import asyncio
 
             await asyncio.sleep(0.1)  # 100ms delay to ensure DB commit
-            await self._trigger_gorse_sync(shop_id, save_results)
+            # await self._trigger_gorse_sync(shop_id, save_results)
 
             # Check if all feature types succeeded for logging purposes
             all_features_succeeded = True
@@ -1415,24 +1445,24 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                 # The shop_id, search_query, product_id are already in feature_data
                                 batch_data.append(feature_data)
                     else:
-                        # Simple entity types - use consistent dictionary-based approach
+                        # Simple entity types - use consistent dictionary-based approach with snake_case
                         prepared_data = feature_data.copy()
-                        prepared_data["shopId"] = shop_id
+                        prepared_data["shop_id"] = shop_id
 
                         # Add entity ID based on feature type
                         if feature_type == "collection":
-                            prepared_data["collectionId"] = entity_id
+                            prepared_data["collection_id"] = entity_id
                         elif feature_type == "customer_behavior":
-                            prepared_data["customerId"] = entity_id
+                            prepared_data["customer_id"] = entity_id
                         elif feature_type == "product":
-                            prepared_data["productId"] = entity_id
+                            prepared_data["product_id"] = entity_id
                         elif feature_type == "user":
-                            prepared_data["customerId"] = entity_id
+                            prepared_data["customer_id"] = entity_id
                         elif feature_type == "session":
-                            prepared_data["sessionId"] = entity_id
+                            prepared_data["session_id"] = entity_id
                         else:
                             # Generic fallback
-                            prepared_data["entityId"] = entity_id
+                            prepared_data["entity_id"] = entity_id
 
                         batch_data.append(prepared_data)
 

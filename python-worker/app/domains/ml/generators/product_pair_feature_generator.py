@@ -4,8 +4,7 @@ Aligned with the ProductPairFeatures table schema
 """
 
 import datetime
-import json
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from collections import defaultdict
 
 from app.core.logging import get_logger
@@ -95,16 +94,16 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
             )
 
             features = {
-                "shopId": shop_id,
-                "productId1": product_id1,
-                "productId2": product_id2,
-                "coPurchaseCount": co_purchase_count,
-                "coViewCount": co_view_count,
-                "coCartCount": co_cart_count,
-                "supportScore": support_score,
-                "liftScore": lift_score,
-                "lastCoOccurrence": last_co_occurrence,
-                "lastComputedAt": now_utc(),
+                "shop_id": shop_id,
+                "product_id1": product_id1,
+                "product_id2": product_id2,
+                "co_purchase_count": co_purchase_count,
+                "co_view_count": co_view_count,
+                "co_cart_count": co_cart_count,
+                "support_score": support_score,
+                "lift_score": lift_score,
+                "last_co_occurrence": last_co_occurrence,
+                "last_computed_at": now_utc(),
             }
 
             logger.debug(
@@ -134,7 +133,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         target_ids = {product_id1, product_id2}
 
         for order in orders:
-            line_items = order.get("lineItems", [])
+            line_items = order.get("line_items", [])
             product_ids_in_order = {
                 self._extract_product_id_from_line_item(item, variant_to_product_map)
                 for item in line_items
@@ -142,7 +141,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
 
             if target_ids.issubset(product_ids_in_order):
                 count += 1
-                order_date = self._parse_date(order.get("orderDate"))
+                order_date = self._parse_date(order.get("order_date"))
                 if order_date and (last_date is None or order_date > last_date):
                     last_date = order_date
 
@@ -164,11 +163,11 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
 
         for event in behavioral_events:
             # Extract session ID from event record
-            session_id = event.get("clientId")  # clientId is now stored directly
+            session_id = event.get("client_id")  # client_id is now stored directly
             if not session_id:
                 continue
 
-            event_type = event.get("eventType")
+            event_type = event.get("event_type")
             product_id = self._extract_product_id_from_event(event)
 
             if not product_id:
@@ -232,7 +231,7 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
         for order in orders:
             product_ids_in_order = {
                 self._extract_product_id_from_line_item(item, variant_to_product_map)
-                for item in order.get("lineItems", [])
+                for item in order.get("line_items", [])
             }
             if product_id1 in product_ids_in_order:
                 p1_purchases += 1
@@ -272,8 +271,8 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
     ) -> str:
         """Extract product ID from order line item using variant-to-product mapping"""
         # Direct product ID
-        if "productId" in line_item:
-            return str(line_item["productId"])
+        if "product_id" in line_item:
+            return str(line_item["product_id"])
 
         # From variant structure
         if "variant" in line_item and isinstance(line_item["variant"], dict):
@@ -307,14 +306,14 @@ class ProductPairFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Returns a default feature set when computation fails."""
         return {
-            "shopId": shop_id,
-            "productId1": product_id1,
-            "productId2": product_id2,
-            "coPurchaseCount": 0,
-            "coViewCount": 0,
-            "coCartCount": 0,
-            "supportScore": 0.0,
-            "liftScore": 0.0,
-            "lastCoOccurrence": None,
-            "lastComputedAt": now_utc(),
+            "shop_id": shop_id,
+            "product_id1": product_id1,
+            "product_id2": product_id2,
+            "co_purchase_count": 0,
+            "co_view_count": 0,
+            "co_cart_count": 0,
+            "support_score": 0.0,
+            "lift_score": 0.0,
+            "last_co_occurrence": None,
+            "last_computed_at": now_utc(),
         }

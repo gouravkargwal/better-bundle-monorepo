@@ -105,84 +105,94 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             availability_features = self._compute_availability_features(product_data)
 
             features = {
-                "shopId": shop_id,
-                "productId": product_id,
+                "shop_id": shop_id,
+                "product_id": product_id,
                 # 30-day metrics
-                "viewCount30d": metrics_30d["view_count"],
-                "uniqueViewers30d": metrics_30d["unique_viewers"],
-                "cartAddCount30d": metrics_30d["cart_add_count"],
-                "cartViewCount30d": metrics_30d["cart_view_count"],
-                "cartRemoveCount30d": metrics_30d["cart_remove_count"],
-                "purchaseCount30d": metrics_30d["purchase_count"],
-                "uniquePurchasers30d": metrics_30d["unique_purchasers"],
+                "view_count_30d": metrics_30d["view_count"],
+                "unique_viewers_30d": metrics_30d["unique_viewers"],
+                "cart_add_count_30d": metrics_30d["cart_add_count"],
+                "cart_view_count_30d": metrics_30d["cart_view_count"],
+                "cart_remove_count_30d": metrics_30d["cart_remove_count"],
+                "purchase_count_30d": metrics_30d["purchase_count"],
+                "unique_purchasers_30d": metrics_30d["unique_purchasers"],
                 # Conversion metrics
-                "viewToCartRate": conversion_metrics["view_to_cart_rate"],
-                "cartToPurchaseRate": conversion_metrics["cart_to_purchase_rate"],
-                "overallConversionRate": conversion_metrics["overall_conversion_rate"],
-                "cartAbandonmentRate": conversion_metrics["cart_abandonment_rate"],
-                "cartModificationRate": conversion_metrics["cart_modification_rate"],
-                "cartViewToPurchaseRate": conversion_metrics[
+                "view_to_cart_rate": conversion_metrics["view_to_cart_rate"],
+                "cart_to_purchase_rate": conversion_metrics["cart_to_purchase_rate"],
+                "overall_conversion_rate": conversion_metrics[
+                    "overall_conversion_rate"
+                ],
+                "cart_abandonment_rate": conversion_metrics["cart_abandonment_rate"],
+                "cart_modification_rate": conversion_metrics["cart_modification_rate"],
+                "cart_view_to_purchase_rate": conversion_metrics[
                     "cart_view_to_purchase_rate"
                 ],
                 # Temporal metrics
-                "lastViewedAt": temporal_metrics["last_viewed_at"],
-                "lastPurchasedAt": temporal_metrics["last_purchased_at"],
-                "firstPurchasedAt": temporal_metrics["first_purchased_at"],
-                "daysSinceFirstPurchase": temporal_metrics["days_since_first_purchase"],
-                "daysSinceLastPurchase": temporal_metrics["days_since_last_purchase"],
+                "last_viewed_at": temporal_metrics["last_viewed_at"],
+                "last_purchased_at": temporal_metrics["last_purchased_at"],
+                "first_purchased_at": temporal_metrics["first_purchased_at"],
+                "days_since_first_purchase": temporal_metrics[
+                    "days_since_first_purchase"
+                ],
+                "days_since_last_purchase": temporal_metrics[
+                    "days_since_last_purchase"
+                ],
                 # Price & Inventory
-                "avgSellingPrice": price_inventory_metrics["avg_selling_price"],
-                "priceVariance": price_inventory_metrics["price_variance"],
-                "totalInventory": price_inventory_metrics["total_inventory"],
-                "inventoryTurnover": price_inventory_metrics["inventory_turnover"],
-                "stockVelocity": price_inventory_metrics["stock_velocity"],
-                "priceTier": price_inventory_metrics["price_tier"],
+                "avg_selling_price": price_inventory_metrics["avg_selling_price"],
+                "price_variance": price_inventory_metrics["price_variance"],
+                "total_inventory": price_inventory_metrics["total_inventory"],
+                "inventory_turnover": price_inventory_metrics["inventory_turnover"],
+                "stock_velocity": price_inventory_metrics["stock_velocity"],
+                "price_tier": price_inventory_metrics["price_tier"],
                 # Enhanced metadata scores
-                "variantComplexity": metadata_scores["variant_complexity"],
-                "imageRichness": metadata_scores["image_richness"],
-                "tagDiversity": metadata_scores["tag_diversity"],
-                "metafieldUtilization": metadata_scores["metafield_utilization"],
+                "variant_complexity": metadata_scores["variant_complexity"],
+                "image_richness": metadata_scores["image_richness"],
+                "tag_diversity": metadata_scores["tag_diversity"],
+                "metafield_utilization": metadata_scores["metafield_utilization"],
                 # New enhanced features
-                "mediaRichness": enhanced_metadata_scores["media_richness"],
-                "seoOptimization": seo_features["seo_optimization"],
-                "seoTitleLength": seo_features["seo_title_length"],
-                "seoDescriptionLength": seo_features["seo_description_length"],
-                "hasVideoContent": media_features["has_video_content"],
-                "has3DContent": media_features["has_3d_content"],
-                "mediaCount": media_features["media_count"],
-                "hasOnlineStoreUrl": store_integration_features["has_online_store_url"],
-                "hasPreviewUrl": store_integration_features["has_preview_url"],
-                "hasCustomTemplate": store_integration_features["has_custom_template"],
+                "media_richness": enhanced_metadata_scores["media_richness"],
+                "seo_optimization": seo_features["seo_optimization"],
+                "seo_title_length": seo_features["seo_title_length"],
+                "seo_description_length": seo_features["seo_description_length"],
+                "has_video_content": media_features["has_video_content"],
+                "has_3d_content": media_features["has_3d_content"],
+                "media_count": media_features["media_count"],
+                "has_online_store_url": store_integration_features[
+                    "has_online_store_url"
+                ],
+                "has_preview_url": store_integration_features["has_preview_url"],
+                "has_custom_template": store_integration_features[
+                    "has_custom_template"
+                ],
                 # Computed scores
-                "popularityScore": popularity_trending["popularity_score"],
-                "trendingScore": popularity_trending["trending_score"],
+                "popularity_score": popularity_trending["popularity_score"],
+                "trending_score": popularity_trending["trending_score"],
                 # Refund metrics (NEW)
-                "refundedOrders": refund_metrics["refunded_orders"],
-                "refundRate": refund_metrics["refund_rate"],
-                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
-                "netRevenue": refund_metrics["net_revenue"],
-                "refundRiskScore": refund_metrics["refund_risk_score"],
+                "refunded_orders": refund_metrics["refunded_orders"],
+                "refund_rate": refund_metrics["refund_rate"],
+                "total_refunded_amount": refund_metrics["total_refunded_amount"],
+                "net_revenue": refund_metrics["net_revenue"],
+                "refund_risk_score": refund_metrics["refund_risk_score"],
                 # NEW: Enhanced features using previously unused fields
-                "contentRichnessScore": content_quality_features[
+                "content_richness_score": content_quality_features[
                     "content_richness_score"
                 ],
-                "descriptionLength": content_quality_features["description_length"],
-                "descriptionHtmlLength": content_quality_features[
+                "description_length": content_quality_features["description_length"],
+                "description_html_length": content_quality_features[
                     "description_html_length"
                 ],
-                "productAge": product_lifecycle_features["product_age"],
-                "lastUpdatedDays": product_lifecycle_features["last_updated_days"],
-                "updateFrequency": product_lifecycle_features["update_frequency"],
-                "productType": category_features["product_type"],
-                "categoryComplexity": category_features["category_complexity"],
-                "availabilityScore": availability_features["availability_score"],
-                "statusStability": availability_features["status_stability"],
-                "lastComputedAt": now_utc(),
+                "product_age": product_lifecycle_features["product_age"],
+                "last_updated_days": product_lifecycle_features["last_updated_days"],
+                "update_frequency": product_lifecycle_features["update_frequency"],
+                "product_type": category_features["product_type"],
+                "category_complexity": category_features["category_complexity"],
+                "availability_score": availability_features["availability_score"],
+                "status_stability": availability_features["status_stability"],
+                "last_computed_at": now_utc(),
             }
 
             logger.debug(
                 f"Computed product features for product: {product_id} - "
-                f"Views: {features['viewCount30d']}, Purchases: {features['purchaseCount30d']}"
+                f"Views: {features['view_count_30d']}, Purchases: {features['purchase_count_30d']}"
             )
 
             return features
@@ -579,7 +589,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract session ID from event"""
         event_data = event.get("eventData", {})
-        return event_data.get("clientId")
+        return event_data.get("client_id")
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
         """Parse date from various formats"""
@@ -602,61 +612,61 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _get_default_features(self, shop_id: str, product_id: str) -> Dict[str, Any]:
         """Return default features when computation fails"""
         return {
-            "shopId": shop_id,
-            "productId": product_id,
-            "viewCount30d": 0,
-            "uniqueViewers30d": 0,
-            "cartAddCount30d": 0,
-            "purchaseCount30d": 0,
-            "uniquePurchasers30d": 0,
-            "viewToCartRate": None,
-            "cartToPurchaseRate": None,
-            "overallConversionRate": None,
-            "lastViewedAt": None,
-            "lastPurchasedAt": None,
-            "firstPurchasedAt": None,
-            "daysSinceFirstPurchase": None,
-            "daysSinceLastPurchase": None,
-            "avgSellingPrice": None,
-            "priceVariance": None,
-            "totalInventory": None,
-            "inventoryTurnover": None,
-            "stockVelocity": None,
-            "priceTier": None,
-            "variantComplexity": None,
-            "imageRichness": None,
-            "tagDiversity": None,
-            "metafieldUtilization": None,
-            "mediaRichness": 0,
-            "seoOptimization": 0,
-            "seoTitleLength": 0,
-            "seoDescriptionLength": 0,
-            "hasVideoContent": False,
-            "has3DContent": False,
-            "mediaCount": 0,
-            "hasOnlineStoreUrl": False,
-            "hasPreviewUrl": False,
-            "hasCustomTemplate": False,
-            "popularityScore": 0.0,
-            "trendingScore": 0.0,
+            "shop_id": shop_id,
+            "product_id": product_id,
+            "view_count_30d": 0,
+            "unique_viewers_30d": 0,
+            "cart_add_count_30d": 0,
+            "purchase_count_30d": 0,
+            "unique_purchasers_30d": 0,
+            "view_to_cart_rate": None,
+            "cart_to_purchase_rate": None,
+            "overall_conversion_rate": None,
+            "last_viewed_at": None,
+            "last_purchased_at": None,
+            "first_purchased_at": None,
+            "days_since_first_purchase": None,
+            "days_since_last_purchase": None,
+            "avg_selling_price": None,
+            "price_variance": None,
+            "total_inventory": None,
+            "inventory_turnover": None,
+            "stock_velocity": None,
+            "price_tier": None,
+            "variant_complexity": None,
+            "image_richness": None,
+            "tag_diversity": None,
+            "metafield_utilization": None,
+            "media_richness": 0,
+            "seo_optimization": 0,
+            "seo_title_length": 0,
+            "seo_description_length": 0,
+            "has_video_content": False,
+            "has_3d_content": False,
+            "media_count": 0,
+            "has_online_store_url": False,
+            "has_preview_url": False,
+            "has_custom_template": False,
+            "popularity_score": 0.0,
+            "trending_score": 0.0,
             # Refund metrics (NEW)
-            "refundedOrders": 0,
-            "refundRate": 0.0,
-            "totalRefundedAmount": 0.0,
-            "netRevenue": 0.0,
-            "refundRiskScore": 0.0,
+            "refunded_orders": 0,
+            "refund_rate": 0.0,
+            "total_refunded_amount": 0.0,
+            "net_revenue": 0.0,
+            "refund_risk_score": 0.0,
             # NEW: Enhanced features using previously unused fields
-            "contentRichnessScore": 0,
-            "descriptionLength": 0,
-            "descriptionHtmlLength": 0,
-            "productAge": 0,
-            "lastUpdatedDays": 0,
-            "updateFrequency": 0.0,
-            "productType": "",
-            "categoryComplexity": 0,
-            "availabilityScore": 0,
-            "statusStability": 0,
-            "lastComputedAt": now_utc(),
+            "content_richness_score": 0,
+            "description_length": 0,
+            "description_html_length": 0,
+            "product_age": 0,
+            "last_updated_days": 0,
+            "update_frequency": 0.0,
+            "product_type": "",
+            "category_complexity": 0,
+            "availability_score": 0,
+            "status_stability": 0,
+            "last_computed_at": now_utc(),
         }
 
     def _compute_enhanced_metadata_scores(
@@ -701,8 +711,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _compute_seo_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute SEO-related features"""
         try:
-            seo_title = product_data.get("seoTitle", "")
-            seo_description = product_data.get("seoDescription", "")
+            seo_title = product_data.get("seo_title", "")
+            seo_description = product_data.get("seo_description", "")
 
             # SEO optimization score (0-100)
             seo_optimization = 0
@@ -769,9 +779,9 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         """Compute store integration features"""
         try:
             return {
-                "has_online_store_url": bool(product_data.get("onlineStoreUrl")),
-                "has_preview_url": bool(product_data.get("onlineStorePreviewUrl")),
-                "has_custom_template": bool(product_data.get("templateSuffix")),
+                "has_online_store_url": bool(product_data.get("online_store_url")),
+                "has_preview_url": bool(product_data.get("online_store_preview_url")),
+                "has_custom_template": bool(product_data.get("template_suffix")),
             }
         except Exception as e:
             logger.error(f"Error computing store integration features: {str(e)}")
@@ -805,7 +815,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             refunded_orders = 0
 
             for order in orders:
-                line_items = order.get("lineItems", [])
+                line_items = order.get("line_items", [])
                 order_contains_product = False
                 order_revenue = 0.0
 
@@ -832,7 +842,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                     total_revenue += order_revenue
 
                     # Check if this order was refunded
-                    financial_status = order.get("financialStatus")
+                    financial_status = order.get("financial_status")
                     if financial_status == "refunded":
                         refunded_orders += 1
                         # Use totalRefundedAmount if available, otherwise use order_revenue
@@ -885,7 +895,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         try:
             # Description analysis (currently unused)
             description = product_data.get("description", "")
-            description_html = product_data.get("descriptionHtml", "")
+            description_html = product_data.get("description_html", "")
 
             description_length = len(description) if description else 0
             description_html_length = len(description_html) if description_html else 0

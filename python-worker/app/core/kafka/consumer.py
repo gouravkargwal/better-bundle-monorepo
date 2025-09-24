@@ -159,7 +159,6 @@ class KafkaConsumer:
         if self._consumer:
             try:
                 await self._consumer.stop()
-                await self._consumer.close()  # Ensure proper cleanup
                 self._consumer = None
                 logger.info(
                     f"Consumer closed. Processed {self._message_count} messages, {self._error_count} errors, {self._committed_count} commits"

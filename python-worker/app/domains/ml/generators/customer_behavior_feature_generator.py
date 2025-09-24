@@ -8,8 +8,6 @@ import json
 import math
 import statistics
 from collections import Counter
-from prisma import Json
-
 from app.core.logging import get_logger
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from .base_feature_generator import BaseFeatureGenerator
@@ -126,7 +124,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             # Add lastComputedAt timestamp
             from app.shared.helpers import now_utc
 
-            features["lastComputedAt"] = now_utc()
+            features["last_computed_at"] = now_utc()
 
             logger.debug(
                 f"Computed {len(features)} behavior features for customer: {customer_id}"
@@ -148,7 +146,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         if not sessions:
             # Fallback: estimate sessions from interactions
             session_ids = set(
-                i.get("sessionId") for i in interactions if i.get("sessionId")
+                i.get("session_id") for i in interactions if i.get("session_id")
             )
             session_count = len(session_ids)
 
@@ -158,7 +156,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             )
 
             return {
-                "sessionCount": session_count,
+                "session_count": session_count,
                 "avgSessionDuration": None,  # Can't calculate without session data
                 "avgEventsPerSession": avg_events_per_session,
             }
@@ -182,9 +180,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         )
 
         return {
-            "sessionCount": session_count,
-            "avgSessionDuration": avg_duration,
-            "avgEventsPerSession": avg_events_per_session,
+            "session_count": session_count,
+            "avg_session_duration": avg_duration,
+            "avg_events_per_session": avg_events_per_session,
         }
 
     def _compute_interaction_event_counts(
@@ -256,24 +254,24 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 counts["recommendation_click"] += 1
 
         return {
-            "totalEventCount": total_event_count,
-            "productViewCount": counts["product_view"],
-            "collectionViewCount": counts["collection_view"],
-            "cartAddCount": counts["cart_add"],
-            "cartViewCount": counts["cart_view"],
-            "cartRemoveCount": counts["cart_remove"],
-            "searchCount": counts["search"],
-            "checkoutStartCount": counts["checkout_start"],
-            "purchaseCount": counts["purchase"],
+            "total_event_count": total_event_count,
+            "product_view_count": counts["product_view"],
+            "collection_view_count": counts["collection_view"],
+            "cart_add_count": counts["cart_add"],
+            "cart_view_count": counts["cart_view"],
+            "cart_remove_count": counts["cart_remove"],
+            "search_count": counts["search"],
+            "checkout_start_count": counts["checkout_start"],
+            "purchase_count": counts["purchase"],
             # NEW: Extension-specific counts
-            "venusInteractionCount": extension_counts["venus"],
-            "phoenixInteractionCount": extension_counts["phoenix"],
-            "apolloInteractionCount": extension_counts["apollo"],
-            "atlasInteractionCount": extension_counts["atlas"],
+            "venus_interaction_count": extension_counts["venus"],
+            "phoenix_interaction_count": extension_counts["phoenix"],
+            "apollo_interaction_count": extension_counts["apollo"],
+            "atlas_interaction_count": extension_counts["atlas"],
             # NEW: Recommendation-specific counts
-            "recommendationClickRate": counts.get("recommendation_click", 0)
+            "recommendation_click_rate": counts.get("recommendation_click", 0)
             / max(counts.get("recommendation_view", 1), 1),
-            "upsellInteractionCount": counts.get("upsell_interaction", 0),
+            "upsell_interaction_count": counts.get("upsell_interaction", 0),
         }
 
     def _compute_interaction_temporal_patterns(
@@ -282,25 +280,25 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Compute temporal patterns from user interactions"""
         if not interactions:
             return {
-                "daysSinceFirstEvent": 0,
-                "daysSinceLastEvent": 0,
-                "mostActiveHour": None,
-                "mostActiveDay": None,
+                "days_since_first_event": 0,
+                "days_since_last_event": 0,
+                "most_active_hour": None,
+                "most_active_day": None,
             }
 
         # Sort interactions by timestamp
         valid_interactions = []
         for interaction in interactions:
-            created_at = self._parse_datetime(interaction.get("createdAt"))
+            created_at = self._parse_datetime(interaction.get("created_at"))
             if created_at:
                 valid_interactions.append((interaction, created_at))
 
         if not valid_interactions:
             return {
-                "daysSinceFirstEvent": 0,
-                "daysSinceLastEvent": 0,
-                "mostActiveHour": None,
-                "mostActiveDay": None,
+                "days_since_first_event": 0,
+                "days_since_last_event": 0,
+                "most_active_hour": None,
+                "most_active_day": None,
             }
 
         valid_interactions.sort(key=lambda x: x[1])
@@ -320,10 +318,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         most_active_day = max(set(days), key=days.count) if days else None
 
         return {
-            "daysSinceFirstEvent": days_since_first,
-            "daysSinceLastEvent": days_since_last,
-            "mostActiveHour": most_active_hour,
-            "mostActiveDay": most_active_day,
+            "days_since_first_event": days_since_first,
+            "days_since_last_event": days_since_last,
+            "most_active_hour": most_active_hour,
+            "most_active_day": most_active_day,
         }
 
     def _compute_interaction_behavior_patterns(
@@ -377,12 +375,12 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         primary_referrer = referrer_counts.most_common(1)[0][0] if referrers else None
 
         return {
-            "uniqueProductsViewed": len(unique_products),
-            "uniqueCollectionsViewed": len(unique_collections),
-            "searchTerms": Json(search_terms[:10]),  # Keep last 10 search terms
-            "topCategories": Json(top_categories),
-            "deviceType": primary_device,
-            "primaryReferrer": primary_referrer,
+            "unique_products_viewed": len(unique_products),
+            "unique_collections_viewed": len(unique_collections),
+            "search_terms": search_terms[:10],  # Keep last 10 search terms
+            "top_categories": top_categories,
+            "device_type": primary_device,
+            "primary_referrer": primary_referrer,
         }
 
     def _compute_computed_scores_from_interactions(
@@ -391,9 +389,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Compute engagement, recency, diversity, and behavioral scores from interactions"""
 
         # Engagement score (based on interaction variety and frequency)
-        total_interactions = features.get("totalEventCount", 0)
-        session_count = features.get("sessionCount", 1)
-        unique_products = features.get("uniqueProductsViewed", 0)
+        total_interactions = features.get("total_event_count", 0)
+        session_count = features.get("session_count", 1)
+        unique_products = features.get("unique_products_viewed", 0)
 
         # Normalize engagement (0-1 scale)
         engagement_raw = (
@@ -404,7 +402,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         engagement_score = max(0.0, min(1.0, engagement_raw))
 
         # Recency score (based on days since last interaction)
-        days_since_last = features.get("daysSinceLastEvent", float("inf"))
+        days_since_last = features.get("days_since_last_event", float("inf"))
         if days_since_last == float("inf"):
             recency_score = 0.0
         else:
@@ -425,10 +423,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         )
 
         return {
-            "engagementScore": round(engagement_score, 3),
-            "recencyScore": round(recency_score, 3),
-            "diversityScore": round(diversity_score, 3),
-            "behavioralScore": round(behavioral_score, 3),
+            "engagement_score": round(engagement_score, 3),
+            "recency_score": round(recency_score, 3),
+            "diversity_score": round(diversity_score, 3),
+            "behavioral_score": round(behavioral_score, 3),
         }
 
     def _get_empty_behavior_features(
@@ -436,43 +434,43 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Return empty behavior features when no events exist"""
         return {
-            "shopId": shop.get("id", ""),
-            "customerId": customer.get("customerId", ""),
-            "sessionCount": 0,
-            "avgSessionDuration": None,
-            "avgEventsPerSession": None,
-            "totalEventCount": 0,
-            "productViewCount": 0,
-            "collectionViewCount": 0,
-            "cartAddCount": 0,
-            "searchCount": 0,
-            "checkoutStartCount": 0,
-            "purchaseCount": 0,
-            "daysSinceFirstEvent": 0,
-            "daysSinceLastEvent": 0,
-            "mostActiveHour": None,
-            "mostActiveDay": None,
-            "uniqueProductsViewed": 0,
-            "uniqueCollectionsViewed": 0,
-            "searchTerms": Json([]),
-            "topCategories": Json([]),
-            "deviceType": None,
-            "primaryReferrer": None,
-            "browseToCartRate": None,
-            "cartToPurchaseRate": None,
-            "searchToPurchaseRate": None,
-            "engagementScore": 0.0,
-            "recencyScore": 0.0,
-            "diversityScore": 0.0,
-            "behavioralScore": 0.0,
+            "shop_id": shop.get("id", ""),
+            "customer_id": customer.get("customerId", ""),
+            "session_count": 0,
+            "avg_session_duration": None,
+            "avg_events_per_session": None,
+            "total_event_count": 0,
+            "product_view_count": 0,
+            "collection_view_count": 0,
+            "cart_add_count": 0,
+            "search_count": 0,
+            "checkout_start_count": 0,
+            "purchase_count": 0,
+            "days_since_first_event": 0,
+            "days_since_last_event": 0,
+            "most_active_hour": None,
+            "most_active_day": None,
+            "unique_products_viewed": 0,
+            "unique_collections_viewed": 0,
+            "search_terms": [],
+            "top_categories": [],
+            "device_type": None,
+            "primary_referrer": None,
+            "browse_to_cart_rate": None,
+            "cart_to_purchase_rate": None,
+            "search_to_purchase_rate": None,
+            "engagement_score": 0.0,
+            "recency_score": 0.0,
+            "diversity_score": 0.0,
+            "behavioral_score": 0.0,
             # NEW: Extension-specific interaction counts
-            "venusInteractionCount": 0,
-            "phoenixInteractionCount": 0,
-            "apolloInteractionCount": 0,
-            "atlasInteractionCount": 0,
+            "venus_interaction_count": 0,
+            "phoenix_interaction_count": 0,
+            "apollo_interaction_count": 0,
+            "atlas_interaction_count": 0,
             # NEW: Recommendation-specific counts
-            "recommendationClickRate": 0.0,
-            "upsellInteractionCount": 0,
+            "recommendation_click_rate": 0.0,
+            "upsell_interaction_count": 0,
         }
 
     def _compute_basic_features(
@@ -480,17 +478,17 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic identification features"""
         return {
-            "shopId": shop.get("id", ""),
-            "customerId": customer.get("customerId", ""),
+            "shop_id": shop.get("id", ""),
+            "customer_id": customer.get("customerId", ""),
         }
 
     def _compute_session_metrics(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute session-level metrics by grouping events into sessions"""
         if not events:
             return {
-                "sessionCount": 0,
-                "avgSessionDuration": None,
-                "avgEventsPerSession": None,
+                "session_count": 0,
+                "avg_session_duration": None,
+                "avg_events_per_session": None,
             }
 
         # Group events into sessions (30-minute timeout)
@@ -518,9 +516,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         )
 
         return {
-            "sessionCount": session_count,
-            "avgSessionDuration": avg_duration,
-            "avgEventsPerSession": avg_events_per_session,
+            "session_count": session_count,
+            "avg_session_duration": avg_duration,
+            "avg_events_per_session": avg_events_per_session,
         }
 
     def _compute_event_counts(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -536,7 +534,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         purchase_count = 0
 
         for event in events:
-            event_type = event.get("eventType", "").lower()
+            event_type = event.get("event_type", "").lower()
 
             if event_type in ["product_viewed", "product_view"]:
                 product_view_count += 1
@@ -556,15 +554,15 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 purchase_count += 1
 
         return {
-            "totalEventCount": total_event_count,
-            "productViewCount": product_view_count,
-            "collectionViewCount": collection_view_count,
-            "cartAddCount": cart_add_count,
-            "cartViewCount": cart_view_count,
-            "cartRemoveCount": cart_remove_count,
-            "searchCount": search_count,
-            "checkoutStartCount": checkout_start_count,
-            "purchaseCount": purchase_count,
+            "total_event_count": total_event_count,
+            "product_view_count": product_view_count,
+            "collection_view_count": collection_view_count,
+            "cart_add_count": cart_add_count,
+            "cart_view_count": cart_view_count,
+            "cart_remove_count": cart_remove_count,
+            "search_count": search_count,
+            "checkout_start_count": checkout_start_count,
+            "purchase_count": purchase_count,
         }
 
     def _compute_temporal_patterns(
@@ -573,10 +571,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Compute temporal behavioral patterns"""
         if not events:
             return {
-                "daysSinceFirstEvent": 0,
-                "daysSinceLastEvent": 0,
-                "mostActiveHour": None,
-                "mostActiveDay": None,
+                "days_since_first_event": 0,
+                "days_since_last_event": 0,
+                "most_active_hour": None,
+                "most_active_day": None,
             }
 
         # Sort events by time
@@ -609,10 +607,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         most_active_day = Counter(days).most_common(1)[0][0] if days else None
 
         return {
-            "daysSinceFirstEvent": days_since_first,
-            "daysSinceLastEvent": days_since_last,
-            "mostActiveHour": most_active_hour,
-            "mostActiveDay": most_active_day,
+            "days_since_first_event": days_since_first,
+            "days_since_last_event": days_since_last,
+            "most_active_hour": most_active_hour,
+            "most_active_day": most_active_day,
         }
 
     def _compute_behavior_patterns(
@@ -627,7 +625,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         referrers = []
 
         for event in events:
-            event_data = event.get("eventData", {})
+            event_data = event.get("event_data", {})
             if isinstance(event_data, str):
                 try:
                     event_data = json.loads(event_data)
@@ -647,13 +645,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 unique_collections.add(collection_id)
 
             # Extract search terms
-            if event.get("eventType") in ["search_submitted", "search"]:
-                search_term = event_data.get("query") or event_data.get("searchTerm")
+            if event.get("event_type") in ["search_submitted", "search"]:
+                search_term = event_data.get("query") or event_data.get("search_term")
                 if search_term:
                     search_terms.append(search_term.lower())
 
             # Extract product categories
-            category = event_data.get("category") or event_data.get("productType")
+            category = event_data.get("category") or event_data.get("product_type")
             if category:
                 categories.append(category)
 
@@ -694,20 +692,20 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 referrer_value = str(referrer)
 
         return {
-            "uniqueProductsViewed": len(unique_products),
-            "uniqueCollectionsViewed": len(unique_collections),
-            "searchTerms": Json(unique_search_terms if unique_search_terms else []),
-            "topCategories": Json(top_categories if top_categories else []),
-            "deviceType": device_type_value,
-            "primaryReferrer": referrer_value,
+            "unique_products_viewed": len(unique_products),
+            "unique_collections_viewed": len(unique_collections),
+            "search_terms": unique_search_terms if unique_search_terms else [],
+            "top_categories": top_categories if top_categories else [],
+            "device_type": device_type_value,
+            "primary_referrer": referrer_value,
         }
 
     def _compute_conversion_metrics(self, features: Dict[str, Any]) -> Dict[str, Any]:
         """Compute conversion rate metrics"""
-        product_views = features.get("productViewCount", 0)
-        cart_adds = features.get("cartAddCount", 0)
-        purchases = features.get("purchaseCount", 0)
-        searches = features.get("searchCount", 0)
+        product_views = features.get("product_view_count", 0)
+        cart_adds = features.get("cart_add_count", 0)
+        purchases = features.get("purchase_count", 0)
+        searches = features.get("search_count", 0)
 
         # Browse to cart rate
         browse_to_cart_rate = (cart_adds / product_views) if product_views > 0 else None
@@ -719,9 +717,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         search_to_purchase_rate = (purchases / searches) if searches > 0 else None
 
         return {
-            "browseToCartRate": browse_to_cart_rate,
-            "cartToPurchaseRate": cart_to_purchase_rate,
-            "searchToPurchaseRate": search_to_purchase_rate,
+            "browse_to_cart_rate": browse_to_cart_rate,
+            "cart_to_purchase_rate": cart_to_purchase_rate,
+            "search_to_purchase_rate": search_to_purchase_rate,
         }
 
     def _compute_computed_scores(
@@ -733,9 +731,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Compute normalized behavioral scores (0-1)"""
 
         # Engagement Score (based on activity volume and diversity)
-        total_events = features.get("totalEventCount", 0)
-        session_count = features.get("sessionCount", 0)
-        unique_products = features.get("uniqueProductsViewed", 0)
+        total_events = features.get("total_event_count", 0)
+        session_count = features.get("session_count", 0)
+        unique_products = features.get("unique_products_viewed", 0)
 
         # Normalize components (using log scale for large numbers)
         import math
@@ -747,22 +745,22 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         engagement_score = (event_score + session_score + diversity_events) / 3.0
 
         # Recency Score (higher for more recent activity)
-        days_since_last = features.get("daysSinceLastEvent", 365)
+        days_since_last = features.get("days_since_last_event", 365)
         recency_score = max(
             0, (30 - min(days_since_last, 30)) / 30.0
         )  # Linear decay over 30 days
 
         # Diversity Score (based on variety of activities)
         diversity_components = []
-        if features.get("productViewCount", 0) > 0:
+        if features.get("product_view_count", 0) > 0:
             diversity_components.append(1)
-        if features.get("collectionViewCount", 0) > 0:
+        if features.get("collection_view_count", 0) > 0:
             diversity_components.append(1)
-        if features.get("cartAddCount", 0) > 0:
+        if features.get("cart_add_count", 0) > 0:
             diversity_components.append(1)
-        if features.get("searchCount", 0) > 0:
+        if features.get("search_count", 0) > 0:
             diversity_components.append(1)
-        if features.get("purchaseCount", 0) > 0:
+        if features.get("purchase_count", 0) > 0:
             diversity_components.append(1)
 
         diversity_score = (
@@ -771,13 +769,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
         # Behavioral Score (composite of all factors)
         conversion_quality = 0
-        if features.get("browseToCartRate"):
+        if features.get("browse_to_cart_rate"):
             conversion_quality += min(
-                features.get("browseToCartRate", 0) / 0.1, 1.0
+                features.get("browse_to_cart_rate", 0) / 0.1, 1.0
             )  # Good rate is 10%
-        if features.get("cartToPurchaseRate"):
+        if features.get("cart_to_purchase_rate"):
             conversion_quality += min(
-                features.get("cartToPurchaseRate", 0) / 0.3, 1.0
+                features.get("cart_to_purchase_rate", 0) / 0.3, 1.0
             )  # Good rate is 30%
         conversion_quality = conversion_quality / 2.0  # Average of both rates
 
@@ -789,10 +787,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         )
 
         return {
-            "engagementScore": engagement_score,
-            "recencyScore": recency_score,
-            "diversityScore": diversity_score,
-            "behavioralScore": behavioral_score,
+            "engagement_score": engagement_score,
+            "recency_score": recency_score,
+            "diversity_score": diversity_score,
+            "behavioral_score": behavioral_score,
         }
 
     def _group_events_into_sessions(
@@ -910,11 +908,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         try:
             if not user_sessions:
                 return {
-                    "totalUnifiedSessions": 0,
-                    "crossSessionSpanDays": 0,
+                    "total_unified_sessions": 0,
+                    "cross_session_span_days": 0,
                     "sessionFrequencyScore": 0.0,
                     "deviceDiversity": 0,
-                    "avgSessionDuration": None,
+                    "avg_session_duration": None,
                 }
 
             # Filter sessions for this customer
@@ -924,11 +922,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             if not customer_sessions:
                 return {
-                    "totalUnifiedSessions": 0,
-                    "crossSessionSpanDays": 0,
+                    "total_unified_sessions": 0,
+                    "cross_session_span_days": 0,
                     "sessionFrequencyScore": 0.0,
                     "deviceDiversity": 0,
-                    "avgSessionDuration": None,
+                    "avg_session_duration": None,
                 }
 
             # Basic session metrics
@@ -998,11 +996,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 avg_session_duration = sum(session_durations) / len(session_durations)
 
             return {
-                "totalUnifiedSessions": total_sessions,
-                "crossSessionSpanDays": cross_session_span_days,
-                "sessionFrequencyScore": round(session_frequency_score, 4),
-                "deviceDiversity": len(user_agents),
-                "avgSessionDuration": (
+                "total_unified_sessions": total_sessions,
+                "cross_session_span_days": cross_session_span_days,
+                "session_frequency_score": round(session_frequency_score, 4),
+                "device_diversity": len(user_agents),
+                "avg_session_duration": (
                     round(avg_session_duration, 2) if avg_session_duration else None
                 ),
             }
@@ -1010,11 +1008,11 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         except Exception as e:
             logger.error(f"Error computing cross-session features: {str(e)}")
             return {
-                "totalUnifiedSessions": 0,
-                "crossSessionSpanDays": 0,
-                "sessionFrequencyScore": 0.0,
-                "deviceDiversity": 0,
-                "avgSessionDuration": None,
+                "total_unified_sessions": 0,
+                "cross_session_span_days": 0,
+                "session_frequency_score": 0.0,
+                "device_diversity": 0,
+                "avg_session_duration": None,
             }
 
     def _compute_extension_features(
@@ -1024,13 +1022,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         try:
             if not user_interactions:
                 return {
-                    "phoenixInteractionCount": 0,
-                    "apolloInteractionCount": 0,
-                    "venusInteractionCount": 0,
-                    "atlasInteractionCount": 0,
-                    "extensionEngagementScore": 0.0,
-                    "recommendationClickRate": 0.0,
-                    "upsellInteractionCount": 0,
+                    "phoenix_interaction_count": 0,
+                    "apollo_interaction_count": 0,
+                    "venus_interaction_count": 0,
+                    "atlas_interaction_count": 0,
+                    "extension_engagement_score": 0.0,
+                    "recommendation_click_rate": 0.0,
+                    "upsell_interaction_count": 0,
                 }
 
             # Filter interactions for this customer
@@ -1040,13 +1038,13 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             if not customer_interactions:
                 return {
-                    "phoenixInteractionCount": 0,
-                    "apolloInteractionCount": 0,
-                    "venusInteractionCount": 0,
-                    "atlasInteractionCount": 0,
-                    "extensionEngagementScore": 0.0,
-                    "recommendationClickRate": 0.0,
-                    "upsellInteractionCount": 0,
+                    "phoenix_interaction_count": 0,
+                    "apollo_interaction_count": 0,
+                    "venus_interaction_count": 0,
+                    "atlas_interaction_count": 0,
+                    "extension_engagement_score": 0.0,
+                    "recommendation_click_rate": 0.0,
+                    "upsell_interaction_count": 0,
                 }
 
             # Count interactions by extension type
@@ -1083,25 +1081,25 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 recommendation_click_rate = recommendation_clicks / total_interactions
 
             return {
-                "phoenixInteractionCount": extension_counts.get("phoenix", 0),
-                "apolloInteractionCount": extension_counts.get("apollo", 0),
-                "venusInteractionCount": extension_counts.get("venus", 0),
-                "atlasInteractionCount": extension_counts.get("atlas", 0),
-                "extensionEngagementScore": round(extension_engagement_score, 4),
-                "recommendationClickRate": round(recommendation_click_rate, 4),
-                "upsellInteractionCount": upsell_interactions,
+                "phoenix_interaction_count": extension_counts.get("phoenix", 0),
+                "apollo_interaction_count": extension_counts.get("apollo", 0),
+                "venus_interaction_count": extension_counts.get("venus", 0),
+                "atlas_interaction_count": extension_counts.get("atlas", 0),
+                "extension_engagement_score": round(extension_engagement_score, 4),
+                "recommendation_click_rate": round(recommendation_click_rate, 4),
+                "upsell_interaction_count": upsell_interactions,
             }
 
         except Exception as e:
             logger.error(f"Error computing extension features: {str(e)}")
             return {
-                "phoenixInteractionCount": 0,
-                "apolloInteractionCount": 0,
-                "venusInteractionCount": 0,
-                "atlasInteractionCount": 0,
-                "extensionEngagementScore": 0.0,
-                "recommendationClickRate": 0.0,
-                "upsellInteractionCount": 0,
+                "phoenix_interaction_count": 0,
+                "apollo_interaction_count": 0,
+                "venus_interaction_count": 0,
+                "atlas_interaction_count": 0,
+                "extension_engagement_score": 0.0,
+                "recommendation_click_rate": 0.0,
+                "upsell_interaction_count": 0,
             }
 
     def _compute_enhanced_session_metrics(
@@ -1111,9 +1109,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         try:
             if not user_sessions:
                 return {
-                    "totalInteractionsInSessions": 0,
-                    "avgInteractionsPerSession": 0.0,
-                    "sessionEngagementScore": 0.0,
+                    "total_interactions_in_sessions": 0,
+                    "avg_interactions_per_session": 0.0,
+                    "session_engagement_score": 0.0,
                 }
 
             # Filter sessions for this customer
@@ -1123,9 +1121,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             if not customer_sessions:
                 return {
-                    "totalInteractionsInSessions": 0,
-                    "avgInteractionsPerSession": 0.0,
-                    "sessionEngagementScore": 0.0,
+                    "total_interactions_in_sessions": 0,
+                    "avg_interactions_per_session": 0.0,
+                    "session_engagement_score": 0.0,
                 }
 
             # Calculate session interaction metrics
@@ -1142,17 +1140,17 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             )  # Normalize to 0-1
 
             return {
-                "totalInteractionsInSessions": total_interactions,
-                "avgInteractionsPerSession": round(avg_interactions_per_session, 2),
-                "sessionEngagementScore": round(session_engagement_score, 4),
+                "total_interactions_in_sessions": total_interactions,
+                "avg_interactions_per_session": round(avg_interactions_per_session, 2),
+                "session_engagement_score": round(session_engagement_score, 4),
             }
 
         except Exception as e:
             logger.error(f"Error computing enhanced session metrics: {str(e)}")
             return {
-                "totalInteractionsInSessions": 0,
-                "avgInteractionsPerSession": 0.0,
-                "sessionEngagementScore": 0.0,
+                "total_interactions_in_sessions": 0,
+                "avg_interactions_per_session": 0.0,
+                "session_engagement_score": 0.0,
             }
 
     def _compute_attribution_features(
@@ -1162,9 +1160,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         try:
             if not purchase_attributions:
                 return {
-                    "multiTouchAttributionScore": 0.0,
-                    "attributionRevenue": 0.0,
-                    "conversionPathLength": 0,
+                    "multi_touch_attribution_score": 0.0,
+                    "attribution_revenue": 0.0,
+                    "conversion_path_length": 0,
                     # Note: extensionContributionWeights field removed - not in database schema
                 }
 
@@ -1175,9 +1173,9 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             if not customer_attributions:
                 return {
-                    "multiTouchAttributionScore": 0.0,
-                    "attributionRevenue": 0.0,
-                    "conversionPathLength": 0,
+                    "multi_touch_attribution_score": 0.0,
+                    "attribution_revenue": 0.0,
+                    "conversion_path_length": 0,
                     # Note: extensionContributionWeights field removed - not in database schema
                 }
 
@@ -1241,18 +1239,18 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
                 }
 
             return {
-                "multiTouchAttributionScore": round(multi_touch_score, 4),
-                "attributionRevenue": round(total_revenue, 2),
-                "conversionPathLength": conversion_path_length,
+                "multi_touch_attribution_score": round(multi_touch_score, 4),
+                "attribution_revenue": round(total_revenue, 2),
+                "conversion_path_length": conversion_path_length,
                 # Note: extensionContributionWeights field removed - not in database schema
             }
 
         except Exception as e:
             logger.error(f"Error computing attribution features: {str(e)}")
             return {
-                "multiTouchAttributionScore": 0.0,
-                "attributionRevenue": 0.0,
-                "conversionPathLength": 0,
+                "multi_touch_attribution_score": 0.0,
+                "attribution_revenue": 0.0,
+                "conversion_path_length": 0,
                 # Note: extensionContributionWeights field removed - not in database schema
             }
 
@@ -1374,22 +1372,22 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             )
 
             return {
-                "deviceDiversity": device_diversity,
-                "deviceConsistency": device_consistency,
-                "deviceType": most_common_device,
+                "device_diversity": device_diversity,
+                "device_consistency": device_consistency,
+                "device_type": most_common_device,
                 "country": most_common_country,
                 "timezone": most_common_timezone,
                 "language": most_common_language,
-                "referrerType": most_common_referrer_type,
+                "referrer_type": most_common_referrer_type,
             }
         except Exception as e:
             logger.error(f"Error computing device location features: {str(e)}")
             return {
-                "deviceDiversity": 0,
-                "deviceConsistency": 0,
-                "deviceType": "",
+                "device_diversity": 0,
+                "device_consistency": 0,
+                "device_type": "",
                 "country": "",
                 "timezone": "",
                 "language": "",
-                "referrerType": "direct",
+                "referrer_type": "direct",
             }

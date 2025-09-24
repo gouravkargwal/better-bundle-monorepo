@@ -40,8 +40,8 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated session features matching SessionFeatures schema
         """
         try:
-            session_id = session_data.get("sessionId", "")
-            customer_id = session_data.get("customerId")
+            session_id = session_data.get("session_id", "")
+            customer_id = session_data.get("customer_id")
             events = session_data.get("events", [])
 
             logger.debug(f"Computing session features for session: {session_id}")
@@ -74,7 +74,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             features.update(enhanced_context_features)
 
             # Add lastComputedAt timestamp
-            features["lastComputedAt"] = now_utc()
+            features["last_computed_at"] = now_utc()
             logger.debug(
                 f"Computed {len(features)} session features for session: {session_id}"
             )
@@ -93,24 +93,24 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         shop = context.get("shop", {})
         current_time = now_utc()
         return {
-            "shopId": shop.get("id", ""),
-            "sessionId": session_data.get("sessionId", ""),
-            "customerId": session_data.get("customerId"),
-            "startTime": current_time,
-            "endTime": current_time,
-            "durationSeconds": 0,
-            "eventCount": 0,
-            "pageViewCount": 0,
-            "productViewCount": 0,
-            "collectionViewCount": 0,
-            "searchCount": 0,
-            "cartAddCount": 0,
-            "checkoutStarted": False,
-            "checkoutCompleted": False,
-            "orderValue": None,
-            "referrerDomain": None,
-            "landingPage": None,
-            "exitPage": None,
+            "shop_id": shop.get("id", ""),
+            "session_id": session_data.get("session_id", ""),
+            "customer_id": session_data.get("customer_id"),
+            "start_time": current_time,
+            "end_time": current_time,
+            "duration_seconds": 0,
+            "event_count": 0,
+            "page_view_count": 0,
+            "product_view_count": 0,
+            "collection_view_count": 0,
+            "search_count": 0,
+            "cart_add_count": 0,
+            "checkout_started": False,
+            "checkout_completed": False,
+            "order_value": None,
+            "referrer_domain": None,
+            "landing_page": None,
+            "exit_page": None,
         }
 
     def _compute_basic_session_features(
@@ -118,18 +118,18 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic session identification features"""
         return {
-            "shopId": shop.get("id", ""),
-            "sessionId": session_data.get("sessionId", ""),
-            "customerId": session_data.get("customerId"),  # Can be None for anonymous
+            "shop_id": shop.get("id", ""),
+            "session_id": session_data.get("session_id", ""),
+            "customer_id": session_data.get("customer_id"),  # Can be None for anonymous
         }
 
     def _compute_session_timing(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute session timing features"""
         if not events:
             return {
-                "startTime": None,
-                "endTime": None,
-                "durationSeconds": 0,
+                "start_time": None,
+                "end_time": None,
+                "duration_seconds": 0,
             }
 
         # Sort events by time
@@ -158,9 +158,9 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             duration_seconds = int((end_time - start_time).total_seconds())
 
         return {
-            "startTime": start_time,
-            "endTime": end_time,
-            "durationSeconds": duration_seconds,
+            "start_time": start_time,
+            "end_time": end_time,
+            "duration_seconds": duration_seconds,
         }
 
     def _compute_event_counts(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -203,14 +203,14 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                 search_count += 1
 
         return {
-            "eventCount": event_count,
-            "pageViewCount": page_view_count,
-            "productViewCount": product_view_count,
-            "collectionViewCount": collection_view_count,
-            "searchCount": search_count,
-            "cartAddCount": cart_add_count,
-            "cartViewCount": cart_view_count,
-            "cartRemoveCount": cart_remove_count,
+            "event_count": event_count,
+            "page_view_count": page_view_count,
+            "product_view_count": product_view_count,
+            "collection_view_count": collection_view_count,
+            "search_count": search_count,
+            "cart_add_count": cart_add_count,
+            "cart_view_count": cart_view_count,
+            "cart_remove_count": cart_remove_count,
         }
 
     def _compute_conversion_metrics(
@@ -282,20 +282,20 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         cart_abandoned = cart_viewed and not checkout_completed
 
         return {
-            "checkoutStarted": checkout_started,
-            "checkoutCompleted": checkout_completed,
-            "orderValue": order_value,
-            "cartViewed": cart_viewed,
-            "cartAbandoned": cart_abandoned,
+            "checkout_started": checkout_started,
+            "checkout_completed": checkout_completed,
+            "order_value": order_value,
+            "cart_viewed": cart_viewed,
+            "cart_abandoned": cart_abandoned,
         }
 
     def _compute_context_features(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute device and context features"""
         if not events:
             return {
-                "referrerDomain": None,
-                "landingPage": None,
-                "exitPage": None,
+                "referrer_domain": None,
+                "landing_page": None,
+                "exit_page": None,
             }
 
         # Sort events by time
@@ -379,11 +379,11 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                 exit_page = url
 
         return {
-            "referrerDomain": (
+            "referrer_domain": (
                 referrer_domain if isinstance(referrer_domain, str) else None
             ),
-            "landingPage": landing_page if isinstance(landing_page, str) else None,
-            "exitPage": exit_page if isinstance(exit_page, str) else None,
+            "landing_page": landing_page if isinstance(landing_page, str) else None,
+            "exit_page": exit_page if isinstance(exit_page, str) else None,
         }
 
     def _classify_device_type(self, user_agent: str) -> str:
@@ -427,19 +427,19 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         try:
             if not events:
                 return {
-                    "deviceType": "",
-                    "browserType": "",
-                    "osType": "",
-                    "screenResolution": "",
+                    "device_type": "",
+                    "browser_type": "",
+                    "os_type": "",
+                    "screen_resolution": "",
                     "country": "",
                     "region": "",
                     "city": "",
                     "timezone": "",
                     "language": "",
-                    "referrerType": "direct",
-                    "trafficSource": "direct",
-                    "deviceConsistency": 0,
-                    "locationConsistency": 0,
+                    "referrer_type": "direct",
+                    "traffic_source": "direct",
+                    "device_consistency": 0,
+                    "location_consistency": 0,
                 }
 
             # Extract device and location data from events
@@ -458,19 +458,19 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                 event_data = event.get("eventData", {})
 
                 # Device information
-                device_type = event_data.get("deviceType", "")
+                device_type = event_data.get("device_type", "")
                 if device_type:
                     device_types.append(device_type)
 
-                browser_type = event_data.get("browserType", "")
+                browser_type = event_data.get("browser_type", "")
                 if browser_type:
                     browser_types.append(browser_type)
 
-                os_type = event_data.get("osType", "")
+                os_type = event_data.get("os_type", "")
                 if os_type:
                     os_types.append(os_type)
 
-                screen_resolution = event_data.get("screenResolution", "")
+                screen_resolution = event_data.get("screen_resolution", "")
                 if screen_resolution:
                     screen_resolutions.append(screen_resolution)
 
@@ -577,34 +577,34 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                     traffic_source = "referral"
 
             return {
-                "deviceType": most_common_device,
-                "browserType": most_common_browser,
-                "osType": most_common_os,
-                "screenResolution": most_common_screen,
+                "device_type": most_common_device,
+                "browser_type": most_common_browser,
+                "os_type": most_common_os,
+                "screen_resolution": most_common_screen,
                 "country": most_common_country,
                 "region": most_common_region,
                 "city": most_common_city,
                 "timezone": most_common_timezone,
                 "language": most_common_language,
-                "referrerType": most_common_referrer_type,
-                "trafficSource": traffic_source,
-                "deviceConsistency": device_consistency,
-                "locationConsistency": location_consistency,
+                "referrer_type": most_common_referrer_type,
+                "traffic_source": traffic_source,
+                "device_consistency": device_consistency,
+                "location_consistency": location_consistency,
             }
         except Exception as e:
             logger.error(f"Error computing enhanced context features: {str(e)}")
             return {
-                "deviceType": "",
-                "browserType": "",
-                "osType": "",
-                "screenResolution": "",
+                "device_type": "",
+                "browser_type": "",
+                "os_type": "",
+                "screen_resolution": "",
                 "country": "",
                 "region": "",
                 "city": "",
                 "timezone": "",
                 "language": "",
-                "referrerType": "direct",
-                "trafficSource": "direct",
-                "deviceConsistency": 0,
-                "locationConsistency": 0,
+                "referrer_type": "direct",
+                "traffic_source": "direct",
+                "device_consistency": 0,
+                "location_consistency": 0,
             }

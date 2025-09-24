@@ -5,8 +5,6 @@ Collection feature generator for ML feature engineering
 from typing import Dict, Any, List, Optional
 import statistics
 from datetime import datetime, timedelta, timezone
-from prisma import Json
-
 from app.core.logging import get_logger
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
@@ -71,10 +69,10 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 # Ensure JSON fields are always set even without order data
                 features.update(
                     {
-                        "conversionRate": None,
-                        "revenueContribution": None,
-                        "topProducts": Json([]),
-                        "topVendors": Json([]),
+                        "conversion_rate": None,
+                        "revenue_contribution": None,
+                        "top_products": [],
+                        "top_vendors": [],
                     }
                 )
 
@@ -103,7 +101,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             # Add lastComputedAt timestamp
             from app.shared.helpers import now_utc
 
-            features["lastComputedAt"] = now_utc()
+            features["last_computed_at"] = now_utc()
 
             logger.debug(
                 f"Computed {len(features)} features for collection: {collection.get('collectionId', 'unknown')}"
@@ -121,10 +119,10 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute basic collection features"""
         return {
-            "shopId": shop.get("id", "") if shop else "",
-            "collectionId": collection.get("collectionId", ""),
-            "productCount": collection.get("productCount", 0),
-            "isAutomated": bool(collection.get("isAutomated", False)),
+            "shop_id": shop.get("id", "") if shop else "",
+            "collection_id": collection.get("collectionId", ""),
+            "product_count": collection.get("productCount", 0),
+            "is_automated": bool(collection.get("isAutomated", False)),
         }
 
     def _compute_engagement_metrics(
@@ -158,27 +156,31 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             e
             for e in collection_events
             if self.adapter_factory.is_view_event(e)
-            and e.get("eventType") == "collection_viewed"
+            and e.get("event_type") == "collection_viewed"
         ]
         click_events = [
             e
             for e in collection_events
-            if e.get("eventType") == "product_click_from_collection"
+            if e.get("event_type") == "product_click_from_collection"
         ]
-        bounce_events = [e for e in collection_events if e.get("eventType") == "bounce"]
+        bounce_events = [
+            e for e in collection_events if e.get("event_type") == "bounce"
+        ]
 
         view_count = len(view_events)
         unique_viewers = len(
-            set(e.get("customerId") for e in view_events if e.get("customerId"))
+            set(e.get("customer_id") for e in view_events if e.get("customer_id"))
         )
         click_count = len(click_events)
         bounce_count = len(bounce_events)
 
         return {
-            "viewCount30d": view_count,
-            "uniqueViewers30d": unique_viewers,
-            "clickThroughRate": (click_count / view_count) if view_count > 0 else None,
-            "bounceRate": (bounce_count / view_count) if view_count > 0 else None,
+            "view_count_30d": view_count,
+            "unique_viewers_30d": unique_viewers,
+            "click_through_rate": (
+                (click_count / view_count) if view_count > 0 else None
+            ),
+            "bounce_rate": (bounce_count / view_count) if view_count > 0 else None,
         }
 
     def _compute_product_metrics(
@@ -200,11 +202,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
         if not collection_products:
             return {
-                "avgProductPrice": None,
-                "minProductPrice": None,
-                "maxProductPrice": None,
-                "priceRange": None,
-                "priceVariance": None,
+                "avg_product_price": None,
+                "min_product_price": None,
+                "max_product_price": None,
+                "price_range": None,
+                "price_variance": None,
             }
 
         # Extract prices
@@ -220,11 +222,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
         if not prices:
             return {
-                "avgProductPrice": None,
-                "minProductPrice": None,
-                "maxProductPrice": None,
-                "priceRange": None,
-                "priceVariance": None,
+                "avg_product_price": None,
+                "min_product_price": None,
+                "max_product_price": None,
+                "price_range": None,
+                "price_variance": None,
             }
 
         # Calculate price metrics
@@ -235,11 +237,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         price_variance = statistics.variance(prices) if len(prices) > 1 else 0
 
         return {
-            "avgProductPrice": avg_price,
-            "minProductPrice": min_price,
-            "maxProductPrice": max_price,
-            "priceRange": price_range,
-            "priceVariance": price_variance,
+            "avg_product_price": avg_price,
+            "min_product_price": min_price,
+            "max_product_price": max_price,
+            "price_range": price_range,
+            "price_variance": price_variance,
         }
 
     def _compute_performance_metrics(
@@ -257,7 +259,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         product_info = {}
 
         for product in products:
-            product_id = product.get("productId")
+            product_id = product.get("product_id")
             if not product_id:
                 continue
 
@@ -279,7 +281,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             # Check if this collection ID is in the product's collections
             for coll in collections:
                 if isinstance(coll, dict):
-                    coll_id = coll.get("id") or coll.get("collectionId")
+                    coll_id = coll.get("id") or coll.get("collection_id")
                 elif isinstance(coll, str):
                     coll_id = coll
                 else:
@@ -307,7 +309,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
             order_has_collection_product = False
             for line_item in line_items:
-                product_id = line_item.get("productId") or line_item.get("product_id")
+                product_id = line_item.get("product_id")
 
                 # Only include if product belongs to this collection
                 if product_id and product_id in collection_product_ids:
@@ -341,7 +343,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
         # Calculate revenue contribution by computing total shop revenue from all orders
         total_shop_revenue = sum(
-            float(order.get("totalPrice", 0)) for order in order_data
+            float(order.get("total_price", 0)) for order in order_data
         )
         revenue_contribution = None
         if total_shop_revenue > 0:
@@ -360,10 +362,10 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         top_vendor_names = [v[0] for v in top_vendors]
 
         return {
-            "conversionRate": conversion_rate,
-            "revenueContribution": revenue_contribution,
-            "topProducts": Json(top_product_ids if top_product_ids else []),
-            "topVendors": Json(top_vendor_names if top_vendor_names else []),
+            "conversion_rate": conversion_rate,
+            "revenue_contribution": revenue_contribution,
+            "top_products": top_product_ids if top_product_ids else [],
+            "top_vendors": top_vendor_names if top_vendor_names else [],
         }
 
     def _compute_seo_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:
@@ -392,38 +394,38 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             score += 1
 
         # SEO-specific fields
-        seo_title = collection.get("seoTitle", "")
+        seo_title = collection.get("seo_title", "")
         if seo_title:
             score += 1
 
-        seo_description = collection.get("seoDescription", "")
+        seo_description = collection.get("seo_description", "")
         if seo_description:
             score += 1
 
-        return {"seoScore": score}  # Max score is 8
+        return {"seo_score": score}  # Max score is 8
 
     def _compute_image_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:
         """Compute image quality score"""
         score = 0
 
         # Check if collection has an image
-        image_url = collection.get("imageUrl")
+        image_url = collection.get("image_url")
         if image_url:
             score += 3
 
             # Check if image has alt text
-            image_alt = collection.get("imageAlt")
+            image_alt = collection.get("image_alt")
             if image_alt and len(image_alt.strip()) > 0:
                 score += 2
 
-        return {"imageScore": score}  # Max score is 5
+        return {"image_score": score}  # Max score is 5
 
     def _compute_performance_score(self, features: Dict[str, Any]) -> Dict[str, Any]:
         """Compute composite performance score"""
         score = 0.0
 
         # View engagement (30% weight)
-        view_count = features.get("viewCount30d", 0)
+        view_count = features.get("view_count_30d", 0)
         if view_count > 0:
             # Normalize view count (log scale for large numbers)
             import math
@@ -434,37 +436,37 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             score += normalized_views * 0.3
 
         # Click-through rate (25% weight)
-        ctr = features.get("clickThroughRate")
+        ctr = features.get("click_through_rate")
         if ctr is not None:
             # Good CTR is around 2-5%
             normalized_ctr = min(ctr / 0.05, 1.0)  # Cap at 5%
             score += normalized_ctr * 0.25
 
         # Conversion rate (25% weight)
-        conversion_rate = features.get("conversionRate")
+        conversion_rate = features.get("conversion_rate")
         if conversion_rate is not None:
             # Good conversion rate is around 2-3%
             normalized_conversion = min(conversion_rate / 0.03, 1.0)  # Cap at 3%
             score += normalized_conversion * 0.25
 
         # Revenue contribution (10% weight)
-        revenue_contribution = features.get("revenueContribution")
+        revenue_contribution = features.get("revenue_contribution")
         if revenue_contribution is not None:
             # Normalize revenue contribution (good collections contribute 5-10%+)
             normalized_revenue = min(revenue_contribution / 10.0, 1.0)  # Cap at 10%
             score += normalized_revenue * 0.1
 
         # SEO score (5% weight)
-        seo_score = features.get("seoScore", 0)
+        seo_score = features.get("seo_score", 0)
         normalized_seo = seo_score / 8.0  # Max SEO score is 8
         score += normalized_seo * 0.05
 
         # Image score (5% weight)
-        image_score = features.get("imageScore", 0)
+        image_score = features.get("image_score", 0)
         normalized_image = image_score / 5.0  # Max image score is 5
         score += normalized_image * 0.05
 
-        return {"performanceScore": score}
+        return {"performance_score": score}
 
     def _compute_collection_metadata_features(
         self, collection: Dict[str, Any]
@@ -473,7 +475,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         try:
             # Handle and template features (currently unused)
             handle = collection.get("handle", "")
-            template_suffix = collection.get("templateSuffix", "")
+            template_suffix = collection.get("template_suffix", "")
 
             # Handle quality score (URL-friendly)
             handle_quality = 0
@@ -494,26 +496,26 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             extras_utilization = min(extras_count / 3, 1.0)  # Normalize to 0-1
 
             return {
-                "handleQuality": handle_quality,
-                "templateScore": template_score,
-                "metafieldUtilization": metafield_utilization,
-                "extrasUtilization": extras_utilization,
+                "handle_quality": handle_quality,
+                "template_score": template_score,
+                "metafield_utilization": metafield_utilization,
+                "extras_utilization": extras_utilization,
                 "handle": handle,
-                "templateSuffix": template_suffix,
-                "metafieldCount": metafield_count,
-                "extrasCount": extras_count,
+                "template_suffix": template_suffix,
+                "metafield_count": metafield_count,
+                "extras_count": extras_count,
             }
         except Exception as e:
             logger.error(f"Error computing collection metadata features: {str(e)}")
             return {
-                "handleQuality": 0,
-                "templateScore": 0,
-                "metafieldUtilization": 0.0,
-                "extrasUtilization": 0.0,
+                "handle_quality": 0,
+                "template_score": 0,
+                "metafield_utilization": 0.0,
+                "extras_utilization": 0.0,
                 "handle": "",
-                "templateSuffix": "",
-                "metafieldCount": 0,
-                "extrasCount": 0,
+                "template_suffix": "",
+                "metafield_count": 0,
+                "extras_count": 0,
             }
 
     def _compute_collection_lifecycle_features(
@@ -524,8 +526,8 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             from app.shared.helpers import now_utc
 
             # Collection age and update frequency
-            created_at = collection.get("createdAt")
-            updated_at = collection.get("updatedAt")
+            created_at = collection.get("created_at")
+            updated_at = collection.get("updated_at")
 
             collection_age = 0
             last_updated_days = 0
@@ -573,16 +575,16 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 maturity_score += 10
 
             return {
-                "collectionAge": collection_age,
-                "lastUpdatedDays": last_updated_days,
-                "updateFrequency": round(update_frequency, 2),
-                "maturityScore": min(maturity_score, 100),
+                "collection_age": collection_age,
+                "last_updated_days": last_updated_days,
+                "update_frequency": round(update_frequency, 2),
+                "maturity_score": min(maturity_score, 100),
             }
         except Exception as e:
             logger.error(f"Error computing collection lifecycle features: {str(e)}")
             return {
-                "collectionAge": 0,
-                "lastUpdatedDays": 0,
-                "updateFrequency": 0.0,
-                "maturityScore": 0,
+                "collection_age": 0,
+                "last_updated_days": 0,
+                "update_frequency": 0.0,
+                "maturity_score": 0,
             }

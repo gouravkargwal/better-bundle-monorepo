@@ -660,31 +660,49 @@ class NormalizationService:
                 # Start from last normalized, else last window start; end at last collected/window end, else now
                 from datetime import datetime, timezone
 
-                resolved_start = start_time or (
-                    (
-                        watermark.last_normalized_at.isoformat()
-                        if watermark and watermark.last_normalized_at
-                        else None
-                    )
-                    or (
-                        watermark.last_window_start.isoformat()
-                        if watermark and watermark.last_window_start
-                        else None
-                    )
+                # Get all available timestamps
+                last_normalized = (
+                    watermark.last_normalized_at.isoformat()
+                    if watermark and watermark.last_normalized_at
+                    else None
                 )
-                resolved_end = end_time or (
-                    (
-                        watermark.last_collected_at.isoformat()
-                        if watermark and watermark.last_collected_at
-                        else None
-                    )
-                    or (
-                        watermark.last_window_end.isoformat()
-                        if watermark and watermark.last_window_end
-                        else None
-                    )
-                    or datetime.now(timezone.utc).isoformat()
+                last_window_start = (
+                    watermark.last_window_start.isoformat()
+                    if watermark and watermark.last_window_start
+                    else None
                 )
+                last_collected = (
+                    watermark.last_collected_at.isoformat()
+                    if watermark and watermark.last_collected_at
+                    else None
+                )
+                last_window_end = (
+                    watermark.last_window_end.isoformat()
+                    if watermark and watermark.last_window_end
+                    else None
+                )
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                # Collect all available timestamps and sort them
+                available_timestamps = [
+                    ts
+                    for ts in [
+                        last_normalized,
+                        last_window_start,
+                        last_collected,
+                        last_window_end,
+                    ]
+                    if ts
+                ]
+
+                if available_timestamps:
+                    # Use the earliest timestamp as start, latest as end
+                    resolved_start = start_time or min(available_timestamps)
+                    resolved_end = end_time or max(available_timestamps)
+                else:
+                    # Fallback to current time
+                    resolved_start = start_time or now_iso
+                    resolved_end = end_time or now_iso
 
             # Guard against inverted windows (can occur if lastNormalizedAt > lastCollectedAt)
             if resolved_start and resolved_end and resolved_start > resolved_end:
