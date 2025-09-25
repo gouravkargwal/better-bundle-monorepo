@@ -72,8 +72,8 @@ def create_engine() -> AsyncEngine:
     # Engine configuration optimized for async operations
     engine_kwargs = {
         "url": database_url,
-        "echo": settings.DEBUG,  # Log SQL queries in debug mode
-        "echo_pool": settings.DEBUG,  # Log connection pool events in debug mode
+        "echo": settings.database.SQLALCHEMY_ECHO,  # Log SQL queries when enabled
+        "echo_pool": settings.database.SQLALCHEMY_ECHO_POOL,  # Log pool events when enabled
         "poolclass": NullPool,  # Use NullPool for async engines
         # Note: NullPool doesn't support pool_size, max_overflow, pool_timeout
         "connect_args": (

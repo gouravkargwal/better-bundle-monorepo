@@ -219,6 +219,7 @@ class SeedPipelineRunner:
         # Insert into normalized tables using SQLAlchemy
         print("  📦 Inserting products...")
         product_data_list = []
+        raw_product_list = []
         for product in products:
             # Extract product ID from GraphQL ID
             product_id = (

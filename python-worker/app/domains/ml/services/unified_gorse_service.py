@@ -6,13 +6,30 @@ This eliminates the need for bridge tables and ensures training is always trigge
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
-
+from app.core.database.session import get_session_context
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from app.shared.gorse_api_client import GorseApiClient
 from app.domains.ml.transformers.gorse_data_transformers import GorseDataTransformers
+from sqlalchemy import select, func
+from app.core.database.models import (
+    UserFeatures,
+    ProductFeatures,
+    InteractionFeatures,
+    SessionFeatures,
+    ProductPairFeatures,
+    SearchProductFeatures,
+    CollectionFeatures,
+    CustomerBehaviorFeatures,
+    ProductData,
+    CustomerData,
+    CollectionData,
+    UserSession,
+    UserInteraction,
+    PurchaseAttribution,
+)
 
 logger = get_logger(__name__)
 
@@ -41,33 +58,47 @@ class UnifiedGorseService:
         self.transformers = GorseDataTransformers()
         self.batch_size = batch_size
 
+    def _ensure_aware_utc(self, dt: Optional[datetime]) -> Optional[datetime]:
+        """Normalize a datetime to timezone-aware UTC to avoid naive/aware comparison errors."""
+        if dt is None:
+            return None
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     async def _check_feature_table_has_data(
         self, table_name: str, shop_id: str, since_time: Optional[datetime] = None
     ) -> bool:
-        """Check if a feature table has data for the given shop and time range"""
+        """Check if a feature table has data for the given shop and time range (SQLAlchemy)."""
         try:
-            db = await self._get_database()
+            model_map = {
+                "user_features": UserFeatures,
+                "product_features": ProductFeatures,
+                "interaction_features": InteractionFeatures,
+                "session_features": SessionFeatures,
+                "product_pair_features": ProductPairFeatures,
+                "search_product_features": SearchProductFeatures,
+                "collection_features": CollectionFeatures,
+                "customer_behavior_features": CustomerBehaviorFeatures,
+            }
 
-            # Get the table model
-            table_model = getattr(db, table_name.lower(), None)
-            if not table_model:
-                logger.warning(f"Table {table_name} not found in database")
+            model = model_map.get(table_name)
+            if model is None:
+                logger.warning(f"Table {table_name} not found in SQLAlchemy models")
                 return False
 
-            # Check if there's any data
-            if since_time:
-                count = await table_model.count(
-                    where={
-                        "shopId": shop_id,
-                        "lastComputedAt": {"gte": since_time},
-                    }
-                )
-            else:
-                count = await table_model.count(where={"shopId": shop_id})
+            async with get_session_context() as session:
+                where_clauses = [model.shop_id == shop_id]
+                if hasattr(model, "last_computed_at") and since_time is not None:
+                    where_clauses.append(model.last_computed_at >= since_time)
 
-            has_data = count > 0
-            logger.info(f"Table {table_name} has {count} records for shop {shop_id}")
-            return has_data
+                stmt = select(func.count()).select_from(model).where(*where_clauses)
+                count = (await session.execute(stmt)).scalar_one()
+                has_data = (count or 0) > 0
+                logger.info(
+                    f"Table {table_name} has {count or 0} records for shop {shop_id}"
+                )
+                return has_data
 
         except Exception as e:
             logger.error(
@@ -76,53 +107,39 @@ class UnifiedGorseService:
             return False
 
     async def _get_last_sync_timestamp(self, shop_id: str) -> Optional[datetime]:
-        """Get the last sync timestamp for incremental sync"""
+        """Get the last sync timestamp for incremental sync using SQLAlchemy sources"""
         try:
-            db = await self._get_database()
+            async with get_session_context() as session:
+                candidates: List[Optional[datetime]] = []
 
-            # Get the most recent timestamp from source data tables (not feature tables)
-            # This ensures we sync based on when the actual data was created, not when features were computed
-            result = await db.query_raw(
-                """
-                SELECT MAX(last_created) as last_sync FROM (
-                    SELECT MAX("created_at") as last_created FROM "user_interactions" WHERE "shop_id" = $1
-                    UNION ALL
-                    SELECT MAX("created_at") as last_created FROM "user_sessions" WHERE "shop_id" = $1
-                    UNION ALL
-                    SELECT MAX("created_at") as last_created FROM "purchase_attributions" WHERE "shop_id" = $1
-                    UNION ALL
-                    SELECT MAX("createdAt") as last_created FROM "ProductData" WHERE "shopId" = $1
-                    UNION ALL
-                    SELECT MAX("createdAt") as last_created FROM "CustomerData" WHERE "shopId" = $1
-                    UNION ALL
-                    SELECT MAX("createdAt") as last_created FROM "CollectionData" WHERE "shopId" = $1
-                ) as all_source_data
-                """,
-                shop_id,
-            )
+                async def max_created(
+                    model, field_name: str = "created_at"
+                ) -> Optional[datetime]:
+                    field = getattr(model, field_name, None)
+                    if field is None:
+                        return None
+                    stmt = select(func.max(field)).where(model.shop_id == shop_id)
+                    return (await session.execute(stmt)).scalar_one()
 
-            if result and result[0] and result[0].get("last_sync"):
-                last_sync = result[0]["last_sync"]
-                # Handle case where result might be 0 or other non-datetime values
-                if last_sync and last_sync != 0:
-                    # Ensure last_sync is a datetime object
-                    if isinstance(last_sync, str):
-                        from datetime import datetime
+                candidates.append(await max_created(UserInteraction))
+                candidates.append(await max_created(UserSession))
+                candidates.append(await max_created(PurchaseAttribution))
+                candidates.append(await max_created(ProductData, "created_at"))
+                candidates.append(await max_created(CustomerData, "created_at"))
+                candidates.append(await max_created(CollectionData, "created_at"))
 
-                        last_sync = datetime.fromisoformat(
-                            last_sync.replace("Z", "+00:00")
-                        )
-                    # Add a small buffer to ensure we don't miss any data
+                # Normalize to timezone-aware UTC to prevent comparison errors
+                valid = [self._ensure_aware_utc(c) for c in candidates if c]
+                if valid:
+                    last_sync = max(valid)
                     return last_sync - timedelta(minutes=5)
 
-            # If no source data found, look back 24 hours
-            return now_utc() - timedelta(hours=24)
+                return now_utc() - timedelta(hours=24)
 
         except Exception as e:
             logger.error(
                 f"Failed to get last sync timestamp for shop {shop_id}: {str(e)}"
             )
-            # Fallback to 24 hours ago
             return now_utc() - timedelta(hours=24)
 
     async def sync_and_train(
@@ -165,6 +182,10 @@ class UnifiedGorseService:
                     else:
                         logger.info("No previous sync found, doing full sync")
                         sync_type = "all"
+
+            # Ensure since_time is timezone-aware UTC for downstream comparisons
+            if since_time is not None:
+                since_time = self._ensure_aware_utc(since_time)
 
             results = {
                 "job_id": job_id,
@@ -344,58 +365,54 @@ class UnifiedGorseService:
     ) -> int:
         """Sync users from feature tables directly to Gorse API with streaming"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [UserFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            UserFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream users in batches to avoid memory issues
-                if since_time:
-                    users = await db.userfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(UserFeatures)
+                        .where(*where_clauses)
+                        .order_by(UserFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    users = await db.userfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    users = result.scalars().all()
 
-                if not users:
-                    break
+                    if not users:
+                        break
 
-                # Transform to Gorse format
-                gorse_users = []
-                for user in users:
-                    # Apply shop prefix for multi-tenancy
-                    prefixed_user_id = f"shop_{shop_id}_{user.customerId}"
+                    # Transform to Gorse format
+                    gorse_users = []
+                    for user in users:
+                        prefixed_user_id = (
+                            f"shop_{shop_id}_{getattr(user, 'customer_id', '')}"
+                        )
+                        labels = self.transformers.transform_user_features_to_labels(
+                            user
+                        )
+                        gorse_users.append(
+                            {"userId": prefixed_user_id, "labels": labels}
+                        )
 
-                    # Transform user features to Gorse labels
-                    labels = self.transformers.transform_user_features_to_labels(user)
+                    # Push to Gorse API
+                    if gorse_users:
+                        await self.gorse_client.insert_users_batch(gorse_users)
+                        total_synced += len(gorse_users)
+                        logger.info(
+                            f"Synced {len(gorse_users)} users (total: {total_synced})"
+                        )
 
-                    gorse_user = {"userId": prefixed_user_id, "labels": labels}
-                    gorse_users.append(gorse_user)
+                    if len(users) < self.batch_size:
+                        break
 
-                # Push to Gorse API
-                if gorse_users:
-                    await self.gorse_client.insert_users_batch(gorse_users)
-                    total_synced += len(gorse_users)
-                    logger.info(
-                        f"Synced {len(gorse_users)} users (total: {total_synced})"
-                    )
-
-                # Check if we got fewer records than batch size (end of data)
-                if len(users) < self.batch_size:
-                    break
-
-                offset += self.batch_size
+                    offset += self.batch_size
 
             return total_synced
 
@@ -408,58 +425,61 @@ class UnifiedGorseService:
     ) -> int:
         """Sync items from feature tables directly to Gorse API with streaming and parallel processing"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [ProductFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            ProductFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream products in batches to avoid memory issues
-                if since_time:
-                    products = await db.productfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(ProductFeatures)
+                        .where(*where_clauses)
+                        .order_by(ProductFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    products = await db.productfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    products = result.scalars().all()
 
-                if not products:
-                    break
+                    if not products:
+                        break
 
-                # Get product data for this batch only
-                product_ids = [p.productId for p in products]
-                product_data = await db.productdata.find_many(
-                    where={"shopId": shop_id, "productId": {"in": product_ids}}
-                )
-                product_data_map = {p.productId: p for p in product_data}
+                    product_ids = [
+                        p.product_id for p in products if getattr(p, "product_id", None)
+                    ]
+                    if product_ids:
+                        pd_stmt = select(ProductData).where(
+                            ProductData.shop_id == shop_id,
+                            ProductData.product_id.in_(product_ids),
+                        )
+                        pd_res = await session.execute(pd_stmt)
+                        product_data = pd_res.scalars().all()
+                        product_data_map = {
+                            p.product_id: (p.__dict__ if hasattr(p, "__dict__") else p)
+                            for p in product_data
+                        }
+                    else:
+                        product_data_map = {}
 
-                # Process items in parallel batches
-                gorse_items = await self._process_items_batch_parallel(
-                    products, product_data_map, shop_id
-                )
-
-                # Push to Gorse API
-                if gorse_items:
-                    await self.gorse_client.insert_items_batch(gorse_items)
-                    total_synced += len(gorse_items)
-                    logger.info(
-                        f"Synced {len(gorse_items)} items (total: {total_synced})"
+                    gorse_items = await self._process_items_batch_parallel(
+                        products, product_data_map, shop_id
                     )
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(products) < self.batch_size:
-                    break
+                    if gorse_items:
+                        await self.gorse_client.insert_items_batch(gorse_items)
+                        total_synced += len(gorse_items)
+                        logger.info(
+                            f"Synced {len(gorse_items)} items (total: {total_synced})"
+                        )
 
-                offset += self.batch_size
+                    if len(products) < self.batch_size:
+                        break
+
+                    offset += self.batch_size
 
             return total_synced
 
@@ -501,16 +521,15 @@ class UnifiedGorseService:
         """Process a single item (can be run in parallel)"""
         try:
             # Validate product ID
-            if not product.productId or str(product.productId).strip() == "":
+            pid = getattr(product, "product_id", None)
+            if not pid or str(pid).strip() == "":
                 logger.error(
-                    f"Product has empty or None productId: {product.productId} | Product: {product}"
+                    f"Product has empty or None product_id: {pid} | Product: {product}"
                 )
-                raise ValueError(
-                    f"Product has empty or None productId: {product.productId}"
-                )
+                raise ValueError(f"Product has empty or None product_id: {pid}")
 
             # Apply shop prefix for multi-tenancy
-            prefixed_item_id = f"shop_{shop_id}_{product.productId}"
+            prefixed_item_id = f"shop_{shop_id}_{pid}"
 
             # Validate the constructed item ID
             if (
@@ -519,12 +538,12 @@ class UnifiedGorseService:
                 or prefixed_item_id == f"shop_{shop_id}_None"
             ):
                 logger.error(
-                    f"Constructed empty item ID: '{prefixed_item_id}' for product: {product.productId}"
+                    f"Constructed empty item ID: '{prefixed_item_id}' for product: {pid}"
                 )
                 raise ValueError(f"Constructed empty item ID: '{prefixed_item_id}'")
 
             # Get product data
-            product_info = product_data_map.get(product.productId, {})
+            product_info = product_data_map.get(pid, {})
 
             # Transform product features to Gorse labels
             labels = self.transformers.transform_product_features_to_labels(
@@ -532,7 +551,7 @@ class UnifiedGorseService:
             )
 
             # Get categories (this could be cached for better performance)
-            categories = await self._get_product_categories(product.productId, shop_id)
+            categories = await self._get_product_categories(pid, shop_id)
 
             return {
                 "itemId": prefixed_item_id,
@@ -542,7 +561,7 @@ class UnifiedGorseService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to process item {product.productId}: {str(e)}")
+            logger.error(f"Failed to process item {pid}: {str(e)}")
             raise e
 
     async def _sync_feedback_to_gorse(
@@ -550,43 +569,41 @@ class UnifiedGorseService:
     ) -> int:
         """Sync feedback from interaction features (which contain user-item interactions)"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [InteractionFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            InteractionFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream interaction features in batches
-                if since_time:
-                    interactions = await db.interactionfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(InteractionFeatures)
+                        .where(*where_clauses)
+                        .order_by(InteractionFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    interactions = await db.interactionfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    interactions = result.scalars().all()
 
-                if not interactions:
-                    break
+                    if not interactions:
+                        break
 
-                # Convert interaction features to feedback
-                feedback_batch = []
-                for interaction in interactions:
-                    # Create multiple feedback records based on actual interaction counts
-                    # This ensures Gorse gets the full picture of user behavior
+                    # Convert interaction features to feedback
+                    feedback_batch = []
+                    for interaction in interactions:
+                        # Create multiple feedback records based on actual interaction counts
+                        # This ensures Gorse gets the full picture of user behavior
 
-                    # Create view feedback records (one for each view)
-                    # Use slightly different timestamps to avoid Gorse unique constraint issues
-                    base_timestamp = interaction.lastComputedAt
-                    for i in range(interaction.viewCount):
+                        # Create view feedback records (one for each view)
+                        # Use slightly different timestamps to avoid Gorse unique constraint issues
+                        base_timestamp = (
+                            getattr(interaction, "last_computed_at", None) or now_utc()
+                        )
+                    for i in range(getattr(interaction, "view_count", 0)):
                         # Add microsecond offset to make each record truly unique
                         timestamp_offset = timedelta(
                             microseconds=i * 1000
@@ -594,109 +611,112 @@ class UnifiedGorseService:
                         feedback_batch.append(
                             {
                                 "feedbackType": "view",
-                                "userId": f"shop_{shop_id}_{interaction.customerId}",
-                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
                                 "timestamp": (
                                     base_timestamp + timestamp_offset
                                 ).isoformat(),
                             }
                         )
 
-                    # Create cart_add feedback records (one for each cart add)
-                    for i in range(interaction.cartAddCount):
+                        # Create cart_add feedback records (one for each cart add)
+                    for i in range(getattr(interaction, "cart_add_count", 0)):
                         # Add microsecond offset to make each record truly unique
                         timestamp_offset = timedelta(
-                            microseconds=(i + interaction.viewCount) * 1000
+                            microseconds=(i + getattr(interaction, "view_count", 0))
+                            * 1000
                         )
                         feedback_batch.append(
                             {
                                 "feedbackType": "cart_add",
-                                "userId": f"shop_{shop_id}_{interaction.customerId}",
-                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
                                 "timestamp": (
                                     base_timestamp + timestamp_offset
                                 ).isoformat(),
                             }
                         )
 
-                    # Create cart_view feedback records (one for each cart view)
-                    for i in range(interaction.cartViewCount):
+                        # Create cart_view feedback records (one for each cart view)
+                    for i in range(getattr(interaction, "cart_view_count", 0)):
                         timestamp_offset = timedelta(
                             microseconds=(
-                                i + interaction.viewCount + interaction.cartAddCount
+                                i
+                                + getattr(interaction, "view_count", 0)
+                                + getattr(interaction, "cart_add_count", 0)
                             )
                             * 1000
                         )
                         feedback_batch.append(
                             {
                                 "feedbackType": "cart_view",
-                                "userId": f"shop_{shop_id}_{interaction.customerId}",
-                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
                                 "timestamp": (
                                     base_timestamp + timestamp_offset
                                 ).isoformat(),
                             }
                         )
 
-                    # Create cart_remove feedback records (one for each cart remove)
-                    for i in range(interaction.cartRemoveCount):
+                        # Create cart_remove feedback records (one for each cart remove)
+                    for i in range(getattr(interaction, "cart_remove_count", 0)):
                         timestamp_offset = timedelta(
                             microseconds=(
                                 i
-                                + interaction.viewCount
-                                + interaction.cartAddCount
-                                + interaction.cartViewCount
+                                + getattr(interaction, "view_count", 0)
+                                + getattr(interaction, "cart_add_count", 0)
+                                + getattr(interaction, "cart_view_count", 0)
                             )
                             * 1000
                         )
                         feedback_batch.append(
                             {
                                 "feedbackType": "cart_remove",
-                                "userId": f"shop_{shop_id}_{interaction.customerId}",
-                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
                                 "timestamp": (
                                     base_timestamp + timestamp_offset
                                 ).isoformat(),
                             }
                         )
 
-                    # Create purchase feedback records (one for each purchase)
-                    # This is the most important feedback type
-                    for i in range(interaction.purchaseCount):
+                        # Create purchase feedback records (one for each purchase)
+                        # This is the most important feedback type
+                    for i in range(getattr(interaction, "purchase_count", 0)):
                         timestamp_offset = timedelta(
                             microseconds=(
                                 i
-                                + interaction.viewCount
-                                + interaction.cartAddCount
-                                + interaction.cartViewCount
-                                + interaction.cartRemoveCount
+                                + getattr(interaction, "view_count", 0)
+                                + getattr(interaction, "cart_add_count", 0)
+                                + getattr(interaction, "cart_view_count", 0)
+                                + getattr(interaction, "cart_remove_count", 0)
                             )
                             * 1000
                         )
                         feedback_batch.append(
                             {
                                 "feedbackType": "purchase",
-                                "userId": f"shop_{shop_id}_{interaction.customerId}",
-                                "itemId": f"shop_{shop_id}_{interaction.productId}",
+                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
                                 "timestamp": (
                                     base_timestamp + timestamp_offset
                                 ).isoformat(),
                             }
                         )
 
-                # Push feedback to Gorse API
-                if feedback_batch:
-                    logger.info(
-                        f"📊 Creating {len(feedback_batch)} feedback records from {len(interactions)} interactions"
-                    )
-                    await self.gorse_client.insert_feedback_batch(feedback_batch)
-                    total_synced += len(feedback_batch)
+                    # Push feedback to Gorse API
+                    if feedback_batch:
+                        logger.info(
+                            f"📊 Creating {len(feedback_batch)} feedback records from {len(interactions)} interactions"
+                        )
+                        await self.gorse_client.insert_feedback_batch(feedback_batch)
+                        total_synced += len(feedback_batch)
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(interactions) < self.batch_size:
-                    break
+                    # Check if we got fewer records than batch size (end of data)
+                    if len(interactions) < self.batch_size:
+                        break
 
-                offset += self.batch_size
+                    offset += self.batch_size
 
             logger.info(
                 f"Synced {total_synced} feedback records from interaction features"
@@ -712,49 +732,47 @@ class UnifiedGorseService:
     ) -> int:
         """Stream interaction features and convert to feedback"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
 
-            while True:
-                # Stream interaction features in batches
-                if since_time:
-                    interactions = await db.interactionfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [InteractionFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            InteractionFeatures.last_computed_at >= since_time
+                        )
+
+                    stmt = (
+                        select(InteractionFeatures)
+                        .where(*where_clauses)
+                        .order_by(InteractionFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    interactions = await db.interactionfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    result = await session.execute(stmt)
+                    interactions = result.scalars().all()
+
+                    if not interactions:
+                        break
+
+                    # Process interactions in parallel
+                    feedback_batches = await self._process_interactions_batch_parallel(
+                        interactions, shop_id
                     )
 
-                if not interactions:
-                    break
+                    # Push all feedback batches to Gorse API
+                    for feedback_batch in feedback_batches:
+                        if feedback_batch:
+                            await self.gorse_client.insert_feedback_batch(
+                                feedback_batch
+                            )
+                            total_synced += len(feedback_batch)
 
-                # Process interactions in parallel
-                feedback_batches = await self._process_interactions_batch_parallel(
-                    interactions, shop_id
-                )
+                    if len(interactions) < self.batch_size:
+                        break
 
-                # Push all feedback batches to Gorse API
-                for feedback_batch in feedback_batches:
-                    if feedback_batch:
-                        await self.gorse_client.insert_feedback_batch(feedback_batch)
-                        total_synced += len(feedback_batch)
-
-                # Check if we got fewer records than batch size (end of data)
-                if len(interactions) < self.batch_size:
-                    break
-
-                offset += self.batch_size
+                    offset += self.batch_size
 
             return total_synced
 
@@ -769,51 +787,47 @@ class UnifiedGorseService:
     ) -> int:
         """Stream customer behavior features and convert to feedback"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
 
-            while True:
-                # Stream customer behavior features in batches
-                if since_time:
-                    customer_behaviors = await db.customerbehaviorfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [CustomerBehaviorFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            CustomerBehaviorFeatures.last_computed_at >= since_time
+                        )
+
+                    stmt = (
+                        select(CustomerBehaviorFeatures)
+                        .where(*where_clauses)
+                        .order_by(CustomerBehaviorFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    customer_behaviors = await db.customerbehaviorfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    result = await session.execute(stmt)
+                    customer_behaviors = result.scalars().all()
+
+                    if not customer_behaviors:
+                        break
+
+                    feedback_batches = (
+                        await self._process_customer_behaviors_batch_parallel(
+                            customer_behaviors, shop_id
+                        )
                     )
 
-                if not customer_behaviors:
-                    break
+                    for feedback_batch in feedback_batches:
+                        if feedback_batch:
+                            await self.gorse_client.insert_feedback_batch(
+                                feedback_batch
+                            )
+                            total_synced += len(feedback_batch)
 
-                # Process customer behaviors in parallel
-                feedback_batches = (
-                    await self._process_customer_behaviors_batch_parallel(
-                        customer_behaviors, shop_id
-                    )
-                )
+                    if len(customer_behaviors) < self.batch_size:
+                        break
 
-                # Push all feedback batches to Gorse API
-                for feedback_batch in feedback_batches:
-                    if feedback_batch:
-                        await self.gorse_client.insert_feedback_batch(feedback_batch)
-                        total_synced += len(feedback_batch)
-
-                # Check if we got fewer records than batch size (end of data)
-                if len(customer_behaviors) < self.batch_size:
-                    break
-
-                offset += self.batch_size
+                    offset += self.batch_size
 
             return total_synced
 
@@ -828,59 +842,50 @@ class UnifiedGorseService:
     ) -> int:
         """Sync session features to Gorse as user session data"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
-
-            while True:
-                # Stream session features in batches
-                if since_time:
-                    sessions = await db.sessionfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
-                else:
-                    sessions = await db.sessionfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
-
-                if not sessions:
-                    break
-
-                # Convert session features to user session data for Gorse using transformers
-                session_batch = []
-                for session in sessions:
-                    if session.customerId:  # Only process sessions with known customers
-                        # Use transformer to convert session features to Gorse format
-                        session_data = (
-                            self.transformers.transform_session_features_to_gorse(
-                                session, shop_id
-                            )
+            async with get_session_context() as session_ctx:
+                while True:
+                    where_clauses = [SessionFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            SessionFeatures.last_computed_at >= since_time
                         )
-                        if session_data:
-                            session_batch.append(session_data)
 
-                # Push session data to Gorse API (if Gorse supports session data)
-                if session_batch:
-                    # Note: This assumes Gorse has session support, otherwise we can skip
-                    logger.info(
-                        f"Found {len(session_batch)} sessions to sync (session sync not implemented in Gorse yet)"
+                    stmt = (
+                        select(SessionFeatures)
+                        .where(*where_clauses)
+                        .order_by(SessionFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                    total_synced += len(session_batch)
+                    result = await session_ctx.execute(stmt)
+                    sessions = result.scalars().all()
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(sessions) < self.batch_size:
-                    break
+                    if not sessions:
+                        break
 
-                offset += self.batch_size
+                    session_batch = []
+                    for s in sessions:
+                        if getattr(s, "customer_id", None):
+                            session_data = (
+                                self.transformers.transform_session_features_to_gorse(
+                                    s, shop_id
+                                )
+                            )
+                            if session_data:
+                                session_batch.append(session_data)
+
+                    if session_batch:
+                        logger.info(
+                            f"Found {len(session_batch)} sessions to sync (session sync not implemented in Gorse yet)"
+                        )
+                        total_synced += len(session_batch)
+
+                    if len(sessions) < self.batch_size:
+                        break
+
+                    offset += self.batch_size
 
             logger.info(
                 f"Processed {total_synced} session features (session sync not implemented in Gorse yet)"
@@ -898,55 +903,45 @@ class UnifiedGorseService:
     ) -> int:
         """Sync product pair features to Gorse as item-to-item relationships"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [ProductPairFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            ProductPairFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream product pair features in batches
-                if since_time:
-                    product_pairs = await db.productpairfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(ProductPairFeatures)
+                        .where(*where_clauses)
+                        .order_by(ProductPairFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    product_pairs = await db.productpairfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    product_pairs = result.scalars().all()
 
-                if not product_pairs:
-                    break
+                    if not product_pairs:
+                        break
 
-                # Convert product pair features to item-to-item feedback using transformers
-                feedback_batch = []
-                for pair in product_pairs:
-                    # Use transformer to convert product pair features to Gorse feedback
-                    pair_feedback = (
-                        self.transformers.transform_product_pair_features_to_feedback(
+                    feedback_batch = []
+                    for pair in product_pairs:
+                        pair_feedback = self.transformers.transform_product_pair_features_to_feedback(
                             pair, shop_id
                         )
-                    )
-                    if pair_feedback:
-                        feedback_batch.extend(pair_feedback)
+                        if pair_feedback:
+                            feedback_batch.extend(pair_feedback)
 
-                # Push feedback to Gorse API
-                if feedback_batch:
-                    await self.gorse_client.insert_feedback_batch(feedback_batch)
-                    total_synced += len(feedback_batch)
+                    if feedback_batch:
+                        await self.gorse_client.insert_feedback_batch(feedback_batch)
+                        total_synced += len(feedback_batch)
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(product_pairs) < self.batch_size:
-                    break
+                    if len(product_pairs) < self.batch_size:
+                        break
 
-                offset += self.batch_size
+                    offset += self.batch_size
 
             logger.info(f"Synced {total_synced} product pair relationships to Gorse")
             return total_synced
@@ -962,55 +957,45 @@ class UnifiedGorseService:
     ) -> int:
         """Sync search product features to Gorse as search-based feedback"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [SearchProductFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            SearchProductFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream search product features in batches
-                if since_time:
-                    search_products = await db.searchproductfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(SearchProductFeatures)
+                        .where(*where_clauses)
+                        .order_by(SearchProductFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    search_products = await db.searchproductfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    search_products = result.scalars().all()
 
-                if not search_products:
-                    break
+                    if not search_products:
+                        break
 
-                # Convert search product features to search-based feedback using transformers
-                feedback_batch = []
-                for search_product in search_products:
-                    # Use transformer to convert search product features to Gorse feedback
-                    search_feedback = (
-                        self.transformers.transform_search_product_features_to_feedback(
+                    feedback_batch = []
+                    for search_product in search_products:
+                        search_feedback = self.transformers.transform_search_product_features_to_feedback(
                             search_product, shop_id
                         )
-                    )
-                    if search_feedback:
-                        feedback_batch.append(search_feedback)
+                        if search_feedback:
+                            feedback_batch.append(search_feedback)
 
-                # Push feedback to Gorse API
-                if feedback_batch:
-                    await self.gorse_client.insert_feedback_batch(feedback_batch)
-                    total_synced += len(feedback_batch)
+                    if feedback_batch:
+                        await self.gorse_client.insert_feedback_batch(feedback_batch)
+                        total_synced += len(feedback_batch)
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(search_products) < self.batch_size:
-                    break
+                    if len(search_products) < self.batch_size:
+                        break
 
-                offset += self.batch_size
+                    offset += self.batch_size
 
             logger.info(f"Synced {total_synced} search-product correlations to Gorse")
             return total_synced
@@ -1026,55 +1011,47 @@ class UnifiedGorseService:
     ) -> int:
         """Sync collection features to Gorse as collection-based items"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
-
-            while True:
-                # Stream collection features in batches
-                if since_time:
-                    collections = await db.collectionfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
-                else:
-                    collections = await db.collectionfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
-
-                if not collections:
-                    break
-
-                # Convert collection features to Gorse items using transformers
-                items_batch = []
-                for collection in collections:
-                    # Use transformer to convert collection features to Gorse item
-                    collection_item = (
-                        self.transformers.transform_collection_features_to_item(
-                            collection, shop_id
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [CollectionFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            CollectionFeatures.last_computed_at >= since_time
                         )
+
+                    stmt = (
+                        select(CollectionFeatures)
+                        .where(*where_clauses)
+                        .order_by(CollectionFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                    if collection_item:
-                        items_batch.append(collection_item)
+                    result = await session.execute(stmt)
+                    collections = result.scalars().all()
 
-                # Push items to Gorse API
-                if items_batch:
-                    await self.gorse_client.insert_items_batch(items_batch)
-                    total_synced += len(items_batch)
+                    if not collections:
+                        break
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(collections) < self.batch_size:
-                    break
+                    items_batch = []
+                    for collection in collections:
+                        collection_item = (
+                            self.transformers.transform_collection_features_to_item(
+                                collection, shop_id
+                            )
+                        )
+                        if collection_item:
+                            items_batch.append(collection_item)
 
-                offset += self.batch_size
+                    if items_batch:
+                        await self.gorse_client.insert_items_batch(items_batch)
+                        total_synced += len(items_batch)
+
+                    if len(collections) < self.batch_size:
+                        break
+
+                    offset += self.batch_size
 
             logger.info(f"Synced {total_synced} collection features to Gorse")
             return total_synced
@@ -1090,55 +1067,45 @@ class UnifiedGorseService:
     ) -> int:
         """Sync customer behavior features to Gorse as enhanced user features"""
         try:
-            db = await self._get_database()
             total_synced = 0
             offset = 0
+            async with get_session_context() as session:
+                while True:
+                    where_clauses = [CustomerBehaviorFeatures.shop_id == shop_id]
+                    if since_time is not None:
+                        where_clauses.append(
+                            CustomerBehaviorFeatures.last_computed_at >= since_time
+                        )
 
-            while True:
-                # Stream customer behavior features in batches
-                if since_time:
-                    behaviors = await db.customerbehaviorfeatures.find_many(
-                        where={
-                            "shopId": shop_id,
-                            "lastComputedAt": {"gte": since_time},
-                        },
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
+                    stmt = (
+                        select(CustomerBehaviorFeatures)
+                        .where(*where_clauses)
+                        .order_by(CustomerBehaviorFeatures.last_computed_at.asc())
+                        .offset(offset)
+                        .limit(self.batch_size)
                     )
-                else:
-                    behaviors = await db.customerbehaviorfeatures.find_many(
-                        where={"shopId": shop_id},
-                        skip=offset,
-                        take=self.batch_size,
-                        order={"lastComputedAt": "asc"},
-                    )
+                    result = await session.execute(stmt)
+                    behaviors = result.scalars().all()
 
-                if not behaviors:
-                    break
+                    if not behaviors:
+                        break
 
-                # Convert customer behavior features to enhanced user features using transformers
-                users_batch = []
-                for behavior in behaviors:
-                    # Use transformer to convert behavior features to enhanced user features
-                    enhanced_user = (
-                        self.transformers.transform_customer_behavior_to_user_features(
+                    users_batch = []
+                    for behavior in behaviors:
+                        enhanced_user = self.transformers.transform_customer_behavior_to_user_features(
                             behavior, shop_id
                         )
-                    )
-                    if enhanced_user:
-                        users_batch.append(enhanced_user)
+                        if enhanced_user:
+                            users_batch.append(enhanced_user)
 
-                # Push enhanced users to Gorse API
-                if users_batch:
-                    await self.gorse_client.insert_users_batch(users_batch)
-                    total_synced += len(users_batch)
+                    if users_batch:
+                        await self.gorse_client.insert_users_batch(users_batch)
+                        total_synced += len(users_batch)
 
-                # Check if we got fewer records than batch size (end of data)
-                if len(behaviors) < self.batch_size:
-                    break
+                    if len(behaviors) < self.batch_size:
+                        break
 
-                offset += self.batch_size
+                    offset += self.batch_size
 
             logger.info(f"Synced {total_synced} customer behavior features to Gorse")
             return total_synced
@@ -1238,13 +1205,6 @@ class UnifiedGorseService:
     async def _get_product_categories(self, product_id: str, shop_id: str) -> List[str]:
         """Get categories for a product"""
         try:
-            db = await self._get_database()
-
-            # Get collection features for this product
-            collection_features = await db.collectionfeatures.find_many(
-                where={"shopId": shop_id}
-            )
-
             # For now, return a simple category based on product type
             # This can be enhanced to use actual collection data
             return [f"shop_{shop_id}", "Products"]
@@ -1257,15 +1217,21 @@ class UnifiedGorseService:
         """Determine if product should be hidden in Gorse"""
         # Simple logic - can be enhanced
         try:
-            # Handle both Prisma models and dictionaries
-            if hasattr(product, "viewCount30d"):
-                view_count = product.viewCount30d
-                purchase_count = product.purchaseCount30d
-                conversion_rate = product.overallConversionRate
+            # Handle SQLAlchemy models (snake_case) and dicts (snake_case or camelCase)
+            if hasattr(product, "view_count_30d"):
+                view_count = getattr(product, "view_count_30d", 0)
+                purchase_count = getattr(product, "purchase_count_30d", 0)
+                conversion_rate = getattr(product, "overall_conversion_rate", 0)
             else:
-                view_count = product.get("viewCount30d", 0)
-                purchase_count = product.get("purchaseCount30d", 0)
-                conversion_rate = product.get("overallConversionRate", 0)
+                view_count = product.get(
+                    "view_count_30d", product.get("viewCount30d", 0)
+                )
+                purchase_count = product.get(
+                    "purchase_count_30d", product.get("purchaseCount30d", 0)
+                )
+                conversion_rate = product.get(
+                    "overall_conversion_rate", product.get("overallConversionRate", 0)
+                )
 
             return view_count == 0 and purchase_count == 0 and conversion_rate == 0
         except Exception as e:

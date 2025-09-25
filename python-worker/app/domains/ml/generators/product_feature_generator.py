@@ -931,8 +931,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute product lifecycle features using previously unused fields"""
         try:
-            created_at = product_data.get("productCreatedAt")
-            updated_at = product_data.get("productUpdatedAt")
+            created_at = product_data.get("created_at")
+            updated_at = product_data.get("updated_at")
 
             product_age = 0
             last_updated_days = 0
@@ -978,7 +978,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute category features using previously unused fields"""
         try:
-            product_type = product_data.get("productType", "")
+            product_type = product_data.get("product_type", "")
 
             # Category complexity score based on product type
             category_complexity = 0
@@ -1024,7 +1024,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         """Compute availability features using previously unused fields"""
         try:
             status = product_data.get("status", "")
-            is_active = product_data.get("isActive", True)
+            is_active = product_data.get("is_active", True)
 
             # Availability score (0-100)
             availability_score = 0

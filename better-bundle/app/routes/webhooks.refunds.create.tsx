@@ -32,8 +32,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No refund ID or order ID found" }, { status: 400 });
     }
 
-    const shopRecord = await prisma.shop.findFirst({
-      where: { shopDomain: shop },
+    const shopRecord = await prisma.shops.findFirst({
+      where: { shop_domain: shop },
       select: { id: true },
     });
 

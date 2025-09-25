@@ -52,6 +52,9 @@ class DatabaseSettings(BaseSettings):
         default="postgresql+asyncpg://postgres:postgres@localhost:5433/betterbundle",
         env="DATABASE_URL",
     )
+    # Control SQLAlchemy logging of SQL and pool events
+    SQLALCHEMY_ECHO: bool = Field(default=False, env="SQLALCHEMY_ECHO")
+    SQLALCHEMY_ECHO_POOL: bool = Field(default=False, env="SQLALCHEMY_ECHO_POOL")
 
     @validator("DATABASE_URL")
     def validate_database_url(cls, v):

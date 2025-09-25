@@ -876,7 +876,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             import asyncio
 
             await asyncio.sleep(0.1)  # 100ms delay to ensure DB commit
-            # await self._trigger_gorse_sync(shop_id, save_results)
+            await self._trigger_gorse_sync(shop_id, save_results)
 
             # Check if all feature types succeeded for logging purposes
             all_features_succeeded = True
@@ -1249,7 +1249,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Sort all events by timestamp for time-based correlation
             all_events = search_events + product_view_events
-            all_events.sort(key=lambda x: x.get("createdAt", ""))
+            all_events.sort(key=lambda x: x.get("created_at", ""))
 
             # Find search events followed by product views within 24 hours
             for i, event in enumerate(all_events):
@@ -1262,16 +1262,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     adapter_factory = InteractionEventAdapterFactory()
                     search_query = adapter_factory.extract_search_query(event)
                     if search_query:
-                        search_time = event.get("createdAt")
-                        search_customer = event.get("customerId") or "anonymous"
+                        search_time = event.get("created_at")
+                        search_customer = event.get("customer_id") or "anonymous"
 
                         # Look for product views within 24 hours after search
                         for j in range(i + 1, len(all_events)):
                             later_event = all_events[j]
                             if later_event.get("interactionType") == "product_viewed":
-                                later_time = later_event.get("createdAt")
+                                later_time = later_event.get("created_at")
                                 later_customer = (
-                                    later_event.get("customerId") or "anonymous"
+                                    later_event.get("customer_id") or "anonymous"
                                 )
 
                                 # Check time difference (within 24 hours)
@@ -1659,7 +1659,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     session_interactions = [
                         interaction
                         for interaction in user_interactions or []
-                        if interaction.get("sessionId") == session_id
+                        if interaction.get("session_id") == session_id
                     ]
 
                     # Build session context
@@ -1687,7 +1687,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 # Group interactions by sessionId
                 session_groups = {}
                 for interaction in user_interactions:
-                    session_id = interaction.get("sessionId")
+                    session_id = interaction.get("session_id")
                     if session_id:
                         if session_id not in session_groups:
                             session_groups[session_id] = []
@@ -1698,16 +1698,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     # Create a minimal session object from the interactions
                     session_data = {
                         "id": session_id,
-                        "sessionId": session_id,
-                        "customerId": (
-                            session_interactions[0].get("customerId")
+                        "session_id": session_id,
+                        "customer_id": (
+                            session_interactions[0].get("customer_id")
                             if session_interactions
                             else None
                         ),
-                        "shopId": shop.get("id") if shop else None,
-                        "createdAt": (
+                        "shop_id": shop.get("id") if shop else None,
+                        "created_at": (
                             min(
-                                interaction.get("createdAt", "")
+                                interaction.get("created_at", "")
                                 for interaction in session_interactions
                             )
                             if session_interactions

@@ -32,8 +32,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get shop ID from database
-    const shopRecord = await prisma.shop.findFirst({
-      where: { shopDomain: shop },
+    const shopRecord = await prisma.shops.findFirst({
+      where: { shop_domain: shop },
       select: { id: true },
     });
 

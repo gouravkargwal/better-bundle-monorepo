@@ -34,19 +34,19 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     // Update billing plan with subscription status
-    const billingPlan = await prisma.billingPlan.findFirst({
+    const billingPlan = await prisma.billing_plans.findFirst({
       where: {
-        shopId: shop,
+        shop_id: shop,
         status: "active",
       },
     });
 
     if (billingPlan) {
       // Update billing plan with subscription status
-      await prisma.billingPlan.update({
+      await prisma.billing_plans.update({
         where: { id: billingPlan.id },
         data: {
-          configuration: {
+          billing_metadata: {
             ...billingPlan.configuration,
             subscription_id: subscriptionData.id,
             subscription_status: subscriptionData.status,
@@ -63,9 +63,9 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Create billing event
-    await prisma.billingEvent.create({
+    await prisma.billing_events.create({
       data: {
-        shopId: shop,
+        shop_id: shop,
         type: "subscription_updated",
         data: {
           subscription_id: subscriptionData.id,
@@ -73,7 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
           status: subscriptionData.status,
           updated_at: new Date().toISOString(),
         },
-        metadata: {
+        billing_metadata: {
           webhook_topic: topic,
           shopify_subscription_id: subscriptionData.id,
         },

@@ -33,27 +33,26 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     // Update billing invoice status
-    const invoice = await prisma.billingInvoice.findFirst({
+    const invoice = await prisma.billing_invoices.findFirst({
       where: {
-        shopId: shop,
+        shop_id: shop,
         status: "pending",
-        // Match by amount and currency
         amount: parseFloat(chargeData.price),
         currency: chargeData.currency,
       },
       orderBy: {
-        createdAt: "desc",
+        created_at: "desc",
       },
     });
 
     if (invoice) {
       // Update invoice with failed status
-      await prisma.billingInvoice.update({
+      await prisma.billing_invoices.update({
         where: { id: invoice.id },
         data: {
           status: "failed",
-          paymentReference: chargeData.id.toString(),
-          metadata: {
+          payment_reference: chargeData.id.toString(),
+          billing_metadata: {
             ...invoice.metadata,
             shopify_charge_id: chargeData.id,
             shopify_charge_status: chargeData.status,
@@ -73,9 +72,9 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Create billing event
-    await prisma.billingEvent.create({
+    await prisma.billing_events.create({
       data: {
-        shopId: shop,
+        shop_id: shop,
         type: "charge_failed",
         data: {
           charge_id: chargeData.id,
@@ -85,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
           name: chargeData.name,
           failure_reason: "Payment failed",
         },
-        metadata: {
+        billing_metadata: {
           webhook_topic: topic,
           shopify_charge_id: chargeData.id,
         },

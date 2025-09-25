@@ -82,7 +82,7 @@ class BillingInvoice(BaseModel, ShopMixin):
     paid_at = Column(DateTime, nullable=True, index=True)
     payment_method = Column(String(50), nullable=True)
     payment_reference = Column(String(255), nullable=True)
-
+    billing_metadata = Column(JSON, default={}, nullable=False)
     # Relationships
     plan = relationship("BillingPlan", back_populates="invoices")
 
