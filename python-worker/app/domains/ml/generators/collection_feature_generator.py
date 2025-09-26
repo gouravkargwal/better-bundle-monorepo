@@ -39,7 +39,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         """
         try:
             logger.debug(
-                f"Computing features for collection: {collection.get('collectionId', 'unknown')}"
+                f"Computing features for collection: {collection.get('collection_id', 'unknown')}"
             )
 
             features = {}
@@ -104,13 +104,13 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             features["last_computed_at"] = now_utc()
 
             logger.debug(
-                f"Computed {len(features)} features for collection: {collection.get('collectionId', 'unknown')}"
+                f"Computed {len(features)} features for collection: {collection.get('collection_id', 'unknown')}"
             )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute collection features for {collection.get('collectionId', 'unknown')}: {str(e)}"
+                f"Failed to compute collection features for {collection.get('collection_id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -120,16 +120,16 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         """Compute basic collection features"""
         return {
             "shop_id": shop.get("id", "") if shop else "",
-            "collection_id": collection.get("collectionId", ""),
-            "product_count": collection.get("productCount", 0),
-            "is_automated": bool(collection.get("isAutomated", False)),
+            "collection_id": collection.get("collection_id", ""),
+            "product_count": collection.get("product_count", 0),
+            "is_automated": bool(collection.get("is_automated", False)),
         }
 
     def _compute_engagement_metrics(
         self, collection: Dict[str, Any], behavioral_events: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute engagement metrics from behavioral events (30-day window)"""
-        collection_id = collection.get("collectionId", "")
+        collection_id = collection.get("collection_id", "")
         thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
         # Filter events for this collection in last 30 days
@@ -143,11 +143,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
             if event_time >= thirty_days_ago:
                 # Check if event is related to this collection
-                event_data = event.get("eventData", {})
+                event_data = event.get("event_data", {})
                 if event_data.get(
-                    "collectionId"
+                    "collection_id"
                 ) == collection_id or collection_id in event_data.get(
-                    "collectionIds", []
+                    "collection_ids", []
                 ):
                     collection_events.append(event)
 
@@ -257,7 +257,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         products: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compute performance metrics from order data"""
-        collection_id = collection.get("collectionId", "")
+        collection_id = collection.get("collection_id", "")
         products = products or []
 
         # Get product IDs directly from collection data (normalized structure)

@@ -49,7 +49,7 @@ class GraphQLProductAdapter(BaseAdapter):
         raw_tags = payload.get("tags") or []
         tags: List[str] = list(raw_tags) if isinstance(raw_tags, list) else []
 
-        # Variants via edges
+        # Variants via edges - now using snake_case field names from paginated data
         variants: List[CanonicalVariant] = []
         for edge in (payload.get("variants", {}) or {}).get("edges", []) or []:
             node = edge.get("node", {})
@@ -58,19 +58,23 @@ class GraphQLProductAdapter(BaseAdapter):
                     variant_id=_extract_numeric_gid(node.get("id")),
                     title=node.get("title"),
                     price=_to_float(node.get("price")),
-                    compare_at_price=_to_float(node.get("compareAtPrice")),
+                    compare_at_price=_to_float(
+                        node.get("compare_at_price")
+                    ),  # Updated to snake_case
                     sku=node.get("sku"),
                     barcode=node.get("barcode"),
                     inventory=(
-                        int(node.get("inventoryQuantity") or 0)
-                        if node.get("inventoryQuantity") is not None
+                        int(
+                            node.get("inventory_quantity") or 0
+                        )  # Updated to snake_case
+                        if node.get("inventory_quantity") is not None
                         else None
                     ),
                 )
             )
 
-        # Derive key product fields
-        total_inventory = payload.get("totalInventory")
+        # Derive key product fields - now using snake_case field names
+        total_inventory = payload.get("total_inventory")  # Updated to snake_case
         if total_inventory is None and variants:
             total_inventory = sum([vi.inventory or 0 for vi in variants])
 
@@ -80,7 +84,7 @@ class GraphQLProductAdapter(BaseAdapter):
         # Note: Derived metrics (variant_count, image_count, tag_count, price_range, collections)
         # are computed in feature engineering, not during normalization
 
-        # Images/media/options via edges → arrays of nodes with extracted IDs
+        # Images/media/options via edges → arrays of nodes with extracted IDs and snake_case fields
         def _edges_to_nodes_with_extracted_ids(
             container: Optional[Dict[str, Any]],
         ) -> List[Dict[str, Any]]:
@@ -92,11 +96,17 @@ class GraphQLProductAdapter(BaseAdapter):
                 # Extract numeric ID from GraphQL ID
                 if "id" in node:
                     node["id"] = _extract_numeric_gid(node["id"])
+                # Convert altText to alt_text for images
+                if "altText" in node:
+                    node["alt_text"] = node.pop("altText")
                 nodes.append(node)
             return nodes
 
         images = _edges_to_nodes_with_extracted_ids(payload.get("images"))
         media = _edges_to_nodes_with_extracted_ids(payload.get("media"))
+
+        # Process metafields - now using snake_case field names from paginated data
+        metafields = _edges_to_nodes_with_extracted_ids(payload.get("metafields"))
 
         # Extract IDs from options array
         options = []
@@ -110,9 +120,11 @@ class GraphQLProductAdapter(BaseAdapter):
         seo_title = seo.get("title")
         seo_description = seo.get("description")
 
-        # Canonical internal timestamps (required)
-        created_at = _parse_iso(payload.get("createdAt"))
-        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
+        # Canonical internal timestamps (required) - now using snake_case field names
+        created_at = _parse_iso(payload.get("created_at"))  # Updated to snake_case
+        updated_at = (
+            _parse_iso(payload.get("updated_at")) or created_at
+        )  # Updated to snake_case
 
         model = CanonicalProduct(
             shop_id=shop_id,
@@ -123,7 +135,7 @@ class GraphQLProductAdapter(BaseAdapter):
             handle=payload.get("handle") or "untitled-product",
             description=payload.get("description"),
             vendor=payload.get("vendor"),
-            product_type=payload.get("productType"),
+            product_type=payload.get("product_type"),  # Updated to snake_case
             status=payload.get("status"),
             tags=tags,
             price=price,
@@ -134,9 +146,10 @@ class GraphQLProductAdapter(BaseAdapter):
             images=images,
             media=media,
             options=options,
+            metafields=metafields,  # Added metafields processing
             seo_title=seo_title,
             seo_description=seo_description,
-            template_suffix=payload.get("templateSuffix"),
+            template_suffix=payload.get("template_suffix"),  # Updated to snake_case
             # Derived metrics are computed in feature engineering, not normalization
             extras={},
         )

@@ -66,15 +66,15 @@ class GraphQLCollectionAdapter(BaseAdapter):
             if not product_id:
                 continue
 
-            # Normalize product data
+            # Normalize product data - now using snake_case field names from paginated data
             normalized_product = {
                 "id": product_id,
                 "title": node.get("title", ""),
                 "handle": node.get("handle", ""),
-                "product_type": node.get("productType", ""),
+                "product_type": node.get("product_type", ""),  # Updated to snake_case
                 "vendor": node.get("vendor", ""),
                 "tags": node.get("tags", []),
-                "price_range": node.get("priceRangeV2", {}),
+                "price_range": node.get("price_range", {}),  # Updated to snake_case
             }
 
             normalized_products.append(normalized_product)
@@ -95,11 +95,13 @@ class GraphQLCollectionAdapter(BaseAdapter):
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         collectionId = _extract_numeric_gid(payload.get("id")) or ""
         created_at = (
-            _parse_iso(payload.get("createdAt"))
-            or _parse_iso(payload.get("updatedAt"))
+            _parse_iso(payload.get("created_at"))  # Updated to snake_case
+            or _parse_iso(payload.get("updated_at"))  # Updated to snake_case
             or datetime.utcnow()
         )
-        updated_at = _parse_iso(payload.get("updatedAt")) or created_at
+        updated_at = (
+            _parse_iso(payload.get("updated_at")) or created_at
+        )  # Updated to snake_case
 
         model = CanonicalCollection(
             shop_id=shop_id,
@@ -107,9 +109,10 @@ class GraphQLCollectionAdapter(BaseAdapter):
             title=payload.get("title") or "Untitled Collection",
             handle=payload.get("handle") or "untitled-collection",
             description=payload.get("description")
-            or payload.get("descriptionHtml")
+            or payload.get("description_html")  # Updated to snake_case
             or "",
-            template_suffix=payload.get("templateSuffix") or "",
+            template_suffix=payload.get("template_suffix")
+            or "",  # Updated to snake_case
             seo_title=(payload.get("seo", {}) or {}).get("title"),
             seo_description=(payload.get("seo", {}) or {}).get("description"),
             image_url=(
@@ -118,7 +121,7 @@ class GraphQLCollectionAdapter(BaseAdapter):
                 else None
             ),
             image_alt=(
-                (payload.get("image") or {}).get("altText")
+                (payload.get("image") or {}).get("alt_text")  # Updated to snake_case
                 if isinstance(payload.get("image"), dict)
                 else None
             ),

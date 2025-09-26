@@ -49,6 +49,9 @@ class ProductData(BaseModel, ShopMixin):
     images = Column(JSON, default=[], nullable=True)
     media = Column(JSON, default=[], nullable=True)
     options = Column(JSON, default=[], nullable=True)
+    metafields = Column(
+        JSON, default=[], nullable=True
+    )  # Store complete metafield data
 
     # Note: Derived metrics (variant_count, image_count, tag_count) are computed
     # in feature engineering, not stored in database

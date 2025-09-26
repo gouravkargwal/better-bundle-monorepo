@@ -29,9 +29,11 @@ def _to_float(value: Any) -> float:
 
 
 def _money_from_set(node: Dict[str, Any]) -> float:
-    # Expect shape: { shopMoney: { amount: ".." } }
+    # Expect shape: { shop_money: { amount: ".." } } - now using snake_case
     try:
-        return _to_float(node.get("shopMoney", {}).get("amount"))
+        return _to_float(
+            node.get("shop_money", {}).get("amount")
+        )  # Updated to snake_case
     except Exception:
         return 0.0
 
@@ -56,13 +58,36 @@ class GraphQLOrderAdapter(BaseAdapter):
         )
         customer_id = _extract_numeric_gid(customer_gid)
 
-        # Line items (edges → nodes)
+        # Line items (edges → nodes) - now using snake_case field names from paginated data
         line_items: List[CanonicalLineItem] = []
-        li_edges = (payload.get("lineItems", {}) or {}).get("edges", []) or []
+        li_edges = (payload.get("line_items", {}) or {}).get(
+            "edges", []
+        ) or []  # Updated to snake_case
         for edge in li_edges:
             node = edge.get("node", {})
             variant = node.get("variant", {}) or {}
             product = variant.get("product", {}) or {}
+
+            # Extract price information from price sets
+            original_unit_price = None
+            discounted_unit_price = None
+            currency_code = None
+
+            # Extract from originalUnitPriceSet
+            original_price_set = node.get("original_unit_price_set", {})
+            if original_price_set:
+                shop_money = original_price_set.get("shop_money", {})
+                original_unit_price = _to_float(shop_money.get("amount"))
+                currency_code = shop_money.get("currency_code")
+
+            # Extract from discountedUnitPriceSet
+            discounted_price_set = node.get("discounted_unit_price_set", {})
+            if discounted_price_set:
+                shop_money = discounted_price_set.get("shop_money", {})
+                discounted_unit_price = _to_float(shop_money.get("amount"))
+                if not currency_code:
+                    currency_code = shop_money.get("currency_code")
+
             # Map customAttributes (array of {key, value}) into a dict for properties
             custom_attrs = node.get("customAttributes") or []
             props_dict: Dict[str, Any] = {}
@@ -83,6 +108,7 @@ class GraphQLOrderAdapter(BaseAdapter):
                             props_dict[str(k)] = v
             except Exception:
                 props_dict = {}
+
             line_items.append(
                 CanonicalLineItem(
                     productId=_extract_numeric_gid(product.get("id")),
@@ -90,22 +116,32 @@ class GraphQLOrderAdapter(BaseAdapter):
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
                     price=_to_float(variant.get("price")),
+                    original_unit_price=original_unit_price,
+                    discounted_unit_price=discounted_unit_price,
+                    currency_code=currency_code,
+                    variant_data=variant,  # Store complete variant information
                     properties=props_dict,
                 )
             )
 
-        # Totals from *Set nodes
-        total_amount = _money_from_set(payload.get("totalPriceSet", {}) or {})
-        subtotal_amount = _money_from_set(payload.get("subtotalPriceSet", {}) or {})
-        total_tax_amount = _money_from_set(payload.get("totalTaxSet", {}) or {})
+        # Totals from *Set nodes - now using snake_case field names
+        total_amount = _money_from_set(
+            payload.get("total_price_set", {}) or {}
+        )  # Updated to snake_case
+        subtotal_amount = _money_from_set(
+            payload.get("subtotal_price_set", {}) or {}
+        )  # Updated to snake_case
+        total_tax_amount = _money_from_set(
+            payload.get("total_tax_set", {}) or {}
+        )  # Updated to snake_case
         total_shipping_amount = _money_from_set(
-            payload.get("totalShippingPriceSet", {}) or {}
+            payload.get("total_shipping_price_set", {}) or {}  # Updated to snake_case
         )
         total_refunded_amount = _money_from_set(
-            payload.get("totalRefundedSet", {}) or {}
+            payload.get("total_refunded_set", {}) or {}  # Updated to snake_case
         )
         total_outstanding_amount = _money_from_set(
-            payload.get("totalOutstandingSet", {}) or {}
+            payload.get("total_outstanding_set", {}) or {}  # Updated to snake_case
         )
 
         # Tags can be array in GQL
@@ -113,11 +149,13 @@ class GraphQLOrderAdapter(BaseAdapter):
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-        # Compute canonical timestamps
-        created_at = _parse_iso(payload.get("createdAt")) or datetime.utcnow()
+        # Compute canonical timestamps - now using snake_case field names
+        created_at = (
+            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+        )  # Updated to snake_case
         updated_at = (
-            _parse_iso(payload.get("updatedAt"))
-            or _parse_iso(payload.get("createdAt"))
+            _parse_iso(payload.get("updated_at"))  # Updated to snake_case
+            or _parse_iso(payload.get("created_at"))  # Updated to snake_case
             or created_at
         )
 
@@ -126,24 +164,33 @@ class GraphQLOrderAdapter(BaseAdapter):
             order_id=entity_id,
             created_at=created_at,
             updated_at=updated_at,
-            currency_code=payload.get("currencyCode"),
-            presentment_currency_code=payload.get("presentmentCurrencyCode"),
+            currency_code=payload.get("currency_code"),  # Updated to snake_case
+            presentment_currency_code=payload.get(
+                "presentment_currency_code"
+            ),  # Updated to snake_case
             total_amount=total_amount,
             subtotal_amount=subtotal_amount,
             total_tax_amount=total_tax_amount,
             total_shipping_amount=total_shipping_amount,
             total_refunded_amount=total_refunded_amount,
             total_outstanding_amount=total_outstanding_amount,
-            order_date=_parse_iso(payload.get("createdAt")) or created_at,
-            processed_at=_parse_iso(payload.get("processedAt")),
-            cancelled_at=_parse_iso(payload.get("cancelledAt")),
+            order_date=_parse_iso(payload.get("created_at"))
+            or created_at,  # Updated to snake_case
+            processed_at=_parse_iso(
+                payload.get("processed_at")
+            ),  # Updated to snake_case
+            cancelled_at=_parse_iso(
+                payload.get("cancelled_at")
+            ),  # Updated to snake_case
             confirmed=payload.get("confirmed", False),
             test=payload.get("test", False),
             order_name=payload.get("name"),
             note=payload.get("note"),
             customer_email=payload.get("email"),
             customer_phone=payload.get("phone"),
-            customer_display_name=(payload.get("customer") or {}).get("displayName"),
+            customer_display_name=(payload.get("customer") or {}).get(
+                "display_name"
+            ),  # Updated to snake_case
             financial_status=payload.get("financialStatus") or None,
             fulfillment_status=payload.get("fulfillmentStatus") or None,
             customer_id=customer_id,
@@ -151,9 +198,11 @@ class GraphQLOrderAdapter(BaseAdapter):
             note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
             lineItems=line_items,
-            billing_address=payload.get("billingAddress"),
-            shipping_address=payload.get("shippingAddress"),
-            discount_applications=(payload.get("discountApplications", {}) or {}).get(
+            billing_address=payload.get("billing_address"),  # Updated to snake_case
+            shipping_address=payload.get("shipping_address"),  # Updated to snake_case
+            discount_applications=(
+                payload.get("discount_applications", {}) or {}
+            ).get(  # Updated to snake_case
                 "edges", []
             ),
             metafields=(payload.get("metafields", {}) or {}).get("edges", []),

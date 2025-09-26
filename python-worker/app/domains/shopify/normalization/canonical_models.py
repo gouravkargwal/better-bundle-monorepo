@@ -6,12 +6,68 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 
+class CanonicalVariantData(BaseModel):
+    """Canonical variant data model - stores complete variant information from paginated products"""
+
+    variant_id: Optional[str] = None
+    title: Optional[str] = None
+    price: Optional[float] = None
+    compare_at_price: Optional[float] = None
+    inventory_quantity: Optional[int] = None
+    sku: Optional[str] = None
+    barcode: Optional[str] = None
+    taxable: Optional[bool] = None
+    inventory_policy: Optional[str] = None
+    position: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    selected_options: Any = Field(default_factory=list)  # selectedOptions (JSON)
+
+
+class CanonicalImageData(BaseModel):
+    """Canonical image data model - stores complete image information from paginated products"""
+
+    image_id: Optional[str] = None
+    url: Optional[str] = None
+    alt_text: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class CanonicalMetafieldData(BaseModel):
+    """Canonical metafield data model - stores complete metafield information from paginated data"""
+
+    metafield_id: Optional[str] = None
+    namespace: Optional[str] = None
+    key: Optional[str] = None
+    value: Optional[str] = None
+    type: Optional[str] = None
+
+
+class CanonicalProductInCollection(BaseModel):
+    """Canonical product in collection model - stores product data within collections"""
+
+    product_id: Optional[str] = None
+    title: Optional[str] = None
+    handle: Optional[str] = None
+    product_type: Optional[str] = None
+    vendor: Optional[str] = None
+    tags: Any = Field(default_factory=list)
+    price_range: Any = Field(default_factory=dict)  # priceRangeV2 data
+
+
 class CanonicalLineItem(BaseModel):
+    """Canonical line item model - stores complete line item data from paginated orders"""
+
     productId: Optional[str] = None
     variantId: Optional[str] = None
     title: Optional[str] = None
     quantity: int = 0
     price: float = 0.0
+    original_unit_price: Optional[float] = None  # From originalUnitPriceSet
+    discounted_unit_price: Optional[float] = None  # From discountedUnitPriceSet
+    currency_code: Optional[str] = None  # From price sets
+    variant_data: Any = Field(default_factory=dict)  # Complete variant information
     properties: Any = Field(default_factory=dict)
 
 
@@ -51,7 +107,7 @@ class CanonicalOrder(BaseModel):
     note_attributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
     lineItems: List[CanonicalLineItem] = Field(
         default_factory=list
-    )  # Extracted separately for LineItemData records
+    )  # Extracted separately for LineItemData records - complete paginated line items
     shipping_address: Any = Field(default_factory=dict)  # shippingAddress (JSON)
     billing_address: Any = Field(default_factory=dict)  # billingAddress (JSON)
     discount_applications: Any = Field(
@@ -113,11 +169,18 @@ class CanonicalProduct(BaseModel):
     seo_description: Optional[str] = None  # seoDescription
     template_suffix: Optional[str] = None  # templateSuffix
 
-    # Detailed product data (essential for ML)
-    variants: Any = Field(default_factory=list)  # variants (JSON)
-    images: Any = Field(default_factory=list)  # images (JSON)
-    media: Any = Field(default_factory=list)  # media (JSON)
+    # Detailed product data (essential for ML) - now stores complete paginated data
+    variants: Any = Field(
+        default_factory=list
+    )  # variants (JSON) - all variants from pagination
+    images: Any = Field(
+        default_factory=list
+    )  # images (JSON) - all images from pagination
+    media: Any = Field(default_factory=list)  # media (JSON) - all media from pagination
     options: Any = Field(default_factory=list)  # options (JSON)
+    metafields: Any = Field(
+        default_factory=list
+    )  # metafields (JSON) - all metafields from pagination
 
     # Note: Derived metrics are computed in feature engineering, not stored
 
@@ -142,7 +205,9 @@ class CanonicalCollection(BaseModel):
     product_count: int = 0  # productCount
     is_automated: bool = False  # isAutomated
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
-    products: Any = Field(default_factory=list)  # products (JSON)
+    products: Any = Field(
+        default_factory=list
+    )  # products (JSON) - complete paginated product data
 
     # Internal fields
     created_at: datetime
@@ -157,23 +222,18 @@ class CanonicalCustomer(BaseModel):
     shop_id: str
     customer_id: str  # Maps to customerId
     # Exact field mapping to CustomerData table
-    email: Optional[str] = None  # email
     first_name: Optional[str] = None  # firstName
     last_name: Optional[str] = None  # lastName
     total_spent: float = 0.0  # totalSpent
     order_count: int = 0  # orderCount
     last_order_date: Optional[datetime] = None  # lastOrderDate
-    tags: Any = Field(default_factory=list)  # tags (JSON)
     last_order_id: Optional[str] = None  # lastOrderId
-    location: Any = Field(default_factory=dict)  # location (JSON)
-    metafields: Any = Field(default_factory=list)  # metafields (JSON)
-    state: Optional[str] = ""  # state
     verified_email: bool = False  # verifiedEmail
     tax_exempt: bool = False  # taxExempt
-    default_address: Any = Field(default_factory=dict)  # defaultAddress (JSON)
-    addresses: Any = Field(default_factory=list)  # addresses (JSON)
-    currency_code: Optional[str] = "USD"  # currencyCode
     customer_locale: Optional[str] = "en"  # customerLocale
+    tags: Any = Field(default_factory=list)  # tags (JSON)
+    state: Optional[str] = ""  # state
+    default_address: Any = Field(default_factory=dict)  # defaultAddress (JSON)
 
     # Internal fields
     created_at: datetime  # Used for createdAt

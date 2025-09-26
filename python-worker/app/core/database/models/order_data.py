@@ -84,6 +84,12 @@ class LineItemData(BaseModel):
     title = Column(String, nullable=True)
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)
+    original_unit_price = Column(Float, nullable=True)  # From originalUnitPriceSet
+    discounted_unit_price = Column(Float, nullable=True)  # From discountedUnitPriceSet
+    currency_code = Column(String(10), nullable=True)  # From price sets
+    variant_data = Column(
+        JSON, default={}, nullable=True
+    )  # Complete variant information
     properties = Column(JSON, default={}, nullable=True)
 
     order = relationship("OrderData", back_populates="line_items")

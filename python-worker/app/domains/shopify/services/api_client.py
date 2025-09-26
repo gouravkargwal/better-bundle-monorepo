@@ -339,14 +339,14 @@ class ShopifyAPIClient(IShopifyAPIClient):
                 id
                 name
                 email
-                myshopifyDomain
+                myshopify_domain: myshopifyDomain
                 plan {
-                    displayName
+                    display_name: displayName
                 }
-                currencyCode
-                ianaTimezone
-                createdAt
-                updatedAt
+                currency_code: currencyCode
+                iana_timezone: ianaTimezone
+                created_at: createdAt
+                updated_at: updatedAt
             }
         }
         """
@@ -371,11 +371,11 @@ class ShopifyAPIClient(IShopifyAPIClient):
         graphql_query = """
         query($first: Int!, $after: String, $query: String) {
             products(first: $first, after: $after, query: $query) {
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
+                page_info: pageInfo {
+                    has_next_page: hasNextPage
+                    has_previous_page: hasPreviousPage
+                    start_cursor: startCursor
+                    end_cursor: endCursor
                 }
                 edges {
                     cursor
@@ -384,30 +384,36 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         title
                         description
                         handle
-                        createdAt
-                        updatedAt
-                        publishedAt
+                        created_at: createdAt
+                        updated_at: updatedAt
+                        published_at: publishedAt
                         status
                         tags
-                        productType
+                        product_type: productType
                         vendor
-                        totalInventory
-                        onlineStoreUrl
-                        onlineStorePreviewUrl
+                        total_inventory: totalInventory
+                        online_store_url: onlineStoreUrl
+                        online_store_preview_url: onlineStorePreviewUrl
                         seo {
                             title
                             description
                         }
-                        templateSuffix
+                        template_suffix: templateSuffix
                         images(first: 5) {
                             edges {
                                 node {
                                     id
                                     url
-                                    altText
+                                    alt_text: altText
                                     width
                                     height
                                 }
+                            }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
                             }
                         }
                         media(first: 10) {
@@ -417,7 +423,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                         id
                                         image {
                                             url
-                                            altText
+                                            alt_text: altText
                                             width
                                             height
                                         }
@@ -426,17 +432,23 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                         id
                                         sources {
                                             url
-                                            mimeType
+                                            mime_type: mimeType
                                         }
                                     }
                                     ... on Model3d {
                                         id
                                         sources {
                                             url
-                                            mimeType
+                                            mime_type: mimeType
                                         }
                                     }
                                 }
+                            }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
                             }
                         }
                         options(first: 5) {
@@ -451,20 +463,26 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     id
                                     title
                                     price
-                                    compareAtPrice
-                                    inventoryQuantity
+                                    compare_at_price: compareAtPrice
+                                    inventory_quantity: inventoryQuantity
                                     sku
                                     barcode
                                     taxable
-                                    inventoryPolicy
+                                    inventory_policy: inventoryPolicy
                                     position
-                                    createdAt
-                                    updatedAt
-                                    selectedOptions {
+                                    created_at: createdAt
+                                    updated_at: updatedAt
+                                    selected_options: selectedOptions {
                                         name
                                         value
                                     }
                                 }
+                            }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
                             }
                         }
                         metafields(first: 10) {
@@ -477,6 +495,12 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     type
                                 }
                             }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
+                            }
                         }
                     }
                 }
@@ -485,7 +509,120 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """
 
         result = await self.execute_query(graphql_query, variables, shop_domain)
-        return result.get("products", {})
+        products_data = result.get("products", {})
+
+        # Process each product to fetch all variants, images, and metafields if needed
+        if products_data.get("edges"):
+            processed_products = []
+
+            for product_edge in products_data["edges"]:
+                product = product_edge["node"]
+
+                # Check and fetch additional variants if needed
+                variants = product.get("variants", {})
+                variants_page_info = variants.get("page_info", {})
+                if variants_page_info.get("has_next_page"):
+                    all_variants = variants.get("edges", []).copy()
+                    variants_cursor = variants_page_info.get("end_cursor")
+
+                    while variants_cursor:
+                        rate_limit_info = await self.check_rate_limit(shop_domain)
+                        if not rate_limit_info["can_make_request"]:
+                            await self.wait_for_rate_limit(shop_domain)
+
+                        variants_batch = await self._fetch_product_variants(
+                            shop_domain, product["id"], variants_cursor
+                        )
+                        if not variants_batch:
+                            break
+
+                        new_variants = variants_batch.get("edges", [])
+                        all_variants.extend(new_variants)
+
+                        page_info = variants_batch.get("page_info", {})
+                        variants_cursor = (
+                            page_info.get("end_cursor")
+                            if page_info.get("has_next_page")
+                            else None
+                        )
+
+                    product["variants"] = {
+                        "edges": all_variants,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                # Check and fetch additional images if needed
+                images = product.get("images", {})
+                images_page_info = images.get("page_info", {})
+                if images_page_info.get("has_next_page"):
+                    all_images = images.get("edges", []).copy()
+                    images_cursor = images_page_info.get("end_cursor")
+
+                    while images_cursor:
+                        rate_limit_info = await self.check_rate_limit(shop_domain)
+                        if not rate_limit_info["can_make_request"]:
+                            await self.wait_for_rate_limit(shop_domain)
+
+                        images_batch = await self._fetch_product_images(
+                            shop_domain, product["id"], images_cursor
+                        )
+                        if not images_batch:
+                            break
+
+                        new_images = images_batch.get("edges", [])
+                        all_images.extend(new_images)
+
+                        page_info = images_batch.get("page_info", {})
+                        images_cursor = (
+                            page_info.get("end_cursor")
+                            if page_info.get("has_next_page")
+                            else None
+                        )
+
+                    product["images"] = {
+                        "edges": all_images,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                # Check and fetch additional metafields if needed
+                metafields = product.get("metafields", {})
+                metafields_page_info = metafields.get("page_info", {})
+                if metafields_page_info.get("has_next_page"):
+                    all_metafields = metafields.get("edges", []).copy()
+                    metafields_cursor = metafields_page_info.get("end_cursor")
+
+                    while metafields_cursor:
+                        rate_limit_info = await self.check_rate_limit(shop_domain)
+                        if not rate_limit_info["can_make_request"]:
+                            await self.wait_for_rate_limit(shop_domain)
+
+                        metafields_batch = await self._fetch_product_metafields(
+                            shop_domain, product["id"], metafields_cursor
+                        )
+                        if not metafields_batch:
+                            break
+
+                        new_metafields = metafields_batch.get("edges", [])
+                        all_metafields.extend(new_metafields)
+
+                        page_info = metafields_batch.get("page_info", {})
+                        metafields_cursor = (
+                            page_info.get("end_cursor")
+                            if page_info.get("has_next_page")
+                            else None
+                        )
+
+                    product["metafields"] = {
+                        "edges": all_metafields,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                processed_products.append(product_edge)
+
+            # Update the products data with processed products
+            products_data["edges"] = processed_products
+
+        return products_data
 
     async def get_orders(
         self,
@@ -523,93 +660,93 @@ class ShopifyAPIClient(IShopifyAPIClient):
         graphql_query = """
         query($first: Int!, $after: String, $query: String) {
             orders(first: $first, after: $after, query: $query) {
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
+                page_info: pageInfo {
+                    has_next_page: hasNextPage
+                    has_previous_page: hasPreviousPage
+                    start_cursor: startCursor
+                    end_cursor: endCursor
                 }
                 edges {
                     cursor
                     node {
                         id
                         name
-                        createdAt
-                        updatedAt
-                        processedAt
-                        cancelledAt
-                        cancelReason
-                        totalPriceSet {
-                            shopMoney {
+                        created_at: createdAt
+                        updated_at: updatedAt
+                        processed_at: processedAt
+                        cancelled_at: cancelledAt
+                        cancel_reason: cancelReason
+                        total_price_set: totalPriceSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
-                        subtotalPriceSet {
-                            shopMoney {
+                        subtotal_price_set: subtotalPriceSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
-                        totalTaxSet {
-                            shopMoney {
+                        total_tax_set: totalTaxSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
-                        totalShippingPriceSet {
-                            shopMoney {
+                        total_shipping_price_set: totalShippingPriceSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
-                        totalRefundedSet {
-                            shopMoney {
+                        total_refunded_set: totalRefundedSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
-                        totalOutstandingSet {
-                            shopMoney {
+                        total_outstanding_set: totalOutstandingSet {
+                            shop_money: shopMoney {
                                 amount
-                                currencyCode
+                                currency_code: currencyCode
                             }
                         }
                         customer {
                             id
-                            firstName
-                            lastName
-                            displayName
+                            first_name: firstName
+                            last_name: lastName
+                            display_name: displayName
                             tags
-                            createdAt
-                            updatedAt
+                            created_at: createdAt
+                            updated_at: updatedAt
                             state
-                            verifiedEmail
-                            defaultAddress {
+                            verified_email: verifiedEmail
+                            default_address: defaultAddress {
                                 id
                                 city
                                 province
                                 country
-                                provinceCode
-                                countryCodeV2
+                                province_code: provinceCode
+                                country_code_v2: countryCodeV2
                             }
                         }
-                        lineItems(first: 10) {
+                        line_items: lineItems(first: 10) {
                             edges {
                                 node {
                                     id
                                     title
                                     quantity
-                                    originalUnitPriceSet {
-                                        shopMoney {
+                                    original_unit_price_set: originalUnitPriceSet {
+                                        shop_money: shopMoney {
                                             amount
-                                            currencyCode
+                                            currency_code: currencyCode
                                         }
                                     }
-                                    discountedUnitPriceSet {
-                                        shopMoney {
+                                    discounted_unit_price_set: discountedUnitPriceSet {
+                                        shop_money: shopMoney {
                                             amount
-                                            currencyCode
+                                            currency_code: currencyCode
                                         }
                                     }
                                     variant {
@@ -619,27 +756,33 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                         sku
                                         barcode
                                         taxable
-                                        inventoryPolicy
+                                        inventory_policy: inventoryPolicy
                                         position
-                                        createdAt
-                                        updatedAt
+                                        created_at: createdAt
+                                        updated_at: updatedAt
                                         product {
                                             id
                                             title
-                                            productType
+                                            product_type: productType
                                             vendor
                                             tags
                                         }
                                     }
                                 }
                             }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
+                            }
                         }
                         fulfillments {
                             id
                             status
-                            createdAt
-                            updatedAt
-                            displayStatus
+                            created_at: createdAt
+                            updated_at: updatedAt
+                            display_status: displayStatus
                         }
                         transactions {
                             id
@@ -647,37 +790,37 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             status
                             amount
                             gateway
-                            createdAt
-                            processedAt
+                            created_at: createdAt
+                            processed_at: processedAt
                         }
-                        shippingAddress {
+                        shipping_address: shippingAddress {
                             city
                             province
                             country
-                            provinceCode
-                            countryCodeV2
+                            province_code: provinceCode
+                            country_code_v2: countryCodeV2
                         }
-                        billingAddress {
+                        billing_address: billingAddress {
                             city
                             province
                             country
-                            provinceCode
-                            countryCodeV2
+                            province_code: provinceCode
+                            country_code_v2: countryCodeV2
                         }
                         tags
                         note
                         confirmed
                         test
-                        customerLocale
-                        currencyCode
-                        presentmentCurrencyCode
-                        discountApplications(first: 5) {
+                        customer_locale: customerLocale
+                        currency_code: currencyCode
+                        presentment_currency_code: presentmentCurrencyCode
+                        discount_applications: discountApplications(first: 5) {
                             edges {
                                 node {
                                     value {
                                         ... on MoneyV2 {
                                             amount
-                                            currencyCode
+                                            currency_code: currencyCode
                                         }
                                         ... on PricingPercentageValue {
                                             percentage
@@ -697,7 +840,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                 }
                             }
                         }
-                        customAttributes {
+                        custom_attributes: customAttributes {
                             key
                             value
                         }
@@ -708,7 +851,60 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """
 
         result = await self.execute_query(graphql_query, variables, shop_domain)
-        return result.get("orders", {})
+        orders_data = result.get("orders", {})
+
+        # Process each order to fetch all line items if needed
+        if orders_data.get("edges"):
+            processed_orders = []
+
+            for order_edge in orders_data["edges"]:
+                order = order_edge["node"]
+
+                # Check if order has more line items to fetch
+                line_items = order.get("line_items", {})
+                line_items_page_info = line_items.get("page_info", {})
+
+                if line_items_page_info.get("has_next_page"):
+                    # Fetch all remaining line items for this order
+                    all_line_items = line_items.get("edges", []).copy()
+                    line_items_cursor = line_items_page_info.get("end_cursor")
+
+                    while line_items_cursor:
+                        # Check rate limit before each request
+                        rate_limit_info = await self.check_rate_limit(shop_domain)
+                        if not rate_limit_info["can_make_request"]:
+                            await self.wait_for_rate_limit(shop_domain)
+
+                        # Fetch next batch of line items
+                        line_items_batch = await self._fetch_order_line_items(
+                            shop_domain, order["id"], line_items_cursor
+                        )
+
+                        if not line_items_batch:
+                            break
+
+                        new_line_items = line_items_batch.get("edges", [])
+                        all_line_items.extend(new_line_items)
+
+                        page_info = line_items_batch.get("page_info", {})
+                        line_items_cursor = (
+                            page_info.get("end_cursor")
+                            if page_info.get("has_next_page")
+                            else None
+                        )
+
+                    # Replace the line items in the order
+                    order["line_items"] = {
+                        "edges": all_line_items,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                processed_orders.append(order_edge)
+
+            # Update the orders data with processed orders
+            orders_data["edges"] = processed_orders
+
+        return orders_data
 
     async def get_customers(
         self,
@@ -730,21 +926,33 @@ class ShopifyAPIClient(IShopifyAPIClient):
         graphql_query = """
         query($first: Int!, $after: String, $query: String) {
             customers(first: $first, after: $after, query: $query) {
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
+                page_info: pageInfo {
+                    has_next_page: hasNextPage
+                    has_previous_page: hasPreviousPage
+                    start_cursor: startCursor
+                    end_cursor: endCursor
                 }
                 edges {
                     cursor
                     node {
                         id
-                        firstName
-                        lastName
-                        createdAt
-                        updatedAt
-                        defaultAddress {
+                        first_name: firstName
+                        last_name: lastName
+                        created_at: createdAt
+                        updated_at: updatedAt
+                        total_spent: amountSpent {
+                            amount
+                            currency_code: currencyCode
+                        }
+                        orders_count: numberOfOrders
+                        last_order: lastOrder {
+                            id
+                            created_at: createdAt
+                        }
+                        verified_email: verifiedEmail
+                        tax_exempt: taxExempt
+                        customer_locale: locale
+                        default_address: defaultAddress {
                             city
                             province
                             country
@@ -779,11 +987,11 @@ class ShopifyAPIClient(IShopifyAPIClient):
         graphql_query = """
         query($first: Int!, $after: String, $query: String) {
             collections(first: $first, after: $after, query: $query) {
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
+                page_info: pageInfo {
+                    has_next_page: hasNextPage
+                    has_previous_page: hasPreviousPage
+                    start_cursor: startCursor
+                    end_cursor: endCursor
                 }
                 edges {
                     cursor
@@ -792,9 +1000,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         title
                         handle
                         description
-                        descriptionHtml
-                        updatedAt
-                        templateSuffix
+                        description_html: descriptionHtml
+                        updated_at: updatedAt
+                        template_suffix: templateSuffix
                         seo {
                             title
                             description
@@ -812,26 +1020,26 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                     id
                                     title
                                     handle
-                                    productType
+                                    product_type: productType
                                     vendor
                                     tags
-                                    priceRangeV2 {
-                                        minVariantPrice {
+                                    price_range: priceRangeV2 {
+                                        min_variant_price: minVariantPrice {
                                             amount
-                                            currencyCode
+                                            currency_code: currencyCode
                                         }
-                                        maxVariantPrice {
+                                        max_variant_price: maxVariantPrice {
                                             amount
-                                            currencyCode
+                                            currency_code: currencyCode
                                         }
                                     }
                                 }
                             }
-                            pageInfo {
-                                hasNextPage
-                                hasPreviousPage
-                                startCursor
-                                endCursor
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                has_previous_page: hasPreviousPage
+                                start_cursor: startCursor
+                                end_cursor: endCursor
                             }
                         }
                         metafields(first: 10) {
@@ -870,12 +1078,12 @@ class ShopifyAPIClient(IShopifyAPIClient):
 
                 # Check if collection has more products to fetch
                 products = collection.get("products", {})
-                products_page_info = products.get("pageInfo", {})
+                products_page_info = products.get("page_info", {})
 
-                if products_page_info.get("hasNextPage"):
+                if products_page_info.get("has_next_page"):
                     # Fetch all remaining products for this collection
                     all_products = products.get("edges", []).copy()
-                    products_cursor = products_page_info.get("endCursor")
+                    products_cursor = products_page_info.get("end_cursor")
 
                     while products_cursor:
                         # Check rate limit before each request
@@ -894,17 +1102,17 @@ class ShopifyAPIClient(IShopifyAPIClient):
                         new_products = products_batch.get("edges", [])
                         all_products.extend(new_products)
 
-                        page_info = products_batch.get("pageInfo", {})
+                        page_info = products_batch.get("page_info", {})
                         products_cursor = (
-                            page_info.get("endCursor")
-                            if page_info.get("hasNextPage")
+                            page_info.get("end_cursor")
+                            if page_info.get("has_next_page")
                             else None
                         )
 
                     # Replace the products in the collection
                     collection["products"] = {
                         "edges": all_products,
-                        "pageInfo": {"hasNextPage": False},
+                        "page_info": {"has_next_page": False},
                     }
 
                 processed_collections.append(collection_edge)
@@ -928,24 +1136,24 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             id
                             title
                             handle
-                            productType
+                            product_type: productType
                             vendor
                             tags
-                            priceRangeV2 {
-                                minVariantPrice {
+                            price_range: priceRangeV2 {
+                                min_variant_price: minVariantPrice {
                                     amount
-                                    currencyCode
+                                    currency_code: currencyCode
                                 }
-                                maxVariantPrice {
+                                max_variant_price: maxVariantPrice {
                                     amount
-                                    currencyCode
+                                    currency_code: currencyCode
                                 }
                             }
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
                     }
                 }
             }
@@ -961,6 +1169,194 @@ class ShopifyAPIClient(IShopifyAPIClient):
         result = await self.execute_query(products_query, variables, shop_domain)
         collection_data = result.get("collection", {})
         return collection_data.get("products", {})
+
+    async def _fetch_order_line_items(
+        self, shop_domain: str, order_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of line items for a specific order"""
+
+        line_items_query = """
+        query($orderId: ID!, $first: Int!, $after: String) {
+            order(id: $orderId) {
+                line_items: lineItems(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            title
+                            quantity
+                            original_unit_price_set: originalUnitPriceSet {
+                                shop_money: shopMoney {
+                                    amount
+                                    currency_code: currencyCode
+                                }
+                            }
+                            discounted_unit_price_set: discountedUnitPriceSet {
+                                shop_money: shopMoney {
+                                    amount
+                                    currency_code: currencyCode
+                                }
+                            }
+                            variant {
+                                id
+                                title
+                                price
+                                sku
+                                barcode
+                                taxable
+                                inventory_policy: inventoryPolicy
+                                position
+                                created_at: createdAt
+                                updated_at: updatedAt
+                                product {
+                                    id
+                                    title
+                                    product_type: productType
+                                    vendor
+                                    tags
+                                }
+                            }
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "orderId": order_id,
+            "first": 10,  # Keep small to manage GraphQL cost
+            "after": cursor,
+        }
+
+        result = await self.execute_query(line_items_query, variables, shop_domain)
+        order_data = result.get("order", {})
+        return order_data.get("line_items", {})
+
+    async def _fetch_product_variants(
+        self, shop_domain: str, product_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of variants for a specific product"""
+
+        variants_query = """
+        query($productId: ID!, $first: Int!, $after: String) {
+            product(id: $productId) {
+                variants(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            title
+                            price
+                            compare_at_price: compareAtPrice
+                            inventory_quantity: inventoryQuantity
+                            sku
+                            barcode
+                            taxable
+                            inventory_policy: inventoryPolicy
+                            position
+                            created_at: createdAt
+                            updated_at: updatedAt
+                            selected_options: selectedOptions {
+                                name
+                                value
+                            }
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "productId": product_id,
+            "first": 10,  # Keep small to manage GraphQL cost
+            "after": cursor,
+        }
+
+        result = await self.execute_query(variants_query, variables, shop_domain)
+        product_data = result.get("product", {})
+        return product_data.get("variants", {})
+
+    async def _fetch_product_images(
+        self, shop_domain: str, product_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of images for a specific product"""
+
+        images_query = """
+        query($productId: ID!, $first: Int!, $after: String) {
+            product(id: $productId) {
+                images(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            url
+                            alt_text: altText
+                            width
+                            height
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "productId": product_id,
+            "first": 5,  # Keep small to manage GraphQL cost
+            "after": cursor,
+        }
+
+        result = await self.execute_query(images_query, variables, shop_domain)
+        product_data = result.get("product", {})
+        return product_data.get("images", {})
+
+    async def _fetch_product_metafields(
+        self, shop_domain: str, product_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of metafields for a specific product"""
+
+        metafields_query = """
+        query($productId: ID!, $first: Int!, $after: String) {
+            product(id: $productId) {
+                metafields(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            namespace
+                            key
+                            value
+                            type
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "productId": product_id,
+            "first": 10,  # Keep small to manage GraphQL cost
+            "after": cursor,
+        }
+
+        result = await self.execute_query(metafields_query, variables, shop_domain)
+        product_data = result.get("product", {})
+        return product_data.get("metafields", {})
 
     async def check_rate_limit(self, shop_domain: str) -> Dict[str, Any]:
         """Check current rate limit status based on GraphQL cost"""
@@ -1063,9 +1459,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """Get the actual scopes granted to the app from Shopify GraphQL API"""
         query = """
         query {
-          currentAppInstallation {
+          current_app_installation: currentAppInstallation {
             id
-            accessScopes {
+            access_scopes: accessScopes {
               handle
               description
             }
@@ -1076,9 +1472,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
         try:
             result = await self.execute_query(query, shop_domain=shop_domain)
 
-            if "currentAppInstallation" in result:
-                installation = result["currentAppInstallation"]
-                scopes = installation.get("accessScopes", [])
+            if "current_app_installation" in result:
+                installation = result["current_app_installation"]
+                scopes = installation.get("access_scopes", [])
 
                 # Extract scope handles
                 scope_handles = [scope["handle"] for scope in scopes]
