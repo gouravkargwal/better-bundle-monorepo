@@ -136,6 +136,7 @@ class CanonicalCollection(BaseModel):
     product_count: int = 0  # productCount
     is_automated: bool = False  # isAutomated
     metafields: Any = Field(default_factory=list)  # metafields (JSON)
+    products: Any = Field(default_factory=list)  # products (JSON)
 
     # Internal fields
     created_at: datetime

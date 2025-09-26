@@ -28,6 +28,9 @@ class CollectionData(BaseModel, ShopMixin):
     is_automated = Column(Boolean, default=False, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     metafields = Column(JSON, default=[], nullable=True)
+    products = Column(
+        JSON, default=[], nullable=True
+    )  # Store products data from GraphQL
     extras = Column(JSON, default={}, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)

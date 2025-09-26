@@ -42,6 +42,56 @@ class GraphQLCollectionAdapter(BaseAdapter):
             return metafields
         return []
 
+    def _normalize_products(self, products):
+        """Normalize products data from GraphQL to store in database"""
+        if not products or not isinstance(products, dict):
+            return []
+
+        products_edges = products.get("edges", [])
+        if not isinstance(products_edges, list):
+            return []
+
+        # Extract and normalize product data
+        normalized_products = []
+        for edge in products_edges:
+            if not isinstance(edge, dict):
+                continue
+
+            node = edge.get("node", {})
+            if not isinstance(node, dict):
+                continue
+
+            # Extract numeric ID from GraphQL ID
+            product_id = self._extract_numeric_gid(node.get("id"))
+            if not product_id:
+                continue
+
+            # Normalize product data
+            normalized_product = {
+                "id": product_id,
+                "title": node.get("title", ""),
+                "handle": node.get("handle", ""),
+                "product_type": node.get("productType", ""),
+                "vendor": node.get("vendor", ""),
+                "tags": node.get("tags", []),
+                "price_range": node.get("priceRangeV2", {}),
+            }
+
+            normalized_products.append(normalized_product)
+
+        return normalized_products
+
+    def _extract_numeric_gid(self, gid):
+        """Extract numeric ID from GraphQL ID"""
+        if not gid or not isinstance(gid, str):
+            return None
+        try:
+            if gid.startswith("gid://shopify/"):
+                return gid.split("/")[-1]
+            return gid
+        except Exception:
+            return None
+
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         collectionId = _extract_numeric_gid(payload.get("id")) or ""
         created_at = (
@@ -73,12 +123,15 @@ class GraphQLCollectionAdapter(BaseAdapter):
                 else None
             ),
             product_count=(
-                len(payload.get("products") or [])
-                if isinstance(payload.get("products"), list)
+                len(payload.get("products", {}).get("edges", []))
+                if isinstance(payload.get("products"), dict)
                 else 0
             ),
             is_automated=bool(payload.get("ruleSet") is not None),
             metafields=self._normalize_metafields(payload.get("metafields")),
+            products=self._normalize_products(
+                payload.get("products")
+            ),  # Store products data
             created_at=created_at,
             updated_at=updated_at,
             is_active=True,

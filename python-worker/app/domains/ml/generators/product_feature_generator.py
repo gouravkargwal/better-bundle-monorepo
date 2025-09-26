@@ -51,7 +51,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             product_data = context.get("product_data", {})
             orders = context.get("orders", [])
             behavioral_events = context.get("behavioral_events", [])
-            collections = context.get("collections", [])
 
             # Compute 30-day metrics
             metrics_30d = self._compute_30day_metrics(

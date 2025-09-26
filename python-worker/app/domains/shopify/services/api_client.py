@@ -467,22 +467,6 @@ class ShopifyAPIClient(IShopifyAPIClient):
                                 }
                             }
                         }
-                        collections(first: 5) {
-                            edges {
-                                node {
-                                    id
-                                    title
-                                    handle
-                                    description
-                                    image {
-                                        url
-                                        altText
-                                    }
-                                    updatedAt
-                                    sortOrder
-                                }
-                            }
-                        }
                         metafields(first: 10) {
                             edges {
                                 node {
@@ -782,7 +766,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
         cursor: Optional[str] = None,
         query: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get collections from shop"""
+        """Get collections from shop with complete product data"""
         variables = {
             "first": limit or 250,  # Increased from 50 to 250
             "after": cursor,
@@ -822,7 +806,7 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             width
                             height
                         }
-                        products(first: 10) {
+                        products(first: 250) {
                             edges {
                                 node {
                                     id
@@ -846,6 +830,8 @@ class ShopifyAPIClient(IShopifyAPIClient):
                             pageInfo {
                                 hasNextPage
                                 hasPreviousPage
+                                startCursor
+                                endCursor
                             }
                         }
                         metafields(first: 10) {
@@ -873,7 +859,108 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """
 
         result = await self.execute_query(graphql_query, variables, shop_domain)
-        return result.get("collections", {})
+        collections_data = result.get("collections", {})
+
+        # Process each collection to fetch all products if needed
+        if collections_data.get("edges"):
+            processed_collections = []
+
+            for collection_edge in collections_data["edges"]:
+                collection = collection_edge["node"]
+
+                # Check if collection has more products to fetch
+                products = collection.get("products", {})
+                products_page_info = products.get("pageInfo", {})
+
+                if products_page_info.get("hasNextPage"):
+                    # Fetch all remaining products for this collection
+                    all_products = products.get("edges", []).copy()
+                    products_cursor = products_page_info.get("endCursor")
+
+                    while products_cursor:
+                        # Check rate limit before each request
+                        rate_limit_info = await self.check_rate_limit(shop_domain)
+                        if not rate_limit_info["can_make_request"]:
+                            await self.wait_for_rate_limit(shop_domain)
+
+                        # Fetch next batch of products
+                        products_batch = await self._fetch_collection_products(
+                            shop_domain, collection["id"], products_cursor
+                        )
+
+                        if not products_batch:
+                            break
+
+                        new_products = products_batch.get("edges", [])
+                        all_products.extend(new_products)
+
+                        page_info = products_batch.get("pageInfo", {})
+                        products_cursor = (
+                            page_info.get("endCursor")
+                            if page_info.get("hasNextPage")
+                            else None
+                        )
+
+                    # Replace the products in the collection
+                    collection["products"] = {
+                        "edges": all_products,
+                        "pageInfo": {"hasNextPage": False},
+                    }
+
+                processed_collections.append(collection_edge)
+
+            # Update the collections data with processed collections
+            collections_data["edges"] = processed_collections
+
+        return collections_data
+
+    async def _fetch_collection_products(
+        self, shop_domain: str, collection_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of products for a specific collection"""
+
+        products_query = """
+        query($collectionId: ID!, $first: Int!, $after: String) {
+            collection(id: $collectionId) {
+                products(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            title
+                            handle
+                            productType
+                            vendor
+                            tags
+                            priceRangeV2 {
+                                minVariantPrice {
+                                    amount
+                                    currencyCode
+                                }
+                                maxVariantPrice {
+                                    amount
+                                    currencyCode
+                                }
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "collectionId": collection_id,
+            "first": 250,  # Max batch size for cost efficiency
+            "after": cursor,
+        }
+
+        result = await self.execute_query(products_query, variables, shop_domain)
+        collection_data = result.get("collection", {})
+        return collection_data.get("products", {})
 
     async def check_rate_limit(self, shop_domain: str) -> Dict[str, Any]:
         """Check current rate limit status based on GraphQL cost"""

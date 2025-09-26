@@ -187,18 +187,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         self, collection: Dict[str, Any], products: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Compute product-related metrics matching schema"""
-        collection_id = collection.get("collectionId", "")
-
-        # Filter products that belong to this collection
-        collection_products = []
-        for product in products:
-            collections = product.get("collections", [])
-            if isinstance(collections, list):
-                collection_ids = [
-                    c.get("id") if isinstance(c, dict) else c for c in collections
-                ]
-                if collection_id in collection_ids:
-                    collection_products.append(product)
+        collection_products = collection.get("products", [])
 
         if not collection_products:
             return {
@@ -209,13 +198,30 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 "price_variance": None,
             }
 
-        # Extract prices
+        # Extract prices from normalized product data
         prices = []
         vendors = []
         for product in collection_products:
-            price = product.get("price", 0)
-            if price > 0:
-                prices.append(float(price))
+            # Extract price from price_range structure
+            price_range = product.get("price_range", {})
+            if isinstance(price_range, dict):
+                min_price = price_range.get("minVariantPrice", {})
+                max_price = price_range.get("maxVariantPrice", {})
+
+                if isinstance(min_price, dict) and isinstance(max_price, dict):
+                    min_amount = min_price.get("amount", "0")
+                    max_amount = max_price.get("amount", "0")
+
+                    try:
+                        min_val = float(min_amount)
+                        max_val = float(max_amount)
+                        # Use average of min and max price
+                        avg_price = (min_val + max_val) / 2
+                        if avg_price > 0:
+                            prices.append(avg_price)
+                    except (ValueError, TypeError):
+                        pass
+
             vendor = product.get("vendor")
             if vendor:
                 vendors.append(vendor)
@@ -254,42 +260,23 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
         collection_id = collection.get("collectionId", "")
         products = products or []
 
-        # Build product-to-collection mapping and product info lookup
+        # Get product IDs directly from collection data (normalized structure)
+        collection_products_data = collection.get("products", [])
         collection_product_ids = set()
         product_info = {}
 
-        for product in products:
-            product_id = product.get("product_id")
-            if not product_id:
+        for product in collection_products_data:
+            if not isinstance(product, dict):
                 continue
 
-            product_info[product_id] = {
-                "vendor": product.get("vendor", ""),
-                "title": product.get("title", ""),
-            }
-
-            # Check if product belongs to this collection
-            collections = product.get("collections", [])
-            if isinstance(collections, str):
-                import json
-
-                try:
-                    collections = json.loads(collections)
-                except:
-                    collections = []
-
-            # Check if this collection ID is in the product's collections
-            for coll in collections:
-                if isinstance(coll, dict):
-                    coll_id = coll.get("id") or coll.get("collection_id")
-                elif isinstance(coll, str):
-                    coll_id = coll
-                else:
-                    continue
-
-                if coll_id == collection_id:
-                    collection_product_ids.add(product_id)
-                    break
+            # Extract product ID (already normalized)
+            product_id = product.get("id")
+            if product_id:
+                collection_product_ids.add(product_id)
+                product_info[product_id] = {
+                    "vendor": product.get("vendor", ""),
+                    "title": product.get("title", ""),
+                }
 
         # Find orders with products from this collection
         collection_orders = []
@@ -588,3 +575,14 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                 "update_frequency": 0.0,
                 "maturity_score": 0,
             }
+
+    def _extract_numeric_gid(self, gid: Optional[str]) -> Optional[str]:
+        """Extract numeric ID from GraphQL ID"""
+        if not gid or not isinstance(gid, str):
+            return None
+        try:
+            if gid.startswith("gid://shopify/"):
+                return gid.split("/")[-1]
+            return gid
+        except Exception:
+            return None

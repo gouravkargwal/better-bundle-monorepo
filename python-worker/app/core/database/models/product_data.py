@@ -48,7 +48,6 @@ class ProductData(BaseModel, ShopMixin):
     images = Column(JSON, default=[], nullable=True)
     media = Column(JSON, default=[], nullable=True)
     options = Column(JSON, default=[], nullable=True)
-    collections = Column(JSON, default=[], nullable=True)
     metafields = Column(JSON, default=[], nullable=True)
     extras = Column(JSON, default={}, nullable=True)
 
