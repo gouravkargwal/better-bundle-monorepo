@@ -234,7 +234,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         cart_remove_count = 0
 
         for event in recent_events:
-            event_type = event.get("eventType", "")
+            event_type = event.get("interactionType", event.get("eventType", ""))
 
             if event_type == "product_viewed":
                 view_count += 1
@@ -261,23 +261,23 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         unique_purchasers = set()
 
         for order in orders:
-            order_date = self._parse_date(order.get("orderDate"))
+            order_date = self._parse_date(order.get("order_date"))
             if order_date and order_date >= thirty_days_ago:
                 # Check if this order contains the product
-                for line_item in order.get("lineItems", []):
+                for line_item in order.get("line_items", []):
                     item_product_id = self._extract_product_id_from_line_item(line_item)
                     # Use product ID mapping to match order product ID to ProductData product ID
                     if product_id_mapping and item_product_id:
                         mapped_product_id = product_id_mapping.get(item_product_id)
                         if mapped_product_id == product_id:
                             recent_orders.append(order)
-                            customer_id = order.get("customerId")
+                            customer_id = order.get("customer_id")
                             if customer_id:
                                 unique_purchasers.add(customer_id)
                             break
                     elif item_product_id == product_id:
                         recent_orders.append(order)
-                        customer_id = order.get("customerId")
+                        customer_id = order.get("customer_id")
                         if customer_id:
                             unique_purchasers.add(customer_id)
                         break
@@ -347,7 +347,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Find last view
         last_viewed_at = None
         for event in behavioral_events:
-            if event.get("eventType") == "product_viewed":
+            if (
+                event.get("interactionType", event.get("eventType", ""))
+                == "product_viewed"
+            ):
                 event_product_id = self._extract_product_id_from_event(event)
                 # Use product ID mapping to match behavioral event product ID to ProductData product ID
                 if product_id_mapping and event_product_id:
@@ -368,13 +371,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         last_purchased_at = None
 
         for order in orders:
-            for line_item in order.get("lineItems", []):
+            for line_item in order.get("line_items", []):
                 item_product_id = self._extract_product_id_from_line_item(line_item)
                 # Use product ID mapping to match order product ID to ProductData product ID
                 if product_id_mapping and item_product_id:
                     mapped_product_id = product_id_mapping.get(item_product_id)
                     if mapped_product_id == product_id:
-                        order_date = self._parse_date(order.get("orderDate"))
+                        order_date = self._parse_date(order.get("order_date"))
                         if order_date:
                             if (
                                 not first_purchased_at
@@ -385,7 +388,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                                 last_purchased_at = order_date
                         break
                 elif item_product_id == product_id:
-                    order_date = self._parse_date(order.get("orderDate"))
+                    order_date = self._parse_date(order.get("order_date"))
                     if order_date:
                         if not first_purchased_at or order_date < first_purchased_at:
                             first_purchased_at = order_date
@@ -421,9 +424,9 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         total_quantity_sold = 0
 
         for order in orders:
-            for line_item in order.get("lineItems", []):
+            for line_item in order.get("line_items", []):
                 item_product_id = self._extract_product_id_from_line_item(line_item)
-                if item_product_id == product_data.get("productId"):
+                if item_product_id == product_data.get("product_id"):
                     price = float(line_item.get("price", 0.0))
                     quantity = int(line_item.get("quantity", 1))
                     selling_prices.extend([price] * quantity)
@@ -441,7 +444,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             price_variance = 0.0
 
         # Calculate inventory turnover
-        total_inventory = int(product_data.get("totalInventory", 0))
+        total_inventory = int(product_data.get("total_inventory", 0))
         if total_inventory > 0 and total_quantity_sold > 0:
             # Simplified: assuming data covers 30 days
             inventory_turnover = total_quantity_sold / total_inventory
@@ -542,8 +545,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        if "productId" in line_item:
-            return str(line_item["productId"])
+        if "product_id" in line_item:
+            return str(line_item["product_id"])
 
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
@@ -813,7 +816,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                         refunded_orders += 1
                         # Use totalRefundedAmount if available, otherwise use order_revenue
                         refunded_amount = float(
-                            order.get("totalRefundedAmount", order_revenue)
+                            order.get("total_refunded_amount", order_revenue)
                         )
                         total_refunded_amount += refunded_amount
 

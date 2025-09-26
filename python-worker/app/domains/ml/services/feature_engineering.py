@@ -128,11 +128,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     # Find the specific product data for this entity
                     product_data = {}
                     products_list = context.get("product_data", [])
-                    current_product_id = entity.get("productId", "")
+                    current_product_id = entity.get("product_id", "")
 
                     # Find the matching product in the products list
                     for product in products_list:
-                        if product.get("productId") == current_product_id:
+                        if product.get("product_id") == current_product_id:
                             product_data = product
                             break
 
@@ -143,7 +143,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self._compute_feature_safely(
                         generator,
                         context.get("shop", {}).get("id", ""),
-                        entity.get("productId", ""),
+                        entity.get("product_id", ""),
                         product_context,
                         entity_id=entity_id,
                         feature_type=feature_type,
@@ -153,7 +153,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     features = await self._compute_feature_safely(
                         generator,
                         context.get("shop", {}).get("id", ""),
-                        entity.get("customerId", ""),
+                        entity.get("customer_id", ""),
                         context,
                         entity_id=entity_id,
                         feature_type=feature_type,
@@ -339,25 +339,25 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Add customer IDs from existing customers
             for customer in customers:
-                customer_id = customer.get("customerId", "")
+                customer_id = customer.get("customer_id", "")
                 if customer_id:
                     all_customer_ids.add(customer_id)
 
             # Add customer IDs from interactions
             for interaction in user_interactions or []:
-                customer_id = interaction.get("customerId", "")
+                customer_id = interaction.get("customer_id", "")
                 if customer_id:
                     all_customer_ids.add(customer_id)
 
             # Add customer IDs from sessions
             for session in user_sessions or []:
-                customer_id = session.get("customerId", "")
+                customer_id = session.get("customer_id", "")
                 if customer_id:
                     all_customer_ids.add(customer_id)
 
             # Add customer IDs from attributions
             for attribution in purchase_attributions or []:
-                customer_id = attribution.get("customerId", "")
+                customer_id = attribution.get("customer_id", "")
                 if customer_id:
                     all_customer_ids.add(customer_id)
 
@@ -366,32 +366,32 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 # Find existing customer data or create minimal customer object
                 customer_data = None
                 for customer in customers:
-                    if customer.get("customerId") == customer_id:
+                    if customer.get("customer_id") == customer_id:
                         customer_data = customer
                         break
 
                 # If no customer data exists, create minimal customer object
                 if not customer_data:
                     customer_data = {
-                        "customerId": customer_id,
+                        "customer_id": customer_id,
                         "id": customer_id,  # Use customerId as id for consistency
-                        "shopId": shop.get("id", ""),
+                        "shop_id": shop.get("id", ""),
                     }
 
                 # Filter unified analytics data for this customer
                 customer_interactions = []
                 for interaction in user_interactions or []:
-                    if interaction.get("customerId") == customer_id:
+                    if interaction.get("customer_id") == customer_id:
                         customer_interactions.append(interaction)
 
                 customer_sessions = []
                 for session in user_sessions or []:
-                    if session.get("customerId") == customer_id:
+                    if session.get("customer_id") == customer_id:
                         customer_sessions.append(session)
 
                 customer_attributions = []
                 for attribution in purchase_attributions or []:
-                    if attribution.get("customerId") == customer_id:
+                    if attribution.get("customer_id") == customer_id:
                         customer_attributions.append(attribution)
 
                 # Build context with unified analytics data
@@ -429,7 +429,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         from datetime import datetime, timedelta
         from collections import defaultdict
 
-        sessions = defaultdict(lambda: {"events": [], "customerId": None})
+        sessions = defaultdict(lambda: {"events": [], "customer_id": None})
 
         # Sort events by time
         sorted_events = sorted(
@@ -440,7 +440,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         current_sessions = {}  # customer_id -> current_session_id
 
         for event in sorted_events:
-            customer_id = event.get("customerId") or "anonymous"
+            customer_id = event.get("customer_id") or "anonymous"
 
             # Customer IDs are already normalized at data ingestion level
 
@@ -499,7 +499,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     else f"{customer_id}_{str(uuid.uuid4())[:8]}"
                 )
                 current_sessions[customer_id] = session_id
-                sessions[session_id]["customerId"] = (
+                sessions[session_id]["customer_id"] = (
                     customer_id if customer_id != "anonymous" else None
                 )
 
@@ -1005,7 +1005,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 products,
                 self.product_generator,
                 product_context,
-                "productId",
+                "product_id",
                 "product",
             )
             all_features["products"] = product_features
@@ -1017,7 +1017,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "user_interactions": user_interactions or [],
             }
             user_features = await self._process_entities_batch(
-                customers, self.user_generator, user_context, "customerId", "user"
+                customers, self.user_generator, user_context, "customer_id", "user"
             )
             all_features["users"] = user_features
 
@@ -1052,7 +1052,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Create variant ID to product ID mapping from products data
             variant_to_product_map = {}
             for product in products or []:
-                product_id = product.get("productId")
+                product_id = product.get("product_id")
                 if product_id:
                     variants = product.get("variants", [])
                     for variant in variants:
@@ -1071,8 +1071,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # From user interactions
             for event in user_interactions:
-                if event.get("customerId") and "metadata" in event:
-                    customer_id = event.get("customerId")
+                if event.get("customer_id") and "metadata" in event:
+                    customer_id = event.get("customer_id")
                     event_type = event.get("interactionType", "")
 
                     # Handle cart_viewed events specially - extract all products from cart
@@ -1092,8 +1092,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             product_ids = []
 
                             for item in cart_items:
-                                if isinstance(item, dict) and "productId" in item:
-                                    product_ids.append(item["productId"])
+                                if isinstance(item, dict) and "product_id" in item:
+                                    product_ids.append(item["product_id"])
                                 elif isinstance(item, str):
                                     product_ids.append(item)
 
@@ -1127,10 +1127,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # From orders
             for order in orders:
-                if order.get("customerId"):
-                    customer_id = order.get("customerId")
+                if order.get("customer_id"):
+                    customer_id = order.get("customer_id")
                     # Customer IDs are already normalized at data ingestion level
-                    for line_item in order.get("lineItems", []):
+                    for line_item in order.get("line_items", []):
                         # Extract product ID from line item structure using variant mapping
                         product_id = None
 
@@ -1143,8 +1143,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                                 product_id = variant_to_product_map[variant_id]
 
                         # Fallback: try direct productId field (camelCase)
-                        if not product_id and "productId" in line_item:
-                            product_id = line_item.get("productId")
+                        if not product_id and "product_id" in line_item:
+                            product_id = line_item.get("product_id")
 
                         # Fallback: try variant.product.id structure
                         if (
@@ -1198,7 +1198,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             product_pairs = set()
             for order in orders:
                 order_products = []
-                for line_item in order.get("lineItems", []):
+                for line_item in order.get("line_items", []):
                     # Extract product ID from line item structure
                     product_id = None
 
@@ -1337,7 +1337,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 try:
                     search_product_data = {
                         "searchQuery": search_query,
-                        "productId": product_id,
+                        "product_id": product_id,
                     }
                     features = await self.search_product_generator.generate_features(
                         search_product_data, search_context
@@ -1569,7 +1569,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         checkout = metadata.get("data", {}).get("checkout", {})
                     else:
                         checkout = metadata.get("checkout", {})
-                    line_items = checkout.get("lineItems", [])
+                    line_items = checkout.get("line_items", [])
                     for item in line_items:
                         variant = item.get("variant", {})
                         product_info = variant.get("product", {})
@@ -1585,7 +1585,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         # Find matching product in ProductData by title
                         for product in products:
                             if product.get("title") == product_title:
-                                mapping[event_product_id] = product.get("productId", "")
+                                mapping[event_product_id] = product.get(
+                                    "product_id", ""
+                                )
                                 break
 
         return mapping
