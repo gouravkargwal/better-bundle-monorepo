@@ -152,7 +152,18 @@ class NormalizationJobHandler(EventHandler):
                 )
             return
 
-        # Process data with time range filtering (GraphQL or REST without id falls back to window)
-        await self.consumer.normalization_service.process_normalization_window(
-            shop_id, data_type, format_type, start_time, end_time
-        )
+        # Check for processing mode (historical vs incremental)
+        mode = payload.get(
+            "mode", "incremental"
+        )  # Default to incremental for backward compatibility
+
+        if mode == "historical":
+            # Process all historical data
+            await self.consumer.normalization_service.process_historical_data(
+                shop_id, data_type, format_type
+            )
+        else:
+            # Process data with time range filtering (GraphQL or REST without id falls back to window)
+            await self.consumer.normalization_service.process_normalization_window(
+                shop_id, data_type, format_type, start_time, end_time, mode
+            )

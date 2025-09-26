@@ -25,6 +25,7 @@ export const triggerFullAnalysis = async (shopDomain: string) => {
       job_id: jobId,
       shop_id: shop.id,
       job_type: "data_collection",
+      mode: "historical", // This ensures all historical data is processed during onboarding
       timestamp: new Date().toISOString(),
     };
 

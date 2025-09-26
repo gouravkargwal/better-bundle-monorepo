@@ -237,8 +237,8 @@ class UnifiedGorseService:
                         )
                     )
                 else:
-                    logger.info(
-                        f"Skipping session features sync - no data found for shop {shop_id}"
+                    logger.debug(
+                        f"Skipping session features sync - no data found for shop {shop_id} (expected for new shops)"
                     )
                     results["sessions_synced"] = 0
 
@@ -257,8 +257,8 @@ class UnifiedGorseService:
                         )
                     )
                 else:
-                    logger.info(
-                        f"Skipping product pair features sync - no data found for shop {shop_id}"
+                    logger.debug(
+                        f"Skipping product pair features sync - no data found for shop {shop_id} (expected for new shops)"
                     )
                     results["product_pairs_synced"] = 0
 
@@ -277,8 +277,8 @@ class UnifiedGorseService:
                         )
                     )
                 else:
-                    logger.info(
-                        f"Skipping search product features sync - no data found for shop {shop_id}"
+                    logger.debug(
+                        f"Skipping search product features sync - no data found for shop {shop_id} (expected for new shops)"
                     )
                     results["search_products_synced"] = 0
 
@@ -297,8 +297,8 @@ class UnifiedGorseService:
                         )
                     )
                 else:
-                    logger.info(
-                        f"Skipping collection features sync - no data found for shop {shop_id}"
+                    logger.debug(
+                        f"Skipping collection features sync - no data found for shop {shop_id} (expected for new shops)"
                     )
                     results["collections_synced"] = 0
 
@@ -317,8 +317,8 @@ class UnifiedGorseService:
                         )
                     )
                 else:
-                    logger.info(
-                        f"Skipping customer behavior features sync - no data found for shop {shop_id}"
+                    logger.debug(
+                        f"Skipping customer behavior features sync - no data found for shop {shop_id} (expected for new shops)"
                     )
                     results["customer_behaviors_synced"] = 0
 

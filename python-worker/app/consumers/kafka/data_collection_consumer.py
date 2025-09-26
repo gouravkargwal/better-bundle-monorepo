@@ -70,6 +70,7 @@ class DataCollectionKafkaConsumer:
         try:
             job_id = event.get("job_id")
             shop_id = event.get("shop_id")
+            mode = event.get("mode", "incremental")  # Extract mode from event
             if not job_id or not shop_id:
                 logger.error(
                     "❌ Invalid data collection message: missing required fields",
@@ -78,7 +79,7 @@ class DataCollectionKafkaConsumer:
                 )
                 return False
 
-            return await self._process_data_collection_job(job_id, shop_id)
+            return await self._process_data_collection_job(job_id, shop_id, mode)
 
         except Exception as e:
             logger.exception(
@@ -93,7 +94,9 @@ class DataCollectionKafkaConsumer:
         return event_type == "data_collection"
 
     # Data collection business logic methods
-    async def _process_data_collection_job(self, job_id: str, shop_id: str):
+    async def _process_data_collection_job(
+        self, job_id: str, shop_id: str, mode: str = "incremental"
+    ):
         """Process comprehensive data collection job"""
         try:
             shop_record = await self.shop_repo.get_active_by_id(shop_id)
@@ -108,6 +111,7 @@ class DataCollectionKafkaConsumer:
                 shop_domain=shop_record.shop_domain,
                 shop_id=shop_id,
                 access_token=shop_record.access_token,  # Pass the access token
+                mode=mode,  # Pass the mode to the service
             )
             logger.info(
                 "✅ Data collection completed successfully",

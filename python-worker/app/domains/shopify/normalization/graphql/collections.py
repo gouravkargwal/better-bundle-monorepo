@@ -62,7 +62,7 @@ class GraphQLCollectionAdapter(BaseAdapter):
             template_suffix=payload.get("templateSuffix") or "",
             seo_title=(payload.get("seo", {}) or {}).get("title"),
             seo_description=(payload.get("seo", {}) or {}).get("description"),
-            imageUrl=(
+            image_url=(
                 (payload.get("image") or {}).get("url")
                 if isinstance(payload.get("image"), dict)
                 else None

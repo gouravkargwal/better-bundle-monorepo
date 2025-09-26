@@ -57,7 +57,21 @@ class EntityNormalizationService:
             return await self.data_storage.upsert_entity(data_type, canonical, shop_id)
 
         except Exception as e:
-            self.logger.error(f"Entity normalization failed: {e}")
+            self.logger.error(
+                f"Entity normalization failed: {e}",
+                extra={
+                    "data_type": data_type,
+                    "shop_id": shop_id,
+                    "error_type": type(e).__name__,
+                    "error_details": str(e),
+                    "raw_record_type": type(raw_record).__name__,
+                    "raw_record_keys": (
+                        list(raw_record.keys())
+                        if isinstance(raw_record, dict)
+                        else "not_dict"
+                    ),
+                },
+            )
             # For certain errors, we should not retry
             if self._should_not_retry(e):
                 self.logger.warning(f"Skipping retry for non-retryable error: {e}")
@@ -146,15 +160,51 @@ class EntityNormalizationService:
                 canonical = adapter.to_canonical(payload, shop_id)
                 canonical_data_list.append(canonical)
             except Exception as e:
-                # Log the actual error for debugging
+                # Log detailed error for debugging
                 self.logger.error(
-                    f"Failed to convert {data_type} record to canonical: {e}"
+                    f"Failed to convert {data_type} record to canonical: {e}",
+                    extra={
+                        "data_type": data_type,
+                        "shop_id": shop_id,
+                        "error_type": type(e).__name__,
+                        "error_details": str(e),
+                        "raw_record_keys": (
+                            list(raw_record.keys())
+                            if isinstance(raw_record, dict)
+                            else "not_dict"
+                        ),
+                        "raw_record_sample": (
+                            {k: str(v)[:100] for k, v in list(raw_record.items())[:3]}
+                            if isinstance(raw_record, dict)
+                            else str(raw_record)[:200]
+                        ),
+                    },
                 )
                 continue
 
         # Use data storage service for batch upsert
         processed_count = await self.data_storage.upsert_entities_batch(
             data_type, canonical_data_list, shop_id
+        )
+
+        # Log batch processing summary
+        failed_count = len(raw_records) - len(canonical_data_list)
+        self.logger.info(
+            f"📊 Batch normalization summary for {data_type}",
+            extra={
+                "data_type": data_type,
+                "shop_id": shop_id,
+                "raw_records": len(raw_records),
+                "canonical_converted": len(canonical_data_list),
+                "conversion_failed": failed_count,
+                "storage_successful": processed_count,
+                "storage_failed": len(canonical_data_list) - processed_count,
+                "overall_success_rate": (
+                    f"{(processed_count/len(raw_records)*100):.1f}%"
+                    if raw_records
+                    else "0%"
+                ),
+            },
         )
 
         return processed_count
@@ -362,21 +412,26 @@ class FeatureComputationService:
     def __init__(self):
         self.logger = get_logger(__name__)
 
-    async def trigger_feature_computation(self, shop_id: str, data_type: str):
+    async def trigger_feature_computation(
+        self, shop_id: str, data_type: str, mode: str = "incremental"
+    ):
         """Trigger feature computation after successful normalization."""
         try:
             self.logger.info(
-                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type}"
+                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type} in {mode} mode"
             )
 
-            if data_type in ["products", "orders", "customers", "collections"]:
+            if data_type in ["products", "orders", "customers", "collections", "all"]:
                 job_id = (
                     f"webhook_feature_compute_{shop_id}_{int(now_utc().timestamp())}"
                 )
 
+                # Use historical mode for feature computation when normalization is in historical mode
+                incremental = mode != "historical"
+
                 metadata = {
                     "batch_size": 100,
-                    "incremental": False,  # Use full processing for webhook-triggered events
+                    "incremental": incremental,  # Use historical processing when mode is historical
                     "trigger_source": "webhook_normalization",
                     "entity_type": data_type,
                     "timestamp": now_utc().isoformat(),
@@ -580,6 +635,58 @@ class NormalizationService:
             )
             return False
 
+    async def reset_watermarks_for_historical_processing(
+        self, shop_id: str, data_type: str
+    ) -> None:
+        """Reset watermarks to enable historical processing of all data."""
+        try:
+            from app.core.database.session import get_session_context
+
+            async with get_session_context() as session:
+                from sqlalchemy import delete
+                from app.core.database.models import PipelineWatermark
+
+                # Delete existing watermarks to force historical processing
+                await session.execute(
+                    delete(PipelineWatermark).where(
+                        (PipelineWatermark.shop_id == shop_id)
+                        & (PipelineWatermark.data_type == data_type)
+                    )
+                )
+                await session.commit()
+
+                self.logger.info(
+                    f"🔄 Reset watermarks for historical processing",
+                    extra={"shop_id": shop_id, "data_type": data_type},
+                )
+        except Exception as e:
+            self.logger.error(f"Failed to reset watermarks: {e}")
+
+    async def process_historical_data(
+        self, shop_id: str, data_type: str, format_type: str = "graphql"
+    ) -> bool:
+        """Process all historical data for a shop and data type.
+
+        This is the industry-standard way to handle historical processing.
+        """
+        self.logger.info(
+            f"📚 Starting historical processing for {data_type}",
+            extra={"shop_id": shop_id, "data_type": data_type},
+        )
+
+        # Reset watermarks to ensure we process all data
+        await self.reset_watermarks_for_historical_processing(shop_id, data_type)
+
+        # Process with historical mode
+        return await self.process_normalization_window(
+            shop_id=shop_id,
+            data_type=data_type,
+            format_type=format_type,
+            start_time=None,
+            end_time=None,
+            mode="historical",
+        )
+
     async def process_normalization_window(
         self,
         shop_id: str,
@@ -587,43 +694,77 @@ class NormalizationService:
         format_type: str,
         start_time: Optional[str],
         end_time: Optional[str],
+        mode: str = "incremental",  # "incremental" or "historical"
     ) -> bool:
-        """Process normalization for a time window."""
+        """Process normalization for a time window.
+
+        Args:
+            mode: "incremental" for new data only, "historical" for all data
+        """
         try:
-            self.logger.info(f"🔄 Processing {data_type} for shop {shop_id}")
+            self.logger.info(
+                f"🔄 Processing {data_type} for shop {shop_id} in {mode} mode"
+            )
+
+            # For historical mode, ignore watermarks and process all data
+            if mode == "historical":
+                self.logger.info(f"📚 Historical mode: processing all {data_type} data")
+                start_time = None
+                end_time = None
+                # Skip watermark resolution for historical mode
+                resolved_start = None
+                resolved_end = None
+            else:
+                # Resolve window from watermarks for incremental mode
+                resolved_start, resolved_end = (
+                    await self._resolve_window_from_watermark(
+                        shop_id, data_type, start_time, end_time, format_type
+                    )
+                )
 
             # Handle "all" data types
             if data_type == "all":
                 data_types = ["products", "orders", "customers", "collections"]
                 self.logger.info(f"🔄 Processing all data types: {data_types}")
 
+                # Process all data types first
                 for dt in data_types:
-                    # Resolve window per data type (watermark-aware)
-                    dt_start, dt_end = await self._resolve_window_from_watermark(
-                        shop_id, dt, start_time, end_time, format_type
-                    )
+                    # Resolve window per data type (watermark-aware for incremental mode)
+                    if mode == "historical":
+                        dt_start, dt_end = None, None
+                    else:
+                        dt_start, dt_end = await self._resolve_window_from_watermark(
+                            shop_id, dt, start_time, end_time, format_type
+                        )
                     last_extracted = await self._process_single_data_type(
                         shop_id, dt, format_type, dt_start, dt_end
                     )
-                    # Trigger feature computation after each data type (independent processing)
-                    await self.feature_service.trigger_feature_computation(shop_id, dt)
                     # Upsert watermark to the max of last_extracted and dt_end
                     if dt_end or last_extracted:
                         await self.data_storage.upsert_watermark(
                             shop_id, dt, last_extracted or dt_end, format_type
                         )
-                    self.logger.info(f"✅ Feature computation triggered for {dt}")
-            else:
-                # Resolve window for single data type
-                res_start, res_end = await self._resolve_window_from_watermark(
-                    shop_id, data_type, start_time, end_time, format_type
+                    self.logger.info(f"✅ Normalization completed for {dt}")
+
+                # Trigger feature computation once after all data types are processed
+                await self.feature_service.trigger_feature_computation(
+                    shop_id, "all", mode
                 )
+                self.logger.info(f"✅ Feature computation triggered for all data types")
+            else:
+                # Resolve window for single data type (watermark-aware for incremental mode)
+                if mode == "historical":
+                    res_start, res_end = None, None
+                else:
+                    res_start, res_end = await self._resolve_window_from_watermark(
+                        shop_id, data_type, start_time, end_time, format_type
+                    )
                 last_extracted = await self._process_single_data_type(
                     shop_id, data_type, format_type, res_start, res_end
                 )
                 # Trigger feature computation after this data type
                 await self.feature_service.trigger_feature_computation(
-                    shop_id, data_type
+                    shop_id, data_type, mode
                 )
                 # Upsert watermark
                 if res_end or last_extracted:
@@ -696,9 +837,37 @@ class NormalizationService:
                 ]
 
                 if available_timestamps:
-                    # Use the earliest timestamp as start, latest as end
+                    # For historical data processing, use the full range of available data
+                    # instead of just the latest timestamp
                     resolved_start = start_time or min(available_timestamps)
                     resolved_end = end_time or max(available_timestamps)
+
+                    # If start and end are the same (incremental processing) OR
+                    # if the window is too narrow (less than 1 hour),
+                    # expand the window to process all available data
+                    start_dt = datetime.fromisoformat(
+                        resolved_start.replace("Z", "+00:00")
+                    )
+                    end_dt = datetime.fromisoformat(resolved_end.replace("Z", "+00:00"))
+                    window_duration = (end_dt - start_dt).total_seconds()
+
+                    if (
+                        resolved_start == resolved_end or window_duration < 3600
+                    ):  # Less than 1 hour
+                        self.logger.info(
+                            f"🔄 Expanding narrow window for historical processing",
+                            extra={
+                                "shop_id": shop_id,
+                                "data_type": data_type,
+                                "original_start": resolved_start,
+                                "original_end": resolved_end,
+                                "window_duration_seconds": window_duration,
+                                "expanded_start": min(available_timestamps),
+                                "expanded_end": max(available_timestamps),
+                            },
+                        )
+                        resolved_start = min(available_timestamps)
+                        resolved_end = max(available_timestamps)
                 else:
                     # Fallback to current time
                     resolved_start = start_time or now_iso

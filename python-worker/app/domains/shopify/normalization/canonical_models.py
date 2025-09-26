@@ -131,7 +131,7 @@ class CanonicalCollection(BaseModel):
     template_suffix: Optional[str] = ""  # templateSuffix
     seo_title: Optional[str] = ""  # seoTitle
     seo_description: Optional[str] = ""  # seoDescription
-    imageUrl: Optional[str] = None  # imageUrl
+    image_url: Optional[str] = None  # imageUrl -> image_url to match DB schema
     image_alt: Optional[str] = None  # imageAlt
     product_count: int = 0  # productCount
     is_automated: bool = False  # isAutomated

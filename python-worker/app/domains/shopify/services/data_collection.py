@@ -195,6 +195,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         shop_domain: str,
         access_token: str,
         shop_id: str,
+        mode: str = "incremental",
     ) -> Dict[str, Any]:
         """Collect all available data from Shopify API with session tracking"""
         # Start collection session
@@ -225,7 +226,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
 
             await self._trigger_normalization(
-                shop_id, results.get("processed_types", []), collection_start_time
+                shop_id, results.get("processed_types", []), collection_start_time, mode
             )
 
             total_items = sum(
@@ -304,7 +305,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             await storage_method(data, shop_id)
 
     async def _trigger_normalization(
-        self, shop_id: str, data_types: List[str], collection_start_time: datetime
+        self,
+        shop_id: str,
+        data_types: List[str],
+        collection_start_time: datetime,
+        mode: str = "incremental",
     ):
         """Trigger normalization for processed data types using Kafka with per-data-type watermarks"""
         if not data_types:
@@ -359,6 +364,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         "shop_id": shop_id,
                         "data_type": data_type,
                         "format": "graphql",
+                        "mode": mode,  # Use the mode from the incoming event
                         "timestamp": now_utc().isoformat(),
                         "source": "data_collection_service",
                     }

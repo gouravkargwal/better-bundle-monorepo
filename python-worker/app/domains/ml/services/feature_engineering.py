@@ -780,29 +780,47 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         },
                     }
             else:
-                # Load all data using chunked processing
+                # Load all data using chunked processing - use much larger batch sizes for historical processing
                 products = await self.process_entities_in_chunks(
-                    shop_id, "products", batch_size * 2, chunk_size=100
+                    shop_id,
+                    "products",
+                    10000,
+                    chunk_size=100,  # Process up to 10k products
                 )
                 customers = await self.process_entities_in_chunks(
-                    shop_id, "customers", batch_size, chunk_size=100
+                    shop_id,
+                    "customers",
+                    10000,
+                    chunk_size=100,  # Process up to 10k customers
                 )
                 orders = await self.process_entities_in_chunks(
-                    shop_id, "orders", batch_size * 3, chunk_size=100
+                    shop_id, "orders", 10000, chunk_size=100  # Process up to 10k orders
                 )
                 collections = await self.process_entities_in_chunks(
-                    shop_id, "collections", batch_size, chunk_size=100
+                    shop_id,
+                    "collections",
+                    1000,
+                    chunk_size=100,  # Process up to 1k collections
                 )
 
-                # Load unified analytics data for full processing
+                # Load unified analytics data for full processing - use larger batch sizes for historical processing
                 user_interactions = await self.process_entities_in_chunks(
-                    shop_id, "user_interactions", batch_size * 3, chunk_size=100
+                    shop_id,
+                    "user_interactions",
+                    10000,
+                    chunk_size=100,  # Process up to 10k interactions
                 )
                 user_sessions = await self.process_entities_in_chunks(
-                    shop_id, "user_sessions", batch_size, chunk_size=100
+                    shop_id,
+                    "user_sessions",
+                    10000,
+                    chunk_size=100,  # Process up to 10k sessions
                 )
                 purchase_attributions = await self.process_entities_in_chunks(
-                    shop_id, "purchase_attributions", batch_size, chunk_size=100
+                    shop_id,
+                    "purchase_attributions",
+                    10000,
+                    chunk_size=100,  # Process up to 10k attributions
                 )
 
             # Compute all features using unified analytics data
@@ -895,8 +913,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 if feature_type in save_results:
                     result = save_results[feature_type]
                     if isinstance(result, dict) and result.get("saved_count", 0) == 0:
-                        logger.warning(
-                            f"Feature type {feature_type} had no successful saves"
+                        logger.debug(
+                            f"Feature type {feature_type} had no successful saves (expected when no data available)"
                         )
                         # Don't mark as failed if there was no data to process
                         if result.get("total_processed", 0) > 0:

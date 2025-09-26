@@ -95,6 +95,14 @@ class GraphQLProductAdapter(BaseAdapter):
         images = _edges_to_nodes_with_extracted_ids(payload.get("images"))
         media = _edges_to_nodes_with_extracted_ids(payload.get("media"))
 
+        # Extract collections - get collection IDs only
+        collections: List[str] = []
+        for edge in (payload.get("collections", {}) or {}).get("edges", []) or []:
+            node = edge.get("node", {})
+            collection_id = _extract_numeric_gid(node.get("id"))
+            if collection_id:
+                collections.append(collection_id)
+
         # Extract IDs from options array
         options = []
         for option in payload.get("options") or []:
@@ -131,6 +139,7 @@ class GraphQLProductAdapter(BaseAdapter):
             images=images,
             media=media,
             options=options,
+            collections=collections,  # Add collections field
             seo_title=seo_title,
             seo_description=seo_description,
             template_suffix=payload.get("templateSuffix"),
