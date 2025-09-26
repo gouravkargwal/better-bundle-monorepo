@@ -47,7 +47,7 @@ class UserFeatureGenerator(BaseFeatureGenerator):
 
             # Filter customer's orders
             customer_orders = [
-                order for order in orders if order.get("customerId") == customer_id
+                order for order in orders if order.get("customer_id") == customer_id
             ]
 
             # Compute purchase metrics
@@ -77,24 +77,20 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             features = {
                 "shop_id": shop_id,
                 "customer_id": customer_id,
-                # Purchase Metrics
                 "total_purchases": purchase_metrics["total_purchases"],
                 "total_spent": purchase_metrics["total_spent"],
                 "avg_order_value": purchase_metrics["avg_order_value"],
                 "lifetime_value": purchase_metrics["lifetime_value"],
-                # Refund Metrics (NEW)
                 "refunded_orders": purchase_metrics["refunded_orders"],
                 "refund_rate": purchase_metrics["refund_rate"],
                 "total_refunded_amount": purchase_metrics["total_refunded_amount"],
                 "net_lifetime_value": purchase_metrics["net_lifetime_value"],
-                # Time-based Metrics
                 "days_since_first_order": temporal_metrics["days_since_first_order"],
                 "days_since_last_order": temporal_metrics["days_since_last_order"],
                 "avg_days_between_orders": temporal_metrics["avg_days_between_orders"],
                 "order_frequency_per_month": temporal_metrics[
                     "order_frequency_per_month"
                 ],
-                # Product Preferences
                 "distinct_products_purchased": product_preferences["distinct_products"],
                 "distinct_categories_purchased": product_preferences[
                     "distinct_categories"
@@ -102,11 +98,9 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "preferred_category": product_preferences["preferred_category"],
                 "preferred_vendor": product_preferences["preferred_vendor"],
                 "price_point_preference": product_preferences["price_point_preference"],
-                # Discount Behavior
                 "orders_with_discount_count": discount_metrics["orders_with_discount"],
                 "discount_sensitivity": discount_metrics["discount_sensitivity"],
                 "avg_discount_amount": discount_metrics["avg_discount_amount"],
-                # Enhanced Customer Features (from Order API)
                 "customer_state": customer_enhancement_features["customer_state"],
                 "is_verified_email": customer_enhancement_features["is_verified_email"],
                 "customer_age": customer_enhancement_features["customer_age"],
@@ -120,8 +114,6 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "customer_health_score": customer_enhancement_features[
                     "customer_health_score"
                 ],
-                # NEW: Customer demographic features from CustomerData table
-                "customer_email": customer_demographic_features["customer_email"],
                 "customer_first_name": customer_demographic_features[
                     "customer_first_name"
                 ],
@@ -136,9 +128,6 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 "customer_last_order_id": customer_demographic_features[
                     "customer_last_order_id"
                 ],
-                "customer_metafields": customer_demographic_features[
-                    "customer_metafields"
-                ],
                 "customer_state": customer_demographic_features["customer_state"],
                 "customer_verified_email": customer_demographic_features[
                     "customer_verified_email"
@@ -148,12 +137,6 @@ class UserFeatureGenerator(BaseFeatureGenerator):
                 ],
                 "customer_default_address": customer_demographic_features[
                     "customer_default_address"
-                ],
-                "customer_addresses": customer_demographic_features[
-                    "customer_addresses"
-                ],
-                "customer_currency_code": customer_demographic_features[
-                    "customer_currency_code"
                 ],
                 "customer_locale": customer_demographic_features["customer_locale"],
                 "last_computed_at": now_utc(),
@@ -499,7 +482,6 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             "total_spent": 0.0,
             "avg_order_value": 0.0,
             "lifetime_value": 0.0,
-            # Refund Metrics (NEW)
             "refunded_orders": 0,
             "refund_rate": 0.0,
             "total_refunded_amount": 0.0,
@@ -523,21 +505,16 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             "geographic_region": None,
             "currency_preference": "USD",
             "customer_health_score": 0,
-            # NEW: Customer demographic features from CustomerData table
-            "customer_email": "",
             "customer_first_name": "",
             "customer_last_name": "",
             "customer_location": {},
             "customer_tags": [],
             "customer_created_at_shopify": None,
             "customer_last_order_id": "",
-            "customer_metafields": [],
             "customer_state": "",
             "customer_verified_email": False,
             "customer_tax_exempt": False,
             "customer_default_address": {},
-            "customer_addresses": [],
-            "customer_currency_code": "USD",
             "customer_locale": "en",
             "last_computed_at": now_utc(),
         }
@@ -653,41 +630,32 @@ class UserFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Compute customer demographic features using CustomerData table"""
         try:
-            # Extract all customer data fields (previously unused)
             return {
-                "customer_email": customer_data.get("email", ""),
                 "customer_first_name": customer_data.get("first_name", ""),
                 "customer_last_name": customer_data.get("last_name", ""),
                 "customer_location": customer_data.get("location", {}),
                 "customer_tags": customer_data.get("tags", []),
                 "customer_created_at_shopify": customer_data.get("created_at_shopify"),
                 "customer_last_order_id": customer_data.get("last_order_id", ""),
-                "customer_metafields": customer_data.get("metafields", []),
                 "customer_state": customer_data.get("state", ""),
                 "customer_verified_email": customer_data.get("verified_email", False),
                 "customer_tax_exempt": customer_data.get("tax_exempt", False),
                 "customer_default_address": customer_data.get("default_address", {}),
-                "customer_addresses": customer_data.get("addresses", []),
-                "customer_currency_code": customer_data.get("currency_code", "USD"),
                 "customer_locale": customer_data.get("customer_locale", "en"),
                 "customer_is_active": customer_data.get("is_active", True),
             }
         except Exception as e:
             logger.error(f"Error computing customer demographic features: {str(e)}")
             return {
-                "customer_email": "",
                 "customer_first_name": "",
                 "customer_last_name": "",
                 "customer_location": {},
                 "customer_tags": [],
                 "customer_created_at_shopify": None,
                 "customer_last_order_id": "",
-                "customer_metafields": [],
                 "customer_state": "",
                 "customer_verified_email": False,
                 "customer_tax_exempt": False,
                 "customer_default_address": {},
-                "customer_addresses": [],
-                "customer_currency_code": "USD",
                 "customer_locale": "en",
             }

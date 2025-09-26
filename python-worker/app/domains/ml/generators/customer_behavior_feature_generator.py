@@ -40,7 +40,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             Dictionary of generated features matching CustomerBehaviorFeatures schema
         """
         try:
-            customer_id = customer.get("customerId", "")
+            customer_id = customer.get("customer_id", "")
             logger.debug(
                 f"Computing enhanced customer behavior features for customer: {customer_id}"
             )
@@ -133,7 +133,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
         except Exception as e:
             logger.error(
-                f"Failed to compute behavior features for customer: {customer.get('customerId', 'unknown')}: {str(e)}"
+                f"Failed to compute behavior features for customer: {customer.get('customer_id', 'unknown')}: {str(e)}"
             )
             return {}
 
@@ -435,7 +435,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Return empty behavior features when no events exist"""
         return {
             "shop_id": shop.get("id", ""),
-            "customer_id": customer.get("customerId", ""),
+            "customer_id": customer.get("customer_id", ""),
             "session_count": 0,
             "avg_session_duration": None,
             "avg_events_per_session": None,
@@ -479,7 +479,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
         """Compute basic identification features"""
         return {
             "shop_id": shop.get("id", ""),
-            "customer_id": customer.get("customerId", ""),
+            "customer_id": customer.get("customer_id", ""),
         }
 
     def _compute_session_metrics(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -913,7 +913,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             # Filter sessions for this customer
             customer_sessions = [
-                s for s in user_sessions if s.get("customerId") == customer_id
+                s for s in user_sessions if s.get("customer_id") == customer_id
             ]
 
             if not customer_sessions:
@@ -1029,7 +1029,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             # Filter interactions for this customer
             customer_interactions = [
-                i for i in user_interactions if i.get("customerId") == customer_id
+                i for i in user_interactions if i.get("customer_id") == customer_id
             ]
 
             if not customer_interactions:
@@ -1112,7 +1112,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             # Filter sessions for this customer
             customer_sessions = [
-                s for s in user_sessions if s.get("customerId") == customer_id
+                s for s in user_sessions if s.get("customer_id") == customer_id
             ]
 
             if not customer_sessions:
@@ -1164,7 +1164,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
             # Filter attributions for this customer
             customer_attributions = [
-                a for a in purchase_attributions if a.get("customerId") == customer_id
+                a for a in purchase_attributions if a.get("customer_id") == customer_id
             ]
 
             if not customer_attributions:
