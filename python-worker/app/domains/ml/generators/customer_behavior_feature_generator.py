@@ -626,11 +626,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
         for event in events:
             event_data = event.get("event_data", {})
-            if isinstance(event_data, str):
-                try:
-                    event_data = json.loads(event_data)
-                except:
-                    event_data = {}
+            # Event data is already parsed from database (no JSON parsing needed)
 
             # Extract product IDs
             product_id = event_data.get("productId") or event_data.get("product_id")

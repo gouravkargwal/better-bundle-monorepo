@@ -77,6 +77,9 @@ class GraphQLProductAdapter(BaseAdapter):
         price = variants[0].price if variants else None
         compare_at = variants[0].compare_at_price if variants else None
 
+        # Note: Derived metrics (variant_count, image_count, tag_count, price_range, collections)
+        # are computed in feature engineering, not during normalization
+
         # Images/media/options via edges → arrays of nodes with extracted IDs
         def _edges_to_nodes_with_extracted_ids(
             container: Optional[Dict[str, Any]],
@@ -134,6 +137,7 @@ class GraphQLProductAdapter(BaseAdapter):
             seo_title=seo_title,
             seo_description=seo_description,
             template_suffix=payload.get("templateSuffix"),
+            # Derived metrics are computed in feature engineering, not normalization
             extras={},
         )
 

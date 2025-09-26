@@ -307,11 +307,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         device_type = None
         event_data = first_event.get("eventData", {})
 
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
+        # Event data is already parsed from database (no JSON parsing needed)
 
         # Try to get device type from various possible locations in event data
         user_agent = ""
@@ -359,11 +355,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
         # Extract exit page (from last event)
         exit_page = None
         last_event_data = last_event.get("eventData", {})
-        if isinstance(last_event_data, str):
-            try:
-                last_event_data = json.loads(last_event_data)
-            except:
-                last_event_data = {}
+        # Event data is already parsed from database (no JSON parsing needed)
 
         if "context" in last_event_data and "page" in last_event_data["context"]:
             url = last_event_data["context"]["page"].get("url")

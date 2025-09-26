@@ -465,54 +465,21 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _compute_metadata_scores(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute product metadata richness scores (0-1 normalized)"""
 
-        # Variant complexity
+        # Compute counts from actual data (proper place for this computation)
         variants = product_data.get("variants", [])
-        if isinstance(variants, str):
-            try:
-                import json
-
-                variants = json.loads(variants)
-            except:
-                variants = []
-
         variant_count = len(variants) if isinstance(variants, list) else 0
         variant_complexity = min(variant_count / 10.0, 1.0)  # Normalize to 0-1
 
-        # Image richness
         images = product_data.get("images", [])
-        if isinstance(images, str):
-            try:
-                import json
-
-                images = json.loads(images)
-            except:
-                images = []
-
         image_count = len(images) if isinstance(images, list) else 0
         image_richness = min(image_count / 5.0, 1.0)  # Normalize to 0-1
 
-        # Tag diversity
         tags = product_data.get("tags", [])
-        if isinstance(tags, str):
-            try:
-                import json
-
-                tags = json.loads(tags)
-            except:
-                tags = []
-
         tag_count = len(tags) if isinstance(tags, list) else 0
         tag_diversity = min(tag_count / 10.0, 1.0)  # Normalize to 0-1
 
-        # Metafield utilization
+        # Metafield utilization (data already parsed from database)
         metafields = product_data.get("metafields", [])
-        if isinstance(metafields, str):
-            try:
-                import json
-
-                metafields = json.loads(metafields)
-            except:
-                metafields = []
 
         metafield_count = len(metafields) if isinstance(metafields, list) else 0
         metafield_utilization = min(metafield_count / 5.0, 1.0)  # Normalize to 0-1

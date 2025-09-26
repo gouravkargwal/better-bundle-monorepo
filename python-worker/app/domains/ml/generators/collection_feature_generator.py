@@ -286,13 +286,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
         for order in order_data:
             line_items = order.get("lineItems", [])
-            if isinstance(line_items, str):
-                import json
-
-                try:
-                    line_items = json.loads(line_items)
-                except:
-                    line_items = []
+            # Line items are already parsed from database (no JSON parsing needed)
 
             order_has_collection_product = False
             for line_item in line_items:

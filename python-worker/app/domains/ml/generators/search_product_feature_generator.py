@@ -302,11 +302,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
     def _extract_search_query(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract search query from search event"""
         event_data = event.get("event_data", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
+        # Event data is already parsed from database (no JSON parsing needed)
 
         # Try different possible field names for search query
         query = (
@@ -325,11 +321,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
     def _extract_search_position(self, event: Dict[str, Any]) -> Optional[int]:
         """Extract search result position from event"""
         event_data = event.get("event_data", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
+        # Event data is already parsed from database (no JSON parsing needed)
 
         # Try different field names for position
         position = (

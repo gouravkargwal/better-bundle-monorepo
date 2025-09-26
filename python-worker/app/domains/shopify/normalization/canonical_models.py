@@ -88,34 +88,40 @@ class CanonicalProduct(BaseModel):
     # Exact field mapping to ProductData table
     title: str  # title (required)
     handle: str  # handle (required)
+    # Core product information (essential for ML)
     description: Optional[str] = None  # description
-    description_html: Optional[str] = None  # descriptionHtml
     product_type: Optional[str] = ""  # productType
     vendor: Optional[str] = ""  # vendor
     tags: Any = Field(default_factory=list)  # tags (JSON)
     status: Optional[str] = "ACTIVE"  # status
     total_inventory: Optional[int] = 0  # totalInventory
+
+    # Pricing data (essential for ML)
     price: float = 0.0  # price
     compare_at_price: Optional[float] = 0.0  # compareAtPrice
-    inventory: Optional[int] = 0  # inventory
-    image_url: Optional[str] = None  # imageUrl
-    image_alt: Optional[str] = None  # imageAlt
+    price_range: Any = Field(default_factory=dict)  # price_range (JSON)
+
+    # Collections data (critical for ML features)
+    collections: Any = Field(default_factory=list)  # collections (JSON)
+
+    # Timestamps (used in recency features)
     created_at: Optional[datetime] = None  # createdAt
     updated_at: Optional[datetime] = None  # updatedAt
-    online_store_url: Optional[str] = None  # onlineStoreUrl
-    online_store_preview_url: Optional[str] = None  # onlineStorePreviewUrl
+
+    # SEO data (valuable for content-based ML features)
     seo_title: Optional[str] = None  # seoTitle
     seo_description: Optional[str] = None  # seoDescription
     template_suffix: Optional[str] = None  # templateSuffix
+
+    # Detailed product data (essential for ML)
     variants: Any = Field(default_factory=list)  # variants (JSON)
     images: Any = Field(default_factory=list)  # images (JSON)
     media: Any = Field(default_factory=list)  # media (JSON)
     options: Any = Field(default_factory=list)  # options (JSON)
-    metafields: Any = Field(default_factory=list)  # metafields (JSON)
+
+    # Note: Derived metrics are computed in feature engineering, not stored
 
     # Internal fields
-    created_at: datetime  # Used for createdAt
-    updated_at: datetime  # Used for updatedAt
     is_active: bool = True  # For soft deletes
     extras: Any = Field(default_factory=dict)
 
