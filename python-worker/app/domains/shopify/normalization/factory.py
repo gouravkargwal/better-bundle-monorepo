@@ -9,7 +9,8 @@ from .graphql.orders import GraphQLOrderAdapter
 from .graphql.products import GraphQLProductAdapter
 from .graphql.collections import GraphQLCollectionAdapter
 from .graphql.customers import GraphQLCustomerAdapter
-from .graphql.refunds import GraphQLRefundAdapter
+
+# Refund adapter removed - refunds handled directly in attribution system
 
 
 _REGISTRY: Dict[Tuple[str, str], Type[BaseAdapter]] = {
@@ -18,7 +19,7 @@ _REGISTRY: Dict[Tuple[str, str], Type[BaseAdapter]] = {
     ("graphql", "products"): GraphQLProductAdapter,
     ("graphql", "collections"): GraphQLCollectionAdapter,
     ("graphql", "customers"): GraphQLCustomerAdapter,
-    ("graphql", "refunds"): GraphQLRefundAdapter,
+    # Refunds handled directly in attribution system - no normalization needed
 }
 
 
