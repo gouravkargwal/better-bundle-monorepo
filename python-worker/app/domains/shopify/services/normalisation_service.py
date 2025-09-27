@@ -840,11 +840,17 @@ class NormalizationService:
                 self.logger.error(f"❌ Unknown data type for entity: {data_type}")
                 return False
 
+            # Extract numeric ID from GraphQL ID for search
+            # GraphQL IDs are stored as "gid://shopify/Product/7195111358549"
+            # We need to search for the numeric part "7195111358549"
+            numeric_id = self._extract_numeric_id_from_graphql(shopify_id)
+
             async with get_session_context() as session:
+                # Search by extracting numeric ID from stored GraphQL IDs
                 result = await session.execute(
                     select(model_class).where(
                         (model_class.shop_id == shop_id)
-                        & (model_class.shopify_id == str(shopify_id))
+                        & (model_class.shopify_id.like(f"%/{numeric_id}"))
                     )
                 )
                 raw = result.scalar_one_or_none()
@@ -853,6 +859,7 @@ class NormalizationService:
                 self.logger.warning(
                     "Entity not found in RAW",
                     shopify_id=shopify_id,
+                    numeric_id=numeric_id,
                     shop_id=shop_id,
                     data_type=data_type,
                 )
@@ -897,6 +904,19 @@ class NormalizationService:
                 shopify_id=shopify_id,
             )
             return False
+
+    def _extract_numeric_id_from_graphql(self, shopify_id: str) -> str:
+        """Extract numeric ID from GraphQL ID or return as-is if already numeric."""
+        # If it's already a numeric ID, return as-is
+        if shopify_id.isdigit():
+            return shopify_id
+
+        # If it's a GraphQL ID like "gid://shopify/Product/7195111358549", extract the numeric part
+        if "/" in shopify_id:
+            return shopify_id.split("/")[-1]
+
+        # Fallback: return as-is
+        return shopify_id
 
     async def _execute_batch_normalization(
         self, shop_id: str, data_type: str, params: Dict[str, Any]

@@ -624,8 +624,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, data_type: str, collection_payload: Dict[str, Any]
     ) -> Optional[List[str]]:
         """Get specific IDs for a data type if this is a webhook event."""
-        if collection_payload and collection_payload.get("data_type") == data_type:
-            return collection_payload.get("specific_ids")
+        if collection_payload and "specific_ids" in collection_payload:
+            specific_ids = collection_payload.get("specific_ids", {})
+            return specific_ids.get(data_type)
         return None
 
     async def _execute_collection_tasks(
@@ -675,12 +676,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         specific_ids = {}
 
         if collection_payload and collection_payload.get("specific_ids"):
-            data_type = collection_payload.get("data_type")
-            if data_type:
-                specific_ids[data_type] = collection_payload.get("specific_ids")
-                logger.info(
-                    f"🎯 Extracted specific IDs for {data_type}: {specific_ids[data_type]}"
-                )
+            # The specific_ids is already a dict with data types as keys
+            specific_ids = collection_payload.get("specific_ids", {})
+            logger.info(f"🎯 Extracted specific IDs: {specific_ids}")
 
         return specific_ids
 

@@ -35,9 +35,7 @@ class ProductData(BaseModel, ShopMixin):
     # Collections data (critical for ML features)
     collections = Column(JSON, default=[], nullable=True)  # Array of collection IDs
 
-    # Timestamps (used in recency features)
-    created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    # Timestamps are provided by TimestampMixin (auto-created created_at and updated_at)
 
     # SEO data (valuable for content-based ML features)
     seo_title = Column(String(500), nullable=True)
