@@ -31,16 +31,24 @@ class KafkaConsumer:
             self._topics = topics
             self._group_id = group_id
 
-            # Create static group instance ID using worker_id only (no object ID)
+            # Create unique static group instance ID per consumer group
             worker_id = self.config.get("worker_id", "worker-1")
-            static_group_instance_id = f"betterbundle-{worker_id}"
+            # Include group_id in the static instance ID to make it unique per consumer group
+            static_group_instance_id = f"betterbundle-{worker_id}-{group_id}"
+
+            # Validate that we don't have duplicate static group instance IDs
+            if hasattr(self, '_static_group_instance_id') and self._static_group_instance_id == static_group_instance_id:
+                logger.warning(f"Consumer already initialized with static group instance ID: {static_group_instance_id}")
+                return
+
+            self._static_group_instance_id = static_group_instance_id
 
             consumer_config = {
                 "bootstrap_servers": self.config["bootstrap_servers"],
                 "group_id": group_id,
                 "value_deserializer": lambda m: json.loads(m.decode("utf-8")),
                 "key_deserializer": lambda k: k.decode("utf-8") if k else None,
-                "group_instance_id": static_group_instance_id,  # Static instance ID
+                "group_instance_id": static_group_instance_id,  # Unique static instance ID per group
                 **self.config.get("consumer_config", {}),
             }
 

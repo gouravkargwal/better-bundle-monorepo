@@ -5,11 +5,11 @@ Represents processing watermarks for data pipelines.
 """
 
 from sqlalchemy import Column, String, Index, func
-from .base import Base, ShopMixin, IDMixin
+from .base import Base, ShopMixin, IDMixin, TimestampMixin
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 
 
-class PipelineWatermark(Base, IDMixin, ShopMixin):
+class PipelineWatermark(Base, IDMixin, ShopMixin, TimestampMixin):
     """Pipeline watermark model - matches Prisma schema exactly"""
 
     __tablename__ = "pipeline_watermarks"

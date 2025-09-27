@@ -41,13 +41,15 @@ class KafkaSettings(BaseSettings):
             "auto_offset_reset": "latest",
             "enable_auto_commit": False,
             "max_poll_records": 500,
-            "session_timeout_ms": 60000,  # Increased to 60s for better stability
-            "heartbeat_interval_ms": 20000,  # Increased to 20s (1/3 of session timeout)
+            "session_timeout_ms": 90000,  # Increased to 90s for better stability
+            "heartbeat_interval_ms": 30000,  # Increased to 30s (1/3 of session timeout)
             "max_poll_interval_ms": 300000,  # 5 minutes
             "request_timeout_ms": 30000,  # 30 seconds
-            "rebalance_timeout_ms": 120000,  # 2 minutes for rebalancing
+            "rebalance_timeout_ms": 180000,  # 3 minutes for rebalancing
             "fetch_min_bytes": 1,
             "fetch_max_wait_ms": 500,  # Reduced from default 500ms
+            "retry_backoff_ms": 1000,  # Add retry backoff
+            "metadata_max_age_ms": 300000,  # 5 minutes metadata refresh
             # group_instance_id will be set dynamically in the consumer
         }
     )

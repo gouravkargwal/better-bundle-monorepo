@@ -7,10 +7,10 @@ Represents raw data from Shopify webhooks and API calls.
 from sqlalchemy import Column, String, Index, func
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSON
-from .base import Base, IDMixin, ShopMixin
+from .base import Base, IDMixin, ShopMixin, TimestampMixin
 
 
-class RawOrder(Base, IDMixin, ShopMixin):
+class RawOrder(Base, IDMixin, ShopMixin, TimestampMixin):
     """Raw order data model"""
 
     __tablename__ = "raw_orders"
@@ -40,7 +40,7 @@ class RawOrder(Base, IDMixin, ShopMixin):
         return f"<RawOrder(shop_id={self.shop_id}, shopify_id={self.shopify_id})>"
 
 
-class RawProduct(Base, IDMixin, ShopMixin):
+class RawProduct(Base, IDMixin, ShopMixin, TimestampMixin):
     """Raw product data model"""
 
     __tablename__ = "raw_products"
@@ -70,7 +70,7 @@ class RawProduct(Base, IDMixin, ShopMixin):
         return f"<RawProduct(shop_id={self.shop_id}, shopify_id={self.shopify_id})>"
 
 
-class RawCustomer(Base, IDMixin, ShopMixin):
+class RawCustomer(Base, IDMixin, ShopMixin, TimestampMixin):
     """Raw customer data model"""
 
     __tablename__ = "raw_customers"
@@ -103,7 +103,7 @@ class RawCustomer(Base, IDMixin, ShopMixin):
         return f"<RawCustomer(shop_id={self.shop_id}, shopify_id={self.shopify_id})>"
 
 
-class RawCollection(Base, IDMixin, ShopMixin):
+class RawCollection(Base, IDMixin, ShopMixin, TimestampMixin):
     """Raw collection data model"""
 
     __tablename__ = "raw_collections"

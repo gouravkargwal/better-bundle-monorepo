@@ -6,10 +6,10 @@ Uses snake_case column names for consistency.
 """
 
 from sqlalchemy import Column, String, Boolean, DateTime, BigInteger, Index
-from .base import Base
+from .base import Base, TimestampMixin
 
 
-class Session(Base):
+class Session(Base, TimestampMixin):
     """Session model representing user sessions"""
 
     __tablename__ = "sessions"
