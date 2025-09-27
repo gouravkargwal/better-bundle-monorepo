@@ -627,12 +627,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get products modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(ProductData)
                     .where(
                         ProductData.shop_id == shop_id,
-                        ProductData.updated_at > since_timestamp,
+                        ProductData.updated_at > since_dt,
                     )
                     .order_by(ProductData.updated_at.asc())
                     .limit(limit)
@@ -652,12 +657,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get customers modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(CustomerData)
                     .where(
                         CustomerData.shop_id == shop_id,
-                        CustomerData.updated_at > since_timestamp,
+                        CustomerData.updated_at > since_dt,
                     )
                     .order_by(CustomerData.updated_at.asc())
                     .limit(limit)
@@ -677,12 +687,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get orders modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(OrderData)
                     .where(
                         OrderData.shop_id == shop_id,
-                        OrderData.updated_at > since_timestamp,
+                        OrderData.updated_at > since_dt,
                     )
                     .order_by(OrderData.updated_at.asc())
                     .limit(limit)
@@ -720,12 +735,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get collections modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(CollectionData)
                     .where(
                         CollectionData.shop_id == shop_id,
-                        CollectionData.updated_at > since_timestamp,
+                        CollectionData.updated_at > since_dt,
                     )
                     .order_by(CollectionData.updated_at.asc())
                     .limit(limit)
@@ -745,12 +765,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get behavioral events since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(UserInteraction)
                     .where(
                         UserInteraction.shop_id == shop_id,
-                        UserInteraction.created_at > since_timestamp,
+                        UserInteraction.created_at > since_dt,
                     )
                     .order_by(UserInteraction.created_at.asc())
                     .limit(limit)
@@ -793,12 +818,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get user interactions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(UserInteraction)
                     .where(
                         UserInteraction.shop_id == shop_id,
-                        UserInteraction.created_at > since_timestamp,
+                        UserInteraction.created_at > since_dt,
                     )
                     .order_by(UserInteraction.created_at.asc())
                     .limit(limit)
@@ -840,12 +870,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get user sessions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(UserSession)
                     .where(
                         UserSession.shop_id == shop_id,
-                        UserSession.created_at > since_timestamp,
+                        UserSession.created_at > since_dt,
                     )
                     .order_by(UserSession.created_at.asc())
                     .limit(limit)
@@ -887,12 +922,17 @@ class FeatureRepository(IFeatureRepository):
     ) -> List[Dict[str, Any]]:
         """Get purchase attributions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
             async with get_session_context() as session:
                 stmt = (
                     select(PurchaseAttribution)
                     .where(
                         PurchaseAttribution.shop_id == shop_id,
-                        PurchaseAttribution.created_at > since_timestamp,
+                        PurchaseAttribution.created_at > since_dt,
                     )
                     .order_by(PurchaseAttribution.created_at.asc())
                     .limit(limit)

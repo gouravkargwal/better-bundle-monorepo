@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -27,6 +28,25 @@ def _parse_iso(dt: Any) -> datetime | None:
         return None
 
 
+def _strip_html(html_content: str) -> str:
+    """Strip HTML tags from content to get plain text"""
+    if not html_content:
+        return ""
+    # Remove HTML tags
+    clean = re.compile("<.*?>")
+    text = re.sub(clean, "", html_content)
+    # Decode HTML entities
+    text = text.replace("&nbsp;", " ")
+    text = text.replace("&amp;", "&")
+    text = text.replace("&lt;", "<")
+    text = text.replace("&gt;", ">")
+    text = text.replace("&quot;", '"')
+    text = text.replace("&#39;", "'")
+    # Clean up whitespace
+    text = " ".join(text.split())
+    return text
+
+
 class RestProductAdapter(BaseAdapter):
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         product_id = str(payload.get("id")) if payload.get("id") is not None else ""
@@ -39,36 +59,57 @@ class RestProductAdapter(BaseAdapter):
         else:
             tags = list(raw_tags)
 
-        # variants
-        variants: List[CanonicalVariant] = []
+        # variants - store complete variant data as JSON
+        variants = []
         for v in payload.get("variants", []) or []:
-            variants.append(
-                CanonicalVariant(
-                    variantId=str(v.get("id")) if v.get("id") is not None else None,
-                    title=v.get("title"),
-                    price=_to_float(v.get("price")),
-                    compare_at_price=_to_float(v.get("compare_at_price")),
-                    sku=v.get("sku"),
-                    barcode=v.get("barcode"),
-                    inventory=(
-                        int(v.get("inventory_quantity") or 0)
-                        if v.get("inventory_quantity") is not None
-                        else None
-                    ),
-                )
-            )
+            variant_data = {
+                "variant_id": str(v.get("id")) if v.get("id") is not None else None,
+                "title": v.get("title"),
+                "price": _to_float(v.get("price")),
+                "compare_at_price": _to_float(v.get("compare_at_price")),
+                "sku": v.get("sku"),
+                "barcode": v.get("barcode"),
+                "inventory_quantity": (
+                    int(v.get("inventory_quantity") or 0)
+                    if v.get("inventory_quantity") is not None
+                    else None
+                ),
+                "taxable": v.get("taxable"),
+                "inventory_policy": v.get("inventory_policy"),
+                "position": v.get("position"),
+                "created_at": (
+                    _parse_iso(v.get("created_at")).isoformat()
+                    if _parse_iso(v.get("created_at"))
+                    else None
+                ),
+                "updated_at": (
+                    _parse_iso(v.get("updated_at")).isoformat()
+                    if _parse_iso(v.get("updated_at"))
+                    else None
+                ),
+                "option1": v.get("option1"),
+                "option2": v.get("option2"),
+                "option3": v.get("option3"),
+                "image_id": v.get("image_id"),
+                "inventory_item_id": v.get("inventory_item_id"),
+                "old_inventory_quantity": v.get("old_inventory_quantity"),
+                "admin_graphql_api_id": v.get("admin_graphql_api_id"),
+            }
+            variants.append(variant_data)
 
         # total inventory from variants sum if available
         total_inventory = (
-            sum([vi.inventory or 0 for vi in variants]) if variants else None
+            sum([vi.get("inventory_quantity") or 0 for vi in variants])
+            if variants
+            else None
         )
 
         # primary price fields
         price = None
         compare_at = None
         if variants:
-            price = variants[0].price
-            compare_at = variants[0].compare_at_price
+            price = variants[0].get("price")
+            compare_at = variants[0].get("compare_at_price")
 
         # Parse timestamps
         created_at = _parse_iso(payload.get("created_at")) or datetime.utcnow()
@@ -82,28 +123,30 @@ class RestProductAdapter(BaseAdapter):
 
         model = CanonicalProduct(
             shop_id=shop_id,
-            product_id=product_id,  # Fixed: use productId instead of entityId
-            created_at=created_at,  # Required field
-            updated_at=updated_at,  # Required field
-            title=payload.get("title") or "",  # Required field
-            handle=payload.get("handle") or "",  # Required field
-            description=payload.get("body_html"),
-            vendor=payload.get("vendor"),
+            product_id=product_id,
+            created_at=created_at,
+            updated_at=updated_at,
+            title=payload.get("title") or "",
+            handle=payload.get("handle") or "",
+            description=_strip_html(payload.get("body_html") or ""),
             product_type=payload.get("product_type"),
-            status=payload.get("status"),
+            vendor=payload.get("vendor"),
             tags=tags,
-            price=price or 0.0,  # Required field with default
-            compare_at_price=compare_at,
+            status=payload.get("status"),
             total_inventory=total_inventory,
-            imageUrl=image_url,  # Extract primary image URL
-            imageAlt=image_alt,  # Extract primary image alt text
-            isActive=True if payload.get("status") != "archived" else False,
+            price=price or 0.0,
+            compare_at_price=compare_at,
+            price_range={},  # Will be computed in feature engineering
+            collections=[],  # Will be populated from collection relationships
+            seo_title=None,  # Not available in webhook
+            seo_description=None,  # Not available in webhook
+            template_suffix=payload.get("template_suffix"),
             variants=variants,
-            images=images,  # Keep full images array
+            images=images,
             media=payload.get("media") or [],
             options=payload.get("options") or [],
-            templateSuffix=payload.get("template_suffix"),
-            extras={},
+            metafields=[],  # Not available in webhook
+            extras={},  # No extra fields - only store what exists in main table
         )
 
         return model.dict()

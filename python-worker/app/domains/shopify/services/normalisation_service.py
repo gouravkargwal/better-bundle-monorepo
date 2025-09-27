@@ -12,6 +12,9 @@ from app.domains.shopify.services.normalization_data_storage_service import (
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
+from app.core.database.session import get_session_context
+from app.core.database.models.collection_data import CollectionData
+from sqlalchemy import select
 
 logger = get_logger(__name__)
 
@@ -22,6 +25,26 @@ class EntityNormalizationService:
     def __init__(self):
         self.logger = get_logger(__name__)
         self.data_storage = NormalizationDataStorageService()
+
+    async def _get_existing_collection_products(
+        self, shop_id: str, collection_id: str
+    ) -> List[Dict[str, Any]]:
+        """Fetch existing products for a collection to preserve them during updates"""
+        try:
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(CollectionData).where(
+                        CollectionData.shop_id == shop_id,
+                        CollectionData.collection_id == collection_id,
+                    )
+                )
+                existing_collection = result.scalar_one_or_none()
+                if existing_collection and existing_collection.products:
+                    return existing_collection.products
+                return []
+        except Exception as e:
+            self.logger.warning(f"Could not fetch existing collection products: {e}")
+            return []
 
     async def normalize_entity(
         self, raw_record: Any, shop_id: str, data_type: str
@@ -36,7 +59,18 @@ class EntityNormalizationService:
             # Get adapter and convert to canonical
             data_format = self._detect_format(raw_record, payload)
             adapter = get_adapter(data_format, data_type)
-            canonical = adapter.to_canonical(payload, shop_id)
+
+            # Special handling for collections to preserve existing products
+            if data_type == "collections" and data_format == "rest":
+                collection_id = (
+                    str(payload.get("id")) if payload.get("id") is not None else ""
+                )
+                existing_products = await self._get_existing_collection_products(
+                    shop_id, collection_id
+                )
+                canonical = adapter.to_canonical(payload, shop_id, existing_products)
+            else:
+                canonical = adapter.to_canonical(payload, shop_id)
             self.logger.info(
                 "📦 Canonical entity prepared",
                 extra={

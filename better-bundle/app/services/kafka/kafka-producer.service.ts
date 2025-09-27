@@ -8,7 +8,8 @@ import { kafkaConfig } from "../../utils/kafka-config";
 
 export interface ShopifyEventData {
   event_type: string;
-  shop_id: string;
+  shop_id?: string; // Optional for backward compatibility
+  shop_domain?: string; // New: shop domain for backend resolution
   shopify_id: string;
   timestamp: string;
   [key: string]: any;
@@ -50,8 +51,10 @@ export class KafkaProducerService {
     eventData: ShopifyEventData,
   ): Promise<string> {
     try {
+      const shopIdentifier =
+        eventData.shop_id || eventData.shop_domain || "unknown";
       console.log(
-        `🚀 Publishing Shopify event: ${eventData.event_type} for shop ${eventData.shop_id}`,
+        `🚀 Publishing Shopify event: ${eventData.event_type} for shop ${shopIdentifier}`,
       );
 
       // Add metadata
@@ -62,8 +65,8 @@ export class KafkaProducerService {
         source: "shopify_webhook",
       };
 
-      // Determine key for partitioning (use shop_id for consistent partitioning)
-      const key = eventData.shop_id;
+      // Determine key for partitioning (use shop_id or shop_domain for consistent partitioning)
+      const key = eventData.shop_id || eventData.shop_domain || "unknown";
 
       if (!this.producer) {
         throw new Error("Producer not initialized");
@@ -77,7 +80,8 @@ export class KafkaProducerService {
             value: JSON.stringify(messageWithMetadata),
             headers: {
               "event-type": eventData.event_type,
-              "shop-id": eventData.shop_id,
+              "shop-id":
+                eventData.shop_id || eventData.shop_domain || "unknown",
               timestamp: new Date().toISOString(),
             },
           },

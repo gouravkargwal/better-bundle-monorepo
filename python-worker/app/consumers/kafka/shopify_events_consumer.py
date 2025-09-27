@@ -4,17 +4,26 @@ Kafka-based Shopify events consumer - Migrated from Redis-based consumer
 
 import logging
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.kafka.producer import KafkaProducer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.messaging.interfaces import EventHandler
 from app.core.logging import get_logger
-from app.core.database.simple_db_client import get_database
-
-# Using string values directly for database insertion
-from datetime import datetime, timezone
+from app.core.database.session import get_session_context
+from app.core.database.models.raw_data import (
+    RawProduct,
+    RawOrder,
+    RawCustomer,
+    RawCollection,
+)
+from app.core.database.models.shop import Shop
+from app.core.database.models.user_interaction import UserInteraction
+from app.core.database.models.watermarks import PipelineWatermark
 
 logger = get_logger(__name__)
 
@@ -108,10 +117,20 @@ class ShopifyEventHandler(EventHandler):
         """Handle Shopify events and forward to normalization jobs"""
         try:
             event_type = event.get("event_type")
-            shop_id = event.get("shop_id")
+            shop_domain = event.get("shop_domain")  # New: get shop domain from event
+            shop_id = event.get("shop_id")  # Fallback for backward compatibility
             shopify_id = event.get("shopify_id")
             timestamp = event.get("timestamp")
             raw_payload = event.get("raw_payload") or event.get("payload")
+
+            # Resolve shop_id from shop_domain if needed
+            if shop_domain and not shop_id:
+                shop_id = await self._resolve_shop_id(shop_domain)
+                if not shop_id:
+                    self.logger.error(
+                        f"❌ Could not resolve shop_id for domain: {shop_domain}"
+                    )
+                    return False
 
             self.logger.info(
                 f"📥 Received Shopify event: {event_type} for shop {shop_id}, entity {shopify_id}"
@@ -143,115 +162,15 @@ class ShopifyEventHandler(EventHandler):
                 # 0) Persist RAW entity if payload is present (idempotent upsert)
                 try:
                     if raw_payload and shopify_id and shop_id:
-                        db = await get_database()
-                        data_type = self._get_entity_type(event_type)
-                        table = {
-                            "products": db.rawproduct,
-                            "orders": db.raworder,
-                            "customers": db.rawcustomer,
-                            "collections": db.rawcollection,
-                        }.get(data_type)
-                        if table:
-                            # Extract updated timestamp if available in payload
-                            def _extract_dt(p):
-                                for key in [
-                                    "updated_at",
-                                    "updatedAt",
-                                    "processed_at",
-                                    "processedAt",
-                                ]:
-                                    if isinstance(p, dict) and key in p:
-                                        return p.get(key)
-                                return None
-
-                            updated_str = _extract_dt(raw_payload)
-                            shopify_updated = None
-                            if updated_str:
-                                try:
-                                    shopify_updated = datetime.fromisoformat(
-                                        str(updated_str).replace("Z", "+00:00")
-                                    )
-                                except Exception:
-                                    shopify_updated = None
-                            # Upsert by (shopId, shopifyId)
-                            await table.upsert(
-                                where={
-                                    "shop_id_shopify_id": {
-                                        "shop_id": str(shop_id),
-                                        "shopify_id": str(shopify_id),
-                                    }
-                                },
-                                data={
-                                    "update": {
-                                        "payload": raw_payload,
-                                        "shopifyUpdatedAt": shopify_updated,
-                                        "format": "rest",
-                                        "source": "webhook",
-                                    },
-                                    "create": {
-                                        "shop_id": str(shop_id),
-                                        "payload": raw_payload,
-                                        "shopify_id": str(shopify_id),
-                                        "shopifyUpdatedAt": shopify_updated,
-                                        "format": "rest",
-                                        "source": "webhook",
-                                    },
-                                },
-                            )
-                            self.logger.info(
-                                "🗄️ RAW upsert complete",
-                                extra={
-                                    "shop_id": shop_id,
-                                    "shopify_id": shopify_id,
-                                    "data_type": data_type,
-                                },
-                            )
+                        await self._persist_raw_entity(
+                            event_type, shop_id, shopify_id, raw_payload
+                        )
                 except Exception as raw_err:
                     self.logger.warning(f"RAW persistence failed: {raw_err}")
 
-                # 1) Persist as real-time user interaction (non-historical)
-                try:
-                    db = await get_database()
-                    await db.userinteraction.create(
-                        data={
-                            "sessionId": f"shopify_{timestamp}",
-                            "extensionType": "shopify_webhook",
-                            "interactionType": event_type,
-                            "customerId": None,
-                            "shop_id": str(shop_id),
-                            "metadata": event,
-                        }
-                    )
-                    # Update PipelineWatermark for user_interactions
-                    now_dt = datetime.now(timezone.utc)
-                    await db.pipelinewatermark.upsert(
-                        where={
-                            "shop_id_data_type": {
-                                "shop_id": str(shop_id),
-                                "data_type": "user_interactions",
-                            }
-                        },
-                        data={
-                            "update": {
-                                "lastCollectedAt": now_dt,
-                                "lastWindowEnd": now_dt,
-                            },
-                            "create": {
-                                "shop_id": str(shop_id),
-                                "data_type": "user_interactions",
-                                "lastCollectedAt": now_dt,
-                                "lastWindowEnd": now_dt,
-                            },
-                        },
-                    )
-                    self.logger.info(
-                        "📝 Stored webhook as user_interaction and updated watermark",
-                        extra={"shop_id": shop_id, "event_type": event_type},
-                    )
-                except Exception as persist_err:
-                    self.logger.error(
-                        f"Failed to persist user_interaction: {persist_err}",
-                    )
+                # Note: Webhook events are system events, not user interactions
+                # User interactions should only be created for actual user behaviors
+                # (like page views, clicks, purchases) not for system webhook events
                 # 2) Create a normalize_entity job for the resource itself (REST single-entity)
                 normalize_job = {
                     "event_type": "normalize_data",
@@ -306,125 +225,15 @@ class ShopifyEventHandler(EventHandler):
                 self.logger.error("❌ Missing required fields for refund event")
                 return False
 
-            db = await get_database()
-            now_dt = datetime.now(timezone.utc)
+            await self._handle_refund_persistence(
+                shop_id, order_id, refund_id, raw_payload
+            )
 
-            # 1. Store/update refund data in RawOrder table
-            try:
-                # Check if order exists
-                existing_order = await db.raworder.find_first(
-                    where={"shop_id": shop_id, "shopify_id": order_id},
-                    select={"id": True, "payload": True},
-                )
-
-                if existing_order:
-                    # Update existing order with refund information
-                    existing_payload = (
-                        existing_order.payload
-                        if isinstance(existing_order.payload, dict)
-                        else {}
-                    )
-                    updated_payload = {
-                        **existing_payload,
-                        "refunds": [
-                            *(existing_payload.get("refunds", [])),
-                            raw_payload,
-                        ],
-                    }
-
-                    await db.raworder.update(
-                        where={"id": existing_order.id},
-                        data={
-                            "payload": updated_payload,
-                            "shopifyUpdatedAt": now_dt,
-                            "source": "webhook",
-                            "format": "rest",
-                            "receivedAt": now_dt,
-                        },
-                    )
-                    self.logger.info(
-                        f"✅ Updated existing order {order_id} with refund {refund_id}"
-                    )
-                else:
-                    # Create minimal order record with refund data
-                    self.logger.info(
-                        f"⚠️ Order {order_id} not found, creating minimal record with refund data"
-                    )
-
-                    minimal_order_payload = {
-                        "refunds": [raw_payload],
-                        "id": order_id,
-                        "created_at": raw_payload.get("created_at", now_dt.isoformat()),
-                        "line_items": [],  # Empty array to prevent consumer errors
-                        "total_price": "0.00",
-                        "currency": "USD",
-                    }
-
-                    await db.raworder.create(
-                        data={
-                            "shop_id": shop_id,
-                            "payload": minimal_order_payload,
-                            "shopify_id": order_id,
-                            "shopifyCreatedAt": now_dt,
-                            "shopifyUpdatedAt": now_dt,
-                            "source": "webhook",
-                            "format": "rest",
-                            "receivedAt": now_dt,
-                        }
-                    )
-                    self.logger.info(
-                        f"✅ Created minimal order record for {order_id} with refund {refund_id}"
-                    )
-
-            except Exception as raw_err:
-                self.logger.error(f"❌ Failed to store refund in RawOrder: {raw_err}")
-                return False
-
-            # 2. Record user interaction
-            try:
-                await db.userinteraction.create(
-                    data={
-                        "sessionId": f"refund_{timestamp}",
-                        "extensionType": "shopify_webhook",
-                        "interactionType": "refund_created",
-                        "customerId": None,
-                        "shop_id": str(shop_id),
-                        "metadata": event,
-                        "createdAt": now_dt,
-                    }
-                )
-
-                # Update PipelineWatermark for user_interactions
-                await db.pipelinewatermark.upsert(
-                    where={
-                        "shop_id_data_type": {
-                            "shop_id": str(shop_id),
-                            "data_type": "user_interactions",
-                        }
-                    },
-                    data={
-                        "update": {
-                            "lastCollectedAt": now_dt,
-                            "lastWindowEnd": now_dt,
-                        },
-                        "create": {
-                            "shop_id": str(shop_id),
-                            "data_type": "user_interactions",
-                            "lastCollectedAt": now_dt,
-                            "lastWindowEnd": now_dt,
-                        },
-                    },
-                )
-                self.logger.info(
-                    "✅ Recorded refund as user interaction and updated watermark"
-                )
-
-            except Exception as persist_err:
-                self.logger.error(
-                    f"❌ Failed to persist user interaction: {persist_err}"
-                )
+            # Note: Refund webhook events are system events, not user interactions
+            # User interactions should only be created for actual user behaviors
 
             # 3. Publish refund normalization event
+            now_dt = datetime.now(timezone.utc)
             refund_normalize_job = {
                 "event_type": "refund_created",
                 "shop_id": str(shop_id),
@@ -468,3 +277,213 @@ class ShopifyEventHandler(EventHandler):
             "collection_deleted": "collections",
         }
         return mapping.get(event_type, "unknown")
+
+    async def _resolve_shop_id(self, shop_domain: str) -> str:
+        """Resolve shop_id from shop_domain using SQLAlchemy"""
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(Shop.id).where(Shop.shop_domain == shop_domain)
+            )
+            shop = result.scalar_one_or_none()
+            return str(shop) if shop else None
+
+    async def _persist_raw_entity(
+        self,
+        event_type: str,
+        shop_id: str,
+        shopify_id: str,
+        raw_payload: Dict[str, Any],
+    ) -> None:
+        """Persist raw entity using SQLAlchemy"""
+        async with get_session_context() as session:
+            # Extract updated timestamp if available in payload
+            def _extract_dt(payload):
+                for key in ["updated_at", "updatedAt", "processed_at", "processedAt"]:
+                    if isinstance(payload, dict) and key in payload:
+                        return payload.get(key)
+                return None
+
+            updated_str = _extract_dt(raw_payload)
+            shopify_updated = None
+            if updated_str:
+                try:
+                    shopify_updated = datetime.fromisoformat(
+                        str(updated_str).replace("Z", "+00:00")
+                    )
+                except Exception:
+                    shopify_updated = None
+
+            # Get the appropriate model class
+            model_class = {
+                "product_updated": RawProduct,
+                "product_created": RawProduct,
+                "product_deleted": RawProduct,
+                "order_paid": RawOrder,
+                "customer_created": RawCustomer,
+                "customer_updated": RawCustomer,
+                "collection_created": RawCollection,
+                "collection_updated": RawCollection,
+                "collection_deleted": RawCollection,
+            }.get(event_type)
+
+            if not model_class:
+                self.logger.error(
+                    f"Unknown event type for raw persistence: {event_type}"
+                )
+                return
+
+            # Check if record exists
+            existing = await session.execute(
+                select(model_class).where(
+                    model_class.shop_id == shop_id, model_class.shopify_id == shopify_id
+                )
+            )
+            existing_record = existing.scalar_one_or_none()
+
+            if existing_record:
+                # Update existing record
+                existing_record.payload = raw_payload
+                existing_record.shopify_updated_at = shopify_updated
+                existing_record.format = "rest"
+                existing_record.source = "webhook"
+                existing_record.received_at = datetime.now(timezone.utc)
+            else:
+                # Create new record
+                new_record = model_class(
+                    shop_id=shop_id,
+                    shopify_id=shopify_id,
+                    payload=raw_payload,
+                    shopify_updated_at=shopify_updated,
+                    format="rest",
+                    source="webhook",
+                    received_at=datetime.now(timezone.utc),
+                )
+                session.add(new_record)
+
+            await session.commit()
+            self.logger.info(
+                "🗄️ RAW upsert complete",
+                extra={
+                    "shop_id": shop_id,
+                    "shopify_id": shopify_id,
+                    "event_type": event_type,
+                },
+            )
+
+    async def _persist_user_interaction(
+        self, shop_id: str, event_type: str, timestamp: str, event: Dict[str, Any]
+    ) -> None:
+        """Persist user interaction using SQLAlchemy"""
+        async with get_session_context() as session:
+            # Create user interaction
+            user_interaction = UserInteraction(
+                session_id=f"shopify_{timestamp}",
+                extension_type="shopify_webhook",
+                interaction_type=event_type,
+                customer_id=None,
+                shop_id=shop_id,
+                metadata=event,
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            session.add(user_interaction)
+
+            # Update pipeline watermark
+            now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            # Check if watermark exists
+            existing_watermark = await session.execute(
+                select(PipelineWatermark).where(
+                    PipelineWatermark.shop_id == shop_id,
+                    PipelineWatermark.data_type == "user_interactions",
+                )
+            )
+            watermark = existing_watermark.scalar_one_or_none()
+
+            if watermark:
+                watermark.last_collected_at = now_dt
+                watermark.last_window_end = now_dt
+            else:
+                new_watermark = PipelineWatermark(
+                    shop_id=shop_id,
+                    data_type="user_interactions",
+                    last_collected_at=now_dt,
+                    last_window_end=now_dt,
+                )
+                session.add(new_watermark)
+
+            await session.commit()
+            self.logger.info(
+                "📝 Stored webhook as user_interaction and updated watermark",
+                extra={"shop_id": shop_id, "event_type": event_type},
+            )
+
+    async def _handle_refund_persistence(
+        self, shop_id: str, order_id: str, refund_id: str, raw_payload: Dict[str, Any]
+    ) -> None:
+        """Handle refund persistence using SQLAlchemy"""
+        async with get_session_context() as session:
+            now_dt = datetime.now(timezone.utc)
+
+            # Check if order exists
+            existing_order = await session.execute(
+                select(RawOrder).where(
+                    RawOrder.shop_id == shop_id, RawOrder.shopify_id == order_id
+                )
+            )
+            existing_record = existing_order.scalar_one_or_none()
+
+            if existing_record:
+                # Update existing order with refund information
+                existing_payload = (
+                    existing_record.payload
+                    if isinstance(existing_record.payload, dict)
+                    else {}
+                )
+                updated_payload = {
+                    **existing_payload,
+                    "refunds": [
+                        *(existing_payload.get("refunds", [])),
+                        raw_payload,
+                    ],
+                }
+
+                existing_record.payload = updated_payload
+                existing_record.shopify_updated_at = now_dt
+                existing_record.source = "webhook"
+                existing_record.format = "rest"
+                existing_record.received_at = now_dt
+
+                self.logger.info(
+                    f"✅ Updated existing order {order_id} with refund {refund_id}"
+                )
+            else:
+                # Create minimal order record with refund data
+                self.logger.info(
+                    f"⚠️ Order {order_id} not found, creating minimal record with refund data"
+                )
+
+                minimal_order_payload = {
+                    "refunds": [raw_payload],
+                    "id": order_id,
+                    "created_at": raw_payload.get("created_at", now_dt.isoformat()),
+                    "line_items": [],  # Empty array to prevent consumer errors
+                    "total_price": "0.00",
+                    "currency": "USD",
+                }
+
+                new_record = RawOrder(
+                    shop_id=shop_id,
+                    shopify_id=order_id,
+                    payload=minimal_order_payload,
+                    shopify_created_at=now_dt,
+                    shopify_updated_at=now_dt,
+                    source="webhook",
+                    format="rest",
+                    received_at=now_dt,
+                )
+                session.add(new_record)
+                self.logger.info(
+                    f"✅ Created minimal order record for {order_id} with refund {refund_id}"
+                )
+
+            await session.commit()

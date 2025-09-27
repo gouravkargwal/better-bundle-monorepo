@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -18,8 +19,29 @@ def _parse_iso(dt: Any) -> datetime | None:
         return None
 
 
+def _strip_html(html_content: str) -> str:
+    """Strip HTML tags from content to get plain text"""
+    if not html_content:
+        return ""
+    # Remove HTML tags
+    clean = re.compile("<.*?>")
+    text = re.sub(clean, "", html_content)
+    # Decode HTML entities
+    text = text.replace("&nbsp;", " ")
+    text = text.replace("&amp;", "&")
+    text = text.replace("&lt;", "<")
+    text = text.replace("&gt;", ">")
+    text = text.replace("&quot;", '"')
+    text = text.replace("&#39;", "'")
+    # Clean up whitespace
+    text = " ".join(text.split())
+    return text
+
+
 class RestCollectionAdapter(BaseAdapter):
-    def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
+    def to_canonical(
+        self, payload: Dict[str, Any], shop_id: str, existing_products: list = None
+    ) -> Dict[str, Any]:
         collection_id = str(payload.get("id")) if payload.get("id") is not None else ""
 
         # Detect delete payload (id + minimal fields)
@@ -38,20 +60,29 @@ class RestCollectionAdapter(BaseAdapter):
             updated_at = datetime.utcnow()
 
         model = CanonicalCollection(
-            shopId=shop_id,
-            collectionId=collection_id,  # Fixed: use collectionId instead of entityId
-            originalGid=payload.get("admin_graphql_api_id"),
-            title=payload.get("title") or "",  # Provide default empty string
-            handle=payload.get("handle") or "",  # Provide default empty string
-            description=payload.get("body_html"),
-            templateSuffix=payload.get("template_suffix"),
-            publishedAt=_parse_iso(payload.get("published_at")),
-            collectionUpdatedAt=updated_at,
-            status=payload.get("published_scope"),
-            isActive=not is_delete,
-            createdAt=created_at,  # Added required field
-            updatedAt=updated_at,  # Added required field
-            extras={},
+            shop_id=shop_id,
+            collection_id=collection_id,
+            title=payload.get("title") or "",
+            handle=payload.get("handle") or "",
+            description=_strip_html(payload.get("body_html") or ""),
+            template_suffix=payload.get("template_suffix"),
+            seo_title=None,  # Not available in webhook
+            seo_description=None,  # Not available in webhook
+            image_url=(
+                payload.get("image", {}).get("src") if payload.get("image") else None
+            ),
+            image_alt=(
+                payload.get("image", {}).get("alt") if payload.get("image") else None
+            ),
+            product_count=0,  # Will be computed from products
+            is_automated=False,  # Will be determined from rule_set
+            metafields=[],  # Not available in webhook
+            products=existing_products
+            or [],  # Use existing products if provided, otherwise empty
+            created_at=created_at,
+            updated_at=updated_at,
+            is_active=not is_delete,
+            extras={},  # No extra fields - only store what exists in main table
         )
 
         return model.dict()

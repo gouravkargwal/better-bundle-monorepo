@@ -1,14 +1,13 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
-    const { payload, session, shop } = await authenticate.webhook(request);
+    const { payload, session } = await authenticate.webhook(request);
 
-    if (!session || !shop) {
+    if (!session) {
       return json({ error: "Authentication failed" }, { status: 401 });
     }
 
@@ -21,22 +20,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No collection ID found" }, { status: 400 });
     }
 
-    // Get shop ID from database
-    const shopRecord = await prisma.shops.findUnique({
-      where: { shop_domain: shop },
-      select: { id: true },
-    });
-
-    if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
-
     const kafkaProducer = await KafkaProducerService.getInstance();
 
     const streamData = {
       event_type: "collection_created",
-      shop_id: shopRecord.id,
+      shop_domain: session.shop, // Use session.shop to get the shop domain
       shopify_id: collectionId,
       timestamp: new Date().toISOString(),
       raw_payload: collection,
@@ -47,7 +35,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({
       success: true,
       collectionId: collectionId,
-      shopId: shopRecord.id,
+      shopDomain: session.shop,
       message: "Collection data stored successfully",
     });
   } catch (error) {
