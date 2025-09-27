@@ -36,7 +36,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       collectionId: collectionId,
       shopDomain: session.shop,
-      message: "Collection data stored successfully",
+      message:
+        "Collection create webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing collections create webhook:`, error);

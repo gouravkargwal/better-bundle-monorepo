@@ -28,12 +28,14 @@ class DataCollectionKafkaConsumer:
                     "Shopify service is required for data collection consumer"
                 )
 
+            # Listen to both data collection jobs and shopify events
             await self.consumer.initialize(
-                topics=["data-collection-jobs"], group_id="data-collection-processors"
+                topics=["data-collection-jobs", "shopify-events"],
+                group_id="data-collection-processors",
             )
 
             await self.event_subscriber.initialize(
-                topics=["data-collection-jobs"],
+                topics=["data-collection-jobs", "shopify-events"],
                 group_id="data-collection-processors",
                 existing_consumer=self.consumer,  # Reuse existing consumer
             )
@@ -52,7 +54,8 @@ class DataCollectionKafkaConsumer:
             await self.initialize()
         try:
             await self.event_subscriber.consume_and_handle(
-                topics=["data-collection-jobs"], group_id="data-collection-processors"
+                topics=["data-collection-jobs", "shopify-events"],
+                group_id="data-collection-processors",
             )
         except Exception as e:
             logger.exception(f"❌ Error in data collection consumer: {e}")
@@ -66,38 +69,184 @@ class DataCollectionKafkaConsumer:
             await self.event_subscriber.close()
 
     async def handle(self, event: Dict[str, Any]) -> bool:
-        """Handle data collection events directly"""
+        """Handle both data collection jobs and webhook events"""
         try:
-            job_id = event.get("job_id")
-            shop_id = event.get("shop_id")
-            mode = event.get("mode", "incremental")  # Extract mode from event
-            if not job_id or not shop_id:
-                logger.error(
-                    "❌ Invalid data collection message: missing required fields",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                )
-                return False
+            event_type = event.get("event_type")
 
-            return await self._process_data_collection_job(job_id, shop_id, mode)
+            # Handle data collection jobs (from analysis triggers)
+            if event_type == "data_collection":
+                return await self._handle_data_collection_job(event)
+
+            # Handle webhook events (convert to data collection jobs)
+            elif event_type in [
+                "product_updated",
+                "product_created",
+                "product_deleted",
+                "collection_updated",
+                "collection_created",
+                "collection_deleted",
+                "order_paid",
+                "order_created",
+                "order_updated",
+                "order_cancelled",
+                "customer_created",
+                "customer_updated",
+            ]:
+                return await self._handle_webhook_event(event)
+
+            else:
+                logger.warning(f"❌ Unknown event type: {event_type}")
+                return False
 
         except Exception as e:
             logger.exception(
-                f"Failed to process data collection message",
-                job_id=event.get("job_id"),
+                f"Failed to process event",
+                event_type=event.get("event_type"),
                 error=str(e),
             )
             return False
 
     def can_handle(self, event_type: str) -> bool:
         """Indicate which event types this consumer can handle"""
-        return event_type == "data_collection"
+        return event_type in [
+            "data_collection",
+            "product_updated",
+            "product_created",
+            "product_deleted",
+            "collection_updated",
+            "collection_created",
+            "collection_deleted",
+            "order_paid",
+            "order_created",
+            "order_updated",
+            "order_cancelled",
+            "customer_created",
+            "customer_updated",
+        ]
 
     # Data collection business logic methods
+    async def _handle_data_collection_job(self, event: Dict[str, Any]) -> bool:
+        """Handle data collection jobs from analysis triggers"""
+        job_id = event.get("job_id")
+        shop_id = event.get("shop_id")
+        mode = event.get("mode", "incremental")
+        collection_payload = event.get("collection_payload", {})
+
+        if not job_id or not shop_id:
+            logger.error(
+                "❌ Invalid data collection message: missing required fields",
+                job_id=job_id,
+                shop_id=shop_id,
+            )
+            return False
+
+        return await self._process_data_collection_job(
+            job_id, shop_id, mode, collection_payload
+        )
+
+    async def _handle_webhook_event(self, event: Dict[str, Any]) -> bool:
+        """Handle webhook events and convert to data collection jobs"""
+        try:
+            event_type = event.get("event_type")
+            shop_id = event.get("shop_id")
+            shop_domain = event.get("shop_domain")
+            shopify_id = event.get("shopify_id")
+
+            if not shopify_id:
+                logger.error(f"❌ No shopify_id in webhook event: {event_type}")
+                return False
+
+            # Get shop_id if not provided
+            if not shop_id and shop_domain:
+                shop_record = await self.shop_repo.get_active_by_domain(shop_domain)
+                if not shop_record:
+                    logger.error(f"❌ Shop not found for domain: {shop_domain}")
+                    return False
+                shop_id = shop_record.id
+
+            if not shop_id:
+                logger.error("❌ No shop_id available for webhook event")
+                return False
+
+            # Create collection payload based on event type
+            collection_payload = self._create_collection_payload(event_type, shopify_id)
+
+            if not collection_payload:
+                logger.warning(f"❌ No collection payload for event type: {event_type}")
+                return False
+
+            # Create data collection job
+            job_id = f"webhook_{event_type}_{shopify_id}_{event.get('timestamp', '')}"
+
+            logger.info(
+                "🔄 Converting webhook event to data collection job",
+                event_type=event_type,
+                shopify_id=shopify_id,
+                job_id=job_id,
+                collection_payload=collection_payload,
+            )
+
+            # Process as data collection job
+            return await self._process_data_collection_job(
+                job_id, shop_id, "incremental", collection_payload
+            )
+
+        except Exception as e:
+            logger.exception(
+                f"Failed to handle webhook event",
+                event_type=event.get("event_type"),
+                error=str(e),
+            )
+            return False
+
+    def _create_collection_payload(
+        self, event_type: str, shopify_id: str
+    ) -> Dict[str, Any]:
+        """Create collection payload based on event type"""
+        event_mapping = {
+            # Product events
+            "product_created": {"data_type": "products", "specific_ids": [shopify_id]},
+            "product_updated": {"data_type": "products", "specific_ids": [shopify_id]},
+            "product_deleted": {"data_type": "products", "specific_ids": [shopify_id]},
+            # Collection events
+            "collection_created": {
+                "data_type": "collections",
+                "specific_ids": [shopify_id],
+            },
+            "collection_updated": {
+                "data_type": "collections",
+                "specific_ids": [shopify_id],
+            },
+            "collection_deleted": {
+                "data_type": "collections",
+                "specific_ids": [shopify_id],
+            },
+            # Order events
+            "order_paid": {"data_type": "orders", "specific_ids": [shopify_id]},
+            "order_created": {"data_type": "orders", "specific_ids": [shopify_id]},
+            "order_updated": {"data_type": "orders", "specific_ids": [shopify_id]},
+            "order_cancelled": {"data_type": "orders", "specific_ids": [shopify_id]},
+            # Customer events
+            "customer_created": {
+                "data_type": "customers",
+                "specific_ids": [shopify_id],
+            },
+            "customer_updated": {
+                "data_type": "customers",
+                "specific_ids": [shopify_id],
+            },
+        }
+
+        return event_mapping.get(event_type)
+
     async def _process_data_collection_job(
-        self, job_id: str, shop_id: str, mode: str = "incremental"
+        self,
+        job_id: str,
+        shop_id: str,
+        mode: str = "incremental",
+        collection_payload: Dict[str, Any] = None,
     ):
-        """Process comprehensive data collection job"""
+        """Process data collection job with collection payload"""
         try:
             shop_record = await self.shop_repo.get_active_by_id(shop_id)
             if not shop_record or not shop_record.access_token:
@@ -107,15 +256,19 @@ class DataCollectionKafkaConsumer:
                 )
                 return False
 
+            # Single flow - always use collect_all_data with payload
             result = await self.shopify_service.collect_all_data(
                 shop_domain=shop_record.shop_domain,
                 shop_id=shop_id,
-                access_token=shop_record.access_token,  # Pass the access token
-                mode=mode,  # Pass the mode to the service
+                access_token=shop_record.access_token,
+                mode=mode,
+                collection_payload=collection_payload,
             )
+
             logger.info(
                 "✅ Data collection completed successfully",
                 job_id=job_id,
+                collection_payload=collection_payload,
                 result_keys=(
                     list(result.keys())
                     if isinstance(result, dict)

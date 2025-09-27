@@ -58,7 +58,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       orderId: orderId,
       shopId: shopRecord.id,
-      message: "Order paid event published to Kafka",
+      message:
+        "Order paid webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing ${topic} webhook:`, error);

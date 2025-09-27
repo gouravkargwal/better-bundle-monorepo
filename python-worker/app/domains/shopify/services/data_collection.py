@@ -89,11 +89,19 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         limit: Optional[int] = None,
         since_id: Optional[str] = None,
         force_full_collection: bool = False,
+        specific_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Collect data by type - Simplified Industry Standard"""
         config = self.DATA_TYPES.get(data_type)
         if not config:
             raise ValueError(f"Unsupported data type: {data_type}")
+
+        # Handle specific IDs collection (for webhooks)
+        if specific_ids:
+            logger.info(f"Collecting specific {data_type} IDs: {specific_ids}")
+            return await self._collect_specific_items_by_ids(
+                data_type, shop_domain, specific_ids
+            )
 
         force_full_collection = bool(force_full_collection)
 
@@ -196,8 +204,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         access_token: str,
         shop_id: str,
         mode: str = "incremental",
+        collection_payload: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
-        """Collect all available data from Shopify API with session tracking"""
+        """Collect data from Shopify API based on collection payload - single flow"""
         # Start collection session
         collection_start_time = now_utc()
         session_id = f"collection_{shop_id}_{int(collection_start_time.timestamp())}"
@@ -205,14 +214,16 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         try:
             # 1. Check permissions
             permissions = await self._check_permissions(shop_domain, access_token)
-            collectable_data = self._get_collectable_data_types(
-                permissions,
-                {
-                    "products": True,
-                    "orders": True,
-                    "customers": True,
-                    "collections": True,
-                },
+
+            # 2. Always use payload to determine what data to collect
+            # If no payload provided, create default payload for all data types
+            if not collection_payload:
+                collection_payload = {
+                    "data_types": ["products", "orders", "customers", "collections"]
+                }
+
+            collectable_data = self._get_collectable_data_from_payload(
+                permissions, collection_payload
             )
 
             if not collectable_data:
@@ -222,7 +233,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 }
 
             results = await self._collect_and_store_data(
-                shop_domain, access_token, shop_id, collectable_data
+                shop_domain, access_token, shop_id, collectable_data, collection_payload
             )
 
             await self._trigger_normalization(
@@ -242,6 +253,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 "session_id": session_id,
                 "session_start_time": collection_start_time.isoformat(),
                 "total_items": total_items,
+                "collected_types": list(results.get("collected_data", {}).keys()),
+                "collection_payload": collection_payload,  # Include payload in response
             }
 
         except Exception as e:
@@ -270,15 +283,66 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 collectable.append(data_type)
         return collectable
 
+    def _get_collectable_data_from_payload(
+        self, permissions: Dict, collection_payload: Dict[str, Any]
+    ) -> List[str]:
+        """Get collectable data types based on collection payload - single flow"""
+        collectable = []
+
+        # Handle specific data_types array
+        if "data_types" in collection_payload:
+            data_types = collection_payload["data_types"]
+            for data_type in data_types:
+                if permissions.get(data_type, False):
+                    collectable.append(data_type)
+                else:
+                    logger.warning(f"No permission for {data_type}")
+
+        # Handle individual include flags
+        else:
+            includes = {
+                "products": collection_payload.get("include_products", True),
+                "orders": collection_payload.get("include_orders", True),
+                "customers": collection_payload.get("include_customers", True),
+                "collections": collection_payload.get("include_collections", True),
+            }
+
+            for data_type, include in includes.items():
+                if include and permissions.get(data_type):
+                    collectable.append(data_type)
+
+        # Handle additional data types from payload
+        additional_types = collection_payload.get("additional_data_types", [])
+        for data_type in additional_types:
+            if data_type not in collectable:
+                collectable.append(data_type)
+
+        logger.info(f"Collectable data types from payload: {collectable}")
+        return collectable
+
     async def _collect_and_store_data(
-        self, shop_domain: str, access_token: str, shop_id: str, data_types: List[str]
+        self,
+        shop_domain: str,
+        access_token: str,
+        shop_id: str,
+        data_types: List[str],
+        collection_payload: Dict[str, Any] = None,
     ) -> Dict:
         """Collect and store data in parallel - simplified"""
         # Collect data in parallel
-        tasks = [
-            self._collect_data_by_type(dt, shop_domain, access_token)
-            for dt in data_types
-        ]
+        tasks = []
+        for dt in data_types:
+            # Check if this data type has specific IDs (for webhooks)
+            specific_ids = None
+            if collection_payload and collection_payload.get("data_type") == dt:
+                specific_ids = collection_payload.get("specific_ids")
+
+            tasks.append(
+                self._collect_data_by_type(
+                    dt, shop_domain, shop_id, access_token, specific_ids=specific_ids
+                )
+            )
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         collected_data = {}
@@ -470,3 +534,76 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
         logger.info(f"Collected {len(raw_items)} {data_type} items")
         return raw_items
+
+    async def _collect_specific_items_by_ids(
+        self, data_type: str, shop_domain: str, specific_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Collect specific items by IDs using GraphQL - for webhooks"""
+        collected_items = []
+
+        for item_id in specific_ids:
+            try:
+                item_data = await self._collect_single_item_by_id(
+                    data_type, shop_domain, item_id
+                )
+                if item_data:
+                    collected_items.append(item_data)
+            except Exception as e:
+                logger.error(f"Failed to collect {data_type} {item_id}: {e}")
+
+        logger.info(f"Collected {len(collected_items)} specific {data_type} items")
+        return collected_items
+
+    async def _collect_single_item_by_id(
+        self, data_type: str, shop_domain: str, item_id: str
+    ) -> Dict[str, Any]:
+        """Collect a single item by ID using existing API client methods with full data traversal"""
+        try:
+            if data_type == "products":
+                # Use the modified get_products method with product_ids parameter
+                result = await self.api_client.get_products(
+                    shop_domain=shop_domain, product_ids=[item_id]
+                )
+                # Extract the product from the edges format
+                edges = result.get("edges", [])
+                if edges:
+                    return edges[0]["node"]
+                return None
+            elif data_type == "collections":
+                # Use the modified get_collections method with collection_ids parameter
+                result = await self.api_client.get_collections(
+                    shop_domain=shop_domain, collection_ids=[item_id]
+                )
+                # Extract the collection from the edges format
+                edges = result.get("edges", [])
+                if edges:
+                    return edges[0]["node"]
+                return None
+            elif data_type == "orders":
+                # Use the modified get_orders method with order_ids parameter
+                result = await self.api_client.get_orders(
+                    shop_domain=shop_domain, order_ids=[item_id]
+                )
+                # Extract the order from the edges format
+                edges = result.get("edges", [])
+                if edges:
+                    return edges[0]["node"]
+                return None
+            elif data_type == "customers":
+                # Use the modified get_customers method with customer_ids parameter
+                result = await self.api_client.get_customers(
+                    shop_domain=shop_domain, customer_ids=[item_id]
+                )
+                # Extract the customer from the edges format
+                edges = result.get("edges", [])
+                if edges:
+                    return edges[0]["node"]
+                return None
+            else:
+                logger.warning(
+                    f"Unknown data type for specific collection: {data_type}"
+                )
+                return None
+        except Exception as e:
+            logger.error(f"Failed to collect {data_type} {item_id}: {e}")
+            return None

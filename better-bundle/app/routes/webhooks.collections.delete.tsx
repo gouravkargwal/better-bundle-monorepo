@@ -49,7 +49,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       collectionId: collectionId,
       shopId: shopRecord.id,
-      message: "Collection deletion event stored successfully",
+      message:
+        "Collection delete webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing collections delete webhook:`, error);

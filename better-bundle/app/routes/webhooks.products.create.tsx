@@ -36,7 +36,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       productId: productId,
       shopDomain: session.shop,
-      message: "Product data stored successfully",
+      message:
+        "Product create webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing products create webhook:`, error);

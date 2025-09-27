@@ -38,7 +38,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       productId,
       shopDomain: session.shop,
-      message: "Shopify event published",
+      message:
+        "Product update webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing products update webhook:`, error);

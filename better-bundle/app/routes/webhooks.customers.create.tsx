@@ -48,7 +48,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       customerId: customerId,
       shopId: shopRecord.id,
-      message: "Customer data stored successfully",
+      message:
+        "Customer create webhook processed - will trigger specific data collection",
     });
   } catch (error) {
     console.error(`❌ Error processing customers create webhook:`, error);

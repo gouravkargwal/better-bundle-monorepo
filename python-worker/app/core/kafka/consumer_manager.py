@@ -9,7 +9,6 @@ from app.core.logging import get_logger
 from app.core.config.kafka_settings import kafka_settings
 
 # Import all Kafka consumers
-from app.consumers.kafka.shopify_events_consumer import ShopifyEventsKafkaConsumer
 from app.consumers.kafka.normalization_consumer import NormalizationKafkaConsumer
 from app.consumers.kafka.feature_computation_consumer import (
     FeatureComputationKafkaConsumer,
@@ -52,13 +51,11 @@ class KafkaConsumerManager:
 
             # Initialize all consumers
             self.consumers = {
-                "shopify_events": ShopifyEventsKafkaConsumer(),
-                "normalization": NormalizationKafkaConsumer(),
-                "feature_computation": FeatureComputationKafkaConsumer(),
-                # Pass shopify service dependency to data collection consumer
                 "data_collection": DataCollectionKafkaConsumer(
                     shopify_service=self.shopify_service
-                ),
+                ),  # Handles both analysis triggers and webhook events
+                "normalization": NormalizationKafkaConsumer(),
+                "feature_computation": FeatureComputationKafkaConsumer(),
                 # "purchase_attribution": PurchaseAttributionKafkaConsumer(),
                 # "refund_normalization": RefundNormalizationKafkaConsumer(),
                 # "refund_attribution": RefundAttributionKafkaConsumer(),
