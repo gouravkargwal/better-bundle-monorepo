@@ -62,11 +62,7 @@ from .user_interaction import UserInteraction
 from .purchase_attribution import PurchaseAttribution
 
 # Refund models
-from .refund import (
-    RefundData,
-    RefundLineItemData,
-    RefundAttributionAdjustment,
-)
+from .refund_attribution import RefundAttribution
 
 # Billing models
 from .billing import (
@@ -123,9 +119,7 @@ __all__ = [
     "UserInteraction",
     "PurchaseAttribution",
     # Refund models
-    "RefundData",
-    "RefundLineItemData",
-    "RefundAttributionAdjustment",
+    "RefundAttribution",
     # Billing models
     "BillingPlan",
     "BillingInvoice",

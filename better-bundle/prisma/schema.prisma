@@ -738,67 +738,39 @@ model raw_products {
   @@index([source], map: "ix_raw_products_source")
 }
 
-model refund_attribution_adjustments {
-  order_id             BigInt
-  refund_id            String      @db.VarChar
-  per_extension_refund Json        @db.Json
-  total_refund_amount  Decimal     @db.Decimal(10, 2)
-  computed_at          DateTime    @db.Timestamp(6)
-  metadata             Json        @db.Json
-  id                   String      @id @db.VarChar
-  created_at           DateTime    @db.Timestamp(6)
-  updated_at           DateTime    @db.Timestamp(6)
-  shop_id              String      @db.VarChar
-  refund_data          refund_data @relation(fields: [refund_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops                shops       @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([shop_id, refund_id], map: "ix_refund_attribution_adjustment_shop_id_refund_id")
-  @@index([computed_at], map: "ix_refund_attribution_adjustment_computed_at")
-  @@index([shop_id, order_id], map: "ix_refund_attribution_adjustment_shop_id_order_id")
-  @@index([computed_at], map: "ix_refund_attribution_adjustments_computed_at")
-  @@index([shop_id], map: "ix_refund_attribution_adjustments_shop_id")
-}
+model refund_attributions {
+  session_id                String?     @db.VarChar(255)
+  order_id                  String      @db.VarChar(255)
+  refund_id                 String      @db.VarChar(255)
+  refunded_at               DateTime    @db.Timestamp(6)
+  total_refund_amount       Decimal     @db.Decimal(10, 2)
+  currency_code             String      @db.VarChar(10)
+  contributing_extensions   Json        @db.Json
+  attribution_weights       Json        @db.Json
+  total_refunded_revenue    Decimal     @db.Decimal(10, 2)
+  attributed_refund         Json        @db.Json
+  total_interactions        Int
+  interactions_by_extension Json        @db.Json
+  attribution_algorithm     String      @db.VarChar(50)
+  metadata                  Json        @db.Json
+  id                        String      @id @db.VarChar
+  created_at                DateTime    @db.Timestamp(6)
+  updated_at                DateTime    @db.Timestamp(6)
+  shop_id                   String      @db.VarChar
+  customer_id               String?     @db.VarChar
+  user_sessions             user_sessions? @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shops                     shops       @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-model refund_data {
-  order_id                       BigInt
-  refund_id                      String                           @db.VarChar(255)
-  refunded_at                    DateTime                         @db.Timestamp(6)
-  note                           String?                          @db.VarChar
-  restock                        Boolean
-  total_refund_amount            Decimal                          @db.Decimal(10, 2)
-  currency_code                  String                           @db.VarChar(10)
-  id                             String                           @id @db.VarChar
-  created_at                     DateTime                         @db.Timestamp(6)
-  updated_at                     DateTime                         @db.Timestamp(6)
-  shop_id                        String                           @db.VarChar
-  refund_attribution_adjustments refund_attribution_adjustments[]
-  shops                          shops                            @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  refund_line_item_data          refund_line_item_data[]
-
-  @@unique([shop_id, refund_id], map: "ix_refund_data_shop_id_refund_id")
-  @@index([refund_id], map: "ix_refund_data_refund_id")
-  @@index([refunded_at], map: "ix_refund_data_refunded_at")
-  @@index([shop_id], map: "ix_refund_data_shop_id")
-  @@index([shop_id, order_id], map: "ix_refund_data_shop_id_order_id")
-}
-
-model refund_line_item_data {
-  refund_id     String      @db.VarChar
-  order_id      BigInt
-  product_id    String?     @db.VarChar(255)
-  variant_id    String?     @db.VarChar(255)
-  quantity      Int
-  unit_price    Decimal     @db.Decimal(10, 2)
-  refund_amount Decimal     @db.Decimal(10, 2)
-  properties    Json?       @db.Json
-  id            String      @id @db.VarChar
-  created_at    DateTime    @db.Timestamp(6)
-  updated_at    DateTime    @db.Timestamp(6)
-  refund_data   refund_data @relation(fields: [refund_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([order_id], map: "ix_refund_line_item_data_order_id")
-  @@index([product_id], map: "ix_refund_line_item_data_product_id")
-  @@index([refund_id], map: "ix_refund_line_item_data_refund_id")
+  @@unique([shop_id, refund_id], map: "ix_refund_attribution_shop_id_refund_id")
+  @@index([session_id], map: "ix_refund_attribution_session_id")
+  @@index([order_id], map: "ix_refund_attribution_order_id")
+  @@index([refund_id], map: "ix_refund_attribution_refund_id")
+  @@index([customer_id], map: "ix_refund_attribution_customer_id")
+  @@index([shop_id], map: "ix_refund_attribution_shop_id")
+  @@index([refunded_at], map: "ix_refund_attribution_refunded_at")
+  @@index([shop_id, refunded_at], map: "ix_refund_attribution_shop_id_refunded_at")
+  @@index([shop_id, customer_id, refunded_at], map: "ix_refund_attribution_shop_id_customer_id_refunded_at")
 }
 
 model search_product_features {
@@ -935,8 +907,7 @@ model shops {
   raw_customers                  raw_customers[]
   raw_orders                     raw_orders[]
   raw_products                   raw_products[]
-  refund_attribution_adjustments refund_attribution_adjustments[]
-  refund_data                    refund_data[]
+  refund_attributions            refund_attributions[]
   search_product_features        search_product_features[]
   session_features               session_features[]
   user_features                  user_features[]
@@ -1078,6 +1049,7 @@ model user_sessions {
   shop_id               String                  @db.VarChar
   customer_id           String?                 @db.VarChar
   purchase_attributions purchase_attributions[]
+  refund_attributions   refund_attributions[]
   user_interactions     user_interactions[]
   shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

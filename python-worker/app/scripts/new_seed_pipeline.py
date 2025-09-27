@@ -44,9 +44,7 @@ from app.core.database.models import (
     ProductPairFeatures,
     SearchProductFeatures,
     PurchaseAttribution,
-    RefundData,
-    RefundLineItemData,
-    RefundAttributionAdjustment,
+    RefundAttribution,
     BillingPlan,
     BillingInvoice,
     BillingEvent,
@@ -124,9 +122,8 @@ class SeedPipelineRunner:
         models_to_clean = [
             # Child/related tables first
             LineItemData,
-            RefundLineItemData,
-            RefundAttributionAdjustment,
             PurchaseAttribution,
+            RefundAttribution,
             UserInteraction,
             UserSession,
             UserIdentityLink,
@@ -151,8 +148,6 @@ class SeedPipelineRunner:
             RawCollection,
             # Watermark tables
             PipelineWatermark,
-            # Refund tables
-            RefundData,
             # Billing tables
             BillingEvent,
             BillingInvoice,
@@ -616,9 +611,7 @@ class SeedPipelineRunner:
         """Create refund data for some orders to enable negative feature computation."""
         print("🎯 Creating refund data...")
 
-        refund_data_list = []
-        refund_line_items = []
-        refund_attribution_adjustments = []
+        refund_attributions = []
 
         # Create refunds for ~20% of orders to simulate realistic refund rates
         orders_to_refund = random.sample(orders, max(1, len(orders) // 5))
@@ -628,81 +621,56 @@ class SeedPipelineRunner:
             refund_id = f"refund_{i}_{order_id_str}"
             refunded_at = datetime.utcnow() - timedelta(days=random.randint(1, 30))
 
-            # Create RefundData
+            # Create RefundAttribution (simplified single table approach)
             total_refund_amount = float(
                 getattr(order, "total_amount", 0) or 0
             ) * random.uniform(0.5, 1.0)
-            refund_data = RefundData(
+
+            refund_attribution = RefundAttribution(
                 shop_id=shop_id,
-                order_id=(
-                    int(order_id_str.replace("#", "").replace("order_", ""))
-                    if order_id_str.replace("#", "").replace("order_", "").isdigit()
-                    else random.randint(100000, 999999)
-                ),
+                customer_id=getattr(order, "customer_id", None),
+                session_id=getattr(order, "session_id", None),
+                order_id=order_id_str,
                 refund_id=refund_id,
                 refunded_at=refunded_at,
-                note=f"Refund for order {order_id_str}",
-                restock=random.choice([True, False]),
                 total_refund_amount=total_refund_amount,
                 currency_code=getattr(order, "currency_code", None) or "USD",
-            )
-            session.add(refund_data)
-            await session.flush()  # Flush to get refund_data.id
-            refund_data_list.append(refund_data)
-
-            # Create RefundLineItemData (simplified - one line item per refund)
-            li_obj = None
-            try:
-                if hasattr(order, "line_items") and order.line_items:
-                    li_obj = order.line_items[0]
-            except Exception:
-                li_obj = None
-            unit_price = float(
-                getattr(li_obj, "price", 0)
-                or (total_refund_amount / max(1, random.randint(1, 3)))
-            )
-            quantity = max(1, random.randint(1, 3))
-
-            refund_line_item = RefundLineItemData(
-                refund_id=refund_data.id,  # Use the actual refund_data.id after flush
-                order_id=refund_data.order_id,
-                product_id=getattr(li_obj, "product_id", None) or f"product_{i}",
-                variant_id=getattr(li_obj, "variant_id", None) or f"variant_{i}",
-                quantity=quantity,
-                unit_price=unit_price,
-                refund_amount=total_refund_amount,
-                properties={"source": "seed_pipeline"},
-            )
-            session.add(refund_line_item)
-            refund_line_items.append(refund_line_item)
-
-            # Create RefundAttributionAdjustment
-            adjustment = RefundAttributionAdjustment(
-                shop_id=shop_id,
-                order_id=refund_data.order_id,
-                refund_id=refund_data.id,  # Use the actual refund_data.id after flush
-                per_extension_refund={
+                contributing_extensions=["phoenix", "apollo", "venus"],
+                attribution_weights={
+                    "phoenix": 0.3,
+                    "apollo": 0.4,
+                    "venus": 0.2,
+                    "atlas": 0.1,
+                },
+                total_refunded_revenue=total_refund_amount,
+                attributed_refund={
                     "phoenix": total_refund_amount * 0.3,
                     "apollo": total_refund_amount * 0.4,
                     "venus": total_refund_amount * 0.2,
                     "atlas": total_refund_amount * 0.1,
                 },
-                total_refund_amount=total_refund_amount,
-                computed_at=datetime.utcnow(),
-                refund_metadata={"source": "seed_pipeline"},
+                total_interactions=random.randint(5, 20),
+                interactions_by_extension={
+                    "phoenix": random.randint(1, 5),
+                    "apollo": random.randint(1, 5),
+                    "venus": random.randint(1, 5),
+                    "atlas": random.randint(1, 5),
+                },
+                attribution_algorithm="multi_touch",
+                metadata={
+                    "source": "seed_pipeline",
+                    "refund_note": f"Refund for order {order_id_str}",
+                    "refund_restock": random.choice([True, False]),
+                },
             )
-            session.add(adjustment)
-            refund_attribution_adjustments.append(adjustment)
+            session.add(refund_attribution)
+            refund_attributions.append(refund_attribution)
 
         await session.flush()
-        print(
-            f"✅ Created {len(refund_data_list)} refunds with line items and adjustments"
-        )
+        print(f"✅ Created {len(refund_attributions)} refund attributions")
 
         return {
-            "refund_data": refund_data_list,
-            "refund_line_items": refund_line_items,
-            "refund_attribution_adjustments": refund_attribution_adjustments,
+            "refund_attributions": refund_attributions,
         }
 
     async def seed_search_product_features(

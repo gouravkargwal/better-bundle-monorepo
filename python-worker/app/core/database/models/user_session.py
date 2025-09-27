@@ -36,6 +36,9 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     attributions = relationship(
         "PurchaseAttribution", back_populates="session", cascade="all, delete-orphan"
     )
+    refund_attributions = relationship(
+        "RefundAttribution", back_populates="session", cascade="all, delete-orphan"
+    )
     interactions = relationship(
         "UserInteraction", back_populates="session", cascade="all, delete-orphan"
     )

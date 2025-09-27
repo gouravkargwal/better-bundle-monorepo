@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -32,25 +31,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No refund ID or order ID found" }, { status: 400 });
     }
 
-    const shopRecord = await prisma.shops.findFirst({
-      where: { shop_domain: shop },
-      select: { id: true },
-    });
-
-    if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
-
     const kafkaProducer = await KafkaProducerService.getInstance();
 
     const streamData = {
       event_type: "refund_created",
-      shop_id: shopRecord.id,
+      shop_domain: shop,
       shopify_id: orderId,
       refund_id: refundId,
       timestamp: new Date().toISOString(),
-      raw_payload: refund, // Include the full raw refund payload
     };
 
     await kafkaProducer.publishShopifyEvent(streamData);
@@ -59,8 +47,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       success: true,
       refundId: refundId,
       orderId: orderId,
-      shopId: shopRecord.id,
-      message: "Refund event published to Kafka",
+      shopDomain: shop,
+      message:
+        "Refund event published to Kafka - will trigger data collection and normalization",
     });
   } catch (error) {
     console.error(`❌ Error processing ${topic} webhook:`, error);

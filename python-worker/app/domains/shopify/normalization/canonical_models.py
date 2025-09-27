@@ -242,44 +242,6 @@ class CanonicalCustomer(BaseModel):
     extras: Any = Field(default_factory=dict)
 
 
-class CanonicalRefundLineItem(BaseModel):
-    """Canonical refund line item model"""
-
-    refund_id: str
-    order_id: str
-    product_id: Optional[str] = None
-    variant_id: Optional[str] = None
-    quantity: int
-    unit_price: float
-    refund_amount: float
-    properties: Any = Field(default_factory=dict)
-
-
-class CanonicalRefund(BaseModel):
-    """Canonical refund model - matches RefundData table structure exactly"""
-
-    shop_id: str
-    order_id: str  # Maps to orderId (BigInt)
-    refund_id: str  # Maps to refundId
-
-    # Exact field mapping to RefundData table
-    refunded_at: datetime  # refundedAt
-    note: Optional[str] = ""  # note
-    restock: bool = False  # restock
-    total_refund_amount: float  # totalRefundAmount
-    currency_code: str = "USD"  # currencyCode
-
-    # Line items for RefundLineItemData records
-    refund_line_items: List[CanonicalRefundLineItem] = Field(default_factory=list)
-
-    # Internal fields
-    created_at: datetime
-    updated_at: datetime
-
-    # Preserve unknown fields from raw payloads
-    extras: Any = Field(default_factory=dict)
-
-
 class NormalizeJob(BaseModel):
     event_type: str
     data_type: str  # orders|products|customers|collections

@@ -75,13 +75,8 @@ class Shop(BaseModel):
     purchase_attributions = relationship(
         "PurchaseAttribution", back_populates="shop", cascade="all, delete-orphan"
     )
-    refund_attribution_adjustments = relationship(
-        "RefundAttributionAdjustment",
-        back_populates="shop",
-        cascade="all, delete-orphan",
-    )
-    refund_data = relationship(
-        "RefundData", back_populates="shop", cascade="all, delete-orphan"
+    refund_attributions = relationship(
+        "RefundAttribution", back_populates="shop", cascade="all, delete-orphan"
     )
     user_interactions = relationship(
         "UserInteraction", back_populates="shop", cascade="all, delete-orphan"

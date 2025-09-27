@@ -17,9 +17,6 @@ from app.consumers.kafka.data_collection_consumer import DataCollectionKafkaCons
 from app.consumers.kafka.purchase_attribution_consumer import (
     PurchaseAttributionKafkaConsumer,
 )
-from app.consumers.kafka.refund_normalization_consumer import (
-    RefundNormalizationKafkaConsumer,
-)
 from app.consumers.kafka.refund_attribution_consumer import (
     RefundAttributionKafkaConsumer,
 )
@@ -56,9 +53,8 @@ class KafkaConsumerManager:
                 ),  # Handles both analysis triggers and webhook events
                 "normalization": NormalizationKafkaConsumer(),
                 "feature_computation": FeatureComputationKafkaConsumer(),
-                # "purchase_attribution": PurchaseAttributionKafkaConsumer(),
-                # "refund_normalization": RefundNormalizationKafkaConsumer(),
-                # "refund_attribution": RefundAttributionKafkaConsumer(),
+                "purchase_attribution": PurchaseAttributionKafkaConsumer(),
+                "refund_attribution": RefundAttributionKafkaConsumer(),
             }
 
             # Initialize each consumer in parallel to reduce overall startup time

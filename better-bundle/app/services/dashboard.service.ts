@@ -614,10 +614,10 @@ async function getAttributedMetrics(
               },
               _sum: { total_amount: true },
             }),
-            prisma.refund_attribution_adjustments.aggregate({
+            prisma.refund_attributions.aggregate({
               where: {
                 shop_id: shopId,
-                computed_at: { gte: startDate, lte: endDate },
+                refunded_at: { gte: startDate, lte: endDate },
               },
               _sum: { total_refund_amount: true },
             }),

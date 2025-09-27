@@ -30,11 +30,7 @@ from app.core.database.models import (
     UserIdentityLink,
 )
 from app.core.database.models import PurchaseAttribution
-from app.core.database.models import (
-    RefundData,
-    RefundLineItemData,
-    RefundAttributionAdjustment,
-)
+from app.core.database.models import RefundAttribution
 from app.core.database.models import (
     ProductFeatures,
     CollectionFeatures,
@@ -197,7 +193,9 @@ class ComprehensiveFeatureVerifier:
             )
         )
         refund_count = await session.scalar(
-            select(func.count(RefundData.id)).where(RefundData.shop_id == self.shop_id)
+            select(func.count(RefundAttribution.id)).where(
+                RefundAttribution.shop_id == self.shop_id
+            )
         )
         search_product_features_count = await session.scalar(
             select(func.count(SearchProductFeatures.id)).where(
@@ -302,7 +300,9 @@ class ComprehensiveFeatureVerifier:
             "PurchaseAttribution": await session.scalar(
                 select(func.count(PurchaseAttribution.id))
             ),
-            "RefundData": await session.scalar(select(func.count(RefundData.id))),
+            "RefundAttribution": await session.scalar(
+                select(func.count(RefundAttribution.id))
+            ),
             "ProductFeatures": await session.scalar(
                 select(func.count(ProductFeatures.id))
             ),
@@ -491,14 +491,16 @@ class ComprehensiveFeatureVerifier:
         print("💸 Verifying Refund Data (Seeded)...")
 
         # MODIFIED: Simplified and more robust query.
-        # The seeder populates shop_id on RefundData, so we can rely on that directly.
+        # The seeder populates shop_id on RefundAttribution, so we can rely on that directly.
         # This avoids potential type mismatch issues when joining on order_id.
-        refund_ids_for_shop_subq = select(RefundData.id).where(
-            RefundData.shop_id == self.shop_id
+        refund_ids_for_shop_subq = select(RefundAttribution.id).where(
+            RefundAttribution.shop_id == self.shop_id
         )
 
         refund_count = await session.scalar(
-            select(func.count(RefundData.id)).where(RefundData.shop_id == self.shop_id)
+            select(func.count(RefundAttribution.id)).where(
+                RefundAttribution.shop_id == self.shop_id
+            )
         )
 
         if refund_count == 0:
@@ -512,8 +514,8 @@ class ComprehensiveFeatureVerifier:
             }
 
         line_item_count = await session.scalar(
-            select(func.count(RefundLineItemData.id)).where(
-                RefundLineItemData.refund_id.in_(refund_ids_for_shop_subq)
+            select(func.count(RefundAttribution.id)).where(
+                RefundAttribution.refund_id.in_(refund_ids_for_shop_subq)
             )
         )
 
@@ -524,8 +526,8 @@ class ComprehensiveFeatureVerifier:
         )
 
         sample_refund = await session.scalar(
-            select(RefundData)
-            .where(RefundData.id.in_(refund_ids_for_shop_subq))
+            select(RefundAttribution)
+            .where(RefundAttribution.id.in_(refund_ids_for_shop_subq))
             .limit(1)
         )
 
