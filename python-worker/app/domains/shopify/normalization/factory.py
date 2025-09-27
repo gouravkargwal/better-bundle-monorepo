@@ -3,11 +3,8 @@ from __future__ import annotations
 from typing import Dict, Tuple, Type
 
 from .base_adapter import BaseAdapter
-from .rest.orders import RestOrderAdapter
-from .rest.products import RestProductAdapter
-from .rest.collections import RestCollectionAdapter
-from .rest.customers import RestCustomerAdapter
-from .rest.refunds import RestRefundAdapter
+
+# REST adapters removed - using unified GraphQL data collection
 from .graphql.orders import GraphQLOrderAdapter
 from .graphql.products import GraphQLProductAdapter
 from .graphql.collections import GraphQLCollectionAdapter
@@ -16,15 +13,11 @@ from .graphql.refunds import GraphQLRefundAdapter
 
 
 _REGISTRY: Dict[Tuple[str, str], Type[BaseAdapter]] = {
-    ("rest", "orders"): RestOrderAdapter,
+    # Only GraphQL adapters - REST adapters removed due to unified data collection
     ("graphql", "orders"): GraphQLOrderAdapter,
-    ("rest", "products"): RestProductAdapter,
     ("graphql", "products"): GraphQLProductAdapter,
-    ("rest", "collections"): RestCollectionAdapter,
     ("graphql", "collections"): GraphQLCollectionAdapter,
-    ("rest", "customers"): RestCustomerAdapter,
     ("graphql", "customers"): GraphQLCustomerAdapter,
-    ("rest", "refunds"): RestRefundAdapter,
     ("graphql", "refunds"): GraphQLRefundAdapter,
 }
 

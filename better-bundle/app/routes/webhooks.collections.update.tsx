@@ -21,14 +21,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No collection ID found" }, { status: 400 });
     }
 
-    // Publish Kafka event with raw payload - let backend handle shop_id lookup
+    // Publish Kafka event - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {
       event_type: "collection_updated",
-      shop_domain: session.shop, // Use session.shop to get the shop domain
+      shop_domain: session.shop,
       shopify_id: collectionId,
       timestamp: new Date().toISOString(),
-      raw_payload: collection,
     } as const;
 
     await producer.publishShopifyEvent(event);

@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -31,25 +30,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No order ID found" }, { status: 400 });
     }
 
-    // Get shop ID from database
-    const shopRecord = await prisma.shops.findFirst({
-      where: { shop_domain: shop },
-      select: { id: true },
-    });
-
-    if (!shopRecord) {
-      console.error(`❌ Shop not found in database: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
-
     const kafkaProducer = await KafkaProducerService.getInstance();
 
     const streamData = {
       event_type: "order_paid",
-      shop_id: shopRecord.id,
+      shop_domain: shop,
       shopify_id: orderId,
       timestamp: new Date().toISOString(),
-      raw_payload: order,
     } as const;
 
     await kafkaProducer.publishShopifyEvent(streamData);
@@ -57,7 +44,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({
       success: true,
       orderId: orderId,
-      shopId: shopRecord.id,
+      shopDomain: shop,
       message:
         "Order paid webhook processed - will trigger specific data collection",
     });

@@ -205,35 +205,56 @@ class DataCollectionKafkaConsumer:
         """Create collection payload based on event type"""
         event_mapping = {
             # Product events
-            "product_created": {"data_type": "products", "specific_ids": [shopify_id]},
-            "product_updated": {"data_type": "products", "specific_ids": [shopify_id]},
-            "product_deleted": {"data_type": "products", "specific_ids": [shopify_id]},
+            "product_created": {
+                "data_types": ["products"],
+                "specific_ids": {"products": [shopify_id]},
+            },
+            "product_updated": {
+                "data_types": ["products"],
+                "specific_ids": {"products": [shopify_id]},
+            },
+            "product_deleted": {
+                "data_types": ["products"],
+                "specific_ids": {"products": [shopify_id]},
+            },
             # Collection events
             "collection_created": {
-                "data_type": "collections",
-                "specific_ids": [shopify_id],
+                "data_types": ["collections"],
+                "specific_ids": {"collections": [shopify_id]},
             },
             "collection_updated": {
-                "data_type": "collections",
-                "specific_ids": [shopify_id],
+                "data_types": ["collections"],
+                "specific_ids": {"collections": [shopify_id]},
             },
             "collection_deleted": {
-                "data_type": "collections",
-                "specific_ids": [shopify_id],
+                "data_types": ["collections"],
+                "specific_ids": {"collections": [shopify_id]},
             },
             # Order events
-            "order_paid": {"data_type": "orders", "specific_ids": [shopify_id]},
-            "order_created": {"data_type": "orders", "specific_ids": [shopify_id]},
-            "order_updated": {"data_type": "orders", "specific_ids": [shopify_id]},
-            "order_cancelled": {"data_type": "orders", "specific_ids": [shopify_id]},
+            "order_paid": {
+                "data_types": ["orders"],
+                "specific_ids": {"orders": [shopify_id]},
+            },
+            "order_created": {
+                "data_types": ["orders"],
+                "specific_ids": {"orders": [shopify_id]},
+            },
+            "order_updated": {
+                "data_types": ["orders"],
+                "specific_ids": {"orders": [shopify_id]},
+            },
+            "order_cancelled": {
+                "data_types": ["orders"],
+                "specific_ids": {"orders": [shopify_id]},
+            },
             # Customer events
             "customer_created": {
-                "data_type": "customers",
-                "specific_ids": [shopify_id],
+                "data_types": ["customers"],
+                "specific_ids": {"customers": [shopify_id]},
             },
             "customer_updated": {
-                "data_type": "customers",
-                "specific_ids": [shopify_id],
+                "data_types": ["customers"],
+                "specific_ids": {"customers": [shopify_id]},
             },
         }
 

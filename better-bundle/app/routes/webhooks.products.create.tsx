@@ -24,10 +24,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const streamData = {
       event_type: "product_created",
-      shop_domain: session.shop, // Use session.shop to get the shop domain
+      shop_domain: session.shop,
       shopify_id: productId,
       timestamp: new Date().toISOString(),
-      raw_payload: product,
     };
 
     await kafkaProducer.publishShopifyEvent(streamData);

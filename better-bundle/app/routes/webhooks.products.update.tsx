@@ -22,14 +22,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(product, "product ------------------->");
 
-    // Publish Kafka event with raw payload - let backend handle shop_id lookup
+    // Publish Kafka event with shop_domain - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {
       event_type: "product_updated",
-      shop_domain: session.shop, // Use session.shop to get the shop domain
+      shop_domain: session.shop,
       shopify_id: productId,
       timestamp: new Date().toISOString(),
-      raw_payload: product,
     } as const;
 
     await producer.publishShopifyEvent(event);

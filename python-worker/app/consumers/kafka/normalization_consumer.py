@@ -121,7 +121,7 @@ class NormalizationJobHandler(EventHandler):
             return False
 
     async def _handle_unified_normalization(self, payload: Dict[str, Any]):
-        """Simple, unified normalization handler"""
+        """Unified normalization handler for the new data collection flow"""
         self.logger.info(f"🔄 Starting unified normalization: {payload}")
 
         shop_id = payload.get("shop_id")
@@ -130,6 +130,8 @@ class NormalizationJobHandler(EventHandler):
         start_time = payload.get("start_time")
         end_time = payload.get("end_time")
         shopify_id = payload.get("shopify_id")
+        mode = payload.get("mode", "incremental")
+        source = payload.get("source", "unknown")
 
         if not shop_id or not data_type:
             self.logger.error(
@@ -137,33 +139,33 @@ class NormalizationJobHandler(EventHandler):
             )
             return
 
-        # If REST single-entity event with explicit shopify_id, process only that entity
-        if format_type == "rest" and shopify_id:
-            success = await self.consumer.normalization_service.process_rest_entity(
-                shop_id, data_type, shopify_id
-            )
-            if success:
-                # Feature computation for this type
-                await self.consumer.normalization_service.feature_service.trigger_feature_computation(
-                    shop_id, data_type
-                )
-                self.logger.info(
-                    f"✅ Feature computation triggered for {data_type} (REST single entity)"
-                )
-            return
+        self.logger.info(
+            f"📋 Normalization event details: shop_id={shop_id}, data_type={data_type}, "
+            f"format={format_type}, mode={mode}, source={source}"
+        )
 
-        # Check for processing mode (historical vs incremental)
-        mode = payload.get(
-            "mode", "incremental"
-        )  # Default to incremental for backward compatibility
+        # Create unified normalization parameters
+        normalization_params = {
+            "shopify_id": shopify_id,
+            "format": format_type,
+            "mode": mode,
+            "start_time": start_time,
+            "end_time": end_time,
+            "source": source,
+        }
 
-        if mode == "historical":
-            # Process all historical data
-            await self.consumer.normalization_service.process_historical_data(
-                shop_id, data_type, format_type
+        # Use unified normalization method
+        success = await self.consumer.normalization_service.normalize_data(
+            shop_id, data_type, normalization_params
+        )
+
+        if success:
+            self.logger.info(f"✅ Normalization completed for {data_type}")
+
+            # Trigger feature computation for the processed data type
+            await self.consumer.normalization_service.feature_service.trigger_feature_computation(
+                shop_id, data_type, mode
             )
+            self.logger.info(f"✅ Feature computation triggered for {data_type}")
         else:
-            # Process data with time range filtering (GraphQL or REST without id falls back to window)
-            await self.consumer.normalization_service.process_normalization_window(
-                shop_id, data_type, format_type, start_time, end_time, mode
-            )
+            self.logger.error(f"❌ Normalization failed for {data_type}")
