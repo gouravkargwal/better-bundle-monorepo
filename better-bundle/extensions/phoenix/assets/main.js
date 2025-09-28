@@ -49,9 +49,6 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
-      // Show skeleton only when API call starts
-      this.showSkeleton();
-
       // Get or create session ID from analytics API
       let sessionId;
       if (this.analyticsApi && this.config.shopDomain) {
@@ -63,13 +60,11 @@ class RecommendationCarousel {
           console.log('✅ Phoenix: Session ID obtained from analytics API:', sessionId);
         } catch (error) {
           console.error('❌ Phoenix: Failed to get session from analytics API:', error);
-          this.hideSkeleton();
           this.hideCarousel();
           return;
         }
       } else {
         console.error('❌ Phoenix: Analytics API not available');
-        this.hideSkeleton();
         this.hideCarousel();
         return;
       }
@@ -106,11 +101,9 @@ class RecommendationCarousel {
         // Update product cards with real recommendations and analytics tracking
         this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
       } else {
-        this.hideSkeleton();
         this.hideCarousel();
       }
     } catch (error) {
-      this.hideSkeleton();
       this.hideCarousel();
     }
   }
