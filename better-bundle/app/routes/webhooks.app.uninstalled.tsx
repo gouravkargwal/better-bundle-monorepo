@@ -16,7 +16,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await deactivateShopBilling(shop, "app_uninstalled");
 
       // 2. Delete sessions (original functionality)
-      await db.session.deleteMany({ where: { shop } });
+      await db.sessions.deleteMany({ where: { shop } });
 
       console.log(`✅ Successfully processed app uninstall for ${shop}:`);
       console.log(`   - Deactivated billing and marked shop as inactive`);
