@@ -42,8 +42,8 @@ class ShopifyStoreDeleter:
 
         # Rate limiting
         self.rate_limit_buckets = {}
-        self.max_requests_per_second = 2  # Conservative rate limiting
-        self.request_delay = 0.5  # 500ms between requests
+        self.max_requests_per_second = 10  # Increased for parallel processing
+        self.request_delay = 0.1  # 100ms between requests (reduced for speed)
 
         # Statistics
         self.stats = {
@@ -443,17 +443,43 @@ class ShopifyStoreDeleter:
             f"⚠️  About to delete {len(products)} products. This action is irreversible!"
         )
 
-        for i, product in enumerate(products, 1):
-            product_id = product["id"]
-            product_title = product.get("title", "Unknown")
+        # Process products in parallel batches
+        batch_size = 10  # Process 10 products at a time
+        for i in range(0, len(products), batch_size):
+            batch = products[i : i + batch_size]
+            logger.info(
+                f"Processing products batch {i//batch_size + 1}/{(len(products) + batch_size - 1)//batch_size}"
+            )
 
-            logger.info(f"Deleting product {i}/{len(products)}: {product_title}")
+            # Create tasks for parallel execution
+            tasks = []
+            for product in batch:
+                product_id = product["id"]
+                product_title = product.get("title", "Unknown")
+                task = self._delete_product_with_logging(product_id, product_title)
+                tasks.append(task)
 
-            success = await self.delete_product(product_id)
-            if success:
-                logger.info(f"✅ Deleted product: {product_title}")
-            else:
-                logger.error(f"❌ Failed to delete product: {product_title}")
+            # Execute batch in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log results
+            for j, result in enumerate(results):
+                product = batch[j]
+                product_title = product.get("title", "Unknown")
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"❌ Failed to delete product: {product_title} - {result}"
+                    )
+                elif result:
+                    logger.info(f"✅ Deleted product: {product_title}")
+                else:
+                    logger.error(f"❌ Failed to delete product: {product_title}")
+
+    async def _delete_product_with_logging(
+        self, product_id: str, product_title: str
+    ) -> bool:
+        """Delete a single product with logging"""
+        return await self.delete_product(product_id)
 
     async def delete_all_collections(self) -> None:
         """Delete all collections from the store"""
@@ -468,19 +494,45 @@ class ShopifyStoreDeleter:
             f"⚠️  About to delete {len(collections)} collections. This action is irreversible!"
         )
 
-        for i, collection in enumerate(collections, 1):
-            collection_id = collection["id"]
-            collection_title = collection.get("title", "Unknown")
-
+        # Process collections in parallel batches
+        batch_size = 10  # Process 10 collections at a time
+        for i in range(0, len(collections), batch_size):
+            batch = collections[i : i + batch_size]
             logger.info(
-                f"Deleting collection {i}/{len(collections)}: {collection_title}"
+                f"Processing collections batch {i//batch_size + 1}/{(len(collections) + batch_size - 1)//batch_size}"
             )
 
-            success = await self.delete_collection(collection_id)
-            if success:
-                logger.info(f"✅ Deleted collection: {collection_title}")
-            else:
-                logger.error(f"❌ Failed to delete collection: {collection_title}")
+            # Create tasks for parallel execution
+            tasks = []
+            for collection in batch:
+                collection_id = collection["id"]
+                collection_title = collection.get("title", "Unknown")
+                task = self._delete_collection_with_logging(
+                    collection_id, collection_title
+                )
+                tasks.append(task)
+
+            # Execute batch in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log results
+            for j, result in enumerate(results):
+                collection = batch[j]
+                collection_title = collection.get("title", "Unknown")
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"❌ Failed to delete collection: {collection_title} - {result}"
+                    )
+                elif result:
+                    logger.info(f"✅ Deleted collection: {collection_title}")
+                else:
+                    logger.error(f"❌ Failed to delete collection: {collection_title}")
+
+    async def _delete_collection_with_logging(
+        self, collection_id: str, collection_title: str
+    ) -> bool:
+        """Delete a single collection with logging"""
+        return await self.delete_collection(collection_id)
 
     async def delete_all_orders(self) -> None:
         """Delete all orders from the store"""
@@ -495,17 +547,39 @@ class ShopifyStoreDeleter:
             f"⚠️  About to delete {len(orders)} orders. This action is irreversible!"
         )
 
-        for i, order in enumerate(orders, 1):
-            order_id = order["id"]
-            order_name = order.get("name", "Unknown")
+        # Process orders in parallel batches
+        batch_size = 10  # Process 10 orders at a time
+        for i in range(0, len(orders), batch_size):
+            batch = orders[i : i + batch_size]
+            logger.info(
+                f"Processing orders batch {i//batch_size + 1}/{(len(orders) + batch_size - 1)//batch_size}"
+            )
 
-            logger.info(f"Deleting order {i}/{len(orders)}: {order_name}")
+            # Create tasks for parallel execution
+            tasks = []
+            for order in batch:
+                order_id = order["id"]
+                order_name = order.get("name", "Unknown")
+                task = self._delete_order_with_logging(order_id, order_name)
+                tasks.append(task)
 
-            success = await self.delete_order(order_id)
-            if success:
-                logger.info(f"✅ Deleted order: {order_name}")
-            else:
-                logger.error(f"❌ Failed to delete order: {order_name}")
+            # Execute batch in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log results
+            for j, result in enumerate(results):
+                order = batch[j]
+                order_name = order.get("name", "Unknown")
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Failed to delete order: {order_name} - {result}")
+                elif result:
+                    logger.info(f"✅ Deleted order: {order_name}")
+                else:
+                    logger.error(f"❌ Failed to delete order: {order_name}")
+
+    async def _delete_order_with_logging(self, order_id: str, order_name: str) -> bool:
+        """Delete a single order with logging"""
+        return await self.delete_order(order_id)
 
     async def delete_all_customers(self) -> None:
         """Delete all customers from the store"""
@@ -520,19 +594,47 @@ class ShopifyStoreDeleter:
             f"⚠️  About to delete {len(customers)} customers. This action is irreversible!"
         )
 
-        for i, customer in enumerate(customers, 1):
-            customer_id = customer["id"]
-            first_name = customer.get("firstName", "")
-            last_name = customer.get("lastName", "")
-            customer_name = f"{first_name} {last_name}".strip() or "Unknown"
+        # Process customers in parallel batches
+        batch_size = 10  # Process 10 customers at a time
+        for i in range(0, len(customers), batch_size):
+            batch = customers[i : i + batch_size]
+            logger.info(
+                f"Processing customers batch {i//batch_size + 1}/{(len(customers) + batch_size - 1)//batch_size}"
+            )
 
-            logger.info(f"Deleting customer {i}/{len(customers)}: {customer_name}")
+            # Create tasks for parallel execution
+            tasks = []
+            for customer in batch:
+                customer_id = customer["id"]
+                first_name = customer.get("firstName", "")
+                last_name = customer.get("lastName", "")
+                customer_name = f"{first_name} {last_name}".strip() or "Unknown"
+                task = self._delete_customer_with_logging(customer_id, customer_name)
+                tasks.append(task)
 
-            success = await self.delete_customer(customer_id)
-            if success:
-                logger.info(f"✅ Deleted customer: {customer_name}")
-            else:
-                logger.error(f"❌ Failed to delete customer: {customer_name}")
+            # Execute batch in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log results
+            for j, result in enumerate(results):
+                customer = batch[j]
+                first_name = customer.get("firstName", "")
+                last_name = customer.get("lastName", "")
+                customer_name = f"{first_name} {last_name}".strip() or "Unknown"
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"❌ Failed to delete customer: {customer_name} - {result}"
+                    )
+                elif result:
+                    logger.info(f"✅ Deleted customer: {customer_name}")
+                else:
+                    logger.error(f"❌ Failed to delete customer: {customer_name}")
+
+    async def _delete_customer_with_logging(
+        self, customer_id: str, customer_name: str
+    ) -> bool:
+        """Delete a single customer with logging"""
+        return await self.delete_customer(customer_id)
 
     async def delete_all_data(self) -> None:
         """Delete all store data (products, collections, orders, customers)"""
