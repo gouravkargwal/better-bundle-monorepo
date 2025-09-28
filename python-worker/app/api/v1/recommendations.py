@@ -35,36 +35,44 @@ gorse_client = GorseApiClient(
 
 async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
     """
-    Get shop domain from customer ID using Prisma ORM
+    Get shop domain from customer ID using SQLAlchemy
     """
     try:
-        db = await get_database()
+        from app.core.database.session import get_transaction_context
+        from app.core.database.models.customer_data import CustomerData
+        from app.core.database.models.shop import Shop
+        from sqlalchemy import select
 
-        # First, find the customer by customerId (not id)
-        customer = await db.customerdata.find_first(where={"customerId": customer_id})
-
-        if not customer:
-            logger.warning(f"⚠️ Customer not found with customerId: {customer_id}")
-            return None
-
-        # Get the shopId from the customer
-        shop_id = customer.shopId
-        if not shop_id:
-            logger.warning(f"⚠️ No shopId found for customer {customer_id}")
-            return None
-
-        # Now find the shop by shopId to get shopDomain
-        shop = await db.shop.find_unique(where={"id": shop_id})
-
-        if shop and shop.shopDomain:
-            shop_domain = shop.shopDomain
-            logger.info(
-                f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
+        async with get_transaction_context() as session:
+            # First, find the customer by customer_id
+            result = await session.execute(
+                select(CustomerData).where(CustomerData.customer_id == customer_id)
             )
-            return shop_domain
-        else:
-            logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
-            return None
+            customer = result.scalar_one_or_none()
+
+            if not customer:
+                logger.warning(f"⚠️ Customer not found with customer_id: {customer_id}")
+                return None
+
+            # Get the shop_id from the customer
+            shop_id = customer.shop_id
+            if not shop_id:
+                logger.warning(f"⚠️ No shop_id found for customer {customer_id}")
+                return None
+
+            # Now find the shop by shop_id to get shop_domain
+            shop_result = await session.execute(select(Shop).where(Shop.id == shop_id))
+            shop = shop_result.scalar_one_or_none()
+
+            if shop and shop.shop_domain:
+                shop_domain = shop.shop_domain
+                logger.info(
+                    f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
+                )
+                return shop_domain
+            else:
+                logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
+                return None
 
     except Exception as e:
         logger.error(f"❌ Error looking up shop_domain for customer {customer_id}: {e}")

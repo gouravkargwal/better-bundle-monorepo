@@ -686,60 +686,77 @@ class EntityDeletionService:
     def __init__(self):
         self.logger = get_logger(__name__)
 
-    async def handle_entity_deletion(self, job: NormalizeJob, db):
-        """Handle entity deletion by marking as inactive."""
+    async def handle_entity_deletion(self, job: Dict[str, Any], db=None):
+        """Handle entity deletion by marking as inactive using SQLAlchemy."""
         try:
+            from app.core.database.session import get_transaction_context
+            from app.core.database.models import (
+                ProductData,
+                CollectionData,
+                CustomerData,
+                OrderData,
+            )
+            from sqlalchemy import update
+
             entity_config = {
                 "products": {
-                    "table": db.productdata,
-                    "id_field": "productId",
+                    "model": ProductData,
+                    "id_field": "product_id",
                     "entity_name": "Product",
                 },
                 "collections": {
-                    "table": db.collectiondata,
-                    "id_field": "collectionId",
+                    "model": CollectionData,
+                    "id_field": "collection_id",
                     "entity_name": "Collection",
                 },
                 "customers": {
-                    "table": db.customerdata,
-                    "id_field": "customerId",
+                    "model": CustomerData,
+                    "id_field": "customer_id",
                     "entity_name": "Customer",
                 },
                 "orders": {
-                    "table": db.orderdata,
-                    "id_field": "orderId",
+                    "model": OrderData,
+                    "id_field": "order_id",
                     "entity_name": "Order",
                 },
             }
 
-            config = entity_config.get(job.data_type)
+            data_type = job.get("data_type")
+            config = entity_config.get(data_type)
             if not config:
-                self.logger.warning(
-                    f"Unknown entity type for deletion: {job.data_type}"
-                )
+                self.logger.warning(f"Unknown entity type for deletion: {data_type}")
                 return
 
-            # Check if entity exists
-            entity = await config["table"].find_first(
-                where={"shopId": job.shop_id, config["id_field"]: str(job.shopify_id)}
-            )
+            shop_id = job.get("shop_id")
+            shopify_id = job.get("shopify_id")
 
-            if entity:
-                # Mark as inactive
-                await config["table"].update_many(
-                    where={
-                        "shopId": job.shop_id,
-                        config["id_field"]: str(job.shopify_id),
-                    },
-                    data={"isActive": False, "updatedAt": now_utc()},
+            if not shop_id or not shopify_id:
+                self.logger.error("Missing shop_id or shopify_id for deletion")
+                return
+
+            # Mark as inactive using SQLAlchemy
+            async with get_transaction_context() as session:
+                model_class = config["model"]
+                id_field = config["id_field"]
+
+                # Update the entity to mark as inactive
+                result = await session.execute(
+                    update(model_class)
+                    .where(
+                        (model_class.shop_id == shop_id)
+                        & (getattr(model_class, id_field) == str(shopify_id))
+                    )
+                    .values(is_active=False, updated_at=now_utc())
                 )
-                self.logger.info(
-                    f"{config['entity_name']} {job.shopify_id} marked as inactive"
-                )
-            else:
-                self.logger.warning(
-                    f"No normalized {config['entity_name'].lower()} found for deletion"
-                )
+
+                if result.rowcount > 0:
+                    self.logger.info(
+                        f"{config['entity_name']} {shopify_id} marked as inactive"
+                    )
+                else:
+                    self.logger.warning(
+                        f"No normalized {config['entity_name'].lower()} found for deletion"
+                    )
 
         except Exception as e:
             self.logger.error(f"Failed to handle entity deletion: {e}")

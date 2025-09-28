@@ -131,20 +131,27 @@ class ShopResolverService:
     ) -> Optional[str]:
         """Fetch shop ID from database using customer ID"""
         try:
-            db = await get_database()
+            from app.core.database.session import get_transaction_context
+            from app.core.database.models.customer_data import CustomerData
+            from sqlalchemy import select
 
-            customer = await db.customerdata.find_first(
-                where={"customerId": customer_id}
-            )
-
-            if customer and customer.shopId:
-                logger.info(
-                    f"Found shop_id from customer_id via customerdata: {customer_id} -> {customer.shopId}"
+            async with get_transaction_context() as session:
+                # Query customer data using SQLAlchemy
+                result = await session.execute(
+                    select(CustomerData).where(CustomerData.customer_id == customer_id)
                 )
-                return customer.shopId
-            else:
-                logger.warning(f"Could not find shop_id for customer_id: {customer_id}")
-                return None
+                customer = result.scalar_one_or_none()
+
+                if customer and customer.shop_id:
+                    logger.info(
+                        f"Found shop_id from customer_id via customerdata: {customer_id} -> {customer.shop_id}"
+                    )
+                    return customer.shop_id
+                else:
+                    logger.warning(
+                        f"Could not find shop_id for customer_id: {customer_id}"
+                    )
+                    return None
 
         except Exception as e:
             logger.error(f"Error resolving shop_id from customer_id {customer_id}: {e}")
@@ -189,15 +196,17 @@ class ShopResolverService:
     async def _fetch_shop_id_from_db(self, normalized_domain: str) -> Optional[str]:
         """Fetch shop ID from database"""
         try:
-            db = await get_database()
+            from app.core.database.session import get_transaction_context
+            from app.core.database.models.shop import Shop
+            from sqlalchemy import select
 
-            shop = await db.shop.find_unique(
-                where={
-                    "shopDomain": normalized_domain,
-                },
-            )
+            async with get_transaction_context() as session:
+                result = await session.execute(
+                    select(Shop).where(Shop.shop_domain == normalized_domain)
+                )
+                shop = result.scalar_one_or_none()
 
-            return shop.id if shop else None
+                return shop.id if shop else None
 
         except Exception as e:
             logger.error(
@@ -210,27 +219,29 @@ class ShopResolverService:
     ) -> Optional[dict]:
         """Fetch complete shop details from database"""
         try:
-            db = await get_database()
+            from app.core.database.session import get_transaction_context
+            from app.core.database.models.shop import Shop
+            from sqlalchemy import select
 
-            shop = await db.shop.find_unique(
-                where={
-                    "shopDomain": normalized_domain,
-                }
-            )
+            async with get_transaction_context() as session:
+                result = await session.execute(
+                    select(Shop).where(Shop.shop_domain == normalized_domain)
+                )
+                shop = result.scalar_one_or_none()
 
-            if shop:
-                return {
-                    "id": shop.id,
-                    "shopDomain": shop.shopDomain,
-                    "customDomain": shop.customDomain,
-                    "accessToken": shop.accessToken,
-                    "planType": shop.planType,
-                    "isActive": shop.isActive,
-                    "createdAt": shop.createdAt,
-                    "updatedAt": shop.updatedAt,
-                }
+                if shop:
+                    return {
+                        "id": shop.id,
+                        "shopDomain": shop.shop_domain,
+                        "customDomain": shop.custom_domain,
+                        "accessToken": shop.access_token,
+                        "planType": shop.plan_type,
+                        "isActive": shop.is_active,
+                        "createdAt": shop.created_at,
+                        "updatedAt": shop.updated_at,
+                    }
 
-            return None
+                return None
 
         except Exception as e:
             logger.error(

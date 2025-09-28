@@ -169,16 +169,16 @@ class CollectionAPIClient(BaseShopifyAPIClient):
                 title
                 description
                 handle
-                updatedAt
+                updated_at: updatedAt
                 seo {
                     title
                     description
                 }
-                templateSuffix
+                template_suffix: templateSuffix
                 image {
                     id
                     url
-                    altText
+                    alt_text: altText
                     width
                     height
                 }
@@ -190,11 +190,11 @@ class CollectionAPIClient(BaseShopifyAPIClient):
                             handle
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
             }

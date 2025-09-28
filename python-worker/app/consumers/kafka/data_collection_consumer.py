@@ -184,6 +184,13 @@ class DataCollectionKafkaConsumer:
                 logger.error(f"❌ No shopify_id in webhook event: {event_type}")
                 return False
 
+            # Check if this is a deletion event
+            if event_type.endswith("_deleted"):
+                logger.info(f"🗑️ Handling deletion event: {event_type} for {shopify_id}")
+                return await self._handle_deletion_event(
+                    event_type, shopify_id, shop_data["id"]
+                )
+
             # Create collection payload based on event type
             collection_payload = self._create_collection_payload(event_type, shopify_id)
             if not collection_payload:
@@ -307,4 +314,53 @@ class DataCollectionKafkaConsumer:
 
         except Exception as e:
             logger.exception(f"Data collection job failed: {e}")
+            return False
+
+    async def _handle_deletion_event(
+        self, event_type: str, shopify_id: str, shop_id: str
+    ) -> bool:
+        """Handle deletion events by marking entities as inactive"""
+        try:
+            # Determine data type from event type
+            if event_type == "product_deleted":
+                data_type = "products"
+            elif event_type == "collection_deleted":
+                data_type = "collections"
+            elif event_type == "customer_deleted":
+                data_type = "customers"
+            elif event_type == "order_deleted":
+                data_type = "orders"
+            else:
+                logger.warning(f"❌ Unknown deletion event type: {event_type}")
+                return False
+
+            logger.info(f"🗑️ Processing {data_type} deletion for {shopify_id}")
+
+            # Use the normalization service to handle deletion
+            from app.domains.shopify.services.normalisation_service import (
+                NormalizationService,
+            )
+
+            normalization_service = NormalizationService()
+
+            # Create deletion job
+            deletion_job = {
+                "event_type": event_type,
+                "data_type": data_type,
+                "shop_id": shop_id,
+                "shopify_id": shopify_id,
+            }
+
+            # Handle the deletion using the existing deletion service
+            await normalization_service.deletion_service.handle_entity_deletion(
+                deletion_job, None  # db parameter not needed for SQLAlchemy
+            )
+
+            logger.info(
+                f"✅ Successfully processed {data_type} deletion for {shopify_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.exception(f"❌ Failed to handle deletion event: {e}")
             return False

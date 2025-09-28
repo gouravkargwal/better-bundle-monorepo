@@ -213,19 +213,19 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 name
                 email
                 phone
-                createdAt
-                updatedAt
-                processedAt
-                cancelledAt
-                closedAt
-                totalPrice
-                subtotalPrice
-                totalTax
-                currencyCode
-                financialStatus
-                fulfillmentStatus
-                customerLocale
-                orderNumber
+                created_at: createdAt
+                updated_at: updatedAt
+                processed_at: processedAt
+                cancelled_at: cancelledAt
+                closed_at: closedAt
+                total_price: totalPrice
+                subtotal_price: subtotalPrice
+                total_tax: totalTax
+                currency_code: currencyCode
+                financial_status: financialStatus
+                fulfillment_status: fulfillmentStatus
+                customer_locale: customerLocale
+                order_number: orderNumber
                 tags
                 note
                 test
@@ -236,14 +236,14 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 customer {
                     id
                     email
-                    firstName
-                    lastName
+                    first_name: firstName
+                    last_name: lastName
                     phone
                 }
-                shippingAddress {
+                shipping_address: shippingAddress {
                     id
-                    firstName
-                    lastName
+                    first_name: firstName
+                    last_name: lastName
                     company
                     address1
                     address2
@@ -253,10 +253,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     zip
                     phone
                 }
-                billingAddress {
+                billing_address: billingAddress {
                     id
-                    firstName
-                    lastName
+                    first_name: firstName
+                    last_name: lastName
                     company
                     address1
                     address2
@@ -266,7 +266,7 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     zip
                     phone
                 }
-                lineItems(first: 10) {
+                line_items: lineItems(first: 10) {
                     edges {
                         node {
                             id
@@ -274,15 +274,15 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             quantity
                             price
                             sku
-                            variantId
-                            productId
+                            variant_id: variantId
+                            product_id: productId
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
             }

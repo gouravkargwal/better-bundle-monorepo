@@ -326,36 +326,36 @@ class ProductAPIClient(BaseShopifyAPIClient):
                 title
                 description
                 handle
-                createdAt
-                updatedAt
-                publishedAt
+                created_at: createdAt
+                updated_at: updatedAt
+                published_at: publishedAt
                 status
                 tags
-                productType
+                product_type: productType
                 vendor
-                totalInventory
-                onlineStoreUrl
-                onlineStorePreviewUrl
+                total_inventory: totalInventory
+                online_store_url: onlineStoreUrl
+                online_store_preview_url: onlineStorePreviewUrl
                 seo {
                     title
                     description
                 }
-                templateSuffix
+                template_suffix: templateSuffix
                 images(first: 5) {
                     edges {
                         node {
                             id
                             url
-                            altText
+                            alt_text: altText
                             width
                             height
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
                 media(first: 10) {
@@ -365,7 +365,7 @@ class ProductAPIClient(BaseShopifyAPIClient):
                                 id
                                 image {
                                     url
-                                    altText
+                                    alt_text: altText
                                     width
                                     height
                                 }
@@ -374,23 +374,23 @@ class ProductAPIClient(BaseShopifyAPIClient):
                                 id
                                 sources {
                                     url
-                                    mimeType
+                                    mime_type: mimeType
                                 }
                             }
                             ... on Model3d {
                                 id
                                 sources {
                                     url
-                                    mimeType
+                                    mime_type: mimeType
                                 }
                             }
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
                 options(first: 5) {
@@ -405,26 +405,26 @@ class ProductAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             price
-                            compareAtPrice
-                            inventoryQuantity
+                            compare_at_price: compareAtPrice
+                            inventory_quantity: inventoryQuantity
                             sku
                             barcode
                             taxable
-                            inventoryPolicy
+                            inventory_policy: inventoryPolicy
                             position
-                            createdAt
-                            updatedAt
-                            selectedOptions {
+                            created_at: createdAt
+                            updated_at: updatedAt
+                            selected_options: selectedOptions {
                                 name
                                 value
                             }
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
                 metafields(first: 10) {
@@ -437,11 +437,11 @@ class ProductAPIClient(BaseShopifyAPIClient):
                             type
                         }
                     }
-                    pageInfo {
-                        hasNextPage
-                        hasPreviousPage
-                        startCursor
-                        endCursor
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        has_previous_page: hasPreviousPage
+                        start_cursor: startCursor
+                        end_cursor: endCursor
                     }
                 }
             }
@@ -570,16 +570,16 @@ class ProductAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             price
-                            compareAtPrice
-                            inventoryQuantity
+                            compare_at_price: compareAtPrice
+                            inventory_quantity: inventoryQuantity
                             sku
                             barcode
                             taxable
-                            inventoryPolicy
+                            inventory_policy: inventoryPolicy
                             position
-                            createdAt
-                            updatedAt
-                            selectedOptions {
+                            created_at: createdAt
+                            updated_at: updatedAt
+                            selected_options: selectedOptions {
                                 name
                                 value
                             }
@@ -616,7 +616,7 @@ class ProductAPIClient(BaseShopifyAPIClient):
                         node {
                             id
                             url
-                            altText
+                            alt_text: altText
                             width
                             height
                         }
