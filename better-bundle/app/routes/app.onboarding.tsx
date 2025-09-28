@@ -48,14 +48,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin, redirect } = await authenticate.admin(request);
   try {
-    console.log("📊 Getting shop data from Shopify...");
     const shopData = await getShopInfoFromShopify(admin);
-    console.log("✅ Shop data retrieved successfully");
     // Use atomic transaction to ensure all database operations succeed or fail together
-    console.log("💾 Starting database transaction...");
     await prisma.$transaction(async (tx) => {
       // Step 1: Create/update shop record (idempotent)
-      console.log("🏪 Creating/updating shop record...");
       const shop = await createShopAndSetOnboardingCompleted(
         session,
         shopData,
@@ -114,13 +110,6 @@ export default function OnboardingPage() {
   const isLoading =
     ["loading", "submitting"].includes(navigation.state) &&
     navigation.formMethod === "POST";
-  // Debug logging
-  console.log("🔍 Navigation state:", navigation.state);
-  console.log("🔍 Is submitting:", isLoading);
-  console.log("🔍 Navigation formMethod:", navigation.formMethod);
-  console.log("🔍 Navigation formAction:", navigation.formAction);
-  console.log("🔍 Navigation object:", navigation);
-
   return (
     <Page>
       <TitleBar title="Welcome to BetterBundle!" />

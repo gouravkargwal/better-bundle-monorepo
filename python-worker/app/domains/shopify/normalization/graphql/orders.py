@@ -111,11 +111,11 @@ class GraphQLOrderAdapter(BaseAdapter):
 
             line_items.append(
                 CanonicalLineItem(
-                    productId=_extract_numeric_gid(product.get("id")),
-                    variantId=_extract_numeric_gid(variant.get("id")),
+                    productId=_extract_numeric_gid(node.get("product_id")),
+                    variantId=_extract_numeric_gid(node.get("variant_id")),
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
-                    price=_to_float(variant.get("price")),
+                    price=_to_float(node.get("price")),
                     original_unit_price=original_unit_price,
                     discounted_unit_price=discounted_unit_price,
                     currency_code=currency_code,
@@ -191,8 +191,8 @@ class GraphQLOrderAdapter(BaseAdapter):
             customer_display_name=(payload.get("customer") or {}).get(
                 "display_name"
             ),  # Updated to snake_case
-            financial_status=payload.get("financialStatus") or None,
-            fulfillment_status=payload.get("fulfillmentStatus") or None,
+            financial_status=payload.get("financial_status") or None,
+            fulfillment_status=payload.get("fulfillment_status") or None,
             customer_id=customer_id,
             tags=tags,
             note_attributes=payload.get("customAttributes")

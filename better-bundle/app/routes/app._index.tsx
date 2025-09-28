@@ -11,12 +11,9 @@ import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, redirect } = await authenticate.admin(request);
-  console.log("🔍 Index route - checking onboarding status");
   const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
-  console.log("🔍 Index route - onboarding completed:", onboardingCompleted);
 
   if (!onboardingCompleted) {
-    console.log("🔄 Index route - redirecting to onboarding");
     return redirect("/app/onboarding");
   }
 
@@ -75,7 +72,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       recentActivity: dashboardData?.recentActivity || null,
     };
 
-    console.log("✅ Index route - onboarding completed, showing overview page");
     return json({
       shop: session.shop,
       shopInfo: shop,

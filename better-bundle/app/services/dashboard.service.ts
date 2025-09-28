@@ -414,22 +414,25 @@ async function getTopProducts(
   currencyCode: string,
 ): Promise<TopProductData[]> {
   try {
-    // Single optimized query with joins
-    const topProductsQuery = await prisma.user_interactions.groupBy({
-      by: ["metadata"],
+    // Get all interactions and process them in memory since we can't group by JSON
+    const interactions = await prisma.user_interactions.findMany({
       where: {
         shop_id: shopId,
         created_at: { gte: startDate, lte: endDate },
         interaction_type: { in: ["click", "add_to_cart", "view"] },
       },
-      _count: { interaction_type: true },
+      select: {
+        interaction_metadata: true,
+        interaction_type: true,
+        customer_id: true,
+      },
     });
 
     // Process and aggregate data
     const productStats = new Map();
 
-    for (const interaction of topProductsQuery) {
-      const metadata = interaction.metadata as any;
+    for (const interaction of interactions) {
+      const metadata = interaction.interaction_metadata as any;
       const productId = metadata?.product_id;
 
       if (!productId || typeof productId !== "string") continue;
@@ -441,18 +444,31 @@ async function getTopProducts(
           customers: new Set(),
         });
       }
-      // Additional processing logic here...
+
+      const stats = productStats.get(productId);
+      if (interaction.interaction_type === "view") {
+        stats.views++;
+      } else if (
+        interaction.interaction_type === "click" ||
+        interaction.interaction_type === "add_to_cart"
+      ) {
+        stats.clicks++;
+      }
+
+      if (interaction.customer_id) {
+        stats.customers.add(interaction.customer_id);
+      }
     }
 
     // Get product titles in a single query
     const productIds = Array.from(productStats.keys());
-    const productTitles = await prisma.product_data.findMany({
+    const productTitles = await prisma.productData.findMany({
       where: { shop_id: shopId, product_id: { in: productIds } },
       select: { product_id: true, title: true },
     });
 
     const titleMap = new Map(
-      productTitles.map((product) => [product.product_id, product.title]),
+      productTitles.map((product: any) => [product.product_id, product.title]),
     );
 
     // Calculate total revenue for distribution
@@ -624,11 +640,11 @@ async function getAttributedMetrics(
           ]);
 
         const attributedRevenue = safeNumber(
-          attributedRevenueData._sum.total_revenue,
+          attributedRevenueData._sum?.total_revenue,
         );
-        const totalRevenue = safeNumber(totalRevenueData._sum.total_amount);
+        const totalRevenue = safeNumber(totalRevenueData._sum?.total_amount);
         const attributedRefunds = safeNumber(
-          refundsResult[0]?.total_refund_amount,
+          refundsResult._sum?.total_refund_amount,
         );
 
         const netAttributedRevenue = attributedRevenue - attributedRefunds;

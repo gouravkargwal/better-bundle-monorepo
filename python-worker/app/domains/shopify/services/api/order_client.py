@@ -57,17 +57,17 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         subtotal_price: subtotalPrice
                         total_tax: totalTax
                         currency_code: currencyCode
-                        financial_status: financialStatus
-                        fulfillment_status: fulfillmentStatus
+                        financial_status: displayFinancialStatus
+                        fulfillment_status: displayFulfillmentStatus
                         customer_locale: customerLocale
-                        order_number: orderNumber
+                        order_number: name
                         tags
                         note
                         test
                         confirmed
-                        cancelled
-                        closed
-                        processed
+                        cancelled_at: cancelledAt
+                        closed_at: closedAt
+                        processed_at: processedAt
                         customer {
                             id
                             email
@@ -107,10 +107,14 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                     id
                                     title
                                     quantity
-                                    price
+                                    originalUnitPrice
                                     sku
-                                    variant_id: variantId
-                                    product_id: productId
+                                    variant {
+                                        id
+                                    }
+                                    product {
+                                        id
+                                    }
                                 }
                             }
                             page_info: pageInfo {
@@ -222,17 +226,17 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 subtotal_price: subtotalPrice
                 total_tax: totalTax
                 currency_code: currencyCode
-                financial_status: financialStatus
-                fulfillment_status: fulfillmentStatus
+                financial_status: displayFinancialStatus
+                fulfillment_status: displayFulfillmentStatus
                 customer_locale: customerLocale
-                order_number: orderNumber
+                order_number: name
                 tags
                 note
                 test
                 confirmed
-                cancelled
-                closed
-                processed
+                cancelled_at: cancelledAt
+                closed_at: closedAt
+                processed_at: processedAt
                 customer {
                     id
                     email
@@ -272,10 +276,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price
+                            price: originalUnitPrice
                             sku
-                            variant_id: variantId
-                            product_id: productId
+                            variant_id: variant { id }
+                            product_id: product { id }
                         }
                     }
                     page_info: pageInfo {
@@ -345,10 +349,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price
+                            price: originalUnitPrice
                             sku
-                            variant_id: variantId
-                            product_id: productId
+                            variant_id: variant { id }
+                            product_id: product { id }
                         }
                     }
                     page_info: pageInfo {

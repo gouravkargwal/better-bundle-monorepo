@@ -8,6 +8,7 @@ from app.shared.constants.interaction_types import (
     GorseFeedbackType,
     map_to_gorse_feedback_type,
 )
+from app.recommandations.user_neighbors import UserNeighborsService
 
 logger = get_logger(__name__)
 gorse_client = GorseApiClient(
@@ -470,8 +471,6 @@ class HybridRecommendationService:
 
         elif source == "user_neighbors" and user_id:
             # Use the UserNeighborsService for collaborative filtering
-            from app.recommandations.user_neighbors import UserNeighborsService
-
             user_neighbors_service = UserNeighborsService()
             return await user_neighbors_service.get_neighbor_recommendations(
                 user_id=user_id, shop_id=shop_id, limit=limit, category=category

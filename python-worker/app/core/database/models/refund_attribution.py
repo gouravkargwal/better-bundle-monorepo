@@ -5,7 +5,7 @@ Represents refund attribution data for revenue adjustment tracking.
 """
 
 from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import DECIMAL
 from .base import BaseModel, ShopMixin, CustomerMixin
@@ -27,7 +27,9 @@ class RefundAttribution(BaseModel, ShopMixin, CustomerMixin):
     refund_id = Column("refund_id", String(255), nullable=False, index=True)
 
     # Refund details
-    refunded_at = Column("refunded_at", DateTime, nullable=False, index=True)
+    refunded_at = Column(
+        "refunded_at", TIMESTAMP(timezone=True), nullable=False, index=True
+    )
     total_refund_amount = Column("total_refund_amount", DECIMAL(10, 2), nullable=False)
     currency_code = Column("currency_code", String(10), default="USD", nullable=False)
 

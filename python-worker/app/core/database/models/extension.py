@@ -5,6 +5,7 @@ Represents extension activity tracking.
 """
 
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, func
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 from .enums import AppBlockTarget
@@ -29,7 +30,9 @@ class ExtensionActivity(BaseModel, ShopMixin):
     app_block_location = Column(String(100), nullable=True)
 
     # Activity tracking
-    last_seen = Column(DateTime, nullable=False, default=func.now(), index=True)
+    last_seen = Column(
+        TIMESTAMP(timezone=True), nullable=False, default=func.now(), index=True
+    )
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Relationships

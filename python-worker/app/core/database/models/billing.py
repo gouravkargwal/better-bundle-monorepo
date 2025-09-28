@@ -5,7 +5,7 @@ Represents billing plans, invoices, and events.
 """
 
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import DECIMAL
 from .base import BaseModel, ShopMixin
@@ -27,7 +27,7 @@ class BillingPlan(BaseModel, ShopMixin):
 
     # Plan configuration
     configuration = Column(JSON, default={}, nullable=False)
-    effective_from = Column(DateTime, nullable=False, index=True)
+    effective_from = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
     effective_until = Column(DateTime, nullable=True)
 
     # Trial information
@@ -73,10 +73,10 @@ class BillingInvoice(BaseModel, ShopMixin):
     currency = Column(String(3), nullable=False)
 
     # Billing period
-    period_start = Column(DateTime, nullable=False)
-    period_end = Column(DateTime, nullable=False)
+    period_start = Column(TIMESTAMP(timezone=True), nullable=False)
+    period_end = Column(TIMESTAMP(timezone=True), nullable=False)
     metrics_id = Column(String(255), nullable=False)
-    due_date = Column(DateTime, nullable=False, index=True)
+    due_date = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
 
     # Payment information
     paid_at = Column(DateTime, nullable=True, index=True)
@@ -113,8 +113,8 @@ class BillingEvent(BaseModel, ShopMixin):
     billing_metadata = Column(JSON, default={}, nullable=False)
 
     # Timing
-    occurred_at = Column(DateTime, nullable=False, index=True)
-    processed_at = Column(DateTime, nullable=False, index=True)
+    occurred_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    processed_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
 
     # Relationships
     plan = relationship("BillingPlan", back_populates="events")

@@ -47,14 +47,10 @@ const getShopOnboardingCompleted = async (shopDomain: string) => {
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
     });
-    console.log("📊 Shop record found:", !!shop);
     if (!shop) {
-      console.log("❌ No shop record found, onboarding not completed");
       return false;
     }
     const onboardingStatus = (shop as any)?.onboarding_completed;
-    console.log("📊 Onboarding status from DB:", onboardingStatus);
-    console.log("📊 Final onboarding result:", !!onboardingStatus);
     return !!onboardingStatus; // Ensure boolean return
   } catch (error) {
     console.error("❌ Error getting shop onboarding completed:", error);

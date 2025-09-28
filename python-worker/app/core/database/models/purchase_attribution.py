@@ -5,7 +5,7 @@ Represents purchase attribution data for revenue tracking.
 """
 
 from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import DECIMAL
 from .base import BaseModel, ShopMixin, CustomerMixin
@@ -36,7 +36,9 @@ class PurchaseAttribution(BaseModel, ShopMixin, CustomerMixin):
     )
 
     # Timing - matching Prisma schema
-    purchase_at = Column("purchase_at", DateTime, nullable=False, index=True)
+    purchase_at = Column(
+        "purchase_at", TIMESTAMP(timezone=True), nullable=False, index=True
+    )
     attribution_algorithm = Column(
         "attribution_algorithm", String(50), default="multi_touch", nullable=False
     )

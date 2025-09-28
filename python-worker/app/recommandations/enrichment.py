@@ -1,7 +1,10 @@
 from typing import Dict, Any, List
 
 from app.core.logging import get_logger
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models.shop import Shop
+from app.core.database.models.product_data import ProductData
+from sqlalchemy import select, and_
 
 
 logger = get_logger(__name__)
@@ -11,12 +14,7 @@ class ProductEnrichment:
     """Service to enrich Gorse item IDs with Shopify product data"""
 
     def __init__(self):
-        self.db = None
-
-    async def get_database(self):
-        if self.db is None:
-            self.db = await get_database()
-        return self.db
+        pass
 
     async def enrich_items(
         self,
@@ -41,17 +39,20 @@ class ProductEnrichment:
             logger.debug(
                 f"🎨 Starting enrichment | shop_id={shop_id} | item_count={len(item_ids)} | context={context} | source={source}"
             )
-            db = await self.get_database()
 
-            # Get shop details to determine the correct domain for product URLs and currency
-            shop = await db.shop.find_unique(where={"id": shop_id})
+            async with get_transaction_context() as session:
+                # Get shop details to determine the correct domain for product URLs and currency
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == shop_id)
+                )
+                shop = shop_result.scalar_one_or_none()
 
-            # Use custom domain if available, otherwise fall back to myshopify domain
-            product_domain = (
-                shop.customDomain
-                if shop and shop.customDomain
-                else (shop.shopDomain if shop else None)
-            )
+                # Use custom domain if available, otherwise fall back to myshopify domain
+                product_domain = (
+                    shop.custom_domain
+                    if shop and shop.custom_domain
+                    else (shop.shop_domain if shop else None)
+                )
 
             # Strip prefixes from Gorse item IDs to match database format
             # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
@@ -109,19 +110,22 @@ class ProductEnrichment:
             )
 
             # Fetch products from database using cleaned IDs
-            products = await db.productdata.find_many(
-                where={
-                    "shopId": shop_id,
-                    "productId": {"in": clean_item_ids},
-                }
+            products_result = await session.execute(
+                select(ProductData).where(
+                    and_(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id.in_(clean_item_ids),
+                    )
+                )
             )
+            products = products_result.scalars().all()
 
             logger.debug(
                 f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
             )
 
             # Create a mapping for quick lookup using cleaned IDs
-            product_map = {p.productId: p for p in products}
+            product_map = {p.product_id: p for p in products}
 
             # Enrich items in the same order as requested
             enriched_items = []
@@ -164,28 +168,28 @@ class ProductEnrichment:
                     # Format for frontend ProductRecommendation interface
                     enriched_items.append(
                         {
-                            "id": product.productId,
+                            "id": product.product_id,
                             "title": product.title,
                             "handle": product.handle,
                             "url": f"https://{product_domain}/products/{product.handle}",
                             "price": {
                                 "amount": str(product.price),
                                 "currency_code": (
-                                    shop.currencyCode
-                                    if shop and shop.currencyCode
+                                    shop.currency_code
+                                    if shop and shop.currency_code
                                     else "USD"
                                 ),
                             },
                             "image": (
                                 {
-                                    "url": product.imageUrl or "",
-                                    "alt_text": product.imageAlt or product.title,
+                                    "url": product.image_url or "",
+                                    "alt_text": product.image_alt or product.title,
                                 }
-                                if product.imageUrl
+                                if product.image_url
                                 else None
                             ),
                             "vendor": product.vendor or "",
-                            "product_type": product.productType or "",
+                            "product_type": product.product_type or "",
                             "available": product.status == "ACTIVE",
                             "score": 0.8,  # Default recommendation score
                             "variant_id": variant_id,
