@@ -1,6 +1,6 @@
 import { register } from "@shopify/web-pixels-extension";
 import { SUBSCRIBABLE_EVENTS } from "./config/constants";
-import { trackInteraction, trackLoad } from "./utils/api-client";
+import { trackInteraction } from "./utils/api-client";
 
 register(({ analytics, init, browser }) => {
   // Add error handling wrapper
@@ -145,9 +145,6 @@ register(({ analytics, init, browser }) => {
     }
   };
 
-  // Track extension activity on first page view
-  let extensionTracked = false;
-
   // Helper function to create event handlers with error handling
   const createEventHandler = (eventType: string) => {
     return async (event: any) => {
@@ -174,17 +171,6 @@ register(({ analytics, init, browser }) => {
   // Standard Shopify events
   analytics.subscribe(SUBSCRIBABLE_EVENTS.PAGE_VIEWED, async (event: any) => {
     await safeExecute(async () => {
-      // Track extension activity (only once per session, but check localStorage for throttling)
-      if (!extensionTracked && shopDomain) {
-        extensionTracked = true;
-        trackLoad(shopDomain, browser?.localStorage, pageUrl).catch((error) => {
-          console.warn(
-            "Atlas pixel: Failed to track extension activity:",
-            error,
-          );
-        });
-      }
-
       // Extract and store attribution from URL parameters
       await extractAndStoreAttribution(event);
 

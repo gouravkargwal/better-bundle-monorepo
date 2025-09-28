@@ -27,105 +27,6 @@ import {
   type ProductRecommendation,
 } from "./api/recommendations";
 
-// Apollo Extension Activity Tracker
-const trackApolloActivity = async (shopDomain: string) => {
-  const extensionUid = "93d08f52-a85e-d71e-88b9-5587a3613ded5abe7a5a";
-  const now = Date.now();
-  const lastReported = localStorage.getItem(`ext_${extensionUid}_last_reported`)
-    ? parseInt(localStorage.getItem(`ext_${extensionUid}_last_reported`))
-    : null;
-
-  const hoursSinceLastReport = lastReported
-    ? (now - lastReported) / (1000 * 60 * 60)
-    : Infinity;
-
-  console.log(`[Apollo Tracker] Checking activity tracking:`, {
-    shopDomain: shopDomain,
-    extensionUid: extensionUid,
-    lastReported: lastReported ? new Date(lastReported).toISOString() : "Never",
-    hoursSinceLastReport: lastReported
-      ? hoursSinceLastReport.toFixed(2)
-      : "Never reported",
-    shouldReport: !lastReported || hoursSinceLastReport > 24,
-  });
-
-  // Only call API if haven't reported in last 24 hours
-  if (!lastReported || hoursSinceLastReport > 24) {
-    const timeText = lastReported
-      ? `${hoursSinceLastReport.toFixed(2)} hours ago`
-      : "never";
-    console.log(
-      `[Apollo Tracker] Reporting activity (last report was ${timeText})`,
-    );
-    await reportApolloToAPI(shopDomain, extensionUid);
-    localStorage.setItem(`ext_${extensionUid}_last_reported`, now.toString());
-    console.log(`[Apollo Tracker] Updated last reported timestamp`);
-  } else {
-    console.log(
-      `[Apollo Tracker] Skipping report (reported ${hoursSinceLastReport.toFixed(2)} hours ago)`,
-    );
-  }
-};
-
-const reportApolloToAPI = async (shopDomain: string, extensionUid: string) => {
-  try {
-    const apiBaseUrl =
-      process.env.PYTHON_WORKER_URL || "https://your-api-domain.com/api/v1";
-    const requestBody = {
-      extension_type: "apollo",
-      extension_uid: extensionUid,
-      page_url: window.location?.href || "unknown",
-      app_block_target: null,
-      app_block_location: null,
-    };
-
-    console.log(`[Apollo Tracker] Sending API request:`, {
-      url: `${apiBaseUrl}/extension-activity/${shopDomain}/track-load`,
-      requestBody,
-      timestamp: new Date().toISOString(),
-    });
-
-    const response = await fetch(
-      `${apiBaseUrl}/extension-activity/${shopDomain}/track-load`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      },
-    );
-
-    console.log(`[Apollo Tracker] API response:`, {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Apollo Tracker] API error response:`, errorText);
-      throw new Error(
-        `HTTP error! status: ${response.status}, body: ${errorText}`,
-      );
-    }
-
-    const responseData = await response.json();
-    console.log(
-      `[Apollo Tracker] Successfully tracked activity:`,
-      responseData,
-    );
-  } catch (error: any) {
-    console.error(`[Apollo Tracker] Failed to track activity:`, {
-      error: error.message,
-      stack: error.stack,
-      shopDomain: shopDomain,
-      extensionUid: extensionUid,
-    });
-  }
-};
-
 /**
  * Entry point for the `ShouldRender` Extension Point.
  *
@@ -247,38 +148,28 @@ export function App({
     purchasedProducts = [],
   } = initialState || {};
 
-  // Track extension activity and recommendation view when component mounts
+  // Track recommendation view when component mounts
   React.useEffect(() => {
-    if (shopDomain) {
-      // Track extension activity
-      trackApolloActivity(shopDomain.replace(".myshopify.com", "")).catch(
-        (error) => {
-          console.warn("Failed to track Apollo extension activity:", error);
-        },
+    if (shopDomain && recommendations.length > 0) {
+      const productIds = recommendations.map(
+        (rec: ProductRecommendation) => rec.id,
       );
 
-      // Track recommendation view
-      if (recommendations.length > 0) {
-        const productIds = recommendations.map(
-          (rec: ProductRecommendation) => rec.id,
-        );
-
-        apolloAnalytics
-          .trackRecommendationView(
-            shopDomain.replace(".myshopify.com", ""),
-            customerId,
-            orderId,
-            productIds,
-            {
-              source: "apollo_post_purchase",
-              recommendation_count: recommendations.length,
-              purchased_products_count: purchasedProducts.length,
-            },
-          )
-          .catch((error) => {
-            console.error("Failed to track recommendation view:", error);
-          });
-      }
+      apolloAnalytics
+        .trackRecommendationView(
+          shopDomain.replace(".myshopify.com", ""),
+          customerId,
+          orderId,
+          productIds,
+          {
+            source: "apollo_post_purchase",
+            recommendation_count: recommendations.length,
+            purchased_products_count: purchasedProducts.length,
+          },
+        )
+        .catch((error) => {
+          console.error("Failed to track recommendation view:", error);
+        });
     }
   }, [recommendations, shopDomain, customerId, orderId, purchasedProducts]);
 

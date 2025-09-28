@@ -83,7 +83,7 @@ class ApolloAnalyticsClient {
 
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app";
+    this.baseUrl = "https://036cff6f721b.ngrok-free.app";
   }
 
   /**

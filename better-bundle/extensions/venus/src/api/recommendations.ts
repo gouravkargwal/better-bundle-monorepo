@@ -62,7 +62,7 @@ export interface RecommendationResponse {
 }
 
 const RECOMMENDATION_API_BASE =
-  "https://d242bda5e5c7.ngrok-free.app/api/v1/recommendations";
+  "https://036cff6f721b.ngrok-free.app/api/v1/recommendations";
 
 export class RecommendationApiClient {
   private baseUrl: string;

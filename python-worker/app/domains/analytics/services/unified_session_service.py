@@ -129,11 +129,8 @@ class UnifiedSessionService:
                     )
 
                 # OPTIMIZATION: Create new session with single database call
-                # Use browser_session_id if provided, otherwise generate unique session ID
-                session_id = (
-                    browser_session_id
-                    or f"unified_{shop_id}_{customer_id or 'anon'}_{int(current_time.timestamp())}_{uuid.uuid4().hex[:8]}"
-                )
+                # Use browser_session_id if provided, otherwise generate unique UUID
+                session_id = browser_session_id or str(uuid.uuid4())
                 expires_at = current_time + (
                     self.identified_session_duration
                     if customer_id
@@ -154,68 +151,101 @@ class UnifiedSessionService:
                     logger.error(f"Shop is inactive for ID: {shop_id}")
                     raise ValueError(f"Shop is inactive for ID: {shop_id}")
 
-                # Use try-catch to handle potential race conditions
-                try:
-                    new_session_model = UserSessionModel(
-                        id=session_id,
-                        shop_id=shop_id,
-                        customer_id=customer_id,
-                        browser_session_id=browser_session_id,
-                        status=SessionStatus.ACTIVE,
-                        user_agent=user_agent,
-                        ip_address=ip_address,
-                        referrer=referrer,
-                        created_at=current_time,
-                        last_active=current_time,
-                        expires_at=expires_at,
-                        extensions_used=[],
-                        total_interactions=0,
-                    )
+                # Use retry mechanism with exponential backoff for race conditions
+                max_retries = 3
+                retry_delay = 0.1  # Start with 100ms delay
 
-                    session.add(new_session_model)
-                    await session.commit()
-                    await session.refresh(new_session_model)
+                for attempt in range(max_retries):
+                    try:
+                        # Generate a new UUID for each retry attempt to avoid collisions
+                        if attempt > 0:
+                            session_id = str(uuid.uuid4())
+                            # Add exponential backoff delay
+                            await asyncio.sleep(retry_delay * (2**attempt))
 
-                except Exception as e:
-                    # Handle race condition - if session creation fails due to unique constraint,
-                    # try to find the existing session that was created by another request
-                    if "Unique constraint failed" in str(
-                        e
-                    ) or "UniqueViolationError" in str(e):
-                        logger.warning(
-                            f"Session creation race condition detected, attempting to find existing session: {session_id}"
+                        new_session_model = UserSessionModel(
+                            id=session_id,
+                            shop_id=shop_id,
+                            customer_id=customer_id,
+                            browser_session_id=browser_session_id,
+                            status=SessionStatus.ACTIVE,
+                            user_agent=user_agent,
+                            ip_address=ip_address,
+                            referrer=referrer,
+                            created_at=current_time,
+                            last_active=current_time,
+                            expires_at=expires_at,
+                            extensions_used=[],
+                            total_interactions=0,
                         )
 
-                        # Try to find the session that was created by another concurrent request
-                        existing_stmt = select(UserSessionModel).where(
-                            UserSessionModel.id == session_id
-                        )
-                        existing_result = await session.execute(existing_stmt)
-                        existing_session = existing_result.scalar_one_or_none()
+                        session.add(new_session_model)
+                        await session.commit()
+                        await session.refresh(new_session_model)
+                        break  # Success, exit retry loop
 
-                        if existing_session:
-                            logger.info(
-                                f"Found existing session created by concurrent request: {existing_session.id}"
+                    except Exception as e:
+                        # CRITICAL: Rollback the failed transaction first
+                        await session.rollback()
+
+                        # Handle race condition - if session creation fails due to unique constraint,
+                        # try to find the existing session that was created by another request
+                        if (
+                            "Unique constraint failed" in str(e)
+                            or "UniqueViolationError" in str(e)
+                            or "duplicate key value violates unique constraint"
+                            in str(e)
+                        ):
+                            logger.warning(
+                                f"Session creation race condition detected, attempting to find existing session: {session_id}"
                             )
-                            return UserSession(
-                                id=existing_session.id,
-                                shop_id=existing_session.shop_id,
-                                customer_id=existing_session.customer_id,
-                                browser_session_id=existing_session.browser_session_id,
-                                status=SessionStatus(existing_session.status),
-                                created_at=existing_session.created_at,
-                                last_active=existing_session.last_active,
-                                expires_at=existing_session.expires_at,
-                                user_agent=existing_session.user_agent,
-                                ip_address=existing_session.ip_address,
-                                referrer=existing_session.referrer,
-                            )
+
+                            # Start a new transaction to find the existing session
+                            try:
+                                existing_stmt = select(UserSessionModel).where(
+                                    UserSessionModel.id == session_id
+                                )
+                                existing_result = await session.execute(existing_stmt)
+                                existing_session = existing_result.scalar_one_or_none()
+
+                                if existing_session:
+                                    logger.info(
+                                        f"Found existing session created by concurrent request: {existing_session.id}"
+                                    )
+                                    return UserSession(
+                                        id=existing_session.id,
+                                        shop_id=existing_session.shop_id,
+                                        customer_id=existing_session.customer_id,
+                                        browser_session_id=existing_session.browser_session_id,
+                                        status=SessionStatus(existing_session.status),
+                                        created_at=existing_session.created_at,
+                                        last_active=existing_session.last_active,
+                                        expires_at=existing_session.expires_at,
+                                        user_agent=existing_session.user_agent,
+                                        ip_address=existing_session.ip_address,
+                                        referrer=existing_session.referrer,
+                                    )
+                                else:
+                                    # If we can't find the session, try to find any active session for this user
+                                    fallback_session = await self._find_active_session(
+                                        shop_id, customer_id, browser_session_id
+                                    )
+                                    if fallback_session:
+                                        logger.info(
+                                            f"Found fallback active session: {fallback_session.id}"
+                                        )
+                                        return fallback_session
+                                    else:
+                                        # If no session exists, re-raise the original error
+                                        raise e
+                            except Exception as fallback_error:
+                                logger.error(
+                                    f"Error in race condition handling: {fallback_error}"
+                                )
+                                raise e
                         else:
-                            # If we can't find the session, re-raise the original error
+                            # Re-raise non-unique constraint errors
                             raise e
-                    else:
-                        # Re-raise non-unique constraint errors
-                        raise e
 
                 logger.info(f"Created new session: {new_session_model.id}")
                 return UserSession(
@@ -557,12 +587,7 @@ class UnifiedSessionService:
                     raise ValueError(f"Shop is inactive for ID: {shop_id}")
 
                 # Generate unique session ID using browser_session_id if available
-                import uuid
-
-                session_id = (
-                    browser_session_id
-                    or f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
-                )
+                session_id = browser_session_id or str(uuid.uuid4())
 
                 # Calculate expiration time based on user identification status
                 duration = (
@@ -602,10 +627,10 @@ class UnifiedSessionService:
                             "Unique constraint failed" in str(e)
                             and attempt < max_retries - 1
                         ):
-                            # Generate new session ID and retry
-                            session_id = f"unified_{shop_id}_{customer_id or 'anon'}_{int(utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
+                            # Generate new UUID and retry
+                            session_id = str(uuid.uuid4())
                             logger.warning(
-                                f"Session ID collision, retrying with new ID: {session_id}"
+                                f"Session ID collision, retrying with new UUID: {session_id}"
                             )
                             continue
                         else:
