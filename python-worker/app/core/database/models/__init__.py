@@ -72,7 +72,6 @@ from .billing import (
 )
 
 # Extension models
-from .extension import ExtensionActivity
 
 # Export all models
 __all__ = [
@@ -125,5 +124,4 @@ __all__ = [
     "BillingInvoice",
     "BillingEvent",
     # Extension models
-    "ExtensionActivity",
 ]

@@ -48,7 +48,6 @@ from app.core.database.models import (
     BillingPlan,
     BillingInvoice,
     BillingEvent,
-    ExtensionActivity,
 )
 
 
@@ -153,7 +152,6 @@ class SeedPipelineRunner:
             BillingInvoice,
             BillingPlan,
             # Extension tables
-            ExtensionActivity,
             # Core tables last
             Shop,
         ]

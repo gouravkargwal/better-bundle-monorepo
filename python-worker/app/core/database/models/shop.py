@@ -84,9 +84,6 @@ class Shop(BaseModel):
     user_sessions = relationship(
         "UserSession", back_populates="shop", cascade="all, delete-orphan"
     )
-    extension_activities = relationship(
-        "ExtensionActivity", back_populates="shop", cascade="all, delete-orphan"
-    )
 
     # Table constraints
     __table_args__ = (UniqueConstraint("shop_domain", name="shop_domain_unique"),)

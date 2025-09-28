@@ -25,7 +25,6 @@ from app.core.kafka.consumer_manager import KafkaConsumerManager
 from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
-from app.api.v1.extension_activity import router as extension_activity_router
 
 logger = get_logger(__name__)
 
@@ -81,7 +80,6 @@ app = FastAPI(
 app.include_router(unified_gorse_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
-app.include_router(extension_activity_router)
 
 # Include unified analytics routers
 from app.domains.analytics.api import (
