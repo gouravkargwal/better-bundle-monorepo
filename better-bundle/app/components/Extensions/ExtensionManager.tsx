@@ -369,15 +369,6 @@ export function ExtensionManager({
                             )}
                         </div>
                       )}
-
-                    {/* Inactive message */}
-                    {!isActive && (
-                      <Text as="p" variant="bodySm" tone="critical">
-                        {extension.key === "phoenix"
-                          ? "No app blocks active"
-                          : "Extension not active"}
-                      </Text>
-                    )}
                   </BlockStack>
                 </div>
               </Card>

@@ -24,20 +24,7 @@ function OrderStatusWithRecommendations() {
   const { myshopifyDomain } = useShop();
   const { navigate } = useNavigation();
 
-  // Track extension activity when component mounts
-  React.useEffect(() => {
-    if (myshopifyDomain) {
-      analyticsApi
-        .trackExtensionLoad(
-          myshopifyDomain,
-          "customer_account_order_status_block_render",
-          "order-status-page",
-        )
-        .catch((error) => {
-          console.warn("Failed to track Venus extension activity:", error);
-        });
-    }
-  }, [myshopifyDomain]);
+  // Extension activity is automatically tracked via recommendation API calls
 
   const { loading, products, error, trackRecommendationClick, columnConfig } =
     useRecommendations({

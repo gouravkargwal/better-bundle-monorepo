@@ -129,15 +129,17 @@ export function useRecommendations({
 
           setProducts(transformedProducts);
 
-          // Track recommendation view using unified analytics
-          const productIds = transformedProducts.map((product) => product.id);
-          await analyticsApi.trackRecommendationView(
-            shopDomain?.replace(".myshopify.com", "") || "",
-            context,
-            customerId,
-            productIds,
-            { source: `${context}_page` },
-          );
+          // Only track recommendation view if there are actually products to display
+          if (transformedProducts.length > 0) {
+            const productIds = transformedProducts.map((product) => product.id);
+            await analyticsApi.trackRecommendationView(
+              shopDomain,
+              context,
+              customerId,
+              productIds,
+              { source: `${context}_page` },
+            );
+          }
         } else {
           throw new Error(`Failed to fetch ${context} recommendations`);
         }

@@ -20,20 +20,7 @@ function ProfileBlock() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { navigate } = useNavigation();
 
-  // Track extension activity when component mounts
-  React.useEffect(() => {
-    if (customerId) {
-      analyticsApi
-        .trackExtensionLoad(
-          customerId,
-          "customer_account_profile_block_render",
-          "profile-page",
-        )
-        .catch((error) => {
-          console.warn("Failed to track Venus extension activity:", error);
-        });
-    }
-  }, [customerId]);
+  // Extension activity is automatically tracked via recommendation API calls
 
   const { loading, products, error, trackRecommendationClick, columnConfig } =
     useRecommendations({

@@ -26,59 +26,70 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     let extensions: Record<string, any> = {};
     if (shop) {
-      // Get active extensions (last 24 hours)
+      // Get active extensions by checking recent user sessions that used extensions
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - 24);
 
-      const results = await prisma.extension_activities.findMany({
+      // Get recent sessions that used extensions
+      const recentSessions = await prisma.user_sessions.findMany({
         where: {
           shop_id: shop.id,
-          last_seen: {
+          last_active: {
             gt: cutoffTime,
           },
-          extension_type: {
-            in: ["apollo", "phoenix", "venus"],
+          extensions_used: {
+            not: [],
           },
         },
         orderBy: {
-          last_seen: "desc",
+          last_active: "desc",
         },
+        take: 50, // Get recent sessions to analyze
       });
 
-      // Group by extension type
-      for (const result of results) {
-        const extType = result.extension_type;
+      // Track which extensions have been used recently
+      const extensionActivity: Record<
+        string,
+        { last_seen: Date; count: number }
+      > = {};
 
-        if (!extensions[extType]) {
-          extensions[extType] = {
-            active: true,
-            last_seen: result.last_seen.toISOString(),
-            app_blocks: [],
-          };
-        }
-
-        // Add app block info if available
-        if (result.app_block_target && result.app_block_location) {
-          extensions[extType].app_blocks.push({
-            target: result.app_block_target,
-            location: result.app_block_location,
-            page_url: result.page_url,
-            extension_uid: result.extension_uid,
-          });
-        }
-      }
-
-      // Ensure all extension types are represented
-      const allTypes = ["apollo", "phoenix", "venus"];
-      for (const extType of allTypes) {
-        if (!extensions[extType]) {
-          extensions[extType] = {
-            active: false,
-            last_seen: null,
-            app_blocks: [],
-          };
+      for (const session of recentSessions) {
+        if (session.extensions_used && Array.isArray(session.extensions_used)) {
+          for (const extension of session.extensions_used as string[]) {
+            if (!extensionActivity[extension]) {
+              extensionActivity[extension] = {
+                last_seen: session.last_active,
+                count: 0,
+              };
+            }
+            extensionActivity[extension].count++;
+            // Keep the most recent activity
+            if (session.last_active > extensionActivity[extension].last_seen) {
+              extensionActivity[extension].last_seen = session.last_active;
+            }
+          }
         }
       }
+
+      // Build extensions object based on session data
+      extensions = {
+        venus: {
+          active: !!extensionActivity.venus,
+          last_seen: extensionActivity.venus?.last_seen?.toISOString() || null,
+          app_blocks: [],
+        },
+        apollo: {
+          active: !!extensionActivity.apollo,
+          last_seen: extensionActivity.apollo?.last_seen?.toISOString() || null,
+          app_blocks: [],
+        },
+        phoenix: {
+          active: !!extensionActivity.phoenix,
+          last_seen:
+            extensionActivity.phoenix?.last_seen?.toISOString() || null,
+          app_blocks: [],
+        },
+      };
     }
 
     return json({
