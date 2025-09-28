@@ -118,15 +118,50 @@ class ShopifyAPIClient(IShopifyAPIClient):
             shop_domain, limit, cursor, query, customer_ids
         )
 
+    # Required abstract methods from interface
+    async def execute_query(
+        self,
+        query: str,
+        variables: Optional[Dict[str, Any]] = None,
+        shop_domain: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a GraphQL query - delegate to product client"""
+        return await self.product_client.execute_query(query, variables, shop_domain)
+
+    async def execute_mutation(
+        self,
+        mutation: str,
+        variables: Optional[Dict[str, Any]] = None,
+        shop_domain: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a GraphQL mutation - delegate to product client"""
+        return await self.product_client.execute_mutation(
+            mutation, variables, shop_domain
+        )
+
+    async def check_rate_limit(self, shop_domain: str) -> Dict[str, Any]:
+        """Check rate limit - delegate to product client"""
+        return await self.product_client.check_rate_limit(shop_domain)
+
+    async def wait_for_rate_limit(self, shop_domain: str) -> None:
+        """Wait for rate limit - delegate to product client"""
+        await self.product_client.wait_for_rate_limit(shop_domain)
+
+    async def validate_access_token(self, shop_domain: str) -> bool:
+        """Validate access token - delegate to product client"""
+        return await self.product_client.validate_access_token(shop_domain)
+
+    async def refresh_access_token(self, shop_domain: str) -> bool:
+        """Refresh access token - delegate to product client"""
+        return await self.product_client.refresh_access_token(shop_domain)
+
+    async def get_api_limits(self, shop_domain: str) -> Dict[str, Any]:
+        """Get API limits - delegate to product client"""
+        return await self.product_client.get_api_limits(shop_domain)
+
     # Legacy methods for backward compatibility
     async def get_app_installation_scopes(self, shop_domain: str) -> List[str]:
         """Get app installation scopes"""
         # This would need to be implemented in base client
         logger.warning("get_app_installation_scopes not implemented in new client")
         return []
-
-    async def get_api_limits(self, shop_domain: str) -> Dict[str, Any]:
-        """Get API limits"""
-        # This would need to be implemented in base client
-        logger.warning("get_api_limits not implemented in new client")
-        return {}

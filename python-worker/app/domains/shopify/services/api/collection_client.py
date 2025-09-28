@@ -48,9 +48,7 @@ class CollectionAPIClient(BaseShopifyAPIClient):
                         title
                         description
                         handle
-                        created_at: createdAt
                         updated_at: updatedAt
-                        published_at: publishedAt
                         seo {
                             title
                             description
@@ -171,9 +169,7 @@ class CollectionAPIClient(BaseShopifyAPIClient):
                 title
                 description
                 handle
-                createdAt
                 updatedAt
-                publishedAt
                 seo {
                     title
                     description

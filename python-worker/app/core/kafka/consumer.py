@@ -1,20 +1,31 @@
 """
 Kafka consumer with enterprise features and error handling
+Industry-standard implementation with proper error handling and resilience
 """
 
 import json
 import logging
+import time
+import uuid
 from typing import Dict, Any, List, Optional, AsyncIterator
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
-from aiokafka.errors import KafkaError, KafkaTimeoutError, ConsumerStoppedError
+from aiokafka.errors import (
+    KafkaError,
+    KafkaTimeoutError,
+    ConsumerStoppedError,
+    KafkaConnectionError,
+    KafkaProtocolError,
+    IllegalGenerationError,
+    RebalanceInProgressError,
+)
 import asyncio
 
 logger = logging.getLogger(__name__)
 
 
 class KafkaConsumer:
-    """Kafka consumer with enterprise features"""
+    """Industry-standard Kafka consumer with enterprise features"""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -24,51 +35,74 @@ class KafkaConsumer:
         self._committed_count = 0
         self._topics: List[str] = []
         self._group_id: str = ""
+        self._static_group_instance_id: Optional[str] = None
+        self._client_id: Optional[str] = None
+        self._is_initialized = False
+        self._last_heartbeat = time.time()
+        self._consecutive_errors = 0
+        self._max_consecutive_errors = 5
 
     async def initialize(self, topics: List[str], group_id: str):
-        """Initialize consumer"""
+        """Initialize consumer with industry-standard configuration"""
+        if self._is_initialized:
+            logger.warning(f"Consumer already initialized for group: {group_id}")
+            return
+
         try:
             self._topics = topics
             self._group_id = group_id
 
-            # Create unique static group instance ID per consumer group
+            # Generate unique identifiers for this consumer instance
             worker_id = self.config.get("worker_id", "worker-1")
-            # Include group_id in the static instance ID to make it unique per consumer group
-            static_group_instance_id = f"betterbundle-{worker_id}-{group_id}"
+            instance_uuid = str(uuid.uuid4())[:8]  # Short UUID for readability
+            timestamp = int(time.time() * 1000)
 
-            # Validate that we don't have duplicate static group instance IDs
-            if hasattr(self, '_static_group_instance_id') and self._static_group_instance_id == static_group_instance_id:
-                logger.warning(f"Consumer already initialized with static group instance ID: {static_group_instance_id}")
-                return
+            # Create unique static group instance ID (industry standard)
+            self._static_group_instance_id = (
+                f"betterbundle-{worker_id}-{group_id}-{instance_uuid}"
+            )
+            self._client_id = f"betterbundle-{group_id}-{instance_uuid}"
 
-            self._static_group_instance_id = static_group_instance_id
-
+            # Industry-standard consumer configuration
             consumer_config = {
                 "bootstrap_servers": self.config["bootstrap_servers"],
                 "group_id": group_id,
+                "client_id": self._client_id,
+                "group_instance_id": self._static_group_instance_id,
                 "value_deserializer": lambda m: json.loads(m.decode("utf-8")),
                 "key_deserializer": lambda k: k.decode("utf-8") if k else None,
-                "group_instance_id": static_group_instance_id,  # Unique static instance ID per group
                 **self.config.get("consumer_config", {}),
             }
 
+            # Create and start consumer
             self._consumer = AIOKafkaConsumer(*topics, **consumer_config)
             await self._consumer.start()
+
+            self._is_initialized = True
+            self._last_heartbeat = time.time()
+
             logger.info(
-                f"Kafka consumer initialized for topics: {topics}, group: {group_id}, instance_id: {static_group_instance_id}"
+                f"✅ Kafka consumer initialized - topics: {topics}, group: {group_id}, "
+                f"instance_id: {self._static_group_instance_id}, client_id: {self._client_id}"
             )
+
         except Exception as e:
-            logger.exception(f"Failed to initialize Kafka consumer: {e}")
+            logger.exception(f"❌ Failed to initialize Kafka consumer: {e}")
+            self._is_initialized = False
             raise
 
     async def consume(self, timeout_ms: int = 1000) -> AsyncIterator[Dict[str, Any]]:
-        """Consume messages"""
+        """Consume messages with industry-standard error handling"""
         if not self._consumer:
             raise RuntimeError("Consumer not initialized. Call initialize() first.")
 
         try:
             async for message in self._consumer:
                 try:
+                    # Reset consecutive errors on successful message processing
+                    self._consecutive_errors = 0
+                    self._last_heartbeat = time.time()
+
                     # Convert Kafka message to our format
                     kafka_message = {
                         "topic": message.topic,
@@ -89,10 +123,12 @@ class KafkaConsumer:
 
                 except json.JSONDecodeError as e:
                     self._error_count += 1
+                    self._consecutive_errors += 1
                     logger.error(f"JSON decode error processing message: {e}")
                     continue
                 except Exception as e:
                     self._error_count += 1
+                    self._consecutive_errors += 1
                     logger.error(f"Error processing message: {e}")
                     continue
 
@@ -104,11 +140,80 @@ class KafkaConsumer:
             return  # Exit gracefully
         except Exception as e:
             self._error_count += 1
-            logger.exception(f"Unexpected consumer error: {e}")
-            raise
+            self._consecutive_errors += 1
+            error_msg = str(e)
+
+            # Industry-standard error handling for Kafka consumer group coordination
+            if self._handle_coordination_error(error_msg, e):
+                return  # Error was handled gracefully
+            else:
+                logger.exception(f"Unexpected consumer error: {e}")
+                raise
+
+    def _handle_coordination_error(self, error_msg: str, exception: Exception) -> bool:
+        """Handle Kafka consumer group coordination errors gracefully"""
+        error_handled = False
+
+        # Heartbeat and member recognition errors
+        if (
+            "Heartbeat failed" in error_msg
+            or "member_id was not recognized" in error_msg
+            or "member was not recognized" in error_msg
+        ):
+            logger.warning(f"Consumer group coordination issue: {exception}")
+            error_handled = True
+
+        # SyncGroup and UnknownError handling
+        elif (
+            "UnknownError" in error_msg
+            or "SyncGroup" in error_msg
+            or "SyncGroupRequest" in error_msg
+        ):
+            logger.warning(f"Consumer group sync issue: {exception}")
+            error_handled = True
+
+        # Coordinator changes and dead coordinator
+        elif (
+            "NotCoordinatorForGroup" in error_msg
+            or "coordinator dead" in error_msg.lower()
+            or "marking coordinator dead" in error_msg.lower()
+        ):
+            logger.warning(f"Consumer group coordinator changed: {exception}")
+            error_handled = True
+
+        # Request timeout errors
+        elif (
+            "RequestTimedOutError" in error_msg
+            or "RequestTimedOut" in error_msg
+            or "Request timed out" in error_msg
+        ):
+            logger.warning(f"Request timeout: {exception}")
+            error_handled = True
+
+        # Rebalancing in progress
+        elif "RebalanceInProgress" in error_msg or "rebalancing" in error_msg.lower():
+            logger.warning(f"Consumer group rebalancing: {exception}")
+            error_handled = True
+
+        # Connection errors
+        elif "ConnectionError" in error_msg or "KafkaConnectionError" in error_msg:
+            logger.warning(f"Kafka connection issue: {exception}")
+            error_handled = True
+
+        # Protocol errors
+        elif "ProtocolError" in error_msg or "KafkaProtocolError" in error_msg:
+            logger.warning(f"Kafka protocol issue: {exception}")
+            error_handled = True
+
+        # Illegal generation errors (consumer group generation mismatch)
+        elif "IllegalGeneration" in error_msg or "generation" in error_msg.lower():
+            logger.warning(f"Consumer group generation issue: {exception}")
+            error_handled = True
+
+        return error_handled
 
     async def commit(self, message=None) -> bool:
-        """Commit message offset"""
+        """Commit message offset with error handling"""
         try:
             if self._consumer:
                 await self._consumer.commit()
@@ -163,17 +268,20 @@ class KafkaConsumer:
             logger.exception(f"Failed to seek to beginning: {e}")
 
     async def close(self):
-        """Close consumer"""
+        """Close consumer with proper cleanup"""
         if self._consumer:
             try:
                 await self._consumer.stop()
                 self._consumer = None
+                self._is_initialized = False
                 logger.info(
-                    f"Consumer closed. Processed {self._message_count} messages, {self._error_count} errors, {self._committed_count} commits"
+                    f"✅ Consumer closed. Processed {self._message_count} messages, "
+                    f"{self._error_count} errors, {self._committed_count} commits"
                 )
             except Exception as e:
                 logger.exception(f"Error closing consumer: {e}")
                 self._consumer = None
+                self._is_initialized = False
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""
@@ -186,9 +294,28 @@ class KafkaConsumer:
             "success_rate": (self._message_count - self._error_count)
             / max(self._message_count, 1)
             * 100,
+            "consecutive_errors": self._consecutive_errors,
+            "is_initialized": self._is_initialized,
+            "static_group_instance_id": self._static_group_instance_id,
+            "client_id": self._client_id,
         }
 
     @property
     def is_initialized(self) -> bool:
         """Check if consumer is initialized"""
-        return self._consumer is not None
+        return self._is_initialized and self._consumer is not None
+
+    @property
+    def health_status(self) -> Dict[str, Any]:
+        """Get consumer health status"""
+        current_time = time.time()
+        time_since_heartbeat = current_time - self._last_heartbeat
+
+        return {
+            "is_healthy": self._consecutive_errors < self._max_consecutive_errors,
+            "consecutive_errors": self._consecutive_errors,
+            "time_since_heartbeat": time_since_heartbeat,
+            "is_initialized": self._is_initialized,
+            "message_count": self._message_count,
+            "error_count": self._error_count,
+        }

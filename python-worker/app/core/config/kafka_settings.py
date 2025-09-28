@@ -40,16 +40,18 @@ class KafkaSettings(BaseSettings):
         default={
             "auto_offset_reset": "latest",
             "enable_auto_commit": False,
-            "max_poll_records": 500,
-            "session_timeout_ms": 90000,  # Increased to 90s for better stability
-            "heartbeat_interval_ms": 30000,  # Increased to 30s (1/3 of session timeout)
-            "max_poll_interval_ms": 300000,  # 5 minutes
-            "request_timeout_ms": 30000,  # 30 seconds
-            "rebalance_timeout_ms": 180000,  # 3 minutes for rebalancing
+            "max_poll_records": 50,  # Reduced to prevent long processing times
+            "session_timeout_ms": 30000,  # 30s - industry standard
+            "heartbeat_interval_ms": 10000,  # 10s - 1/3 of session timeout
+            "max_poll_interval_ms": 300000,  # 5 minutes - standard for processing
+            "request_timeout_ms": 30000,  # 30 seconds - standard
+            "rebalance_timeout_ms": 60000,  # 1 minute - standard
             "fetch_min_bytes": 1,
-            "fetch_max_wait_ms": 500,  # Reduced from default 500ms
-            "retry_backoff_ms": 1000,  # Add retry backoff
-            "metadata_max_age_ms": 300000,  # 5 minutes metadata refresh
+            "fetch_max_wait_ms": 500,  # Standard fetch wait
+            "retry_backoff_ms": 100,  # Standard retry backoff
+            "metadata_max_age_ms": 300000,  # 5 minutes - standard
+            "connections_max_idle_ms": 540000,  # 9 minutes - prevent connection drops
+            "api_version": "auto",  # Auto-detect API version
             # group_instance_id will be set dynamically in the consumer
         }
     )

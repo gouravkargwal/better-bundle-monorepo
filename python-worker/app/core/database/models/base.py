@@ -7,6 +7,7 @@ Provides common functionality and base configuration for all models.
 from datetime import datetime
 from typing import Any, Dict, Optional
 from sqlalchemy import Column, String, DateTime, func, ForeignKey
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declared_attr
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,12 +20,17 @@ Base = declarative_base()
 class TimestampMixin:
     """Mixin for models that need created_at and updated_at timestamps"""
 
-    created_at = Column("created_at", DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(
+        "created_at",
+        TIMESTAMP(timezone=True),
+        default=func.current_timestamp(),
+        nullable=False,
+    )
     updated_at = Column(
         "updated_at",
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        TIMESTAMP(timezone=True),
+        default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
         nullable=False,
     )
 

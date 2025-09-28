@@ -70,11 +70,16 @@ class NormalizationDataStorageService:
                         "shop_id": shop_id,
                     },
                 )
+                # For updates, preserve created_at and set updated_at to current time
+                update_data = main_data.copy()
+                update_data.pop("created_at", None)  # Preserve existing created_at
+                update_data["updated_at"] = now_utc()  # Set current timestamp
+
                 async with get_transaction_context() as session:
                     await session.execute(
                         update(model_class)
                         .where(model_class.id == existing.id)
-                        .values(**main_data)
+                        .values(**update_data)
                     )
                     await session.commit()
             else:
