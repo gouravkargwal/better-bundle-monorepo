@@ -1,8 +1,15 @@
 """
 Unified Session Service for BetterBundle Analytics
 
-Manages user sessions across all extensions with proper lifecycle management,
-expiration handling, and cross-extension session sharing using Prisma.
+This service manages user sessions across all extensions with proper lifecycle management,
+expiration handling, and cross-extension session sharing using SQLAlchemy.
+
+Key Features:
+- UUID-based session IDs to prevent collisions
+- Race condition handling with retry logic
+- Automatic session cleanup
+- Cross-extension session sharing
+- Proper transaction management
 """
 
 import asyncio
@@ -28,14 +35,33 @@ logger = get_logger(__name__)
 
 
 class UnifiedSessionService:
-    """Service for managing unified user sessions across all extensions"""
+    """
+    Service for managing unified user sessions across all extensions.
+
+    This service handles:
+    - Session creation and retrieval
+    - Race condition handling
+    - Session lifecycle management
+    - Cross-extension session sharing
+    """
+
+    # ============================================================================
+    # CONFIGURATION & INITIALIZATION
+    # ============================================================================
 
     def __init__(self):
-        # Industry-standard session durations
-        self.anonymous_session_duration = timedelta(days=30)  # E-commerce standard
-        self.identified_session_duration = timedelta(days=7)  # Identified users
+        """Initialize the session service with industry-standard durations."""
+        # Session durations based on e-commerce best practices
+        self.anonymous_session_duration = timedelta(days=30)  # Anonymous users
+        self.identified_session_duration = timedelta(days=7)  # Logged-in users
+
+        # Cleanup settings
         self.cleanup_interval = timedelta(hours=1)
         self._last_cleanup = datetime.utcnow()
+
+    # ============================================================================
+    # MAIN SESSION OPERATIONS
+    # ============================================================================
 
     async def get_or_create_session(
         self,
@@ -47,10 +73,16 @@ class UnifiedSessionService:
         referrer: Optional[str] = None,
     ) -> UserSession:
         """
-        Get existing session or create new one for unified tracking - OPTIMIZED VERSION
+        Get existing session or create new one for unified tracking.
+
+        This is the main entry point for session management. It handles:
+        - Finding existing active sessions
+        - Creating new sessions with UUID-based IDs
+        - Race condition handling with retry logic
+        - Proper transaction management
 
         Args:
-            shop_id: Shop identifier
+            shop_id: Shop identifier (required)
             customer_id: Customer identifier (optional for anonymous users)
             browser_session_id: Browser session identifier
             user_agent: User agent string
@@ -59,6 +91,9 @@ class UnifiedSessionService:
 
         Returns:
             UserSession: Active session for the user
+
+        Raises:
+            ValueError: If shop_id is not provided or shop is not found/inactive
         """
         try:
             # Validate required parameters
@@ -68,223 +103,47 @@ class UnifiedSessionService:
             current_time = utcnow()
 
             async with get_transaction_context() as session:
-                # OPTIMIZATION: Single query to find or create session using upsert
-                if browser_session_id:
-                    # Use browser_session_id as primary lookup (fastest)
-                    stmt = (
-                        select(UserSessionModel)
-                        .where(
-                            and_(
-                                UserSessionModel.browser_session_id
-                                == browser_session_id,
-                                UserSessionModel.shop_id == shop_id,
-                                UserSessionModel.status == SessionStatus.ACTIVE,
-                                UserSessionModel.expires_at > current_time,
-                            )
-                        )
-                        .order_by(desc(UserSessionModel.last_active))
-                    )
+                # Step 1: Try to find existing active session
+                existing_session = await self._find_existing_session(
+                    session, shop_id, customer_id, browser_session_id, current_time
+                )
 
-                    result = await session.execute(stmt)
-                    session_data = result.scalar_one_or_none()
-                elif customer_id:
-                    # Fallback to customer_id lookup
-                    stmt = (
-                        select(UserSessionModel)
-                        .where(
-                            and_(
-                                UserSessionModel.customer_id == customer_id,
-                                UserSessionModel.shop_id == shop_id,
-                                UserSessionModel.status == SessionStatus.ACTIVE,
-                                UserSessionModel.expires_at > current_time,
-                            )
-                        )
-                        .order_by(desc(UserSessionModel.last_active))
-                    )
-
-                    result = await session.execute(stmt)
-                    session_data = result.scalar_one_or_none()
-                else:
-                    session_data = None
-
-                if session_data:
-                    # OPTIMIZATION: Update last active time in background (non-blocking)
+                if existing_session:
+                    # Update activity in background and return existing session
                     asyncio.create_task(
-                        self._update_session_activity_background(session_data.id)
+                        self._update_session_activity_background(existing_session.id)
                     )
+                    logger.info(f"Resumed existing session: {existing_session.id}")
+                    return existing_session
 
-                    logger.info(f"Resumed existing session: {session_data.id}")
-                    return UserSession(
-                        id=session_data.id,
-                        shop_id=session_data.shop_id,
-                        customer_id=session_data.customer_id,
-                        browser_session_id=session_data.browser_session_id,
-                        status=SessionStatus(session_data.status),
-                        created_at=session_data.created_at,
-                        last_active=session_data.last_active,
-                        expires_at=session_data.expires_at,
-                        user_agent=session_data.user_agent,
-                        ip_address=session_data.ip_address,
-                        referrer=session_data.referrer,
-                    )
-
-                # OPTIMIZATION: Create new session with single database call
-                # Use browser_session_id if provided, otherwise generate unique UUID
-                session_id = browser_session_id or str(uuid.uuid4())
-                expires_at = current_time + (
-                    self.identified_session_duration
-                    if customer_id
-                    else self.anonymous_session_duration
-                )
-
-                # Validate shop exists before creating session
-                shop_result = await session.execute(
-                    select(Shop).where(Shop.id == shop_id)
-                )
-                shop = shop_result.scalar_one_or_none()
-
-                if not shop:
-                    logger.error(f"Shop not found for ID: {shop_id}")
-                    raise ValueError(f"Shop not found for ID: {shop_id}")
-
-                if not shop.is_active:
-                    logger.error(f"Shop is inactive for ID: {shop_id}")
-                    raise ValueError(f"Shop is inactive for ID: {shop_id}")
-
-                # Use retry mechanism with exponential backoff for race conditions
-                max_retries = 3
-                retry_delay = 0.1  # Start with 100ms delay
-
-                for attempt in range(max_retries):
-                    try:
-                        # Generate a new UUID for each retry attempt to avoid collisions
-                        if attempt > 0:
-                            session_id = str(uuid.uuid4())
-                            # Add exponential backoff delay
-                            await asyncio.sleep(retry_delay * (2**attempt))
-
-                        new_session_model = UserSessionModel(
-                            id=session_id,
-                            shop_id=shop_id,
-                            customer_id=customer_id,
-                            browser_session_id=browser_session_id,
-                            status=SessionStatus.ACTIVE,
-                            user_agent=user_agent,
-                            ip_address=ip_address,
-                            referrer=referrer,
-                            created_at=current_time,
-                            last_active=current_time,
-                            expires_at=expires_at,
-                            extensions_used=[],
-                            total_interactions=0,
-                        )
-
-                        session.add(new_session_model)
-                        await session.commit()
-                        await session.refresh(new_session_model)
-                        break  # Success, exit retry loop
-
-                    except Exception as e:
-                        # CRITICAL: Rollback the failed transaction first
-                        await session.rollback()
-
-                        # Handle race condition - if session creation fails due to unique constraint,
-                        # try to find the existing session that was created by another request
-                        if (
-                            "Unique constraint failed" in str(e)
-                            or "UniqueViolationError" in str(e)
-                            or "duplicate key value violates unique constraint"
-                            in str(e)
-                        ):
-                            logger.warning(
-                                f"Session creation race condition detected, attempting to find existing session: {session_id}"
-                            )
-
-                            # Start a new transaction to find the existing session
-                            try:
-                                existing_stmt = select(UserSessionModel).where(
-                                    UserSessionModel.id == session_id
-                                )
-                                existing_result = await session.execute(existing_stmt)
-                                existing_session = existing_result.scalar_one_or_none()
-
-                                if existing_session:
-                                    logger.info(
-                                        f"Found existing session created by concurrent request: {existing_session.id}"
-                                    )
-                                    return UserSession(
-                                        id=existing_session.id,
-                                        shop_id=existing_session.shop_id,
-                                        customer_id=existing_session.customer_id,
-                                        browser_session_id=existing_session.browser_session_id,
-                                        status=SessionStatus(existing_session.status),
-                                        created_at=existing_session.created_at,
-                                        last_active=existing_session.last_active,
-                                        expires_at=existing_session.expires_at,
-                                        user_agent=existing_session.user_agent,
-                                        ip_address=existing_session.ip_address,
-                                        referrer=existing_session.referrer,
-                                    )
-                                else:
-                                    # If we can't find the session, try to find any active session for this user
-                                    fallback_session = await self._find_active_session(
-                                        shop_id, customer_id, browser_session_id
-                                    )
-                                    if fallback_session:
-                                        logger.info(
-                                            f"Found fallback active session: {fallback_session.id}"
-                                        )
-                                        return fallback_session
-                                    else:
-                                        # If no session exists, re-raise the original error
-                                        raise e
-                            except Exception as fallback_error:
-                                logger.error(
-                                    f"Error in race condition handling: {fallback_error}"
-                                )
-                                raise e
-                        else:
-                            # Re-raise non-unique constraint errors
-                            raise e
-
-                logger.info(f"Created new session: {new_session_model.id}")
-                return UserSession(
-                    id=new_session_model.id,
-                    shop_id=new_session_model.shop_id,
-                    customer_id=new_session_model.customer_id,
-                    browser_session_id=new_session_model.browser_session_id,
-                    status=SessionStatus(new_session_model.status),
-                    created_at=new_session_model.created_at,
-                    last_active=new_session_model.last_active,
-                    expires_at=new_session_model.expires_at,
-                    user_agent=new_session_model.user_agent,
-                    ip_address=new_session_model.ip_address,
-                    referrer=new_session_model.referrer,
+                # Step 2: Create new session with race condition handling
+                return await self._create_new_session_with_retry(
+                    session,
+                    shop_id,
+                    customer_id,
+                    browser_session_id,
+                    user_agent,
+                    ip_address,
+                    referrer,
+                    current_time,
                 )
 
         except Exception as e:
             logger.error(f"Error in get_or_create_session: {str(e)}")
             raise
 
-    async def _update_session_activity_background(self, session_id: str):
-        """Update session activity in background without blocking the response"""
-        try:
-            async with get_transaction_context() as session:
-                stmt = (
-                    update(UserSessionModel)
-                    .where(UserSessionModel.id == session_id)
-                    .values(last_active=utcnow())
-                )
-                await session.execute(stmt)
-                await session.commit()
-        except Exception as e:
-            logger.warning(f"Failed to update session activity in background: {e}")
-
     async def get_session(self, session_id: str) -> Optional[UserSession]:
-        """Get session by ID"""
+        """
+        Get session by ID.
+
+        Args:
+            session_id: The session ID to look up
+
+        Returns:
+            UserSession if found and active, None otherwise
+        """
         try:
             async with get_transaction_context() as session:
-                # Query session from database using SQLAlchemy
                 stmt = select(UserSessionModel).where(UserSessionModel.id == session_id)
                 result = await session.execute(stmt)
                 session_data = result.scalar_one_or_none()
@@ -294,23 +153,8 @@ class UnifiedSessionService:
                     and session_data.status == SessionStatus.ACTIVE
                     and session_data.expires_at > utcnow()
                 ):
-                    # Convert SQLAlchemy model to Pydantic model
-                    user_session = UserSession(
-                        id=session_data.id,
-                        shop_id=session_data.shop_id,
-                        customer_id=session_data.customer_id,
-                        browser_session_id=session_data.browser_session_id,
-                        status=SessionStatus(session_data.status),
-                        created_at=session_data.created_at,
-                        last_active=session_data.last_active,
-                        expires_at=session_data.expires_at,
-                        user_agent=session_data.user_agent,
-                        ip_address=session_data.ip_address,
-                        referrer=session_data.referrer,
-                        extensions_used=session_data.extensions_used,
-                        total_interactions=session_data.total_interactions,
-                    )
-                    # Update last active time
+                    # Convert to Pydantic model and update activity
+                    user_session = self._convert_to_user_session(session_data)
                     await self._update_session_activity(session_id)
                     return user_session
 
@@ -323,32 +167,40 @@ class UnifiedSessionService:
     async def update_session(
         self, session_id: str, update_data: SessionUpdate
     ) -> Optional[UserSession]:
-        """Update session with new data"""
+        """
+        Update session with new data.
+
+        Args:
+            session_id: The session ID to update
+            update_data: The data to update
+
+        Returns:
+            Updated UserSession if successful, None if session not found
+        """
         try:
             async with get_transaction_context() as session:
-                # Prepare update data for SQLAlchemy
+                # Prepare update data
                 update_dict = update_data.dict(exclude_unset=True)
                 if "last_active" not in update_dict:
                     update_dict["last_active"] = utcnow()
 
-                # Map field names to SQLAlchemy field names
+                # Map to SQLAlchemy fields
                 sqlalchemy_update = {}
-                if "customer_id" in update_dict:
-                    sqlalchemy_update["customer_id"] = update_dict["customer_id"]
-                if "status" in update_dict:
-                    sqlalchemy_update["status"] = update_dict["status"]
-                if "last_active" in update_dict:
-                    sqlalchemy_update["last_active"] = update_dict["last_active"]
-                if "extensions_used" in update_dict:
-                    sqlalchemy_update["extensions_used"] = update_dict[
-                        "extensions_used"
-                    ]
-                if "total_interactions" in update_dict:
-                    sqlalchemy_update["total_interactions"] = update_dict[
-                        "total_interactions"
-                    ]
+                field_mapping = {
+                    "customer_id": "customer_id",
+                    "status": "status",
+                    "last_active": "last_active",
+                    "extensions_used": "extensions_used",
+                    "total_interactions": "total_interactions",
+                }
 
-                # Update session using SQLAlchemy
+                for pydantic_field, sqlalchemy_field in field_mapping.items():
+                    if pydantic_field in update_dict:
+                        sqlalchemy_update[sqlalchemy_field] = update_dict[
+                            pydantic_field
+                        ]
+
+                # Execute update
                 stmt = (
                     update(UserSessionModel)
                     .where(UserSessionModel.id == session_id)
@@ -364,8 +216,20 @@ class UnifiedSessionService:
             logger.error(f"Error updating session {session_id}: {str(e)}")
             return None
 
+    # ============================================================================
+    # SESSION LIFECYCLE MANAGEMENT
+    # ============================================================================
+
     async def terminate_session(self, session_id: str) -> bool:
-        """Terminate a session"""
+        """
+        Terminate a session.
+
+        Args:
+            session_id: The session ID to terminate
+
+        Returns:
+            True if successful, False otherwise
+        """
         try:
             async with get_transaction_context() as session:
                 stmt = (
@@ -386,7 +250,16 @@ class UnifiedSessionService:
     async def add_extension_to_session(
         self, session_id: str, extension_type: str
     ) -> bool:
-        """Add extension to session's extensions_used list"""
+        """
+        Add extension to session's extensions_used list.
+
+        Args:
+            session_id: The session ID
+            extension_type: The extension type to add
+
+        Returns:
+            True if successful, False otherwise
+        """
         try:
             session = await self.get_session(session_id)
             if not session:
@@ -408,10 +281,18 @@ class UnifiedSessionService:
             return False
 
     async def increment_session_interactions(self, session_id: str) -> bool:
-        """Increment session's total interactions count"""
+        """
+        Increment session's total interactions count.
+
+        Args:
+            session_id: The session ID to update
+
+        Returns:
+            True if successful, False otherwise
+        """
         try:
             async with get_transaction_context() as session:
-                # Get current total_interactions value
+                # Get current count
                 stmt = select(UserSessionModel.total_interactions).where(
                     UserSessionModel.id == session_id
                 )
@@ -438,11 +319,23 @@ class UnifiedSessionService:
             logger.error(f"Error incrementing session interactions: {str(e)}")
             return False
 
+    # ============================================================================
+    # QUERY OPERATIONS
+    # ============================================================================
+
     async def query_sessions(self, query: SessionQuery) -> List[UserSession]:
-        """Query sessions based on criteria"""
+        """
+        Query sessions based on criteria.
+
+        Args:
+            query: The query criteria
+
+        Returns:
+            List of matching UserSession objects
+        """
         try:
             async with get_transaction_context() as session:
-                # Build where conditions for SQLAlchemy
+                # Build where conditions
                 where_conditions = [UserSessionModel.shop_id == query.shop_id]
 
                 if query.customer_id:
@@ -468,7 +361,7 @@ class UnifiedSessionService:
                         UserSessionModel.created_at <= query.created_before
                     )
 
-                # Execute query using SQLAlchemy
+                # Execute query
                 stmt = (
                     select(UserSessionModel)
                     .where(and_(*where_conditions))
@@ -479,30 +372,203 @@ class UnifiedSessionService:
                 sessions_data = result.scalars().all()
 
                 # Convert to Pydantic models
-                sessions = []
-                for session_data in sessions_data:
-                    session = UserSession(
-                        id=session_data.id,
-                        shop_id=session_data.shop_id,
-                        customer_id=session_data.customer_id,
-                        browser_session_id=session_data.browser_session_id,
-                        status=SessionStatus(session_data.status),
-                        created_at=session_data.created_at,
-                        last_active=session_data.last_active,
-                        expires_at=session_data.expires_at,
-                        user_agent=session_data.user_agent,
-                        ip_address=session_data.ip_address,
-                        referrer=session_data.referrer,
-                        extensions_used=session_data.extensions_used,
-                        total_interactions=session_data.total_interactions,
-                    )
-                    sessions.append(session)
-
-                return sessions
+                return [
+                    self._convert_to_user_session(session_data)
+                    for session_data in sessions_data
+                ]
 
         except Exception as e:
             logger.error(f"Error querying sessions: {str(e)}")
             return []
+
+    # ============================================================================
+    # PRIVATE HELPER METHODS
+    # ============================================================================
+
+    async def _find_existing_session(
+        self,
+        session,
+        shop_id: str,
+        customer_id: Optional[str],
+        browser_session_id: Optional[str],
+        current_time: datetime,
+    ) -> Optional[UserSession]:
+        """Find existing active session using optimized queries."""
+        try:
+            # Try browser_session_id first (fastest lookup)
+            if browser_session_id:
+                stmt = (
+                    select(UserSessionModel)
+                    .where(
+                        and_(
+                            UserSessionModel.browser_session_id == browser_session_id,
+                            UserSessionModel.shop_id == shop_id,
+                            UserSessionModel.status == SessionStatus.ACTIVE,
+                            UserSessionModel.expires_at > current_time,
+                        )
+                    )
+                    .order_by(desc(UserSessionModel.last_active))
+                )
+                result = await session.execute(stmt)
+                session_data = result.scalar_one_or_none()
+
+                if session_data:
+                    return self._convert_to_user_session(session_data)
+
+            # Fallback to customer_id lookup
+            if customer_id:
+                stmt = (
+                    select(UserSessionModel)
+                    .where(
+                        and_(
+                            UserSessionModel.customer_id == customer_id,
+                            UserSessionModel.shop_id == shop_id,
+                            UserSessionModel.status == SessionStatus.ACTIVE,
+                            UserSessionModel.expires_at > current_time,
+                        )
+                    )
+                    .order_by(desc(UserSessionModel.last_active))
+                )
+                result = await session.execute(stmt)
+                session_data = result.scalar_one_or_none()
+
+                if session_data:
+                    return self._convert_to_user_session(session_data)
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding existing session: {str(e)}")
+            return None
+
+    async def _create_new_session_with_retry(
+        self,
+        session,
+        shop_id: str,
+        customer_id: Optional[str],
+        browser_session_id: Optional[str],
+        user_agent: Optional[str],
+        ip_address: Optional[str],
+        referrer: Optional[str],
+        current_time: datetime,
+    ) -> UserSession:
+        """Create new session with retry logic for race conditions."""
+
+        # Validate shop exists
+        await self._validate_shop(session, shop_id)
+
+        # Generate session ID and expiration
+        session_id = browser_session_id or str(uuid.uuid4())
+        expires_at = current_time + (
+            self.identified_session_duration
+            if customer_id
+            else self.anonymous_session_duration
+        )
+
+        # Retry mechanism with exponential backoff
+        max_retries = 3
+        retry_delay = 0.1
+
+        for attempt in range(max_retries):
+            try:
+                # Generate new UUID for retry attempts
+                if attempt > 0:
+                    session_id = str(uuid.uuid4())
+                    await asyncio.sleep(retry_delay * (2**attempt))
+
+                # Create session model
+                new_session_model = UserSessionModel(
+                    id=session_id,
+                    shop_id=shop_id,
+                    customer_id=customer_id,
+                    browser_session_id=browser_session_id,
+                    status=SessionStatus.ACTIVE,
+                    user_agent=user_agent,
+                    ip_address=ip_address,
+                    referrer=referrer,
+                    created_at=current_time,
+                    last_active=current_time,
+                    expires_at=expires_at,
+                    extensions_used=[],
+                    total_interactions=0,
+                )
+
+                session.add(new_session_model)
+                await session.commit()
+                await session.refresh(new_session_model)
+
+                logger.info(f"Created new session: {new_session_model.id}")
+                return self._convert_to_user_session(new_session_model)
+
+            except Exception as e:
+                # Rollback failed transaction
+                await session.rollback()
+
+                # Handle race conditions
+                if self._is_unique_constraint_error(e):
+                    logger.warning(
+                        f"Session creation race condition detected: {session_id}"
+                    )
+
+                    # Try to find existing session created by concurrent request
+                    existing_session = await self._find_session_by_id(
+                        session, session_id
+                    )
+                    if existing_session:
+                        logger.info(
+                            f"Found existing session created by concurrent request: {existing_session.id}"
+                        )
+                        return existing_session
+
+                    # Try fallback to any active session for this user
+                    fallback_session = await self._find_active_session(
+                        shop_id, customer_id, browser_session_id
+                    )
+                    if fallback_session:
+                        logger.info(
+                            f"Found fallback active session: {fallback_session.id}"
+                        )
+                        return fallback_session
+
+                    # If this is the last attempt, re-raise the error
+                    if attempt == max_retries - 1:
+                        raise e
+                else:
+                    # Re-raise non-unique constraint errors
+                    raise e
+
+        # This should never be reached, but just in case
+        raise Exception("Failed to create session after all retry attempts")
+
+    async def _validate_shop(self, session, shop_id: str) -> None:
+        """Validate that the shop exists and is active."""
+        shop_result = await session.execute(select(Shop).where(Shop.id == shop_id))
+        shop = shop_result.scalar_one_or_none()
+
+        if not shop:
+            logger.error(f"Shop not found for ID: {shop_id}")
+            raise ValueError(f"Shop not found for ID: {shop_id}")
+
+        if not shop.is_active:
+            logger.error(f"Shop is inactive for ID: {shop_id}")
+            raise ValueError(f"Shop is inactive for ID: {shop_id}")
+
+    async def _find_session_by_id(
+        self, session, session_id: str
+    ) -> Optional[UserSession]:
+        """Find session by ID within the current transaction."""
+        try:
+            stmt = select(UserSessionModel).where(UserSessionModel.id == session_id)
+            result = await session.execute(stmt)
+            session_data = result.scalar_one_or_none()
+
+            if session_data:
+                return self._convert_to_user_session(session_data)
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding session by ID: {str(e)}")
+            return None
 
     async def _find_active_session(
         self,
@@ -510,7 +576,7 @@ class UnifiedSessionService:
         customer_id: Optional[str] = None,
         browser_session_id: Optional[str] = None,
     ) -> Optional[UserSession]:
-        """Find existing active session"""
+        """Find existing active session using a new transaction."""
         try:
             async with get_transaction_context() as session:
                 # Build conditions for finding active session
@@ -538,21 +604,7 @@ class UnifiedSessionService:
                 session_data = result.scalar_one_or_none()
 
                 if session_data:
-                    return UserSession(
-                        id=session_data.id,
-                        shop_id=session_data.shop_id,
-                        customer_id=session_data.customer_id,
-                        browser_session_id=session_data.browser_session_id,
-                        status=SessionStatus(session_data.status),
-                        created_at=session_data.created_at,
-                        last_active=session_data.last_active,
-                        expires_at=session_data.expires_at,
-                        user_agent=session_data.user_agent,
-                        ip_address=session_data.ip_address,
-                        referrer=session_data.referrer,
-                        extensions_used=session_data.extensions_used,
-                        total_interactions=session_data.total_interactions,
-                    )
+                    return self._convert_to_user_session(session_data)
 
                 return None
 
@@ -560,105 +612,56 @@ class UnifiedSessionService:
             logger.error(f"Error finding active session: {str(e)}")
             return None
 
-    async def _create_new_session(
-        self,
-        shop_id: str,
-        customer_id: Optional[str] = None,
-        browser_session_id: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        referrer: Optional[str] = None,
-    ) -> UserSession:
-        """Create new session"""
+    def _convert_to_user_session(self, session_data) -> UserSession:
+        """Convert SQLAlchemy model to Pydantic UserSession."""
+        return UserSession(
+            id=session_data.id,
+            shop_id=session_data.shop_id,
+            customer_id=session_data.customer_id,
+            browser_session_id=session_data.browser_session_id,
+            status=SessionStatus(session_data.status),
+            created_at=session_data.created_at,
+            last_active=session_data.last_active,
+            expires_at=session_data.expires_at,
+            user_agent=session_data.user_agent,
+            ip_address=session_data.ip_address,
+            referrer=session_data.referrer,
+            extensions_used=session_data.extensions_used,
+            total_interactions=session_data.total_interactions,
+        )
+
+    def _is_unique_constraint_error(self, error: Exception) -> bool:
+        """Check if the error is a unique constraint violation."""
+        error_str = str(error)
+        return any(
+            phrase in error_str
+            for phrase in [
+                "Unique constraint failed",
+                "UniqueViolationError",
+                "duplicate key value violates unique constraint",
+            ]
+        )
+
+    # ============================================================================
+    # BACKGROUND TASKS
+    # ============================================================================
+
+    async def _update_session_activity_background(self, session_id: str):
+        """Update session activity in background without blocking the response."""
         try:
             async with get_transaction_context() as session:
-                # Validate shop exists before creating session
-                shop_result = await session.execute(
-                    select(Shop).where(Shop.id == shop_id)
+                stmt = (
+                    update(UserSessionModel)
+                    .where(UserSessionModel.id == session_id)
+                    .values(last_active=utcnow())
                 )
-                shop = shop_result.scalar_one_or_none()
-
-                if not shop:
-                    logger.error(f"Shop not found for ID: {shop_id}")
-                    raise ValueError(f"Shop not found for ID: {shop_id}")
-
-                if not shop.is_active:
-                    logger.error(f"Shop is inactive for ID: {shop_id}")
-                    raise ValueError(f"Shop is inactive for ID: {shop_id}")
-
-                # Generate unique session ID using browser_session_id if available
-                session_id = browser_session_id or str(uuid.uuid4())
-
-                # Calculate expiration time based on user identification status
-                duration = (
-                    self.anonymous_session_duration
-                    if not customer_id
-                    else self.identified_session_duration
-                )
-                expires_at = utcnow() + duration
-
-                # Create session using SQLAlchemy with retry logic for unique constraint failures
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        session_model = UserSessionModel(
-                            id=session_id,
-                            shop_id=shop_id,
-                            customer_id=customer_id,
-                            browser_session_id=browser_session_id
-                            or f"browser_{uuid.uuid4().hex[:8]}",
-                            status=SessionStatus.ACTIVE,
-                            created_at=utcnow(),
-                            last_active=utcnow(),
-                            expires_at=expires_at,
-                            user_agent=user_agent,
-                            ip_address=ip_address,
-                            referrer=referrer,
-                            extensions_used=[],
-                            total_interactions=0,
-                        )
-
-                        session.add(session_model)
-                        await session.commit()
-                        await session.refresh(session_model)
-                        break  # Success, exit retry loop
-                    except Exception as e:
-                        if (
-                            "Unique constraint failed" in str(e)
-                            and attempt < max_retries - 1
-                        ):
-                            # Generate new UUID and retry
-                            session_id = str(uuid.uuid4())
-                            logger.warning(
-                                f"Session ID collision, retrying with new UUID: {session_id}"
-                            )
-                            continue
-                        else:
-                            raise e
-
-                # Convert to Pydantic model
-                return UserSession(
-                    id=session_model.id,
-                    shop_id=session_model.shop_id,
-                    customer_id=session_model.customer_id,
-                    browser_session_id=session_model.browser_session_id,
-                    status=SessionStatus(session_model.status),
-                    created_at=session_model.created_at,
-                    last_active=session_model.last_active,
-                    expires_at=session_model.expires_at,
-                    user_agent=session_model.user_agent,
-                    ip_address=session_model.ip_address,
-                    referrer=session_model.referrer,
-                    extensions_used=session_model.extensions_used,
-                    total_interactions=session_model.total_interactions,
-                )
-
+                await session.execute(stmt)
+                await session.commit()
         except Exception as e:
-            logger.error(f"Error creating new session: {str(e)}")
-            raise
+            logger.warning(f"Failed to update session activity in background: {e}")
 
     async def _update_session_activity(self, session_id: str) -> None:
-        """Update session's last active time"""
+        """Update session's last active time."""
         try:
             async with get_transaction_context() as session:
                 stmt = (
@@ -673,7 +676,7 @@ class UnifiedSessionService:
             logger.error(f"Error updating session activity: {str(e)}")
 
     async def _cleanup_expired_sessions(self) -> None:
-        """Clean up expired sessions periodically"""
+        """Clean up expired sessions periodically."""
         try:
             # Only cleanup every hour to avoid excessive database operations
             if utcnow() - self._last_cleanup < self.cleanup_interval:

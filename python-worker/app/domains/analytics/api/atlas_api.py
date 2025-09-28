@@ -93,14 +93,7 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             },
         )
 
-        if interaction:
-            # Fire feature computation event to trigger ML pipeline
-            await analytics_service.fire_feature_computation_event(
-                shop_id=shop_id,
-                trigger_source="atlas_interaction",
-                interaction_id=interaction.id,
-                incremental=True,
-            )
+        # Feature computation is now automatically triggered in track_interaction method
 
         logger.info(f"Atlas interaction tracked successfully: {interaction.id}")
 
@@ -140,11 +133,11 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
         logger.info(f"Atlas session request for shop: {request.shop_domain}")
 
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        
+
         if not shop_id:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Could not resolve shop ID for domain: {request.shop_domain}"
+                status_code=400,
+                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
         # Get or create session

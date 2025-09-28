@@ -6,7 +6,7 @@ validation, storage, and real-time processing.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from app.core.database.session import get_transaction_context
@@ -24,11 +24,15 @@ from app.domains.analytics.models.interaction import (
 )
 
 # Removed complex constants - keeping it simple
-from app.domains.analytics.models.extension import ExtensionType
+from app.domains.analytics.models.extension import (
+    ExtensionType,
+    get_extension_capability,
+)
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
-from app.core.redis_client import streams_manager
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
 
 logger = get_logger(__name__)
 
@@ -101,6 +105,22 @@ class AnalyticsTrackingService:
                     )
                     await self._trigger_customer_linking(
                         shop_id, session_id, customer_id
+                    )
+
+                # Fire feature computation event for ML pipeline
+                try:
+                    await self.fire_feature_computation_event(
+                        shop_id=shop_id,
+                        trigger_source=f"{extension_type.value}_interaction",
+                        interaction_id=interaction.id,
+                        incremental=True,
+                    )
+                    logger.debug(
+                        f"Feature computation event fired for interaction {interaction.id}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fire feature computation event: {str(e)}"
                     )
 
                 logger.info(
@@ -331,7 +351,6 @@ class AnalyticsTrackingService:
     ) -> Dict[str, Any]:
         """Get performance metrics for a specific extension"""
         try:
-            from datetime import timedelta
 
             # Calculate date range
             end_date = utcnow()
@@ -391,8 +410,6 @@ class AnalyticsTrackingService:
     def _validate_extension_context(self, extension_type: ExtensionType) -> bool:
         """Validate that extension can run in the specified context"""
         try:
-            from app.domains.analytics.models.extension import get_extension_capability
-
             capability = get_extension_capability(extension_type)
             return True
 
@@ -481,8 +498,6 @@ class AnalyticsTrackingService:
             Event ID if successful, None if failed
         """
         try:
-            from app.core.redis_client import streams_manager
-            from app.shared.helpers.datetime_utils import utcnow
 
             # Generate a unique job ID
             job_id = f"analytics_triggered_{shop_id}_{int(utcnow().timestamp())}"
@@ -497,23 +512,38 @@ class AnalyticsTrackingService:
                 "processed_count": 0,
             }
 
-            # Publish the feature computation event to Redis stream
-            event_id = await streams_manager.publish_features_computed_event(
-                job_id=job_id,
-                shop_id=shop_id,
-                features_ready=False,  # Need to be computed
-                metadata=metadata,
-            )
+            # Create feature computation event for Kafka
+            feature_event = {
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "features_ready": False,  # Need to be computed
+                "metadata": metadata,
+                "event_type": "feature_computation",
+                "data_type": "interactions",
+                "timestamp": utcnow().isoformat(),
+                "source": "analytics_tracking",
+            }
 
-            logger.info(
-                f"Fired feature computation event from {trigger_source}",
-                job_id=job_id,
-                shop_id=shop_id,
-                interaction_id=interaction_id,
-                event_id=event_id,
-            )
+            # Publish the feature computation event to Kafka
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
 
-            return event_id
+            try:
+                event_id = await publisher.publish_feature_computation_event(
+                    feature_event
+                )
+
+                logger.info(
+                    f"Fired feature computation event from {trigger_source} via Kafka",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                    interaction_id=interaction_id,
+                    event_id=event_id,
+                )
+
+                return event_id
+            finally:
+                await publisher.close()
 
         except Exception as e:
             logger.error(f"Failed to fire feature computation event: {str(e)}")
@@ -537,20 +567,29 @@ class AnalyticsTrackingService:
             job_id = f"customer_linking_{shop_id}_{customer_id}_{session_id}"
             logger.info(f"📝 Generated job_id: {job_id}")
 
-            # Publish the customer linking event
-            logger.info(f"📤 Publishing customer linking event to Redis stream...")
-            event_id = await streams_manager.publish_customer_linking_event(
-                job_id=job_id,
-                shop_id=shop_id,
-                customer_id=customer_id,
-                event_type="customer_linking",
-                trigger_session_id=session_id,
-                linked_sessions=None,
-                metadata={
-                    "session_id": session_id,
-                    "source": "analytics_tracking_service",
-                },
-            )
+            # Publish the customer linking event to Kafka
+            logger.info(f"📤 Publishing customer linking event to Kafka...")
+
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+
+            try:
+                linking_event = {
+                    "job_id": job_id,
+                    "shop_id": shop_id,
+                    "customer_id": customer_id,
+                    "event_type": "customer_linking",
+                    "trigger_session_id": session_id,
+                    "linked_sessions": None,
+                    "metadata": {
+                        "session_id": session_id,
+                        "source": "analytics_tracking_service",
+                    },
+                }
+
+                event_id = await publisher.publish_customer_linking_event(linking_event)
+            finally:
+                await publisher.close()
 
             logger.info(
                 f"✅ Published customer linking event - event_id: {event_id}, customer: {customer_id}, session: {session_id}"
