@@ -496,12 +496,23 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, shop_domain: str, access_token: str
     ) -> Dict[str, Any]:
         """Check permissions - simplified"""
+        logger.info(
+            f"🔍 _check_permissions called for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
+        )
+
         await self.api_client.connect()
         if access_token:
             await self.api_client.set_access_token(shop_domain, access_token)
-            return await self.permission_service.check_shop_permissions(
+            logger.info(
+                f"✅ Access token set for {shop_domain}, calling permission service"
+            )
+            permissions = await self.permission_service.check_shop_permissions(
                 shop_domain, access_token
             )
+            logger.info(f"✅ Permission service returned: {permissions}")
+            return permissions
+        else:
+            logger.warning(f"⚠️ No access token provided for {shop_domain}")
         return {}
 
     def _get_collectable_data_types(

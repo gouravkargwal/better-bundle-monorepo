@@ -121,6 +121,13 @@ class ShopifySettings(BaseSettings):
     SHOPIFY_APP_URL: str = Field(default="http://localhost:3000", env="SHOPIFY_APP_URL")
     SHOPIFY_ACCESS_TOKEN: str = Field(default="", env="SHOPIFY_ACCESS_TOKEN")
 
+    # App Identity Configuration
+    # Note: SHOPIFY_APP_ID is the GraphQL app ID (gid://shopify/App/...), not the client_id from shopify.app.toml
+    SHOPIFY_APP_ID: str = Field(
+        default="gid://shopify/App/277451505665", env="SHOPIFY_APP_ID"
+    )
+    SHOPIFY_APP_TITLE: str = Field(default="BetterBundle", env="SHOPIFY_APP_TITLE")
+
     # API Configuration
     SHOPIFY_API_RATE_LIMIT: int = Field(default=40, env="SHOPIFY_API_RATE_LIMIT")
     SHOPIFY_API_BATCH_SIZE: int = Field(default=250, env="SHOPIFY_API_BATCH_SIZE")

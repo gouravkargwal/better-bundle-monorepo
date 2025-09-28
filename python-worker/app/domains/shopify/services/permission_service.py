@@ -56,11 +56,18 @@ class ShopifyPermissionService(IShopifyPermissionService):
         self, shop_domain: str, access_token: str = None
     ) -> Dict[str, bool]:
         """Check what permissions the app has for a shop"""
+        logger.info(
+            f"🔍 check_shop_permissions called for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
+        )
+
         # Simple recursion guard - return basic permissions to avoid infinite loops
         if not hasattr(self, "_checking_permissions"):
             self._checking_permissions = set()
 
         if shop_domain in self._checking_permissions:
+            logger.info(
+                f"🔄 Recursion guard triggered for {shop_domain}, returning basic permissions"
+            )
             return {
                 "products": True,
                 "orders": True,
@@ -75,10 +82,15 @@ class ShopifyPermissionService(IShopifyPermissionService):
             # Check cache first
             cached = await self._get_cached_permissions(shop_domain)
             if cached:
+                logger.info(f"✅ Using cached permissions for {shop_domain}: {cached}")
                 return cached
 
             # Get actual granted scopes from Shopify
+            logger.info(f"🚀 Getting scopes from Shopify for {shop_domain}")
             scopes = await self._get_shopify_scopes(shop_domain, access_token)
+            logger.info(
+                f"✅ Checking permissions for {shop_domain} with scopes: {scopes}"
+            )
 
             # Check permissions based on granted scopes
             products_permission = any(
@@ -95,6 +107,10 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 scope in ["read_products", "write_products"] for scope in scopes
             )
 
+            logger.info(
+                f"Permission check results for {shop_domain}: products={products_permission}, orders={orders_permission}, customers={customers_permission}, collections={collections_permission}"
+            )
+
             permissions = {
                 "products": products_permission,
                 "orders": orders_permission,
@@ -105,8 +121,16 @@ class ShopifyPermissionService(IShopifyPermissionService):
             # Check overall access
             permissions["has_access"] = any(permissions.values())
 
-            # Cache the results
-            await self._cache_permissions(shop_domain, permissions)
+            # Only cache if we got scopes from the API (successful response)
+            if scopes:  # Only cache when API returned actual scopes
+                logger.info(
+                    f"✅ Caching successful permission results for {shop_domain}"
+                )
+                await self._cache_permissions(shop_domain, permissions)
+            else:
+                logger.warning(
+                    f"⚠️ Not caching permissions for {shop_domain} - API returned empty scopes"
+                )
 
             # Log the results
             await self.log_permission_check(shop_domain, permissions)
@@ -186,19 +210,33 @@ class ShopifyPermissionService(IShopifyPermissionService):
     ) -> List[str]:
         """Get the actual scopes granted to the app from Shopify GraphQL API"""
         try:
+            logger.info(
+                f"🔍 Getting scopes for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
+            )
+
             # Ensure API client is connected
             await self.api_client.connect()
+            logger.info(f"✅ API client connected for {shop_domain}")
 
             # Set access token for API client
             if access_token:
                 await self.api_client.set_access_token(shop_domain, access_token)
+                logger.info(f"✅ Access token set for {shop_domain}")
+            else:
+                logger.warning(f"⚠️ No access token provided for {shop_domain}")
 
             # Use the API client to get scopes
+            logger.info(f"🚀 Calling get_app_installation_scopes for {shop_domain}")
             scopes = await self.api_client.get_app_installation_scopes(shop_domain)
+            logger.info(f"✅ Retrieved scopes for {shop_domain}: {scopes}")
             return scopes
 
         except Exception as e:
-            logger.error(f"Failed to get scopes for {shop_domain}: {e}")
+            logger.error(f"❌ Failed to get scopes for {shop_domain}: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Error details: {str(e)}")
+            # No fallback - return empty list to indicate API failure
+            logger.warning(f"⚠️ API failed for {shop_domain}, returning empty scopes")
             return []
 
     async def get_collection_strategy(

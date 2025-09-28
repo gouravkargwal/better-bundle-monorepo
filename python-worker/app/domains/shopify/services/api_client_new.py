@@ -162,6 +162,9 @@ class ShopifyAPIClient(IShopifyAPIClient):
     # Legacy methods for backward compatibility
     async def get_app_installation_scopes(self, shop_domain: str) -> List[str]:
         """Get app installation scopes"""
-        # This would need to be implemented in base client
-        logger.warning("get_app_installation_scopes not implemented in new client")
-        return []
+        try:
+            # Use the product client to get scopes since it has the GraphQL implementation
+            return await self.product_client.get_app_installation_scopes(shop_domain)
+        except Exception as e:
+            logger.error(f"Failed to get app installation scopes: {e}")
+            return []

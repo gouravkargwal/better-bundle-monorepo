@@ -14,6 +14,7 @@ import httpx
 from app.core.logging import get_logger
 from app.core.exceptions import ConfigurationError
 from app.shared.decorators import retry, async_timing
+from app.core.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -109,6 +110,107 @@ class BaseShopifyAPIClient:
     async def set_access_token(self, shop_domain: str, access_token: str):
         """Set access token for a shop"""
         self.access_tokens[shop_domain] = access_token
+
+    async def get_app_installation_scopes(self, shop_domain: str) -> List[str]:
+        """Get the actual scopes granted to the app from Shopify GraphQL API"""
+        query = """
+        query {
+          currentAppInstallation {
+            id
+            app {
+              id
+              title
+              handle
+            }
+            accessScopes {
+              handle
+              description
+            }
+          }
+        }
+        """
+
+        try:
+            logger.info(f"Attempting to get app installation scopes for {shop_domain}")
+            result = await self.execute_query(query, {}, shop_domain)
+            logger.info(f"GraphQL query result: {result}")
+
+            # Check for GraphQL errors first
+            if "errors" in result:
+                logger.error(f"GraphQL errors for {shop_domain}: {result['errors']}")
+                return []
+
+            # Check if currentAppInstallation exists and is not null
+            if (
+                "currentAppInstallation" in result
+                and result["currentAppInstallation"] is not None
+            ):
+                installation = result["currentAppInstallation"]
+
+                # Verify this is our app
+                app_info = installation.get("app", {})
+                app_title = app_info.get("title", "Unknown")
+                app_handle = app_info.get("handle", "unknown")
+                app_id = app_info.get("id", "unknown")
+
+                logger.info(f"🔍 App verification for {shop_domain}:")
+                logger.info(f"  - App ID: {app_id}")
+                logger.info(f"  - App Title: {app_title}")
+                logger.info(f"  - App Handle: {app_handle}")
+
+                # Verify this is our app using configured app ID
+                expected_app_id = settings.shopify.SHOPIFY_APP_ID
+                expected_app_title = settings.shopify.SHOPIFY_APP_TITLE
+
+                if expected_app_id and app_id != expected_app_id:
+                    logger.error(
+                        f"❌ Wrong app detected! Expected app ID '{expected_app_id}', got '{app_id}'"
+                    )
+                    logger.error(
+                        f"❌ This installation belongs to a different app: {app_title}"
+                    )
+                    return []
+
+                if expected_app_title and app_title != expected_app_title:
+                    logger.error(
+                        f"❌ Wrong app detected! Expected '{expected_app_title}', got '{app_title}'"
+                    )
+                    logger.error(
+                        f"❌ This installation belongs to a different app: {app_id}"
+                    )
+                    return []
+
+                logger.info(
+                    f"✅ Confirmed: This is our {expected_app_title} app (ID: {app_id})"
+                )
+
+                scopes = installation.get("accessScopes", [])
+                logger.info(f"Found installation scopes: {scopes}")
+
+                if scopes:
+                    # Extract scope handles
+                    scope_handles = [scope["handle"] for scope in scopes]
+                    logger.info(
+                        f"✅ Extracted scope handles for BetterBundle: {scope_handles}"
+                    )
+                    return scope_handles
+                else:
+                    logger.warning(
+                        f"No accessScopes found in installation for {shop_domain}"
+                    )
+                    return []
+            else:
+                logger.warning(
+                    f"currentAppInstallation is null or missing for {shop_domain}: {result}"
+                )
+                return []
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get app installation scopes for {shop_domain}: {e}"
+            )
+            logger.error(f"Error details: {type(e).__name__}: {str(e)}")
+            return []
 
     async def execute_query(
         self, query: str, variables: Dict[str, Any], shop_domain: str

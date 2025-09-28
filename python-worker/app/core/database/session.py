@@ -96,6 +96,9 @@ async def get_transaction_context() -> AsyncGenerator[AsyncSession, None]:
         await session.commit()
     except Exception as e:
         logger.error(f"Database transaction error: {e}")
+        logger.error(
+            f"Database transaction error details: {type(e).__name__}: {str(e)}"
+        )
         await session.rollback()
         raise
     finally:

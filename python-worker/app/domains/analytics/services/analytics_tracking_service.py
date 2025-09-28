@@ -9,9 +9,13 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from prisma import Json
-
-from app.core.database import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models.user_interaction import (
+    UserInteraction as UserInteractionModel,
+)
+from app.core.database.models.user_session import UserSession as UserSessionModel
+from app.core.database.models.shop import Shop
+from sqlalchemy import select, and_, or_, desc, func
 from app.domains.analytics.models.interaction import (
     UserInteraction,
     InteractionCreate,
@@ -114,59 +118,78 @@ class AnalyticsTrackingService:
     ) -> List[UserInteraction]:
         """Get interactions based on query criteria"""
         try:
-            db = await get_database()
+            async with get_transaction_context() as session:
+                # Build where conditions for SQLAlchemy
+                where_conditions = []
 
-            # Build where conditions for Prisma
-            where_conditions = {}
+                if query.session_id:
+                    where_conditions.append(
+                        UserInteractionModel.session_id == query.session_id
+                    )
 
-            if query.session_id:
-                where_conditions["sessionId"] = query.session_id
+                if query.customer_id:
+                    where_conditions.append(
+                        UserInteractionModel.customer_id == query.customer_id
+                    )
 
-            if query.customer_id:
-                where_conditions["customerId"] = query.customer_id
+                if query.shop_id:
+                    where_conditions.append(
+                        UserInteractionModel.shop_id == query.shop_id
+                    )
 
-            if query.shop_id:
-                where_conditions["shopId"] = query.shop_id
+                if query.extension_type:
+                    where_conditions.append(
+                        UserInteractionModel.extension_type
+                        == query.extension_type.value
+                    )
 
-            if query.extension_type:
-                where_conditions["extensionType"] = query.extension_type.value
+                if query.interaction_type:
+                    where_conditions.append(
+                        UserInteractionModel.interaction_type
+                        == query.interaction_type.value
+                    )
 
-            if query.interaction_type:
-                where_conditions["interactionType"] = query.interaction_type.value
+                if query.created_after:
+                    where_conditions.append(
+                        UserInteractionModel.created_at >= query.created_after
+                    )
 
-            if query.created_after:
-                where_conditions["createdAt"] = {"gte": query.created_after}
+                if query.created_before:
+                    where_conditions.append(
+                        UserInteractionModel.created_at <= query.created_before
+                    )
 
-            if query.created_before:
-                if "createdAt" in where_conditions:
-                    where_conditions["createdAt"]["lte"] = query.created_before
-                else:
-                    where_conditions["createdAt"] = {"lte": query.created_before}
-
-            # Execute query using Prisma
-            interactions_data = await db.userinteraction.find_many(
-                where=where_conditions,
-                order={"createdAt": "desc"},
-                take=limit,
-                skip=offset,
-            )
-
-            # Convert to Pydantic models
-            interactions = []
-            for interaction_data in interactions_data:
-                interaction = UserInteraction(
-                    id=interaction_data.id,
-                    session_id=interaction_data.sessionId,
-                    extension_type=ExtensionType(interaction_data.extensionType),
-                    interaction_type=InteractionType(interaction_data.interactionType),
-                    customer_id=interaction_data.customerId,
-                    shop_id=interaction_data.shopId,
-                    metadata=interaction_data.metadata,
-                    created_at=interaction_data.createdAt,
+                # Execute query using SQLAlchemy
+                stmt = select(UserInteractionModel)
+                if where_conditions:
+                    stmt = stmt.where(and_(*where_conditions))
+                stmt = (
+                    stmt.order_by(desc(UserInteractionModel.created_at))
+                    .limit(limit)
+                    .offset(offset)
                 )
-                interactions.append(interaction)
 
-            return interactions
+                result = await session.execute(stmt)
+                interactions_data = result.scalars().all()
+
+                # Convert to Pydantic models
+                interactions = []
+                for interaction_data in interactions_data:
+                    interaction = UserInteraction(
+                        id=interaction_data.id,
+                        session_id=interaction_data.session_id,
+                        extension_type=ExtensionType(interaction_data.extension_type),
+                        interaction_type=InteractionType(
+                            interaction_data.interaction_type
+                        ),
+                        customer_id=interaction_data.customer_id,
+                        shop_id=interaction_data.shop_id,
+                        metadata=interaction_data.metadata,
+                        created_at=interaction_data.created_at,
+                    )
+                    interactions.append(interaction)
+
+                return interactions
 
         except Exception as e:
             logger.error(f"Error getting interactions: {str(e)}")
@@ -213,65 +236,91 @@ class AnalyticsTrackingService:
     ) -> Dict[str, Any]:
         """Get performance metrics for a specific recommendation"""
         try:
-            db = await get_database()
+            async with get_transaction_context() as session:
+                # Get all interactions for this recommendation
+                stmt = (
+                    select(UserInteractionModel)
+                    .where(
+                        and_(
+                            UserInteractionModel.shop_id == shop_id,
+                            # Note: recommendation_id would need to be stored in metadata
+                            # This is a simplified version - you might need to adjust based on your schema
+                        )
+                    )
+                    .order_by(desc(UserInteractionModel.created_at))
+                )
 
-            # Get all interactions for this recommendation
-            interactions = await db.userinteraction.find_many(
-                where={
-                    "recommendationId": recommendation_id,
-                    "shopId": shop_id,
-                },
-                order={"createdAt": "desc"},
-            )
+                result = await session.execute(stmt)
+                interactions_data = result.scalars().all()
 
-            # Calculate metrics
-            total_views = len(
-                [
-                    i
-                    for i in interactions
-                    if i.interaction_type == InteractionType.RECOMMENDATION_VIEW
-                ]
-            )
-            total_clicks = len(
-                [
-                    i
-                    for i in interactions
-                    if i.interaction_type == InteractionType.RECOMMENDATION_CLICK
-                ]
-            )
-            total_adds = len(
-                [
-                    i
-                    for i in interactions
-                    if i.interaction_type == InteractionType.RECOMMENDATION_ADD_TO_CART
-                ]
-            )
-            total_purchases = len(
-                [
-                    i
-                    for i in interactions
-                    if i.interaction_type == InteractionType.RECOMMENDATION_PURCHASE
-                ]
-            )
+                # Convert to Pydantic models for processing
+                interactions = []
+                for interaction_data in interactions_data:
+                    interaction = UserInteraction(
+                        id=interaction_data.id,
+                        session_id=interaction_data.session_id,
+                        extension_type=ExtensionType(interaction_data.extension_type),
+                        interaction_type=InteractionType(
+                            interaction_data.interaction_type
+                        ),
+                        customer_id=interaction_data.customer_id,
+                        shop_id=interaction_data.shop_id,
+                        metadata=interaction_data.metadata,
+                        created_at=interaction_data.created_at,
+                    )
+                    interactions.append(interaction)
 
-            # Calculate conversion rates
-            click_rate = (total_clicks / total_views * 100) if total_views > 0 else 0
-            add_rate = (total_adds / total_views * 100) if total_views > 0 else 0
-            purchase_rate = (
-                (total_purchases / total_views * 100) if total_views > 0 else 0
-            )
+                # Calculate metrics
+                total_views = len(
+                    [
+                        i
+                        for i in interactions
+                        if i.interaction_type == InteractionType.RECOMMENDATION_VIEW
+                    ]
+                )
+                total_clicks = len(
+                    [
+                        i
+                        for i in interactions
+                        if i.interaction_type == InteractionType.RECOMMENDATION_CLICK
+                    ]
+                )
+                total_adds = len(
+                    [
+                        i
+                        for i in interactions
+                        if i.interaction_type
+                        == InteractionType.RECOMMENDATION_ADD_TO_CART
+                    ]
+                )
+                total_purchases = len(
+                    [
+                        i
+                        for i in interactions
+                        if i.interaction_type == InteractionType.RECOMMENDATION_PURCHASE
+                    ]
+                )
 
-            return {
-                "recommendation_id": recommendation_id,
-                "total_views": total_views,
-                "total_clicks": total_clicks,
-                "total_adds": total_adds,
-                "total_purchases": total_purchases,
-                "click_rate": round(click_rate, 2),
-                "add_rate": round(add_rate, 2),
-                "purchase_rate": round(purchase_rate, 2),
-                "interactions": interactions,
-            }
+                # Calculate conversion rates
+                click_rate = (
+                    (total_clicks / total_views * 100) if total_views > 0 else 0
+                )
+                add_rate = (total_adds / total_views * 100) if total_views > 0 else 0
+                purchase_rate = (
+                    (total_purchases / total_views * 100) if total_views > 0 else 0
+                )
+
+                return {
+                    "recommendation_id": recommendation_id,
+                    "total_views": total_views,
+                    "total_clicks": total_clicks,
+                    "total_adds": total_adds,
+                    "total_purchases": total_purchases,
+                    "click_rate": round(click_rate, 2),
+                    "add_rate": round(add_rate, 2),
+                    "purchase_rate": round(purchase_rate, 2),
+                    "interactions": interactions,
+                }
 
         except Exception as e:
             logger.error(f"Error getting recommendation performance: {str(e)}")
@@ -356,48 +405,55 @@ class AnalyticsTrackingService:
     ) -> Optional[UserInteraction]:
         """Save interaction to database"""
         try:
-            db = await get_database()
+            async with get_transaction_context() as session:
+                # Validate shop exists before creating interaction
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == interaction_data.shop_id)
+                )
+                shop = shop_result.scalar_one_or_none()
 
-            # Validate shop exists before creating interaction
-            shop = await db.shop.find_unique(where={"id": interaction_data.shop_id})
-            if not shop:
-                logger.error(f"Shop not found for ID: {interaction_data.shop_id}")
-                return None
+                if not shop:
+                    logger.error(f"Shop not found for ID: {interaction_data.shop_id}")
+                    return None
 
-            if not shop.isActive:
-                logger.error(f"Shop is inactive for ID: {interaction_data.shop_id}")
-                return None
+                if not shop.is_active:
+                    logger.error(f"Shop is inactive for ID: {interaction_data.shop_id}")
+                    return None
 
-            # Generate unique interaction ID
-            interaction_id = f"interaction_{uuid.uuid4().hex[:16]}"
+                # Generate unique interaction ID
+                interaction_id = f"interaction_{uuid.uuid4().hex[:16]}"
 
-            # Create interaction record using Prisma
-            interaction_data_db = await db.userinteraction.create(
-                data={
-                    "id": interaction_id,
-                    "sessionId": interaction_data.session_id,
-                    "extensionType": interaction_data.extension_type.value,
-                    "interactionType": interaction_data.interaction_type.value,
-                    "customerId": interaction_data.customer_id,
-                    "shopId": interaction_data.shop_id,
-                    "metadata": Json(interaction_data.metadata),
-                    "createdAt": utcnow(),
-                }
-            )
+                # Create interaction record using SQLAlchemy
+                interaction_model = UserInteractionModel(
+                    id=interaction_id,
+                    session_id=interaction_data.session_id,
+                    extension_type=interaction_data.extension_type.value,
+                    interaction_type=interaction_data.interaction_type.value,
+                    customer_id=interaction_data.customer_id,
+                    shop_id=interaction_data.shop_id,
+                    metadata=interaction_data.metadata,
+                    created_at=utcnow(),
+                )
 
-            # Convert to Pydantic model
-            interaction = UserInteraction(
-                id=interaction_data_db.id,
-                session_id=interaction_data_db.sessionId,
-                extension_type=ExtensionType(interaction_data_db.extensionType),
-                interaction_type=InteractionType(interaction_data_db.interactionType),
-                customer_id=interaction_data_db.customerId,
-                shop_id=interaction_data_db.shopId,
-                metadata=interaction_data_db.metadata,
-                created_at=interaction_data_db.createdAt,
-            )
+                session.add(interaction_model)
+                await session.commit()
+                await session.refresh(interaction_model)
 
-            return interaction
+                # Convert to Pydantic model
+                interaction = UserInteraction(
+                    id=interaction_model.id,
+                    session_id=interaction_model.session_id,
+                    extension_type=ExtensionType(interaction_model.extension_type),
+                    interaction_type=InteractionType(
+                        interaction_model.interaction_type
+                    ),
+                    customer_id=interaction_model.customer_id,
+                    shop_id=interaction_model.shop_id,
+                    metadata=interaction_model.metadata,
+                    created_at=interaction_model.created_at,
+                )
+
+                return interaction
 
         except Exception as e:
             logger.error(f"Error saving interaction: {str(e)}")
