@@ -122,14 +122,22 @@ class ShopifyGraphQLSeeder:
                         }
                     )
 
-                # Create product mutation
+                # Create product with variants using productSet mutation
                 mutation = """
-                mutation productCreate($input: ProductInput!) {
-                    productCreate(input: $input) {
+                mutation productSet($input: ProductSetInput!) {
+                    productSet(input: $input) {
                         product {
                             id
                             title
                             handle
+                            variants(first: 10) {
+                                nodes {
+                                    id
+                                    title
+                                    price
+                                    sku
+                                }
+                            }
                         }
                         userErrors {
                             field
@@ -139,6 +147,35 @@ class ShopifyGraphQLSeeder:
                 }
                 """
 
+                # Create product options and variants
+                product_options = [
+                    {
+                        "name": "Size",
+                        "position": 1,
+                        "values": [
+                            {"name": "Small"},
+                            {"name": "Medium"},
+                            {"name": "Large"},
+                        ],
+                    }
+                ]
+
+                # Convert variants to productSet format with proper option values
+                product_variants = []
+                sizes = ["Small", "Medium", "Large"]
+                for i, variant_data in enumerate(variants):
+                    size = sizes[i % len(sizes)]  # Cycle through sizes
+                    product_variants.append(
+                        {
+                            "price": variant_data["price"],
+                            "sku": f"{variant_data['sku']}-{size[:1]}",  # Add size to SKU
+                            "compareAtPrice": variant_data.get("compareAtPrice"),
+                            "taxable": variant_data["taxable"],
+                            "inventoryPolicy": variant_data["inventoryPolicy"],
+                            "optionValues": [{"optionName": "Size", "name": size}],
+                        }
+                    )
+
                 variables = {
                     "input": {
                         "title": product_data["title"],
@@ -147,27 +184,32 @@ class ShopifyGraphQLSeeder:
                         "handle": product_data["handle"],
                         "tags": product_data.get("tags", []),
                         "status": "ACTIVE",
+                        "productOptions": product_options,
+                        "variants": product_variants,
                     }
                 }
 
                 result = self._graphql_request(mutation, variables)
 
-                if result["data"]["productCreate"]["userErrors"]:
+                if result["data"]["productSet"]["userErrors"]:
                     errors = [
                         error["message"]
-                        for error in result["data"]["productCreate"]["userErrors"]
+                        for error in result["data"]["productSet"]["userErrors"]
                     ]
                     raise Exception(f"Product creation errors: {', '.join(errors)}")
 
-                product = result["data"]["productCreate"]["product"]
+                product = result["data"]["productSet"]["product"]
 
-                # Skip variant creation for now - focus on getting basic products working
-                # TODO: Add variant creation later
+                # Extract variant IDs for order creation
+                variant_ids = []
+                for variant_node in product["variants"]["nodes"]:
+                    variant_ids.append(variant_node["id"])
+
                 self.created_products[f"product_{i}"] = {
                     "id": product["id"],
                     "handle": product["handle"],
                     "title": product["title"],
-                    "variants": [],  # Empty for now
+                    "variants": variant_ids,
                 }
                 print(f"  ✅ Product: {product['title']} ({product['id']})")
             except Exception as e:
@@ -200,7 +242,6 @@ class ShopifyGraphQLSeeder:
                             "phone": addr["phone"],
                             "firstName": customer_data["firstName"],
                             "lastName": customer_data["lastName"],
-                            "default": True,
                         }
                     )
 
@@ -226,7 +267,6 @@ class ShopifyGraphQLSeeder:
                         "firstName": customer_data["firstName"],
                         "lastName": customer_data["lastName"],
                         "email": customer_data["email"],
-                        "verifiedEmail": customer_data["verifiedEmail"],
                         "tags": customer_data.get("tags", []),
                         "addresses": addresses,
                     }
@@ -303,7 +343,6 @@ class ShopifyGraphQLSeeder:
                         "title": c["title"],
                         "descriptionHtml": c["descriptionHtml"],
                         "handle": c["handle"],
-                        "published": True,
                     }
                 }
 
@@ -402,8 +441,18 @@ class ShopifyGraphQLSeeder:
                 """
 
                 line_items = []
-                # Skip order creation for now since we don't have variants
-                # TODO: Add order creation once variants are working
+                # Create line items using product variants
+                for product in selected_products:
+                    if product.get("variants"):
+                        variant_id = product["variants"][0]  # Use first variant
+                        quantity = random.randint(1, 3)
+                        line_items.append(
+                            {
+                                "variantId": variant_id,
+                                "quantity": quantity,
+                            }
+                        )
+
                 if not line_items:
                     print(f"  ⚠️ Skipping order {i} - no variants available")
                     continue
@@ -471,9 +520,21 @@ class ShopifyGraphQLSeeder:
 
     async def run(self) -> bool:
         print(f"🚀 Seeding Shopify store with GraphQL: {self.shop_domain}")
-        await self.create_products()
-        await self.create_customers()
+
+        # Create products and customers in parallel since they're independent
+        print("📦 Creating products and customers in parallel...")
+        products_task = asyncio.create_task(self.create_products())
+        customers_task = asyncio.create_task(self.create_customers())
+
+        # Wait for both to complete
+        await asyncio.gather(products_task, customers_task)
+
+        # Create collections after products are ready
+        print("📚 Creating collections...")
         await self.create_collections()
+
+        # Create orders after products and customers are ready
+        print("📋 Creating orders...")
         await self.create_orders()
 
         print("\n🎯 Seeding Summary:")
