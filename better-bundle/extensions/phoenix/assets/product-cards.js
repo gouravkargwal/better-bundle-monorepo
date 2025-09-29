@@ -158,11 +158,14 @@ class ProductCardManager {
     const slide = document.createElement("div");
     slide.className = "swiper-slide";
 
-    // Get default variant (first available variant or first variant)
-    const defaultVariant =
-      product.variants && product.variants.length > 0
-        ? product.variants.find((v) => v.available) || product.variants[0]
-        : null;
+    // Get default variant using selectedVariantId from API or first available variant
+    let defaultVariant = null;
+    if (product.selectedVariantId && product.variants) {
+      defaultVariant = product.variants.find(v => v.variant_id === product.selectedVariantId);
+    }
+    if (!defaultVariant && product.variants && product.variants.length > 0) {
+      defaultVariant = product.variants.find((v) => v.inventory > 0) || product.variants[0];
+    }
 
     // Handle price data - could be from variant or product level
     let price = product.price;
@@ -189,18 +192,39 @@ class ProductCardManager {
       defaultVariantPrice: defaultVariant?.price,
     });
 
-    // Create variants options if multiple variants exist
+    // Create variants options using options data or variants data
     let variantOptions = "";
-    if (product.variants && product.variants.length > 1) {
+    const maxInventory = product.inventory || (defaultVariant?.inventory || 0);
+
+    if (product.options && product.options.length > 0) {
+      // Use options data to create proper variant selector
       variantOptions = `
         <div class="product-card__variants">
           <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
             ${product.variants
           .map((variant, i) => {
-            const isSelected = variant.variantId === defaultVariant?.variantId;
-            const variantTitle =
-              variant.title || variant.option1 || `Option ${i + 1}`;
-            return `<option value="${variant.variantId}" ${isSelected ? "selected" : ""}>
+            const isSelected = variant.variant_id === defaultVariant?.variant_id;
+            const variantTitle = variant.title || `Option ${i + 1}`;
+            const isAvailable = variant.inventory === undefined || variant.inventory > 0;
+            return `<option value="${variant.variant_id}" ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}>
+                ${variantTitle}
+              </option>`;
+          })
+          .join("")}
+          </select>
+        </div>
+      `;
+    } else if (product.variants && product.variants.length > 1) {
+      // Fallback to variants data
+      variantOptions = `
+        <div class="product-card__variants">
+          <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
+            ${product.variants
+          .map((variant, i) => {
+            const isSelected = variant.variant_id === defaultVariant?.variant_id;
+            const variantTitle = variant.title || `Option ${i + 1}`;
+            const isAvailable = variant.inventory === undefined || variant.inventory > 0;
+            return `<option value="${variant.variant_id}" ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}>
                 ${variantTitle}
               </option>`;
           })
@@ -211,7 +235,7 @@ class ProductCardManager {
     }
 
     slide.innerHTML = `
-      <div class="product-card" onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ""}', '${sessionId || ""}')">
+      <div class="product-card" data-product-id="${product.id}" onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ""}', '${sessionId || ""}')">
         <img
           class="product-card__image"
           src="${product.image?.url || "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=="}"
@@ -225,12 +249,12 @@ class ProductCardManager {
             ${variantOptions}
             <div class="product-card__quantity">
               <button class="qty-btn qty-minus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, -1)">-</button>
-              <input type="number" value="1" min="1" class="qty-input" onclick="event.stopPropagation()">
+              <input type="number" value="1" min="1" ${maxInventory ? `max=\"${Math.max(1, maxInventory)}\"` : ""} class="qty-input" onclick="event.stopPropagation()">
               <button class="qty-btn qty-plus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, 1)">+</button>
             </div>
           </div>
           <button class="product-card__btn" type="button" 
-            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variantId || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
+            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variant_id || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
             Add to cart
           </button>
         </div>
@@ -247,17 +271,29 @@ class ProductCardManager {
 
     if (productData && productData.variants) {
       const selectedVariant = productData.variants.find(
-        (v) => v.variantId === selectedVariantId,
+        (v) => String(v.variant_id) === String(selectedVariantId),
       );
       if (selectedVariant) {
         const priceElement = document.querySelector(
-          `[data-product-id="${productId}"]`,
+          `[data-product-id="${productId}"] .product-card__price`,
         );
         if (priceElement) {
-          const priceAmount =
-            selectedVariant.price || selectedVariant.price_amount;
-          const priceCurrency = selectedVariant.currency_code || "USD";
+          const priceAmount = selectedVariant.price || selectedVariant.price_amount;
+          const priceCurrency = productData.price?.currency_code || "USD";
           priceElement.textContent = formatPrice(priceAmount, priceCurrency);
+        }
+
+        // Update max inventory on qty input when variant changes
+        const cardEl = selectElement.closest('.product-card');
+        const qtyInput = cardEl?.querySelector('.qty-input');
+        if (qtyInput) {
+          const inv = typeof selectedVariant.inventory === 'number' ? selectedVariant.inventory : null;
+          if (inv !== null && inv >= 1) {
+            qtyInput.max = String(inv);
+            if (parseInt(qtyInput.value) > inv) qtyInput.value = String(inv);
+          } else {
+            qtyInput.removeAttribute('max');
+          }
         }
       }
     }
@@ -265,10 +301,14 @@ class ProductCardManager {
 
   // Update quantity
   updateQuantity(button, change) {
-    const qtyInput = button.parentElement.querySelector(".qty-input");
-    const currentValue = parseInt(qtyInput.value);
-    const newValue = Math.max(1, currentValue + change);
-    qtyInput.value = newValue;
+    const qtyInput = button.parentElement.querySelector('.qty-input');
+    const currentValue = parseInt(qtyInput.value) || 1;
+    const min = parseInt(qtyInput.min) || 1;
+    const max = qtyInput.max ? parseInt(qtyInput.max) : null;
+    let newValue = currentValue + change;
+    if (newValue < min) newValue = min;
+    if (max !== null && newValue > max) newValue = max;
+    qtyInput.value = String(newValue);
   }
 
 
@@ -370,6 +410,18 @@ class ProductCardManager {
 
     const selectedVariantId = variantSelect ? variantSelect.value : variantId;
     const selectedQuantity = qtyInput ? parseInt(qtyInput.value) : 1;
+
+    // Enforce inventory cap at the time of add to cart
+    const productData = this.productDataStore[productId];
+    if (productData && productData.variants && selectedVariantId) {
+      const selectedVariant = productData.variants.find(v => String(v.variant_id) === String(selectedVariantId));
+      if (selectedVariant && typeof selectedVariant.inventory === 'number' && selectedVariant.inventory >= 0) {
+        const cappedQty = Math.max(1, Math.min(selectedQuantity, selectedVariant.inventory));
+        if (cappedQty !== selectedQuantity && qtyInput) {
+          qtyInput.value = String(cappedQty);
+        }
+      }
+    }
 
     // Validate variant ID
     if (!selectedVariantId || selectedVariantId === '') {

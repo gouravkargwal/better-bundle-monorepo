@@ -184,14 +184,68 @@ class ProductEnrichment:
                     variants = product.variants if product.variants else []
                     default_variant = None
                     variant_id = None
+                    selected_variant_id = None
+
+                    logger.debug(
+                        f"🔍 Product {product.product_id} variants: {variants}"
+                    )
+                    logger.debug(
+                        f"🔍 Product {product.product_id} options: {product.options}"
+                    )
+                    logger.debug(
+                        f"🔍 Product {product.product_id} inventory: {product.total_inventory}"
+                    )
+
                     if variants and len(variants) > 0:
                         # Get the first variant (usually the default)
                         default_variant = (
                             variants[0] if isinstance(variants, list) else None
                         )
                         if default_variant and isinstance(default_variant, dict):
-                            # Variant IDs are already cleaned in the database
-                            variant_id = default_variant.get("id", "")
+                            # Extract variant ID - handle both GraphQL format and numeric format
+                            # Try different possible keys for variant ID
+                            raw_variant_id = (
+                                default_variant.get("variant_id")
+                                or default_variant.get("id")
+                                or default_variant.get("variantId", "")
+                            )
+                            if raw_variant_id:
+                                # If it's a GraphQL ID, extract the numeric part
+                                if "/" in str(raw_variant_id):
+                                    variant_id = str(raw_variant_id).split("/")[-1]
+                                else:
+                                    variant_id = str(raw_variant_id)
+                                selected_variant_id = variant_id
+                                logger.debug(
+                                    f"✅ Extracted variant_id: {variant_id} from {raw_variant_id}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️ No variant ID found in variant: {default_variant}"
+                                )
+
+                    # Determine availability based on overall and per-variant inventory
+                    total_inventory = getattr(product, "total_inventory", None)
+                    any_variant_instock = False
+                    if isinstance(variants, list) and len(variants) > 0:
+                        for v in variants:
+                            try:
+                                inv = (
+                                    v.get("inventory") if isinstance(v, dict) else None
+                                )
+                                if isinstance(inv, int) and inv > 0:
+                                    any_variant_instock = True
+                                    break
+                            except Exception:
+                                pass
+                    is_available = (product.status == "ACTIVE") and (
+                        (isinstance(total_inventory, int) and total_inventory > 0)
+                        or any_variant_instock
+                    )
+
+                    # Skip products that are unavailable (sold out or inactive)
+                    if not is_available:
+                        continue
 
                     # Format for frontend ProductRecommendation interface
                     enriched_items.append(
@@ -213,10 +267,15 @@ class ProductEnrichment:
                             ),
                             "vendor": product.vendor or "",
                             "product_type": product.product_type or "",
-                            "available": product.status == "ACTIVE",
+                            "available": is_available,
                             "score": 0.8,  # Default recommendation score
                             "variant_id": variant_id,
+                            "selectedVariantId": selected_variant_id,
                             "variants": variants,  # Include all variants for flexibility
+                            "options": product.options
+                            or [],  # Product options for variant selection
+                            "inventory": product.total_inventory
+                            or 0,  # Total inventory count
                         }
                     )
                 else:
