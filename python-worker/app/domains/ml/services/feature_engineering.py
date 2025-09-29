@@ -182,19 +182,16 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         entity_type: str,
         batch_size: int,
         chunk_size: int = 100,
-        incremental: bool = False,
-        since_timestamp: str = None,
     ) -> List[Dict[str, Any]]:
         """
         Process entities in chunks to avoid loading large datasets in memory
+        Unified approach - no complex mode switching
 
         Args:
             shop_id: Shop ID to process
             entity_type: Type of entity ('products', 'customers', 'orders', 'collections', 'user_interactions', 'user_sessions', 'purchase_attributions')
             batch_size: Total batch size to process
             chunk_size: Size of each chunk to process in memory
-            incremental: Whether to use incremental loading
-            since_timestamp: Timestamp for incremental loading
 
         Returns:
             List of all processed entities
@@ -206,78 +203,38 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             current_chunk_size = min(chunk_size, batch_size)
 
             try:
-                if incremental and since_timestamp:
-                    # Use incremental loading methods
-                    if entity_type == "products":
-                        chunk = await self.repository.get_products_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    elif entity_type == "customers":
-                        chunk = await self.repository.get_customers_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    elif entity_type == "orders":
-                        chunk = await self.repository.get_orders_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    elif entity_type == "collections":
-                        chunk = await self.repository.get_collections_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    # behavioral_events removed - using unified analytics
-                    elif entity_type == "user_interactions":
-                        chunk = await self.repository.get_user_interactions_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    elif entity_type == "user_sessions":
-                        chunk = await self.repository.get_user_sessions_batch_since(
-                            shop_id, since_timestamp, current_chunk_size, offset
-                        )
-                    elif entity_type == "purchase_attributions":
-                        chunk = (
-                            await self.repository.get_purchase_attributions_batch_since(
-                                shop_id, since_timestamp, current_chunk_size, offset
-                            )
-                        )
-                    else:
-                        logger.error(
-                            f"Unknown entity type for incremental loading: {entity_type}"
-                        )
-                        break
+                # Use regular batch loading methods - no complex mode switching
+                if entity_type == "products":
+                    chunk = await self.repository.get_products_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "customers":
+                    chunk = await self.repository.get_customers_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "orders":
+                    chunk = await self.repository.get_orders_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "collections":
+                    chunk = await self.repository.get_collections_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "user_interactions":
+                    chunk = await self.repository.get_user_interactions_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "user_sessions":
+                    chunk = await self.repository.get_user_sessions_batch(
+                        shop_id, current_chunk_size, offset
+                    )
+                elif entity_type == "purchase_attributions":
+                    chunk = await self.repository.get_purchase_attributions_batch(
+                        shop_id, current_chunk_size, offset
+                    )
                 else:
-                    # Use regular batch loading methods
-                    if entity_type == "products":
-                        chunk = await self.repository.get_products_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    elif entity_type == "customers":
-                        chunk = await self.repository.get_customers_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    elif entity_type == "orders":
-                        chunk = await self.repository.get_orders_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    elif entity_type == "collections":
-                        chunk = await self.repository.get_collections_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    # behavioral_events removed - using unified analytics
-                    elif entity_type == "user_interactions":
-                        chunk = await self.repository.get_user_interactions_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    elif entity_type == "user_sessions":
-                        chunk = await self.repository.get_user_sessions_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    elif entity_type == "purchase_attributions":
-                        chunk = await self.repository.get_purchase_attributions_batch(
-                            shop_id, current_chunk_size, offset
-                        )
-                    else:
-                        logger.error(f"Unknown entity type: {entity_type}")
-                        break
+                    logger.error(f"Unknown entity type: {entity_type}")
+                    break
 
                 if not chunk:
                     # No more data available
@@ -510,23 +467,22 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         return dict(sessions)
 
     async def run_comprehensive_pipeline_for_shop(
-        self, shop_id: str, batch_size: int = 500, incremental: bool = True
+        self, shop_id: str, batch_size: int = 500
     ) -> Dict[str, Any]:
         """
-        Complete feature engineering pipeline with data loading, processing, and saving
-        Handles all complexity internally including parallel computation and incremental logic
+        Unified feature engineering pipeline - process all available data for a shop
+        No complex modes - just process data chunks like a proper Kafka system
+
+        Args:
+            shop_id: Shop ID to process
+            batch_size: Maximum number of entities to process per type
+
+        Returns:
+            Dict with processing results
         """
         try:
-            logger.info(
-                f"🚀 Starting comprehensive feature pipeline for shop {shop_id}"
-            )
-            logger.info(
-                f"📋 Pipeline params: batch_size={batch_size}, incremental={incremental}"
-            )
-
-            from ..repositories.feature_repository import FeatureRepository
-
-            repository = FeatureRepository()
+            logger.info(f"🚀 Starting unified feature pipeline for shop {shop_id}")
+            logger.info(f"📋 Pipeline params: batch_size={batch_size}")
 
             # Load shop data using SQLAlchemy
             logger.info(f"🔍 Loading shop data for {shop_id}")
@@ -562,248 +518,40 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             }
             logger.info(f"✅ Shop data loaded successfully")
 
-            # Build per-entity incremental windows from PipelineWatermark
-            from app.core.database.models import PipelineWatermark
+            # Load all data for the shop - no complex mode switching
+            logger.info(f"📦 Loading all data for shop {shop_id}")
 
-            async with get_session_context() as session:
-                result = await session.execute(
-                    select(PipelineWatermark).where(
-                        PipelineWatermark.shop_id == shop_id
-                    )
-                )
-                pw_rows = result.scalars().all()
-
-            def _get_pw(data_type: str):
-                for r in pw_rows:
-                    if getattr(r, "data_type", None) == data_type:
-                        return r
-                return None
-
-            # Resolve since timestamps per entity type (lastFeaturesComputedAt)
-            # If None, we'll treat as full for that type
-            products_since = getattr(
-                _get_pw("products"), "last_features_computed_at", None
+            # Load core entities
+            products = await self.process_entities_in_chunks(
+                shop_id, "products", batch_size, chunk_size=100
             )
-            customers_since = getattr(
-                _get_pw("customers"), "last_features_computed_at", None
+            customers = await self.process_entities_in_chunks(
+                shop_id, "customers", batch_size, chunk_size=100
             )
-            orders_since = getattr(_get_pw("orders"), "last_features_computed_at", None)
-            collections_since = getattr(
-                _get_pw("collections"), "last_features_computed_at", None
+            orders = await self.process_entities_in_chunks(
+                shop_id, "orders", batch_size * 3, chunk_size=100
+            )
+            collections = await self.process_entities_in_chunks(
+                shop_id, "collections", batch_size, chunk_size=100
             )
 
-            # Check if this is a new shop (no watermarks exist) - if so, switch to historical mode
-            has_any_watermarks = any(
-                [products_since, customers_since, orders_since, collections_since]
+            # Load unified analytics data
+            user_interactions = await self.process_entities_in_chunks(
+                shop_id, "user_interactions", batch_size * 3, chunk_size=100
+            )
+            user_sessions = await self.process_entities_in_chunks(
+                shop_id, "user_sessions", batch_size, chunk_size=100
+            )
+            purchase_attributions = await self.process_entities_in_chunks(
+                shop_id, "purchase_attributions", batch_size, chunk_size=100
             )
 
-            if incremental and not has_any_watermarks:
-                logger.info(
-                    f"🔄 No watermarks found for shop {shop_id}, switching to historical mode"
-                )
-                incremental = False
-
-            # Handle incremental vs full data loading with chunked processing
-            if incremental:
-                logger.info(f"🔄 Running incremental processing for shop {shop_id}")
-                logger.info(
-                    f"⏰ Feature watermarks: products={products_since}, customers={customers_since}, orders={orders_since}, collections={collections_since}"
-                )
-
-                # Load only data modified since per-type watermark using chunked processing
-                logger.info(f"📦 Loading products for shop {shop_id}")
-                products = await self.process_entities_in_chunks(
-                    shop_id,
-                    "products",
-                    batch_size * 2,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        products_since.isoformat() if products_since else None
-                    ),
-                )
-                logger.info(f"📦 Loaded {len(products) if products else 0} products")
-                logger.info(f"👥 Loading customers for shop {shop_id}")
-                customers = await self.process_entities_in_chunks(
-                    shop_id,
-                    "customers",
-                    batch_size,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        customers_since.isoformat() if customers_since else None
-                    ),
-                )
-                logger.info(f"👥 Loaded {len(customers) if customers else 0} customers")
-
-                logger.info(f"🛒 Loading orders for shop {shop_id}")
-                orders = await self.process_entities_in_chunks(
-                    shop_id,
-                    "orders",
-                    batch_size * 3,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=orders_since.isoformat() if orders_since else None,
-                )
-                logger.info(f"🛒 Loaded {len(orders) if orders else 0} orders")
-
-                logger.info(f"📚 Loading collections for shop {shop_id}")
-                collections = await self.process_entities_in_chunks(
-                    shop_id,
-                    "collections",
-                    batch_size,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        collections_since.isoformat() if collections_since else None
-                    ),
-                )
-                logger.info(
-                    f"📚 Loaded {len(collections) if collections else 0} collections"
-                )
-
-                # NEW: Load unified analytics data
-                user_interactions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "user_interactions",
-                    batch_size * 3,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        min(
-                            [
-                                p
-                                for p in [
-                                    products_since,
-                                    customers_since,
-                                    orders_since,
-                                    collections_since,
-                                ]
-                                if p is not None
-                            ],
-                            default=None,
-                        ).isoformat()
-                        if any(
-                            [
-                                products_since,
-                                customers_since,
-                                orders_since,
-                                collections_since,
-                            ]
-                        )
-                        else None
-                    ),
-                )
-                user_sessions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "user_sessions",
-                    batch_size,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        min(
-                            [
-                                p
-                                for p in [
-                                    products_since,
-                                    customers_since,
-                                    orders_since,
-                                    collections_since,
-                                ]
-                                if p is not None
-                            ],
-                            default=None,
-                        ).isoformat()
-                        if any(
-                            [
-                                products_since,
-                                customers_since,
-                                orders_since,
-                                collections_since,
-                            ]
-                        )
-                        else None
-                    ),
-                )
-                purchase_attributions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "purchase_attributions",
-                    batch_size,
-                    chunk_size=100,
-                    incremental=True,
-                    since_timestamp=(
-                        min(
-                            [
-                                p
-                                for p in [
-                                    products_since,
-                                    customers_since,
-                                    orders_since,
-                                    collections_since,
-                                ]
-                                if p is not None
-                            ],
-                            default=None,
-                        ).isoformat()
-                        if any(
-                            [
-                                products_since,
-                                customers_since,
-                                orders_since,
-                                collections_since,
-                            ]
-                        )
-                        else None
-                    ),
-                )
-
-                # Data has been loaded based on watermarks - no need to check again
-            if not incremental:
-                # Load all data using chunked processing - use much larger batch sizes for historical processing
-                logger.info(f"🔄 Running historical processing for shop {shop_id}")
-                products = await self.process_entities_in_chunks(
-                    shop_id,
-                    "products",
-                    10000,
-                    chunk_size=100,  # Process up to 10k products
-                )
-                customers = await self.process_entities_in_chunks(
-                    shop_id,
-                    "customers",
-                    10000,
-                    chunk_size=100,  # Process up to 10k customers
-                )
-                orders = await self.process_entities_in_chunks(
-                    shop_id, "orders", 10000, chunk_size=100  # Process up to 10k orders
-                )
-                collections = await self.process_entities_in_chunks(
-                    shop_id,
-                    "collections",
-                    1000,
-                    chunk_size=100,  # Process up to 1k collections
-                )
-
-                # Load unified analytics data for full processing - use larger batch sizes for historical processing
-                user_interactions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "user_interactions",
-                    10000,
-                    chunk_size=100,  # Process up to 10k interactions
-                )
-                user_sessions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "user_sessions",
-                    10000,
-                    chunk_size=100,  # Process up to 10k sessions
-                )
-                purchase_attributions = await self.process_entities_in_chunks(
-                    shop_id,
-                    "purchase_attributions",
-                    10000,
-                    chunk_size=100,  # Process up to 10k attributions
-                )
-
-            # Data loading is based on watermarks - if we reach here, we have data to process
+            logger.info(
+                f"📊 Data loaded: products={len(products)}, customers={len(customers)}, orders={len(orders)}, collections={len(collections)}"
+            )
+            logger.info(
+                f"📊 Analytics: interactions={len(user_interactions)}, sessions={len(user_sessions)}, attributions={len(purchase_attributions)}"
+            )
 
             # Compute all features using unified analytics data
             all_features = await self.compute_all_features_for_shop(
@@ -822,59 +570,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 shop_id, all_features
             )
 
-            # Update PipelineWatermark.lastFeaturesComputedAt per type if we saved new features
-            try:
-                total_new = sum(
-                    v.get("saved_count", 0)
-                    for v in save_results.values()
-                    if isinstance(v, dict)
-                )
-                if total_new > 0:
-                    from datetime import datetime, timezone
-
-                    window_end = datetime.now(timezone.utc)
-
-                    # Update each present type using SQLAlchemy session
-                    async with get_session_context() as session:
-                        from sqlalchemy.dialects.postgresql import insert
-
-                        for dtype, key in [
-                            ("products", "products"),
-                            ("customers", "users"),
-                            ("orders", "orders"),
-                            ("collections", "collections"),
-                        ]:
-                            if (
-                                key in save_results
-                                and isinstance(save_results[key], dict)
-                                and save_results[key].get("saved_count", 0) > 0
-                            ):
-                                # Use SQLAlchemy upsert for PipelineWatermark
-                                upsert_stmt = insert(PipelineWatermark).values(
-                                    shop_id=shop_id,
-                                    data_type=dtype,
-                                    last_features_computed_at=window_end,
-                                )
-                                upsert_stmt = upsert_stmt.on_conflict_do_update(
-                                    index_elements=["shop_id", "data_type"],
-                                    set_=dict(last_features_computed_at=window_end),
-                                )
-                                await session.execute(upsert_stmt)
-                        await session.commit()
-                    logger.info(
-                        "💾 Feature watermarks updated",
-                        extra={
-                            "shop_id": shop_id,
-                            "window_end": window_end.isoformat(),
-                        },
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to update feature watermarks: {e}")
-
             # Trigger unified Gorse sync after successful feature computation
-            # Add a small delay to ensure database transactions are committed
-            import asyncio
-
             await asyncio.sleep(0.1)  # 100ms delay to ensure DB commit
             await self._trigger_gorse_sync(shop_id, save_results)
 
@@ -907,9 +603,11 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     )
                     all_features_succeeded = False
 
-            # Log the overall success status (no timestamp update needed - features are self-tracking)
+            # Log the overall success status
             if all_features_succeeded:
-                pass
+                logger.info(
+                    f"✅ All feature types processed successfully for shop {shop_id}"
+                )
             else:
                 logger.warning(
                     f"Some feature types failed for shop {shop_id} - will retry on next run"
@@ -919,14 +617,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "success": True,
                 "shop_id": shop_id,
                 "results": save_results,
-                "incremental": incremental,
                 "all_features_succeeded": all_features_succeeded,
                 "data_loaded": {
                     "products": len(products),
                     "customers": len(customers),
                     "orders": len(orders),
                     "collections": len(collections),
-                    # NEW: Include unified analytics data counts
                     "user_interactions": len(user_interactions),
                     "user_sessions": len(user_sessions),
                     "purchase_attributions": len(purchase_attributions),
@@ -935,7 +631,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             }
 
         except Exception as e:
-            logger.error(f"Comprehensive pipeline failed for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Unified feature pipeline failed for shop {shop_id}: {str(e)}"
+            )
             return {
                 "success": False,
                 "error": str(e),
@@ -1597,40 +1295,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Initialize unified Gorse service
             gorse_service = UnifiedGorseService()
 
-            # Run unified sync and training
-            # If we have new features, use incremental sync, otherwise skip
-            total_new_features = sum(
-                result.get("saved_count", 0)
-                for result in save_results.values()
-                if isinstance(result, dict)
-            )
+            # Run unified sync and training - no complex mode switching
+            result = await gorse_service.sync_and_train(shop_id=shop_id)
 
-            if total_new_features > 0:
-                # We have new features, run incremental sync
-                # Use a small time buffer to ensure we catch the features we just created
-                result = await gorse_service.sync_and_train(
-                    shop_id=shop_id,
-                    sync_type="incremental",
-                    since_hours=0,  # Use auto-detection to find the right timestamp
-                    trigger_source="feature_computation",
-                )
-            else:
-                # No new features, skip sync
-                import time
-
-                result = {
-                    "job_id": f"skipped_sync_{shop_id}_{int(time.time())}",
-                    "shop_id": shop_id,
-                    "sync_type": "skipped",
-                    "users_synced": 0,
-                    "items_synced": 0,
-                    "feedback_synced": 0,
-                    "sessions_synced": 0,
-                    "customer_behaviors_synced": 0,
-                    "collections_synced": 0,
-                    "training_triggered": False,
-                    "errors": [],
-                }
+            logger.info(f"✅ Gorse sync completed for shop {shop_id}: {result}")
 
         except Exception as e:
             logger.error(

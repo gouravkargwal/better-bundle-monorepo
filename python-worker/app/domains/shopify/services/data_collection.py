@@ -88,27 +88,26 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         access_token: str = None,
         limit: Optional[int] = None,
         since_id: Optional[str] = None,
-        force_full_collection: bool = False,
         specific_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Collect data by type - unified approach for all collection scenarios.
-
-        This method handles both webhook events (specific IDs) and analysis triggers
-        (time-based collection) using a single, unified approach.
+        Unified data collection - no complex mode switching
+        Just collect data chunks like a proper Kafka system
         """
         # Step 1: Get data type configuration
         config = self._get_data_type_config(data_type)
 
-        # Step 2: Determine collection parameters
-        collection_params = await self._determine_collection_parameters(
-            shop_id, data_type, force_full_collection, specific_ids
-        )
-
-        # Step 3: Execute collection with determined parameters
-        return await self._execute_collection(
-            data_type, shop_domain, config, collection_params, limit, since_id
-        )
+        # Step 2: Execute collection - no complex mode switching
+        if specific_ids:
+            # Webhook collection for specific IDs
+            return await self._execute_webhook_collection(
+                data_type, shop_domain, specific_ids
+            )
+        else:
+            # Full collection for all data
+            return await self._execute_full_collection(
+                data_type, shop_domain, config, limit, since_id
+            )
 
     def _get_data_type_config(self, data_type: str) -> Dict[str, str]:
         """Get configuration for a data type."""
@@ -116,122 +115,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if not config:
             raise ValueError(f"Unsupported data type: {data_type}")
         return config
-
-    async def _determine_collection_parameters(
-        self,
-        shop_id: str,
-        data_type: str,
-        force_full_collection: bool,
-        specific_ids: Optional[List[str]],
-    ) -> Dict[str, Any]:
-        """
-        Determine collection parameters - unified approach for all scenarios.
-
-        This method creates a single set of parameters that works for both
-        webhook events (specific IDs) and analysis triggers (time-based).
-        """
-        # If we have specific IDs, this is a webhook event
-        if specific_ids:
-            logger.info(f"🎯 Webhook collection for {data_type} IDs: {specific_ids}")
-            return {
-                "type": "webhook",
-                "specific_ids": specific_ids,
-                "query_since": None,
-                "query_filter": None,
-            }
-
-        # Otherwise, determine time-based collection strategy
-        if force_full_collection:
-            logger.info(f"🔄 Force full collection for {data_type}")
-            return {
-                "type": "full",
-                "specific_ids": None,
-                "query_since": None,
-                "query_filter": None,
-            }
-
-        # Check for existing watermarks to determine incremental vs full
-        pw = await self.pipeline_watermark_repository.get_by_shop_and_data_type(
-            shop_id=shop_id, data_type=data_type
-        )
-
-        if pw is None:
-            logger.info(f"🆕 No watermark found for {data_type}, doing full collection")
-            return {
-                "type": "full",
-                "specific_ids": None,
-                "query_since": None,
-                "query_filter": None,
-            }
-        else:
-            logger.info(
-                f"📊 Watermark found for {data_type}, doing incremental collection"
-            )
-            # Calculate incremental parameters
-            query_params = await self._calculate_incremental_parameters(
-                shop_id, data_type
-            )
-            return {
-                "type": "incremental",
-                "specific_ids": None,
-                "query_since": query_params["query_since"],
-                "query_filter": query_params["query_filter"],
-                "last_collected": query_params["last_collected"],
-            }
-
-    async def _calculate_incremental_parameters(
-        self, shop_id: str, data_type: str
-    ) -> Dict[str, Any]:
-        """Calculate parameters for incremental collection."""
-        from datetime import timedelta
-
-        # Get the last collected timestamp from watermark
-        pw = await self.pipeline_watermark_repository.get_by_shop_and_data_type(
-            shop_id=shop_id, data_type=data_type
-        )
-
-        last_collected = self._ensure_aware_utc(pw.last_collected_at) if pw else None
-
-        # Calculate safe since time (add 1 second to avoid duplicates)
-        safe_since = (last_collected + timedelta(seconds=1)) if last_collected else None
-
-        # Clamp to last 7 days maximum
-        query_since = (
-            max(safe_since, now_utc() - timedelta(days=7))
-            if safe_since
-            else now_utc() - timedelta(days=7)
-        )
-
-        return {
-            "query_since": query_since,
-            "query_filter": None,  # Will be set in _execute_incremental_collection
-            "last_collected": last_collected,
-        }
-
-    async def _execute_collection(
-        self,
-        data_type: str,
-        shop_domain: str,
-        config: Dict[str, str],
-        collection_params: Dict[str, Any],
-        limit: Optional[int],
-        since_id: Optional[str],
-    ) -> List[Dict[str, Any]]:
-        """Execute collection using unified parameters."""
-        collection_type = collection_params["type"]
-
-        if collection_type == "webhook":
-            return await self._execute_webhook_collection(
-                data_type, shop_domain, collection_params["specific_ids"]
-            )
-        elif collection_type == "full":
-            return await self._execute_full_collection(
-                data_type, shop_domain, config, limit, since_id
-            )
-        else:  # incremental
-            return await self._execute_incremental_collection(
-                data_type, shop_domain, config, collection_params, limit, since_id
-            )
 
     async def _execute_webhook_collection(
         self, data_type: str, shop_domain: str, specific_ids: List[str]
@@ -263,70 +146,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             since_id=since_id,
         )
 
-    async def _execute_incremental_collection(
-        self,
-        data_type: str,
-        shop_domain: str,
-        config: Dict[str, str],
-        collection_params: Dict[str, Any],
-        limit: Optional[int],
-        since_id: Optional[str],
-    ) -> List[Dict[str, Any]]:
-        """Execute incremental collection for a data type."""
-        logger.info(f"📊 Incremental collection for {data_type}")
-
-        # Create GraphQL-style filter
-        query_filter = (
-            f"{config['field']}:>'{collection_params['query_since'].isoformat()}'"
-        )
-
-        # Log the collection window
-        self._log_collection_window(data_type, collection_params)
-
-        # Execute the collection
-        result = await self._collect_data_generic(
-            shop_domain=shop_domain,
-            data_type=data_type,
-            api_method=config["api"],
-            query_since=collection_params["query_since"],
-            query=query_filter,
-            limit=limit,
-            since_id=since_id,
-        )
-
-        # Log results
-        self._log_incremental_collection_results(data_type, result)
-
-        return result
-
-    def _log_collection_window(self, data_type: str, collection_params: Dict[str, Any]):
-        """Log the collection window for debugging."""
-        logger.info(
-            "📅 Collection watermark window",
-            extra={
-                "data_type": data_type,
-                "lastCollectedAt": (
-                    collection_params["last_collected"].isoformat()
-                    if collection_params.get("last_collected")
-                    else None
-                ),
-                "query_since": collection_params["query_since"].isoformat(),
-            },
-        )
-
-    def _log_incremental_collection_results(
-        self, data_type: str, result: List[Dict[str, Any]]
-    ):
-        """Log the results of incremental collection."""
-        if result and len(result) > 0:
-            logger.info(
-                f"✅ Incremental collection found {len(result)} new/updated {data_type}"
-            )
-        else:
-            logger.info(
-                f"📭 No new/updated data found for {data_type} in incremental collection"
-            )
-
     async def _has_any_raw_data(self, shop_id: str, data_type: str) -> bool:
         """Check if we have any raw data for this data type using repository."""
         try:
@@ -353,20 +172,16 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         shop_domain: str,
         access_token: str,
         shop_id: str,
-        mode: str = "incremental",
         collection_payload: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """
-        Collect data from Shopify API based on collection payload.
-
-        This is the main entry point for data collection. It handles both
-        webhook events (specific IDs) and analysis triggers (bulk collection).
+        Unified data collection - process all available data for a shop
+        No complex modes - just collect data chunks like a proper Kafka system
 
         Args:
             shop_domain: Shopify shop domain
             access_token: Shopify access token
             shop_id: Internal shop ID
-            mode: Collection mode (incremental or historical)
             collection_payload: Payload specifying what data to collect
 
         Returns:
@@ -395,7 +210,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
             # Step 5: Trigger normalization for the collected data
             await self._trigger_normalization_for_results(
-                shop_id, collection_results, session_info["start_time"], mode
+                shop_id, collection_results, session_info["start_time"]
             )
 
             # Step 6: Create success response
@@ -456,14 +271,14 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         }
 
     async def _trigger_normalization_for_results(
-        self, shop_id: str, collection_results: Dict, start_time: datetime, mode: str
+        self, shop_id: str, collection_results: Dict, start_time: datetime
     ):
         """Trigger normalization for the collected data."""
         specific_ids = collection_results.get("specific_ids", {})
         processed_types = collection_results.get("processed_types", [])
 
         await self._trigger_normalization(
-            shop_id, processed_types, start_time, mode, specific_ids
+            shop_id, processed_types, start_time, specific_ids
         )
 
     def _create_success_response(
@@ -705,14 +520,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         shop_id: str,
         data_types: List[str],
         collection_start_time: datetime,
-        mode: str = "incremental",
         specific_ids: Dict[str, List[str]] = None,
     ):
         """
-        Trigger normalization for processed data types using Kafka.
-
-        This method handles both webhook events (specific IDs) and batch processing
-        by publishing appropriate normalization events to Kafka.
+        Unified normalization trigger - no complex mode switching
+        Just process data chunks like a proper Kafka system
         """
         if not data_types:
             logger.info("No data types to normalize")
@@ -721,7 +533,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         logger.info(
             f"🔄 Triggering normalization for shop {shop_id}",
             data_types=data_types,
-            mode=mode,
             has_specific_ids=bool(specific_ids),
         )
 
@@ -738,7 +549,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 # Process each data type
                 for data_type in data_types:
                     await self._process_data_type_normalization(
-                        publisher, shop_id, data_type, mode, specific_ids
+                        publisher, shop_id, data_type, specific_ids
                     )
             finally:
                 await publisher.close()
@@ -760,73 +571,32 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         publisher,
         shop_id: str,
         data_type: str,
-        mode: str,
         specific_ids: Dict[str, List[str]],
     ):
         """Process normalization for a single data type - unified approach."""
-        # Determine normalization parameters
-        normalization_params = self._determine_normalization_parameters(
-            data_type, mode, specific_ids
-        )
-
-        # Execute normalization based on parameters
-        await self._execute_normalization(
-            publisher, shop_id, data_type, normalization_params
-        )
-
-    def _determine_normalization_parameters(
-        self, data_type: str, mode: str, specific_ids: Dict[str, List[str]]
-    ) -> Dict[str, Any]:
-        """Determine normalization parameters - unified approach."""
         # Check if this is a webhook event with specific IDs
         if specific_ids and specific_ids.get(data_type):
-            return {
-                "type": "webhook",
-                "shopify_ids": specific_ids[data_type],
-                "mode": mode,
-            }
-        else:
-            return {
-                "type": "batch",
-                "shopify_ids": None,
-                "mode": mode,
-            }
-
-    async def _execute_normalization(
-        self,
-        publisher,
-        shop_id: str,
-        data_type: str,
-        normalization_params: Dict[str, Any],
-    ):
-        """Execute normalization using unified parameters."""
-        if normalization_params["type"] == "webhook":
             await self._execute_webhook_normalization(
-                publisher, shop_id, data_type, normalization_params
+                publisher, shop_id, data_type, specific_ids[data_type]
             )
         else:
-            await self._execute_batch_normalization(
-                publisher, shop_id, data_type, normalization_params
-            )
+            await self._execute_batch_normalization(publisher, shop_id, data_type)
 
     async def _execute_webhook_normalization(
         self,
         publisher,
         shop_id: str,
         data_type: str,
-        normalization_params: Dict[str, Any],
+        shopify_ids: List[str],
     ):
         """Execute webhook normalization for specific IDs."""
-        shopify_ids = normalization_params["shopify_ids"]
-        mode = normalization_params["mode"]
-
         logger.info(
             f"🎯 Processing webhook normalization for {data_type} IDs: {shopify_ids}"
         )
 
         for shopify_id in shopify_ids:
             normalization_event = self._create_webhook_normalization_event(
-                shop_id, data_type, mode, shopify_id
+                shop_id, data_type, shopify_id
             )
 
             message_id = await publisher.publish_normalization_event(
@@ -842,7 +612,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
 
     def _create_webhook_normalization_event(
-        self, shop_id: str, data_type: str, mode: str, shopify_id: str
+        self, shop_id: str, data_type: str, shopify_id: str
     ) -> Dict[str, Any]:
         """Create a normalization event for webhook processing."""
         return {
@@ -850,7 +620,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             "shop_id": shop_id,
             "data_type": data_type,
             "format": "graphql",  # Webhook events use GraphQL format
-            "mode": mode,
             "shopify_id": shopify_id,  # Specific ID for webhook processing
             "timestamp": now_utc().isoformat(),
             "source": "data_collection_service_webhook",
@@ -861,20 +630,12 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         publisher,
         shop_id: str,
         data_type: str,
-        normalization_params: Dict[str, Any],
     ):
         """Execute batch normalization for time-based processing."""
-        mode = normalization_params["mode"]
-
         logger.info(f"📦 Processing batch normalization for {data_type}")
 
-        # Update watermark for batch processing
-        await self._update_collection_watermark(shop_id, data_type)
-
         # Create and publish batch normalization event
-        normalization_event = self._create_batch_normalization_event(
-            shop_id, data_type, mode
-        )
+        normalization_event = self._create_batch_normalization_event(shop_id, data_type)
 
         message_id = await publisher.publish_normalization_event(normalization_event)
 
@@ -920,7 +681,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             logger.error(f"Failed to update watermark for {data_type}: {e}")
 
     def _create_batch_normalization_event(
-        self, shop_id: str, data_type: str, mode: str
+        self, shop_id: str, data_type: str
     ) -> Dict[str, Any]:
         """Create a normalization event for batch processing."""
         return {
@@ -928,7 +689,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             "shop_id": shop_id,
             "data_type": data_type,
             "format": "graphql",
-            "mode": mode,
             "timestamp": now_utc().isoformat(),
             "source": "data_collection_service",
         }

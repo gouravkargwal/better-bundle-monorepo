@@ -7,8 +7,6 @@ from typing import Dict, Any
 from datetime import datetime
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.messaging.event_subscriber import EventSubscriber
-from app.core.messaging.interfaces import EventHandler
 from app.core.logging import get_logger
 from app.domains.shopify.services.normalisation_service import (
     NormalizationService,
@@ -22,9 +20,7 @@ class NormalizationKafkaConsumer:
 
     def __init__(self):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
-        self.event_subscriber = EventSubscriber(kafka_settings.model_dump())
         self._initialized = False
-
         self.normalization_service = NormalizationService()
 
     async def initialize(self):
@@ -34,16 +30,6 @@ class NormalizationKafkaConsumer:
             await self.consumer.initialize(
                 topics=["normalization-jobs"], group_id="normalization-processors"
             )
-
-            # Initialize event subscriber with existing consumer to avoid duplicate consumers
-            await self.event_subscriber.initialize(
-                topics=["normalization-jobs"],
-                group_id="normalization-processors",
-                existing_consumer=self.consumer,  # Reuse existing consumer
-            )
-
-            # Add event handlers
-            self.event_subscriber.add_handler(NormalizationJobHandler(self))
 
             self._initialized = True
             logger.info("Normalization Kafka consumer initialized")
@@ -59,9 +45,13 @@ class NormalizationKafkaConsumer:
 
         try:
             logger.info("Starting normalization consumer...")
-            await self.event_subscriber.consume_and_handle(
-                topics=["normalization-jobs"], group_id="normalization-processors"
-            )
+            async for message in self.consumer.consume():
+                try:
+                    await self._handle_message(message)
+                    await self.consumer.commit(message)
+                except Exception as e:
+                    logger.error(f"Error processing normalization message: {e}")
+                    continue
         except Exception as e:
             logger.error(f"Error in normalization consumer: {e}")
             raise
@@ -70,8 +60,6 @@ class NormalizationKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        if self.event_subscriber:
-            await self.event_subscriber.close()
         logger.info("Normalization consumer closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
@@ -81,22 +69,12 @@ class NormalizationKafkaConsumer:
             "last_health_check": datetime.utcnow().isoformat(),
         }
 
-
-class NormalizationJobHandler(EventHandler):
-    """Handler for normalization jobs"""
-
-    def __init__(self, consumer: NormalizationKafkaConsumer):
-        self.consumer = consumer
-        self.logger = get_logger(__name__)
-
-    def can_handle(self, event_type: str) -> bool:
-        return event_type == "normalize_data"  # Only unified event type
-
-    async def handle(self, event: Dict[str, Any]) -> bool:
+    async def _handle_message(self, message: Dict[str, Any]):
+        """Handle individual normalization messages"""
         try:
-            self.logger.info(f"🔄 Processing normalization message: {event}")
+            logger.info(f"🔄 Processing normalization message: {message}")
 
-            payload = event.get("data") or event
+            payload = message.get("value") or message
             if isinstance(payload, str):
                 try:
                     payload = json.loads(payload)
@@ -104,68 +82,57 @@ class NormalizationJobHandler(EventHandler):
                     pass
             event_type = payload.get("event_type")
 
-            self.logger.info(f"📋 Extracted event_type: {event_type}")
+            logger.info(f"📋 Extracted event_type: {event_type}")
 
             if event_type == "normalize_data":
-                self.logger.info("📥 Processing normalize_data event")
+                logger.info("📥 Processing normalize_data event")
                 await self._handle_unified_normalization(payload)
             else:
                 # Ignore non-normalization messages
-                self.logger.info(f"⏭️ Ignoring non-normalization message: {event_type}")
-                return True
-
-            return True
+                logger.info(f"⏭️ Ignoring non-normalization message: {event_type}")
 
         except Exception as e:
-            self.logger.error(f"Normalization failed: {e}")
-            return False
+            logger.error(f"Normalization failed: {e}")
+            raise
 
     async def _handle_unified_normalization(self, payload: Dict[str, Any]):
-        """Unified normalization handler for the new data collection flow"""
-        self.logger.info(f"🔄 Starting unified normalization: {payload}")
+        """Unified normalization handler - no complex mode switching"""
+        logger.info(f"🔄 Starting unified normalization: {payload}")
 
         shop_id = payload.get("shop_id")
         data_type = payload.get("data_type")
         format_type = payload.get("format", "graphql")
-        start_time = payload.get("start_time")
-        end_time = payload.get("end_time")
         shopify_id = payload.get("shopify_id")
-        mode = payload.get("mode", "incremental")
         source = payload.get("source", "unknown")
 
         if not shop_id or not data_type:
-            self.logger.error(
-                "❌ Invalid normalization event: missing shop_id or data_type"
-            )
+            logger.error("❌ Invalid normalization event: missing shop_id or data_type")
             return
 
-        self.logger.info(
+        logger.info(
             f"📋 Normalization event details: shop_id={shop_id}, data_type={data_type}, "
-            f"format={format_type}, mode={mode}, source={source}"
+            f"format={format_type}, source={source}"
         )
 
-        # Create unified normalization parameters
+        # Create simplified normalization parameters
         normalization_params = {
             "shopify_id": shopify_id,
             "format": format_type,
-            "mode": mode,
-            "start_time": start_time,
-            "end_time": end_time,
             "source": source,
         }
 
         # Use unified normalization method
-        success = await self.consumer.normalization_service.normalize_data(
+        success = await self.normalization_service.normalize_data(
             shop_id, data_type, normalization_params
         )
 
         if success:
-            self.logger.info(f"✅ Normalization completed for {data_type}")
+            logger.info(f"✅ Normalization completed for {data_type}")
 
             # Trigger feature computation for the processed data type
-            await self.consumer.normalization_service.feature_service.trigger_feature_computation(
-                shop_id, data_type, mode
+            await self.normalization_service.feature_service.trigger_feature_computation(
+                shop_id, data_type
             )
-            self.logger.info(f"✅ Feature computation triggered for {data_type}")
+            logger.info(f"✅ Feature computation triggered for {data_type}")
         else:
-            self.logger.error(f"❌ Normalization failed for {data_type}")
+            logger.error(f"❌ Normalization failed for {data_type}")

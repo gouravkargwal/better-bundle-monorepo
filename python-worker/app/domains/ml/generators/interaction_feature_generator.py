@@ -42,10 +42,6 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             Dictionary matching InteractionFeatures table schema
         """
         try:
-            logger.debug(
-                f"Computing interaction features for shop: {shop_id}, "
-                f"customer: {customer_id}, product: {product_id}"
-            )
 
             # Get relevant data from context
             behavioral_events = context.get("behavioral_events", [])
@@ -172,11 +168,6 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         """Get all purchases of a product by a customer"""
         purchases = []
 
-        logger.info(
-            f"🔍 INTERACTION FEATURE: Looking for purchases for customer {customer_id}, product {product_id}"
-        )
-        logger.info(f"🔍 INTERACTION FEATURE: Processing {len(orders)} orders")
-
         for order in orders:
             # Check if order is for this customer
             # Customer IDs are already normalized at data ingestion level
@@ -191,9 +182,6 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             if line_items is None:
                 line_items = []
 
-            logger.info(
-                f"🔍 INTERACTION FEATURE: Order {order.get('order_id')} has {len(line_items)} line items"
-            )
             for item in line_items:
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure
@@ -225,9 +213,6 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                     )
                     break  # Only count once per order
 
-        logger.info(
-            f"🔍 INTERACTION FEATURE: Found {len(purchases)} purchases for customer {customer_id}, product {product_id}"
-        )
         return purchases
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:

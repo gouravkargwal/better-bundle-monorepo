@@ -1,7 +1,6 @@
 from typing import Dict, Any
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.messaging.event_subscriber import EventSubscriber
 from app.core.logging import get_logger
 from app.repository.ShopRepository import ShopRepository
 from app.services.shop_cache_service import get_shop_cache_service
@@ -14,7 +13,6 @@ class DataCollectionKafkaConsumer:
 
     def __init__(self, shopify_service=None, shop_repo: ShopRepository = None):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
-        self.event_subscriber = EventSubscriber(kafka_settings.model_dump())
         self.shopify_service = shopify_service
         self.shop_repo = shop_repo or ShopRepository()
         self._initialized = False
@@ -32,13 +30,6 @@ class DataCollectionKafkaConsumer:
                 group_id="data-collection-processors",
             )
 
-            await self.event_subscriber.initialize(
-                topics=["data-collection-jobs", "shopify-events"],
-                group_id="data-collection-processors",
-                existing_consumer=self.consumer,
-            )
-
-            self.event_subscriber.add_handler(self)
             self._initialized = True
 
         except Exception as e:
@@ -50,10 +41,14 @@ class DataCollectionKafkaConsumer:
         if not self._initialized:
             await self.initialize()
         try:
-            await self.event_subscriber.consume_and_handle(
-                topics=["data-collection-jobs", "shopify-events"],
-                group_id="data-collection-processors",
-            )
+            logger.info("Starting data collection consumer...")
+            async for message in self.consumer.consume():
+                try:
+                    await self._handle_message(message)
+                    await self.consumer.commit(message)
+                except Exception as e:
+                    logger.error(f"Error processing data collection message: {e}")
+                    continue
         except Exception as e:
             logger.exception(f"❌ Error in data collection consumer: {e}")
             raise
@@ -62,22 +57,32 @@ class DataCollectionKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        if self.event_subscriber:
-            await self.event_subscriber.close()
 
-    async def handle(self, event: Dict[str, Any]) -> bool:
-        """Handle both data collection jobs and webhook events"""
+    async def _handle_message(self, message: Dict[str, Any]):
+        """Handle individual data collection messages"""
         try:
-            event_type = event.get("event_type")
+            logger.info(f"🔄 Processing data collection message: {message}")
+
+            payload = message.get("value") or message
+            if isinstance(payload, str):
+                try:
+                    import json
+
+                    payload = json.loads(payload)
+                except Exception:
+                    pass
+
+            event_type = payload.get("event_type")
+            logger.info(f"📋 Extracted event_type: {event_type}")
 
             # Resolve shop data once for all event types
-            shop_data = await self._resolve_shop_data(event)
+            shop_data = await self._resolve_shop_data(payload)
             if not shop_data:
-                return False
+                return
 
             # Route to appropriate handler
             if event_type == "data_collection":
-                return await self._handle_data_collection_job(event, shop_data)
+                await self._handle_data_collection_job(payload, shop_data)
             elif event_type in [
                 "product_updated",
                 "product_created",
@@ -92,14 +97,31 @@ class DataCollectionKafkaConsumer:
                 "customer_created",
                 "customer_updated",
             ]:
-                return await self._handle_webhook_event(event, shop_data)
+                await self._handle_webhook_event(payload, shop_data)
             else:
                 logger.warning(f"❌ Unknown event type: {event_type}")
-                return False
 
         except Exception as e:
-            logger.exception(f"Failed to process event: {e}")
-            return False
+            logger.exception(f"Failed to process data collection message: {e}")
+            raise
+
+    def can_handle(self, event_type: str) -> bool:
+        """Indicate which event types this consumer can handle"""
+        return event_type in [
+            "data_collection",
+            "product_updated",
+            "product_created",
+            "product_deleted",
+            "collection_updated",
+            "collection_created",
+            "collection_deleted",
+            "order_paid",
+            "order_created",
+            "order_updated",
+            "order_cancelled",
+            "customer_created",
+            "customer_updated",
+        ]
 
     async def _resolve_shop_data(self, event: Dict[str, Any]) -> Dict[str, Any] | None:
         """Resolve shop data for any event type"""
@@ -158,23 +180,22 @@ class DataCollectionKafkaConsumer:
 
     async def _handle_data_collection_job(
         self, event: Dict[str, Any], shop_data: Dict[str, Any]
-    ) -> bool:
+    ):
         """Handle data collection jobs from analysis triggers"""
         job_id = event.get("job_id")
-        mode = event.get("mode", "incremental")
         collection_payload = event.get("collection_payload", {})
 
         if not job_id:
             logger.error("❌ Missing job_id for data collection job")
-            return False
+            return
 
-        return await self._process_data_collection_job(
-            job_id, shop_data["id"], mode, collection_payload, shop_data
+        await self._process_data_collection_job(
+            job_id, shop_data["id"], collection_payload, shop_data
         )
 
     async def _handle_webhook_event(
         self, event: Dict[str, Any], shop_data: Dict[str, Any]
-    ) -> bool:
+    ):
         """Handle webhook events and convert to data collection jobs"""
         try:
             event_type = event.get("event_type")
@@ -182,20 +203,21 @@ class DataCollectionKafkaConsumer:
 
             if not shopify_id:
                 logger.error(f"❌ No shopify_id in webhook event: {event_type}")
-                return False
+                return
 
             # Check if this is a deletion event
             if event_type.endswith("_deleted"):
                 logger.info(f"🗑️ Handling deletion event: {event_type} for {shopify_id}")
-                return await self._handle_deletion_event(
+                await self._handle_deletion_event(
                     event_type, shopify_id, shop_data["id"]
                 )
+                return
 
             # Create collection payload based on event type
             collection_payload = self._create_collection_payload(event_type, shopify_id)
             if not collection_payload:
                 logger.warning(f"❌ No collection payload for event type: {event_type}")
-                return False
+                return
 
             # Create data collection job
             job_id = f"webhook_{event_type}_{shopify_id}_{event.get('timestamp', '')}"
@@ -208,13 +230,13 @@ class DataCollectionKafkaConsumer:
             )
 
             # Process as data collection job with resolved shop data
-            return await self._process_data_collection_job(
-                job_id, shop_data["id"], "incremental", collection_payload, shop_data
+            await self._process_data_collection_job(
+                job_id, shop_data["id"], collection_payload, shop_data
             )
 
         except Exception as e:
             logger.exception(f"Failed to handle webhook event: {e}")
-            return False
+            raise
 
     def _create_collection_payload(
         self, event_type: str, shopify_id: str
@@ -280,7 +302,6 @@ class DataCollectionKafkaConsumer:
         self,
         job_id: str,
         shop_id: str,
-        mode: str = "incremental",
         collection_payload: Dict[str, Any] = None,
         shop_data: Dict[str, Any] = None,
     ):
@@ -296,7 +317,6 @@ class DataCollectionKafkaConsumer:
                 shop_domain=shop_data["domain"],
                 shop_id=shop_data["id"],
                 access_token=shop_data["access_token"],
-                mode=mode,
                 collection_payload=collection_payload,
             )
 
@@ -310,15 +330,14 @@ class DataCollectionKafkaConsumer:
                     else "non-dict result"
                 ),
             )
-            return True
 
         except Exception as e:
             logger.exception(f"Data collection job failed: {e}")
-            return False
+            raise
 
     async def _handle_deletion_event(
         self, event_type: str, shopify_id: str, shop_id: str
-    ) -> bool:
+    ):
         """Handle deletion events by marking entities as inactive"""
         try:
             # Determine data type from event type
@@ -332,7 +351,7 @@ class DataCollectionKafkaConsumer:
                 data_type = "orders"
             else:
                 logger.warning(f"❌ Unknown deletion event type: {event_type}")
-                return False
+                return
 
             logger.info(f"🗑️ Processing {data_type} deletion for {shopify_id}")
 
@@ -359,8 +378,7 @@ class DataCollectionKafkaConsumer:
             logger.info(
                 f"✅ Successfully processed {data_type} deletion for {shopify_id}"
             )
-            return True
 
         except Exception as e:
             logger.exception(f"❌ Failed to handle deletion event: {e}")
-            return False
+            raise

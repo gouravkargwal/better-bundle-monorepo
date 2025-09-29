@@ -6,8 +6,6 @@ from typing import Any, Dict, List
 from datetime import datetime
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.messaging.event_subscriber import EventSubscriber
-from app.core.messaging.interfaces import EventHandler
 from app.core.database.simple_db_client import get_database
 from app.core.logging import get_logger
 
@@ -18,8 +16,7 @@ class RefundAttributionKafkaConsumer:
     """Kafka consumer for refund attribution jobs"""
 
     def __init__(self):
-        self.consumer = KafkaConsumer(kafka_settings.dict())
-        self.event_subscriber = EventSubscriber(kafka_settings.dict())
+        self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self._initialized = False
 
     async def initialize(self):
@@ -30,15 +27,6 @@ class RefundAttributionKafkaConsumer:
                 topics=["refund-attribution-jobs"],
                 group_id="refund-attribution-processors",
             )
-
-            # Initialize event subscriber
-            await self.event_subscriber.initialize(
-                topics=["refund-attribution-jobs"],
-                group_id="refund-attribution-processors",
-            )
-
-            # Add event handlers
-            self.event_subscriber.add_handler(RefundAttributionJobHandler())
 
             self._initialized = True
             logger.info("Refund attribution Kafka consumer initialized")
@@ -54,10 +42,13 @@ class RefundAttributionKafkaConsumer:
 
         try:
             logger.info("Starting refund attribution consumer...")
-            await self.event_subscriber.consume_and_handle(
-                topics=["refund-attribution-jobs"],
-                group_id="refund-attribution-processors",
-            )
+            async for message in self.consumer.consume():
+                try:
+                    await self._handle_message(message)
+                    await self.consumer.commit(message)
+                except Exception as e:
+                    logger.error(f"Error processing refund attribution message: {e}")
+                    continue
         except Exception as e:
             logger.error(f"Error in refund attribution consumer: {e}")
             raise
@@ -66,8 +57,6 @@ class RefundAttributionKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        if self.event_subscriber:
-            await self.event_subscriber.close()
         logger.info("Refund attribution consumer closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
@@ -77,40 +66,33 @@ class RefundAttributionKafkaConsumer:
             "last_health_check": datetime.utcnow().isoformat(),
         }
 
-
-class RefundAttributionJobHandler(EventHandler):
-    """Handler for refund attribution jobs"""
-
-    def __init__(self):
-        self.logger = get_logger(__name__)
-
-    def can_handle(self, event_type: str) -> bool:
-        return event_type in [
-            "refund_created",
-            "refund_attribution_batch",
-            "refund_attribution",
-        ]
-
-    async def handle(self, event: Dict[str, Any]) -> bool:
+    async def _handle_message(self, message: Dict[str, Any]):
+        """Handle individual refund attribution messages"""
         try:
-            self.logger.info(f"🔄 Processing refund attribution message: {event}")
+            logger.info(f"🔄 Processing refund attribution message: {message}")
 
-            event_type = event.get("event_type")
+            payload = message.get("value") or message
+            if isinstance(payload, str):
+                try:
+                    import json
+
+                    payload = json.loads(payload)
+                except Exception:
+                    pass
+
+            event_type = payload.get("event_type")
 
             # Route to appropriate handler
             if event_type == "refund_created":
-                await self._handle_individual_refund_attribution(event)
+                await self._handle_individual_refund_attribution(payload)
             elif event_type == "refund_attribution_batch":
-                await self._handle_batch_refund_attribution(event)
+                await self._handle_batch_refund_attribution(payload)
             else:
-                self.logger.warning(f"⚠️ Unknown event type: {event_type}")
-                return True
-
-            return True
+                logger.warning(f"⚠️ Unknown event type: {event_type}")
 
         except Exception as e:
-            self.logger.error(f"Failed to process refund attribution message: {e}")
-            return False
+            logger.error(f"Failed to process refund attribution message: {e}")
+            raise
 
     async def _handle_individual_refund_attribution(self, message: Dict[str, Any]):
         """Handle individual refund attribution (real-time events)."""
@@ -124,19 +106,19 @@ class RefundAttributionJobHandler(EventHandler):
             if not refund_id:
                 refund_id = message.get("raw_record_id")
                 if not refund_id:
-                    self.logger.warning(
+                    logger.warning(
                         "⚠️ No refund_id or raw_record_id found in message, skipping refund attribution"
                     )
                     return
 
             if not shop_id or not refund_id:
-                self.logger.error(
+                logger.error(
                     "❌ Invalid refund_created payload - missing required fields",
                     message=message,
                 )
                 return
 
-            self.logger.info(
+            logger.info(
                 f"📋 Processing individual refund attribution: shop_id={shop_id}, refund_id={refund_id}, order_id={order_id}"
             )
 
@@ -145,7 +127,7 @@ class RefundAttributionJobHandler(EventHandler):
             await self._process_single_refund_attribution(refund_id, shop_id, db)
 
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 "Failed to process individual refund attribution", error=str(e)
             )
             raise
@@ -156,13 +138,13 @@ class RefundAttributionJobHandler(EventHandler):
         refund_ids = message.get("refund_ids", [])
 
         if not shop_id or not refund_ids:
-            self.logger.error(
+            logger.error(
                 "❌ Invalid refund_attribution_batch payload - missing required fields",
                 message=message,
             )
             return
 
-        self.logger.info(
+        logger.info(
             f"🔄 Processing batch refund attribution: shop_id={shop_id}, refund_count={len(refund_ids)}"
         )
 
@@ -180,18 +162,18 @@ class RefundAttributionJobHandler(EventHandler):
                         )
                         successful += 1
                     except Exception as e:
-                        self.logger.error(
+                        logger.error(
                             f"Failed to process refund attribution for {refund_id}: {e}"
                         )
                         failed += 1
                         continue
 
-            self.logger.info(
+            logger.info(
                 f"✅ Batch refund attribution completed: successful={successful}, failed={failed}"
             )
 
         except Exception as e:
-            self.logger.error(f"Failed to process batch refund attribution: {e}")
+            logger.error(f"Failed to process batch refund attribution: {e}")
             raise
 
     async def _process_single_refund_attribution(
@@ -203,7 +185,7 @@ class RefundAttributionJobHandler(EventHandler):
             where={"shopId": shop_id, "refundId": refund_id}
         )
         if existing_attribution:
-            self.logger.info(
+            logger.info(
                 f"✅ Refund attribution already exists - skipping",
                 shop_id=shop_id,
                 refund_id=refund_id,
@@ -215,7 +197,7 @@ class RefundAttributionJobHandler(EventHandler):
             where={"shopId": shop_id, "shopifyId": refund_id}
         )
         if not raw_order or not getattr(raw_order, "payload", None):
-            self.logger.warning(
+            logger.warning(
                 "RawOrder not found for refund attribution",
                 shop_id=shop_id,
                 refund_id=refund_id,
@@ -234,7 +216,7 @@ class RefundAttributionJobHandler(EventHandler):
                 break
 
         if not refund_obj:
-            self.logger.warning(
+            logger.warning(
                 "Refund not found in RawOrder payload",
                 shop_id=shop_id,
                 refund_id=refund_id,
@@ -247,7 +229,7 @@ class RefundAttributionJobHandler(EventHandler):
             where={"shopId": shop_id, "orderId": order_id}
         )
         if not order:
-            self.logger.warning(
+            logger.warning(
                 "OrderData not found for refund attribution",
                 shop_id=shop_id,
                 order_id=order_id,
@@ -285,7 +267,7 @@ class RefundAttributionJobHandler(EventHandler):
             }
         )
 
-        self.logger.info(
+        logger.info(
             f"✅ Refund attribution created successfully",
             shop_id=shop_id,
             order_id=order_id,

@@ -617,13 +617,11 @@ class FeatureComputationService:
     def __init__(self):
         self.logger = get_logger(__name__)
 
-    async def trigger_feature_computation(
-        self, shop_id: str, data_type: str, mode: str = "incremental"
-    ):
+    async def trigger_feature_computation(self, shop_id: str, data_type: str):
         """Trigger feature computation after successful normalization."""
         try:
             self.logger.info(
-                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type} in {mode} mode"
+                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type}"
             )
 
             if data_type in ["products", "orders", "customers", "collections", "all"]:
@@ -631,12 +629,8 @@ class FeatureComputationService:
                     f"webhook_feature_compute_{shop_id}_{int(now_utc().timestamp())}"
                 )
 
-                # Use historical mode for feature computation when normalization is in historical mode
-                incremental = mode != "historical"
-
                 metadata = {
                     "batch_size": 100,
-                    "incremental": incremental,  # Use historical processing when mode is historical
                     "trigger_source": "webhook_normalization",
                     "entity_type": data_type,
                     "timestamp": now_utc().isoformat(),
@@ -788,19 +782,19 @@ class NormalizationService:
         self, shop_id: str, data_type: str, normalization_params: Dict[str, Any]
     ) -> bool:
         """
-        Unified normalization method for all scenarios.
-
-        This method handles both webhook events (specific IDs) and batch processing
-        (time-based) using a single, unified approach.
+        Unified normalization - no complex mode switching
+        Just process data chunks like a proper Kafka system
         """
         try:
-            # Determine normalization strategy
-            strategy = self._determine_normalization_strategy(normalization_params)
-
-            # Execute normalization based on strategy
-            return await self._execute_normalization_strategy(
-                strategy, shop_id, data_type, normalization_params
-            )
+            # Check if this is a webhook event with specific IDs
+            if normalization_params.get("shopify_id"):
+                return await self._execute_webhook_normalization(
+                    shop_id, data_type, normalization_params
+                )
+            else:
+                return await self._execute_batch_normalization(
+                    shop_id, data_type, normalization_params
+                )
 
         except Exception as e:
             self.logger.error(
@@ -810,25 +804,6 @@ class NormalizationService:
                 exc_info=True,
             )
             return False
-
-    def _determine_normalization_strategy(
-        self, normalization_params: Dict[str, Any]
-    ) -> str:
-        """Determine normalization strategy based on parameters."""
-        # Check if this is a webhook event with specific IDs
-        if normalization_params.get("shopify_id"):
-            return "webhook"
-        else:
-            return "batch"
-
-    async def _execute_normalization_strategy(
-        self, strategy: str, shop_id: str, data_type: str, params: Dict[str, Any]
-    ) -> bool:
-        """Execute normalization using unified parameters."""
-        if strategy == "webhook":
-            return await self._execute_webhook_normalization(shop_id, data_type, params)
-        else:  # batch
-            return await self._execute_batch_normalization(shop_id, data_type, params)
 
     async def _execute_webhook_normalization(
         self, shop_id: str, data_type: str, params: Dict[str, Any]
@@ -940,97 +915,43 @@ class NormalizationService:
     ) -> bool:
         """Execute batch normalization for time-based processing."""
         format_type = params.get("format", "graphql")
-        mode = params.get("mode", "incremental")
 
         self.logger.info(
             f"📚 Starting batch processing for {data_type}",
             extra={"shop_id": shop_id, "data_type": data_type},
         )
 
-        # Reset watermarks to ensure we process all data
-        await self.reset_watermarks_for_historical_processing(shop_id, data_type)
-
-        # Process with historical mode
+        # Process all data for the shop - no complex mode switching
         return await self.process_normalization_window(
             shop_id=shop_id,
             data_type=data_type,
             format_type=format_type,
-            start_time=None,
-            end_time=None,
-            mode="historical",
         )
-
-    async def reset_watermarks_for_historical_processing(
-        self, shop_id: str, data_type: str
-    ) -> None:
-        """Reset watermarks to enable historical processing of all data."""
-        try:
-            from app.core.database.session import get_session_context
-
-            async with get_session_context() as session:
-                from sqlalchemy import delete
-                from app.core.database.models import PipelineWatermark
-
-                # Delete existing watermarks to force historical processing
-                await session.execute(
-                    delete(PipelineWatermark).where(
-                        (PipelineWatermark.shop_id == shop_id)
-                        & (PipelineWatermark.data_type == data_type)
-                    )
-                )
-                await session.commit()
-
-                self.logger.info(
-                    f"🔄 Reset watermarks for historical processing",
-                    extra={"shop_id": shop_id, "data_type": data_type},
-                )
-        except Exception as e:
-            self.logger.error(f"Failed to reset watermarks: {e}")
 
     async def process_normalization_window(
         self,
         shop_id: str,
         data_type: str,
         format_type: str,
-        start_time: Optional[str],
-        end_time: Optional[str],
-        mode: str = "incremental",
     ) -> bool:
         """
-        Process normalization for a time window.
-
-        This is the main method for processing normalization jobs. It handles both
-        incremental processing (new data only) and historical processing (all data).
-
-        Args:
-            shop_id: ID of the shop to process
-            data_type: Type of data to process (products, orders, etc. or "all")
-            format_type: Data format (graphql)
-            start_time: Start of time window (optional)
-            end_time: End of time window (optional)
-            mode: "incremental" for new data only, "historical" for all data
-
-        Returns:
-            bool: True if processing succeeded, False otherwise
+        Unified normalization processing - no complex mode switching
+        Just process data chunks like a proper Kafka system
         """
         try:
-            self.logger.info(
-                f"🔄 Processing {data_type} for shop {shop_id} in {mode} mode"
-            )
+            self.logger.info(f"🔄 Processing {data_type} for shop {shop_id}")
 
             # Step 1: Determine what data types to process
             data_types_to_process = self._get_data_types_to_process(data_type)
 
             # Step 2: Process each data type
             for dt in data_types_to_process:
-                await self._process_single_data_type_with_watermarks(
-                    shop_id, dt, format_type, start_time, end_time, mode
+                await self._process_single_data_type(
+                    shop_id, dt, format_type, None, None
                 )
 
             # Step 3: Trigger feature computation
-            await self._trigger_feature_computation_for_data_types(
-                shop_id, data_type, mode
-            )
+            await self._trigger_feature_computation_for_data_types(shop_id, data_type)
 
             return True
 
@@ -1044,172 +965,12 @@ class NormalizationService:
             return ["products", "orders", "customers", "collections"]
         return [data_type]
 
-    async def _process_single_data_type_with_watermarks(
-        self,
-        shop_id: str,
-        data_type: str,
-        format_type: str,
-        start_time: Optional[str],
-        end_time: Optional[str],
-        mode: str,
-    ):
-        """Process a single data type with proper watermark handling."""
-        # Resolve time window based on mode
-        if mode == "historical":
-            dt_start, dt_end = None, None
-        else:
-            dt_start, dt_end = await self._resolve_window_from_watermark(
-                shop_id, data_type, start_time, end_time, format_type
-            )
-
-        # Process the data
-        last_extracted = await self._process_single_data_type(
-            shop_id, data_type, format_type, dt_start, dt_end
-        )
-
-        # Update watermark
-        if dt_end or last_extracted:
-            await self.data_storage.upsert_watermark(
-                shop_id, data_type, last_extracted or dt_end, format_type
-            )
-
-        self.logger.info(f"✅ Normalization completed for {data_type}")
-
     async def _trigger_feature_computation_for_data_types(
-        self, shop_id: str, data_type: str, mode: str
+        self, shop_id: str, data_type: str
     ):
         """Trigger feature computation for the processed data types."""
-        await self.feature_service.trigger_feature_computation(shop_id, data_type, mode)
+        await self.feature_service.trigger_feature_computation(shop_id, data_type)
         self.logger.info(f"✅ Feature computation triggered for {data_type}")
-
-    async def _resolve_window_from_watermark(
-        self,
-        shop_id: str,
-        data_type: str,
-        start_time: Optional[str],
-        end_time: Optional[str],
-        format_type: Optional[str] = None,
-    ) -> (Optional[str], Optional[str]):
-        """Resolve normalization window using watermark when event window is missing."""
-        if start_time and end_time:
-            return start_time, end_time
-
-        try:
-            if format_type == "graphql":
-                # Get watermark from data storage service
-                watermark = await self.data_storage.get_watermark(
-                    shop_id, data_type, format_type
-                )
-
-                # Start from last normalized, else last window start; end at last collected/window end, else now
-                from datetime import datetime, timezone
-
-                # Get all available timestamps
-                last_normalized = (
-                    watermark.last_normalized_at.isoformat()
-                    if watermark and watermark.last_normalized_at
-                    else None
-                )
-                last_window_start = (
-                    watermark.last_window_start.isoformat()
-                    if watermark and watermark.last_window_start
-                    else None
-                )
-                last_collected = (
-                    watermark.last_collected_at.isoformat()
-                    if watermark and watermark.last_collected_at
-                    else None
-                )
-                last_window_end = (
-                    watermark.last_window_end.isoformat()
-                    if watermark and watermark.last_window_end
-                    else None
-                )
-                now_iso = datetime.now(timezone.utc).isoformat()
-
-                # Collect all available timestamps and sort them
-                available_timestamps = [
-                    ts
-                    for ts in [
-                        last_normalized,
-                        last_window_start,
-                        last_collected,
-                        last_window_end,
-                    ]
-                    if ts
-                ]
-
-                if available_timestamps:
-                    # For historical data processing, use the full range of available data
-                    # instead of just the latest timestamp
-                    resolved_start = start_time or min(available_timestamps)
-                    resolved_end = end_time or max(available_timestamps)
-
-                    # If start and end are the same (incremental processing) OR
-                    # if the window is too narrow (less than 1 hour),
-                    # expand the window to process all available data
-                    start_dt = datetime.fromisoformat(
-                        resolved_start.replace("Z", "+00:00")
-                    )
-                    end_dt = datetime.fromisoformat(resolved_end.replace("Z", "+00:00"))
-                    window_duration = (end_dt - start_dt).total_seconds()
-
-                    if (
-                        resolved_start == resolved_end or window_duration < 3600
-                    ):  # Less than 1 hour
-                        self.logger.info(
-                            f"🔄 Expanding narrow window for historical processing",
-                            extra={
-                                "shop_id": shop_id,
-                                "data_type": data_type,
-                                "original_start": resolved_start,
-                                "original_end": resolved_end,
-                                "window_duration_seconds": window_duration,
-                                "expanded_start": min(available_timestamps),
-                                "expanded_end": max(available_timestamps),
-                            },
-                        )
-                        resolved_start = min(available_timestamps)
-                        resolved_end = max(available_timestamps)
-                else:
-                    # Fallback to current time
-                    resolved_start = start_time or now_iso
-                    resolved_end = end_time or now_iso
-
-            # Guard against inverted windows (can occur if lastNormalizedAt > lastCollectedAt)
-            if resolved_start and resolved_end and resolved_start > resolved_end:
-                self.logger.warning(
-                    "⚠️ Inverted normalization window detected; adjusting",
-                    extra={
-                        "shop_id": shop_id,
-                        "data_type": data_type,
-                        "original_start": resolved_start,
-                        "original_end": resolved_end,
-                    },
-                )
-                # Swap to ensure start <= end
-                resolved_start, resolved_end = resolved_end, resolved_start
-
-            self.logger.info(
-                "🕒 Normalization window resolved",
-                extra={
-                    "shop_id": shop_id,
-                    "data_type": data_type,
-                    "start_time": resolved_start,
-                    "end_time": resolved_end,
-                    "source": (
-                        "PipelineWatermark"
-                        if format_type == "graphql"
-                        else "NormalizationWatermark"
-                    ),
-                },
-            )
-            return resolved_start, resolved_end
-        except Exception as e:
-            self.logger.warning(
-                f"Failed to resolve watermark for {shop_id}/{data_type}: {e}"
-            )
-            return start_time, end_time
 
     async def _process_single_data_type(
         self,
@@ -1234,15 +995,18 @@ class NormalizationService:
         if not model_class:
             return None
 
-        # Step 2: Build the database query with time filters
-        query = self._build_query_with_time_filters(
-            model_class, shop_id, format_type, start_time, end_time
-        )
+        # Step 2: Build a simple query for all data for this shop
+        from sqlalchemy import select
+
+        query = select(model_class).where(model_class.shop_id == shop_id)
 
         # Step 3: Process data in batches
-        return await self._process_data_in_batches(
+        await self._process_data_in_batches(
             query, model_class, shop_id, data_type, format_type
         )
+
+        self.logger.info(f"✅ Normalization completed for {data_type}")
+        return None
 
     def _get_model_class_for_data_type(self, data_type: str):
         """Get the database model class for the given data type."""
@@ -1267,64 +1031,15 @@ class NormalizationService:
 
         return model_class
 
-    def _build_query_with_time_filters(
-        self,
-        model_class,
-        shop_id: str,
-        format_type: str,
-        start_time: Optional[str],
-        end_time: Optional[str],
-    ):
-        """Build database query with time-based filters."""
-        from sqlalchemy import select
-
-        # Base query
-        query = select(model_class).where(model_class.shop_id == shop_id)
-
-        # Add time filters if provided
-        if start_time or end_time:
-            time_field = (
-                model_class.shopify_updated_at
-                if format_type == "graphql"
-                else model_class.extracted_at
-            )
-
-            parsed_start = self._parse_iso_to_aware_datetime(start_time)
-            parsed_end = self._parse_iso_to_aware_datetime(end_time)
-
-            if parsed_start:
-                query = query.where(time_field >= parsed_start)
-            if parsed_end:
-                query = query.where(time_field <= parsed_end)
-
-        self.logger.info(
-            f"🔍 Time filter on {'shopify_updated_at' if format_type == 'graphql' else 'extracted_at'}: {start_time} to {end_time}"
-        )
-
-        return query
-
-    def _parse_iso_to_aware_datetime(self, dt_str: Optional[str]) -> Optional[datetime]:
-        """Parse ISO string to timezone-aware UTC datetime."""
-        if not dt_str:
-            return None
-        try:
-            from datetime import datetime, timezone
-
-            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            return None
-
     async def _process_data_in_batches(
         self, query, model_class, shop_id: str, data_type: str, format_type: str
-    ) -> Optional[str]:
+    ) -> None:
         """Process data in batches with pagination."""
         from app.core.database.session import get_session_context
 
         page_size = 100
         offset = 0
         total_processed = 0
-        last_extracted_iso: Optional[str] = None
 
         while True:
             # Fetch batch of records
@@ -1342,9 +1057,6 @@ class NormalizationService:
 
             # Update tracking variables
             total_processed += successful
-            last_extracted_iso = self._update_last_extracted_timestamp(
-                raw_records, last_extracted_iso
-            )
 
             # Log batch results
             self._log_batch_results(
@@ -1357,8 +1069,7 @@ class NormalizationService:
 
             offset += page_size
 
-        self._log_processing_complete(data_type, total_processed, last_extracted_iso)
-        return last_extracted_iso
+        self._log_processing_complete(data_type, total_processed)
 
     async def _fetch_batch_of_records(
         self, query, model_class, offset: int, page_size: int
@@ -1436,21 +1147,6 @@ class NormalizationService:
 
         return successful
 
-    def _update_last_extracted_timestamp(
-        self, raw_records, last_extracted_iso: Optional[str]
-    ) -> Optional[str]:
-        """Update the last extracted timestamp from the processed records."""
-        for raw_record in raw_records:
-            if getattr(raw_record, "extracted_at", None):
-                try:
-                    current_iso = raw_record.extracted_at.isoformat()
-                    last_extracted_iso = (
-                        max(last_extracted_iso or "", current_iso) or current_iso
-                    )
-                except Exception:
-                    last_extracted_iso = raw_record.extracted_at.isoformat()
-        return last_extracted_iso
-
     def _log_batch_results(
         self,
         data_type: str,
@@ -1482,15 +1178,12 @@ class NormalizationService:
             },
         )
 
-    def _log_processing_complete(
-        self, data_type: str, total_processed: int, last_extracted_iso: Optional[str]
-    ):
+    def _log_processing_complete(self, data_type: str, total_processed: int):
         """Log the completion of processing."""
         self.logger.info(
             "🎉 Normalization complete",
             extra={
                 "data_type": data_type,
                 "total_processed": total_processed,
-                "last_extracted_iso": last_extracted_iso,
             },
         )

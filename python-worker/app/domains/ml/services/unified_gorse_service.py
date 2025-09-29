@@ -168,22 +168,20 @@ class UnifiedGorseService:
         except Exception as e:
             logger.error(f"Failed to update Gorse sync watermark: {str(e)}")
 
-    async def sync_and_train(
-        self,
-        shop_id: str,
-        sync_type: str = "all",
-        since_hours: int = 24,
-        trigger_source: str = "api",
-    ) -> Dict[str, Any]:
+    def _get_full_sync_tasks(self, shop_id: str) -> List[tuple]:
+        """Get all sync tasks for full sync - only essential Gorse data"""
+        return [
+            ("users", self._sync_users_to_gorse(shop_id)),
+            ("items", self._sync_items_to_gorse(shop_id)),
+            ("feedback", self._sync_feedback_to_gorse(shop_id)),
+        ]
+
+    async def sync_and_train(self, shop_id: str) -> Dict[str, Any]:
         """
-        Main entry point: Sync data from feature tables directly to Gorse API
-        This automatically triggers training
+        Unified sync: Process all available data for a shop and sync to Gorse
 
         Args:
             shop_id: Shop ID to sync data for
-            sync_type: Type of sync ("all", "incremental", "users", "items", "feedback")
-            since_hours: Hours to look back for incremental sync
-            trigger_source: Source that triggered the sync
 
         Returns:
             Dict with sync results and training status
@@ -191,177 +189,38 @@ class UnifiedGorseService:
         start_time = now_utc()
         job_id = f"unified_sync_{shop_id}_{int(time.time())}"
 
-        logger.info(f"Starting unified sync and training for shop {shop_id}")
+        logger.info(f"🚀 Starting full sync for shop {shop_id}")
 
         try:
-            # Use watermark table to determine sync scope (consistent with other services)
-            since_time = None
-            if sync_type == "incremental":
-                # Get the last Gorse sync timestamp from watermark table
-                since_time = await self._get_last_sync_timestamp(shop_id)
-                if since_time:
-                    logger.info(f"Using watermark-based incremental sync: {since_time}")
-                else:
-                    logger.info("No previous Gorse sync found, doing full sync")
-                    sync_type = "all"
-
-            # Ensure since_time is timezone-aware UTC for downstream comparisons
-            if since_time is not None:
-                since_time = self._ensure_aware_utc(since_time)
-
             results = {
                 "job_id": job_id,
                 "shop_id": shop_id,
-                "sync_type": sync_type,
-                "since_time": since_time,
                 "start_time": start_time,
                 "users_synced": 0,
                 "items_synced": 0,
                 "feedback_synced": 0,
-                "sessions_synced": 0,
-                "product_pairs_synced": 0,
-                "search_products_synced": 0,
-                "collections_synced": 0,
-                "customer_behaviors_synced": 0,
                 "training_triggered": False,
                 "errors": [],
             }
 
-            # Sync data types in parallel for better performance
-            sync_tasks = []
-
-            if sync_type in ["all", "users", "incremental"]:
-                sync_tasks.append(
-                    ("users", self._sync_users_to_gorse(shop_id, since_time))
-                )
-
-            if sync_type in ["all", "items", "incremental"]:
-                sync_tasks.append(
-                    ("items", self._sync_items_to_gorse(shop_id, since_time))
-                )
-
-            if sync_type in ["all", "feedback", "incremental"]:
-                sync_tasks.append(
-                    ("feedback", self._sync_feedback_to_gorse(shop_id, since_time))
-                )
-
-            # Add new feature table sync tasks with graceful skipping
-            if sync_type in ["all", "sessions", "incremental"]:
-                # Check if session features exist before adding sync task
-                has_session_data = await self._check_feature_table_has_data(
-                    "session_features", shop_id, since_time
-                )
-                if has_session_data:
-                    sync_tasks.append(
-                        (
-                            "sessions",
-                            self._sync_session_features_to_gorse(shop_id, since_time),
-                        )
-                    )
-                else:
-                    logger.debug(
-                        f"Skipping session features sync - no data found for shop {shop_id} (expected for new shops)"
-                    )
-                    results["sessions_synced"] = 0
-
-            if sync_type in ["all", "product_pairs", "incremental"]:
-                # Check if product pair features exist before adding sync task
-                has_product_pair_data = await self._check_feature_table_has_data(
-                    "product_pair_features", shop_id, since_time
-                )
-                if has_product_pair_data:
-                    sync_tasks.append(
-                        (
-                            "product_pairs",
-                            self._sync_product_pair_features_to_gorse(
-                                shop_id, since_time
-                            ),
-                        )
-                    )
-                else:
-                    logger.debug(
-                        f"Skipping product pair features sync - no data found for shop {shop_id} (expected for new shops)"
-                    )
-                    results["product_pairs_synced"] = 0
-
-            if sync_type in ["all", "search_products", "incremental"]:
-                # Check if search product features exist before adding sync task
-                has_search_product_data = await self._check_feature_table_has_data(
-                    "search_product_features", shop_id, since_time
-                )
-                if has_search_product_data:
-                    sync_tasks.append(
-                        (
-                            "search_products",
-                            self._sync_search_product_features_to_gorse(
-                                shop_id, since_time
-                            ),
-                        )
-                    )
-                else:
-                    logger.debug(
-                        f"Skipping search product features sync - no data found for shop {shop_id} (expected for new shops)"
-                    )
-                    results["search_products_synced"] = 0
-
-            if sync_type in ["all", "collections", "incremental"]:
-                # Check if collection features exist before adding sync task
-                has_collection_data = await self._check_feature_table_has_data(
-                    "collection_features", shop_id, since_time
-                )
-                if has_collection_data:
-                    sync_tasks.append(
-                        (
-                            "collections",
-                            self._sync_collection_features_to_gorse(
-                                shop_id, since_time
-                            ),
-                        )
-                    )
-                else:
-                    logger.debug(
-                        f"Skipping collection features sync - no data found for shop {shop_id} (expected for new shops)"
-                    )
-                    results["collections_synced"] = 0
-
-            if sync_type in ["all", "customer_behaviors", "incremental"]:
-                # Check if customer behavior features exist before adding sync task
-                has_customer_behavior_data = await self._check_feature_table_has_data(
-                    "customer_behavior_features", shop_id, since_time
-                )
-                if has_customer_behavior_data:
-                    sync_tasks.append(
-                        (
-                            "customer_behaviors",
-                            self._sync_customer_behavior_features_to_gorse(
-                                shop_id, since_time
-                            ),
-                        )
-                    )
-                else:
-                    logger.debug(
-                        f"Skipping customer behavior features sync - no data found for shop {shop_id} (expected for new shops)"
-                    )
-                    results["customer_behaviors_synced"] = 0
+            # Get all sync tasks for full sync
+            sync_tasks = self._get_full_sync_tasks(shop_id)
 
             # Execute all sync tasks in parallel
-            if sync_tasks:
-                task_names, task_coroutines = zip(*sync_tasks)
-                sync_results = await asyncio.gather(
-                    *task_coroutines, return_exceptions=True
-                )
+            task_names, task_coroutines = zip(*sync_tasks)
+            sync_results = await asyncio.gather(
+                *task_coroutines, return_exceptions=True
+            )
 
-                # Process results
-                for task_name, result in zip(task_names, sync_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Failed to sync {task_name}: {str(result)}")
-                        results[f"{task_name}_synced"] = 0
-                        results["errors"].append(
-                            f"{task_name}_sync_failed: {str(result)}"
-                        )
-                    else:
-                        results[f"{task_name}_synced"] = result
-                        logger.info(f"Synced {result} {task_name} to Gorse")
+            # Process results
+            for task_name, result in zip(task_names, sync_results):
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to sync {task_name}: {str(result)}")
+                    results[f"{task_name}_synced"] = 0
+                    results["errors"].append(f"{task_name}_sync_failed: {str(result)}")
+                else:
+                    results[f"{task_name}_synced"] = result
+                    logger.info(f"Synced {result} {task_name} to Gorse")
 
             # Training is automatically triggered by Gorse API calls
             results["training_triggered"] = True
@@ -369,9 +228,6 @@ class UnifiedGorseService:
             results["duration_seconds"] = (
                 results["end_time"] - start_time
             ).total_seconds()
-
-            # Update Gorse sync watermark (consistent with other services)
-            await self._update_gorse_watermark(shop_id, results["end_time"])
 
             logger.info(f"Unified sync completed for shop {shop_id}: {results}")
             return results
@@ -385,24 +241,16 @@ class UnifiedGorseService:
             ).total_seconds()
             return results
 
-    async def _sync_users_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
-        """Sync users from feature tables directly to Gorse API with streaming"""
+    async def _sync_users_to_gorse(self, shop_id: str) -> int:
+        """Sync users from feature tables directly to Gorse API"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [UserFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            UserFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(UserFeatures)
-                        .where(*where_clauses)
+                        .where(UserFeatures.shop_id == shop_id)
                         .order_by(UserFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -445,24 +293,16 @@ class UnifiedGorseService:
             logger.error(f"Failed to sync users for shop {shop_id}: {str(e)}")
             return 0
 
-    async def _sync_items_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
-        """Sync items from feature tables directly to Gorse API with streaming and parallel processing"""
+    async def _sync_items_to_gorse(self, shop_id: str) -> int:
+        """Sync items from feature tables directly to Gorse API"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [ProductFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            ProductFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(ProductFeatures)
-                        .where(*where_clauses)
+                        .where(ProductFeatures.shop_id == shop_id)
                         .order_by(ProductFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -589,24 +429,16 @@ class UnifiedGorseService:
             logger.error(f"Failed to process item {pid}: {str(e)}")
             raise e
 
-    async def _sync_feedback_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_feedback_to_gorse(self, shop_id: str) -> int:
         """Sync feedback from interaction features (which contain user-item interactions)"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [InteractionFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            InteractionFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(InteractionFeatures)
-                        .where(*where_clauses)
+                        .where(InteractionFeatures.shop_id == shop_id)
                         .order_by(InteractionFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -617,14 +449,6 @@ class UnifiedGorseService:
                     logger.info(
                         f"🔍 GORSE SYNC: Found {len(interactions)} interaction features for shop {shop_id}"
                     )
-                    if since_time:
-                        logger.info(
-                            f"🔍 GORSE SYNC: Filtering by since_time: {since_time}"
-                        )
-                    if interactions:
-                        logger.info(
-                            f"🔍 GORSE SYNC: First interaction last_computed_at: {interactions[0].last_computed_at}"
-                        )
 
                     if not interactions:
                         break
@@ -633,121 +457,106 @@ class UnifiedGorseService:
                     feedback_batch = []
                     for interaction in interactions:
                         # Create multiple feedback records based on actual interaction counts
-                        # This ensures Gorse gets the full picture of user behavior
-
-                        # Debug logging for interaction counts
-                        purchase_count = getattr(interaction, "purchase_count", 0)
-                        view_count = getattr(interaction, "view_count", 0)
-                        cart_add_count = getattr(interaction, "cart_add_count", 0)
-                        logger.info(
-                            f"🔍 GORSE SYNC: Interaction {interaction.customer_id}-{interaction.product_id}: purchase_count={purchase_count}, view_count={view_count}, cart_add_count={cart_add_count}"
-                        )
-
-                        # Create view feedback records (one for each view)
-                        # Use slightly different timestamps to avoid Gorse unique constraint issues
                         base_timestamp = (
                             getattr(interaction, "last_computed_at", None) or now_utc()
                         )
-                    for i in range(getattr(interaction, "view_count", 0)):
-                        # Add microsecond offset to make each record truly unique
-                        timestamp_offset = timedelta(
-                            microseconds=i * 1000
-                        )  # 1ms per record
-                        feedback_batch.append(
-                            {
-                                "feedbackType": "view",
-                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
-                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
-                                "timestamp": (
-                                    base_timestamp + timestamp_offset
-                                ).isoformat(),
-                            }
-                        )
+
+                        # Create view feedback records (one for each view)
+                        for i in range(getattr(interaction, "view_count", 0)):
+                            timestamp_offset = timedelta(microseconds=i * 1000)
+                            feedback_batch.append(
+                                {
+                                    "feedbackType": "view",
+                                    "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                    "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
+                                    "timestamp": (
+                                        base_timestamp + timestamp_offset
+                                    ).isoformat(),
+                                }
+                            )
 
                         # Create cart_add feedback records (one for each cart add)
-                    for i in range(getattr(interaction, "cart_add_count", 0)):
-                        # Add microsecond offset to make each record truly unique
-                        timestamp_offset = timedelta(
-                            microseconds=(i + getattr(interaction, "view_count", 0))
-                            * 1000
-                        )
-                        feedback_batch.append(
-                            {
-                                "feedbackType": "cart_add",
-                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
-                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
-                                "timestamp": (
-                                    base_timestamp + timestamp_offset
-                                ).isoformat(),
-                            }
-                        )
+                        for i in range(getattr(interaction, "cart_add_count", 0)):
+                            timestamp_offset = timedelta(
+                                microseconds=(i + getattr(interaction, "view_count", 0))
+                                * 1000
+                            )
+                            feedback_batch.append(
+                                {
+                                    "feedbackType": "cart_add",
+                                    "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                    "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
+                                    "timestamp": (
+                                        base_timestamp + timestamp_offset
+                                    ).isoformat(),
+                                }
+                            )
 
                         # Create cart_view feedback records (one for each cart view)
-                    for i in range(getattr(interaction, "cart_view_count", 0)):
-                        timestamp_offset = timedelta(
-                            microseconds=(
-                                i
-                                + getattr(interaction, "view_count", 0)
-                                + getattr(interaction, "cart_add_count", 0)
+                        for i in range(getattr(interaction, "cart_view_count", 0)):
+                            timestamp_offset = timedelta(
+                                microseconds=(
+                                    i
+                                    + getattr(interaction, "view_count", 0)
+                                    + getattr(interaction, "cart_add_count", 0)
+                                )
+                                * 1000
                             )
-                            * 1000
-                        )
-                        feedback_batch.append(
-                            {
-                                "feedbackType": "cart_view",
-                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
-                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
-                                "timestamp": (
-                                    base_timestamp + timestamp_offset
-                                ).isoformat(),
-                            }
-                        )
+                            feedback_batch.append(
+                                {
+                                    "feedbackType": "cart_view",
+                                    "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                    "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
+                                    "timestamp": (
+                                        base_timestamp + timestamp_offset
+                                    ).isoformat(),
+                                }
+                            )
 
                         # Create cart_remove feedback records (one for each cart remove)
-                    for i in range(getattr(interaction, "cart_remove_count", 0)):
-                        timestamp_offset = timedelta(
-                            microseconds=(
-                                i
-                                + getattr(interaction, "view_count", 0)
-                                + getattr(interaction, "cart_add_count", 0)
-                                + getattr(interaction, "cart_view_count", 0)
+                        for i in range(getattr(interaction, "cart_remove_count", 0)):
+                            timestamp_offset = timedelta(
+                                microseconds=(
+                                    i
+                                    + getattr(interaction, "view_count", 0)
+                                    + getattr(interaction, "cart_add_count", 0)
+                                    + getattr(interaction, "cart_view_count", 0)
+                                )
+                                * 1000
                             )
-                            * 1000
-                        )
-                        feedback_batch.append(
-                            {
-                                "feedbackType": "cart_remove",
-                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
-                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
-                                "timestamp": (
-                                    base_timestamp + timestamp_offset
-                                ).isoformat(),
-                            }
-                        )
+                            feedback_batch.append(
+                                {
+                                    "feedbackType": "cart_remove",
+                                    "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                    "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
+                                    "timestamp": (
+                                        base_timestamp + timestamp_offset
+                                    ).isoformat(),
+                                }
+                            )
 
                         # Create purchase feedback records (one for each purchase)
-                        # This is the most important feedback type
-                    for i in range(getattr(interaction, "purchase_count", 0)):
-                        timestamp_offset = timedelta(
-                            microseconds=(
-                                i
-                                + getattr(interaction, "view_count", 0)
-                                + getattr(interaction, "cart_add_count", 0)
-                                + getattr(interaction, "cart_view_count", 0)
-                                + getattr(interaction, "cart_remove_count", 0)
+                        for i in range(getattr(interaction, "purchase_count", 0)):
+                            timestamp_offset = timedelta(
+                                microseconds=(
+                                    i
+                                    + getattr(interaction, "view_count", 0)
+                                    + getattr(interaction, "cart_add_count", 0)
+                                    + getattr(interaction, "cart_view_count", 0)
+                                    + getattr(interaction, "cart_remove_count", 0)
+                                )
+                                * 1000
                             )
-                            * 1000
-                        )
-                        feedback_batch.append(
-                            {
-                                "feedbackType": "purchase",
-                                "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
-                                "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
-                                "timestamp": (
-                                    base_timestamp + timestamp_offset
-                                ).isoformat(),
-                            }
-                        )
+                            feedback_batch.append(
+                                {
+                                    "feedbackType": "purchase",
+                                    "userId": f"shop_{shop_id}_{getattr(interaction, 'customer_id', '')}",
+                                    "itemId": f"shop_{shop_id}_{getattr(interaction, 'product_id', '')}",
+                                    "timestamp": (
+                                        base_timestamp + timestamp_offset
+                                    ).isoformat(),
+                                }
+                            )
 
                     # Push feedback to Gorse API
                     if feedback_batch:
@@ -757,7 +566,6 @@ class UnifiedGorseService:
                         await self.gorse_client.insert_feedback_batch(feedback_batch)
                         total_synced += len(feedback_batch)
 
-                    # Check if we got fewer records than batch size (end of data)
                     if len(interactions) < self.batch_size:
                         break
 
@@ -882,24 +690,16 @@ class UnifiedGorseService:
             )
             return 0
 
-    async def _sync_session_features_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_session_features_to_gorse(self, shop_id: str) -> int:
         """Sync session features to Gorse as user session data"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session_ctx:
                 while True:
-                    where_clauses = [SessionFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            SessionFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(SessionFeatures)
-                        .where(*where_clauses)
+                        .where(SessionFeatures.shop_id == shop_id)
                         .order_by(SessionFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -943,24 +743,16 @@ class UnifiedGorseService:
             )
             return 0
 
-    async def _sync_product_pair_features_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_product_pair_features_to_gorse(self, shop_id: str) -> int:
         """Sync product pair features to Gorse as item-to-item relationships"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [ProductPairFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            ProductPairFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(ProductPairFeatures)
-                        .where(*where_clauses)
+                        .where(ProductPairFeatures.shop_id == shop_id)
                         .order_by(ProductPairFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -997,24 +789,16 @@ class UnifiedGorseService:
             )
             return 0
 
-    async def _sync_search_product_features_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_search_product_features_to_gorse(self, shop_id: str) -> int:
         """Sync search product features to Gorse as search-based feedback"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [SearchProductFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            SearchProductFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(SearchProductFeatures)
-                        .where(*where_clauses)
+                        .where(SearchProductFeatures.shop_id == shop_id)
                         .order_by(SearchProductFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -1051,24 +835,16 @@ class UnifiedGorseService:
             )
             return 0
 
-    async def _sync_collection_features_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_collection_features_to_gorse(self, shop_id: str) -> int:
         """Sync collection features to Gorse as collection-based items"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [CollectionFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            CollectionFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(CollectionFeatures)
-                        .where(*where_clauses)
+                        .where(CollectionFeatures.shop_id == shop_id)
                         .order_by(CollectionFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)
@@ -1107,24 +883,16 @@ class UnifiedGorseService:
             )
             return 0
 
-    async def _sync_customer_behavior_features_to_gorse(
-        self, shop_id: str, since_time: Optional[datetime] = None
-    ) -> int:
+    async def _sync_customer_behavior_features_to_gorse(self, shop_id: str) -> int:
         """Sync customer behavior features to Gorse as enhanced user features"""
         try:
             total_synced = 0
             offset = 0
             async with get_session_context() as session:
                 while True:
-                    where_clauses = [CustomerBehaviorFeatures.shop_id == shop_id]
-                    if since_time is not None:
-                        where_clauses.append(
-                            CustomerBehaviorFeatures.last_computed_at >= since_time
-                        )
-
                     stmt = (
                         select(CustomerBehaviorFeatures)
-                        .where(*where_clauses)
+                        .where(CustomerBehaviorFeatures.shop_id == shop_id)
                         .order_by(CustomerBehaviorFeatures.last_computed_at.asc())
                         .offset(offset)
                         .limit(self.batch_size)

@@ -932,8 +932,6 @@ class SeedPipelineRunner:
                     "data_type": data_type,
                     "format": "graphql",  # Seed data uses GraphQL format
                     "shop_id": shop_id,
-                    "start_time": start_time.isoformat(),
-                    "end_time": end_time.isoformat(),
                     "timestamp": current_time.isoformat(),
                     "source": "seed_pipeline",
                 }

@@ -47,6 +47,9 @@ class ShopifyGraphQLSeeder:
         self.created_orders: Dict[str, Dict[str, Any]] = {}
         self.created_collections: Dict[str, Dict[str, Any]] = {}
 
+        # Cache for publication ID
+        self._online_store_publication_id: Optional[str] = None
+
     def _graphql_request(
         self,
         query: str,
@@ -99,9 +102,113 @@ class ShopifyGraphQLSeeder:
                 print(f"    🔍 Detailed error: {error_details}")
                 raise e
 
+    def _get_online_store_publication_id(self) -> str:
+        """Fetch the Online Store publication ID for this shop."""
+        if self._online_store_publication_id:
+            return self._online_store_publication_id
+
+        query = """
+        query {
+            publications(first: 10) {
+                nodes {
+                    id
+                    name
+                }
+            }
+        }
+        """
+
+        try:
+            result = self._graphql_request(query)
+            publications = result["data"]["publications"]["nodes"]
+
+            # Find the Online Store publication
+            for pub in publications:
+                if pub["name"] == "Online Store":
+                    self._online_store_publication_id = pub["id"]
+                    return self._online_store_publication_id
+
+            # Fallback to first publication if Online Store not found
+            if publications:
+                self._online_store_publication_id = publications[0]["id"]
+                print(
+                    f"    ⚠️ Online Store publication not found, using: {publications[0]['name']}"
+                )
+                return self._online_store_publication_id
+            else:
+                raise Exception("No publications found")
+
+        except Exception as e:
+            print(f"    ⚠️ Failed to fetch publications: {e}")
+            # Fallback to hardcoded ID
+            self._online_store_publication_id = "gid://shopify/Publication/1"
+            return self._online_store_publication_id
+
+    def _batch_publish_products(
+        self, product_ids: List[str], publication_id: str
+    ) -> bool:
+        """Publish multiple products to Online Store in a single batch operation."""
+        if not product_ids:
+            return True
+
+        print(f"  📡 Publishing {len(product_ids)} products to Online Store...")
+
+        # Create batch publish mutation
+        mutation = """
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+            publishablePublish(id: $id, input: $input) {
+                publishable {
+                    ... on Product {
+                        id
+                        title
+                    }
+                }
+                userErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        success_count = 0
+        for product_id in product_ids:
+            try:
+                variables = {
+                    "id": product_id,
+                    "input": [{"publicationId": publication_id}],
+                }
+
+                result = self._graphql_request(mutation, variables)
+
+                if result["data"]["publishablePublish"]["userErrors"]:
+                    errors = [
+                        error["message"]
+                        for error in result["data"]["publishablePublish"]["userErrors"]
+                    ]
+                    print(f"    ⚠️ Failed to publish {product_id}: {', '.join(errors)}")
+                else:
+                    success_count += 1
+
+            except Exception as e:
+                print(f"    ⚠️ Failed to publish {product_id}: {e}")
+
+        print(
+            f"  ✅ Successfully published {success_count}/{len(product_ids)} products"
+        )
+        return success_count > 0
+
     async def create_products(self) -> Dict[str, Dict[str, Any]]:
         print("📦 Creating products...")
         products = self.product_generator.generate_products()
+
+        # Get publication ID once at the beginning
+        publication_id = self._get_online_store_publication_id()
+        print(f"  📡 Using publication: {publication_id}")
+
+        # Collect all product IDs for batch publishing
+        created_product_ids = []
+
         for i, product_data in enumerate(products, 1):
             try:
                 # Convert product data to GraphQL format
@@ -222,9 +329,15 @@ class ShopifyGraphQLSeeder:
                     "title": product["title"],
                     "variants": variant_ids,
                 }
+                created_product_ids.append(product["id"])
                 print(f"  ✅ Product: {product['title']} ({product['id']})")
             except Exception as e:
                 print(f"  ❌ Product {i} failed: {e}")
+
+        # Batch publish all products to Online Store
+        if created_product_ids:
+            self._batch_publish_products(created_product_ids, publication_id)
+
         return self.created_products
 
     async def create_customers(self) -> Dict[str, Dict[str, Any]]:
@@ -574,12 +687,13 @@ class ShopifyGraphQLSeeder:
 
         print("\n🎯 Seeding Summary:")
         print(
-            f"  ✅ Products:   {len(self.created_products)} (with inventory tracking)"
+            f"  ✅ Products:   {len(self.created_products)} (published to Online Store)"
         )
         print(f"  ✅ Customers:  {len(self.created_customers)}")
         print(f"  ✅ Collections:{len(self.created_collections)}")
         print(f"  ✅ Orders:     {len(self.created_orders)}")
         print(f"  📦 Inventory: Tracked for all product variants")
+        print(f"  🌐 Storefront: Products visible on {self.shop_domain}")
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
 

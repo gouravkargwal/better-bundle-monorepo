@@ -16,6 +16,34 @@ class ProductEnrichment:
     def __init__(self):
         pass
 
+    def _extract_image_from_media(
+        self, media_data: Any, fallback_title: str
+    ) -> Dict[str, str] | None:
+        """Extract image URL and alt text from media JSON data"""
+        if not media_data or not isinstance(media_data, list) or len(media_data) == 0:
+            return None
+
+        # Get the first media item (usually the main product image)
+        first_media = media_data[0]
+
+        # Handle different media structures
+        if isinstance(first_media, dict):
+            # Check for direct image properties
+            if "image" in first_media and isinstance(first_media["image"], dict):
+                image_data = first_media["image"]
+                return {
+                    "url": image_data.get("url", ""),
+                    "alt_text": image_data.get("altText", fallback_title),
+                }
+            # Check for direct URL properties
+            elif "url" in first_media:
+                return {
+                    "url": first_media.get("url", ""),
+                    "alt_text": first_media.get("altText", fallback_title),
+                }
+
+        return None
+
     async def enrich_items(
         self,
         shop_id: str,
@@ -180,13 +208,8 @@ class ProductEnrichment:
                                     else "USD"
                                 ),
                             },
-                            "image": (
-                                {
-                                    "url": product.image_url or "",
-                                    "alt_text": product.image_alt or product.title,
-                                }
-                                if product.image_url
-                                else None
+                            "image": self._extract_image_from_media(
+                                product.media, product.title
                             ),
                             "vendor": product.vendor or "",
                             "product_type": product.product_type or "",

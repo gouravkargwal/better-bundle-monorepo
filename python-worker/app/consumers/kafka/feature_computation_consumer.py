@@ -3,13 +3,11 @@ Kafka-based feature computation consumer for processing feature engineering jobs
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.messaging.event_subscriber import EventSubscriber
-from app.core.messaging.interfaces import EventHandler
 from app.domains.ml.services import FeatureEngineeringService
 from app.core.logging import get_logger
 
@@ -20,8 +18,7 @@ class FeatureComputationKafkaConsumer:
     """Kafka consumer for feature computation jobs"""
 
     def __init__(self):
-        self.consumer = KafkaConsumer(kafka_settings.dict())
-        self.event_subscriber = EventSubscriber(kafka_settings.dict())
+        self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self.feature_service = FeatureEngineeringService()
         self._initialized = False
 
@@ -38,16 +35,6 @@ class FeatureComputationKafkaConsumer:
                 group_id="feature-computation-processors",
             )
 
-            # Initialize event subscriber with existing consumer to avoid duplicate consumers
-            await self.event_subscriber.initialize(
-                topics=["feature-computation-jobs"],
-                group_id="feature-computation-processors",
-                existing_consumer=self.consumer,  # Reuse existing consumer
-            )
-
-            # Add event handlers
-            self.event_subscriber.add_handler(FeatureComputationJobHandler(self))
-
             self._initialized = True
             logger.info("Feature computation Kafka consumer initialized")
 
@@ -62,10 +49,13 @@ class FeatureComputationKafkaConsumer:
 
         try:
             logger.info("Starting feature computation consumer...")
-            await self.event_subscriber.consume_and_handle(
-                topics=["feature-computation-jobs"],
-                group_id="feature-computation-processors",
-            )
+            async for message in self.consumer.consume():
+                try:
+                    await self._handle_message(message)
+                    await self.consumer.commit(message)
+                except Exception as e:
+                    logger.error(f"Error processing feature computation message: {e}")
+                    continue
         except Exception as e:
             logger.error(f"Error in feature computation consumer: {e}")
             raise
@@ -74,8 +64,6 @@ class FeatureComputationKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        if self.event_subscriber:
-            await self.event_subscriber.close()
         logger.info("Feature computation consumer closed")
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -113,29 +101,24 @@ class FeatureComputationKafkaConsumer:
             "last_health_check": datetime.utcnow().isoformat(),
         }
 
-
-class FeatureComputationJobHandler(EventHandler):
-    """Handler for feature computation jobs"""
-
-    def __init__(self, consumer: FeatureComputationKafkaConsumer):
-        self.consumer = consumer
-        self.logger = get_logger(__name__)
-
-    def can_handle(self, event_type: str) -> bool:
-        return event_type in [
-            "feature_computation",
-            "compute_features",
-            "feature_engineering",
-        ]
-
-    async def handle(self, event: Dict[str, Any]) -> bool:
+    async def _handle_message(self, message: Dict[str, Any]):
+        """Handle individual feature computation messages"""
         try:
-            self.logger.info(f"🔄 Processing feature computation message: {event}")
+            logger.info(f"🔄 Processing feature computation message: {message}")
+
+            payload = message.get("value") or message
+            if isinstance(payload, str):
+                try:
+                    import json
+
+                    payload = json.loads(payload)
+                except Exception:
+                    pass
 
             # Extract message data
-            job_id = event.get("job_id")
-            shop_id = event.get("shop_id")
-            features_ready_raw = event.get("features_ready", False)
+            job_id = payload.get("job_id")
+            shop_id = payload.get("shop_id")
+            features_ready_raw = payload.get("features_ready", False)
             # Robust boolean parsing (handles bool/str/int)
             if isinstance(features_ready_raw, bool):
                 features_ready = features_ready_raw
@@ -151,18 +134,18 @@ class FeatureComputationJobHandler(EventHandler):
                     )
                 except Exception:
                     features_ready = False
-            metadata = event.get("metadata", {})
+            metadata = payload.get("metadata", {})
 
-            self.logger.info(
+            logger.info(
                 f"📋 Extracted: job_id={job_id}, shop_id={shop_id}, features_ready={features_ready}"
             )
 
             if not job_id or not shop_id:
-                self.logger.error("Invalid message: missing job_id or shop_id")
-                return False
+                logger.error("Invalid message: missing job_id or shop_id")
+                return
 
             # Track the job
-            self.consumer.active_feature_jobs[job_id] = {
+            self.active_feature_jobs[job_id] = {
                 "shop_id": shop_id,
                 "started_at": datetime.utcnow(),
                 "status": "processing",
@@ -171,46 +154,41 @@ class FeatureComputationJobHandler(EventHandler):
 
             # Only process if features are not ready (need to be computed)
             if not features_ready:
-                self.logger.info(f"🚀 Starting feature computation for shop {shop_id}")
+                logger.info(f"🚀 Starting feature computation for shop {shop_id}")
                 await self._compute_features_for_shop(job_id, shop_id, metadata)
             else:
-                self.logger.info(
+                logger.info(
                     f"⏭️ Skipping feature computation - features already ready for shop {shop_id}"
                 )
 
             # Mark job as completed
-            if job_id in self.consumer.active_feature_jobs:
-                self.consumer.active_feature_jobs[job_id]["status"] = "completed"
-                self.consumer.active_feature_jobs[job_id][
-                    "completed_at"
-                ] = datetime.utcnow()
-
-            return True
+            if job_id in self.active_feature_jobs:
+                self.active_feature_jobs[job_id]["status"] = "completed"
+                self.active_feature_jobs[job_id]["completed_at"] = datetime.utcnow()
 
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"Failed to process feature computation job: {str(e)}",
-                job_id=event.get("job_id"),
-                shop_id=event.get("shop_id"),
+                job_id=payload.get("job_id"),
+                shop_id=payload.get("shop_id"),
             )
-            return False
+            raise
 
     async def _compute_features_for_shop(
         self, job_id: str, shop_id: str, metadata: Dict[str, Any]
     ):
-        """Compute features for a shop using the feature engineering service"""
+        """Compute features for a shop using full computation"""
         try:
             # Determine batch size based on metadata or use default
             batch_size = metadata.get("batch_size", 100)
-            incremental = metadata.get(
-                "incremental", False
-            )  # Default to incremental processing
-            await self.consumer.feature_service.run_comprehensive_pipeline_for_shop(
-                shop_id=shop_id, batch_size=batch_size, incremental=incremental
+
+            logger.info(f"🚀 Full feature computation for shop {shop_id}")
+            await self.feature_service.run_comprehensive_pipeline_for_shop(
+                shop_id=shop_id, batch_size=batch_size
             )
 
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"Feature computation error",
                 job_id=job_id,
                 shop_id=shop_id,

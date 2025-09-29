@@ -7,8 +7,6 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.messaging.event_subscriber import EventSubscriber
-from app.core.messaging.interfaces import EventHandler
 from app.core.database.simple_db_client import get_database
 from app.domains.billing.services.billing_service import BillingService
 from app.domains.billing.models import PurchaseEvent
@@ -21,8 +19,7 @@ class PurchaseAttributionKafkaConsumer:
     """Kafka consumer for purchase attribution jobs"""
 
     def __init__(self):
-        self.consumer = KafkaConsumer(kafka_settings.dict())
-        self.event_subscriber = EventSubscriber(kafka_settings.dict())
+        self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self._initialized = False
 
     async def initialize(self):
@@ -33,15 +30,6 @@ class PurchaseAttributionKafkaConsumer:
                 topics=["purchase-attribution-jobs"],
                 group_id="purchase-attribution-processors",
             )
-
-            # Initialize event subscriber
-            await self.event_subscriber.initialize(
-                topics=["purchase-attribution-jobs"],
-                group_id="purchase-attribution-processors",
-            )
-
-            # Add event handlers
-            self.event_subscriber.add_handler(PurchaseAttributionJobHandler())
 
             self._initialized = True
             logger.info("Purchase attribution Kafka consumer initialized")
@@ -57,10 +45,13 @@ class PurchaseAttributionKafkaConsumer:
 
         try:
             logger.info("Starting purchase attribution consumer...")
-            await self.event_subscriber.consume_and_handle(
-                topics=["purchase-attribution-jobs"],
-                group_id="purchase-attribution-processors",
-            )
+            async for message in self.consumer.consume():
+                try:
+                    await self._handle_message(message)
+                    await self.consumer.commit(message)
+                except Exception as e:
+                    logger.error(f"Error processing purchase attribution message: {e}")
+                    continue
         except Exception as e:
             logger.error(f"Error in purchase attribution consumer: {e}")
             raise
@@ -69,8 +60,6 @@ class PurchaseAttributionKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        if self.event_subscriber:
-            await self.event_subscriber.close()
         logger.info("Purchase attribution consumer closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
@@ -80,40 +69,30 @@ class PurchaseAttributionKafkaConsumer:
             "last_health_check": datetime.utcnow().isoformat(),
         }
 
-
-class PurchaseAttributionJobHandler(EventHandler):
-    """Handler for purchase attribution jobs"""
-
-    def __init__(self):
-        self.logger = get_logger(__name__)
-
-    def can_handle(self, event_type: str) -> bool:
-        return event_type in [
-            "purchase_ready_for_attribution",
-            "purchase_attribution",
-        ]
-
-    async def handle(self, event: Dict[str, Any]) -> bool:
+    async def _handle_message(self, message: Dict[str, Any]):
+        """Handle individual purchase attribution messages"""
         try:
-            payload = event.get("data") or event
-            if isinstance(payload, str):
-                import json as _json
+            logger.info(f"🔄 Processing purchase attribution message: {message}")
 
+            payload = message.get("value") or message
+            if isinstance(payload, str):
                 try:
-                    payload = _json.loads(payload)
+                    import json
+
+                    payload = json.loads(payload)
                 except Exception:
                     pass
 
             if payload.get("event_type") != "purchase_ready_for_attribution":
-                return True
+                return
 
             shop_id = payload.get("shop_id")
             order_id = payload.get("order_id")
             if not shop_id or not order_id:
-                self.logger.error(
+                logger.error(
                     "Invalid purchase_ready_for_attribution payload", payload=payload
                 )
-                return False
+                return
 
             db = await get_database()
 
@@ -122,12 +101,12 @@ class PurchaseAttributionJobHandler(EventHandler):
                 where={"shopId": shop_id, "orderId": str(order_id)}
             )
             if not order:
-                self.logger.warning(
+                logger.warning(
                     "OrderData not found for attribution",
                     shop_id=shop_id,
                     order_id=order_id,
                 )
-                return True
+                return
 
             line_items = await db.lineitemdata.find_many(where={"orderId": order.id})
 
@@ -148,7 +127,7 @@ class PurchaseAttributionJobHandler(EventHandler):
             currency = getattr(order, "currencyCode", None) or "USD"
             customer_id = getattr(order, "customerId", None)
 
-            self.logger.info(
+            logger.info(
                 f"🔍 Created {len(products)} products for order {order_id}: {products}"
             )
 
@@ -164,12 +143,12 @@ class PurchaseAttributionJobHandler(EventHandler):
             if not await self._has_extension_interactions(
                 db, shop_id, customer_id, session
             ):
-                self.logger.info(
+                logger.info(
                     f"⏭️ Skipping attribution for order {order_id} - no extension interactions found",
                     shop_id=shop_id,
                     customer_id=customer_id,
                 )
-                return True
+                return
 
             purchase_event = PurchaseEvent(
                 order_id=order_id,
@@ -190,18 +169,16 @@ class PurchaseAttributionJobHandler(EventHandler):
             billing = BillingService(await get_database())
             await billing.process_purchase_attribution(purchase_event)
 
-            self.logger.info(
+            logger.info(
                 "Purchase attribution stored",
                 shop_id=shop_id,
                 order_id=order_id,
                 line_items=len(products),
             )
 
-            return True
-
         except Exception as e:
-            self.logger.error("Failed to process purchase attribution", error=str(e))
-            return False
+            logger.error("Failed to process purchase attribution", error=str(e))
+            raise
 
     async def _has_extension_interactions(
         self, db, shop_id: str, customer_id: str, session
@@ -245,13 +222,13 @@ class PurchaseAttributionJobHandler(EventHandler):
             has_interactions = len(interactions) > 0
 
             if has_interactions:
-                self.logger.info(
+                logger.info(
                     f"✅ Found {len(interactions)} extension interactions for customer {customer_id}",
                     shop_id=shop_id,
                     customer_id=customer_id,
                 )
             else:
-                self.logger.info(
+                logger.info(
                     f"❌ No extension interactions found for customer {customer_id}",
                     shop_id=shop_id,
                     customer_id=customer_id,
@@ -260,6 +237,6 @@ class PurchaseAttributionJobHandler(EventHandler):
             return has_interactions
 
         except Exception as e:
-            self.logger.error(f"Error checking extension interactions: {e}")
+            logger.error(f"Error checking extension interactions: {e}")
             # If we can't check, err on the side of processing to avoid missing attributions
             return True
