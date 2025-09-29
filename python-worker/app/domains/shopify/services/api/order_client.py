@@ -46,8 +46,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     node {
                         id
                         name
-                        email
-                        phone
                         created_at: createdAt
                         updated_at: updatedAt
                         processed_at: processedAt
@@ -70,10 +68,8 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         processed_at: processedAt
                         customer {
                             id
-                            email
                             firstName
                             lastName
-                            phone
                         }
                         shipping_address: shippingAddress {
                             id
@@ -86,7 +82,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             province
                             country
                             zip
-                            phone
                         }
                         billing_address: billingAddress {
                             id
@@ -99,7 +94,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             province
                             country
                             zip
-                            phone
                         }
                         line_items: lineItems(first: 10) {
                             edges {
@@ -215,8 +209,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
             order(id: $id) {
                 id
                 name
-                email
-                phone
                 created_at: createdAt
                 updated_at: updatedAt
                 processed_at: processedAt
@@ -239,10 +231,8 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 processed_at: processedAt
                 customer {
                     id
-                    email
                     first_name: firstName
                     last_name: lastName
-                    phone
                 }
                 shipping_address: shippingAddress {
                     id
@@ -255,7 +245,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     province
                     country
                     zip
-                    phone
                 }
                 billing_address: billingAddress {
                     id
@@ -268,7 +257,6 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     province
                     country
                     zip
-                    phone
                 }
                 line_items: lineItems(first: 10) {
                     edges {

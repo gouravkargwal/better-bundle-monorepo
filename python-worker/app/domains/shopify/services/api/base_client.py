@@ -326,7 +326,6 @@ class BaseShopifyAPIClient:
             shop {
                 id
                 name
-                email
                 domain
                 myshopifyDomain
                 planName
