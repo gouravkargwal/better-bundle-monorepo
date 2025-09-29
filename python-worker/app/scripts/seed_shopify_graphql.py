@@ -160,7 +160,7 @@ class ShopifyGraphQLSeeder:
                     }
                 ]
 
-                # Convert variants to productSet format with proper option values
+                # Convert variants to productSet format with proper option values and inventory
                 product_variants = []
                 sizes = ["Small", "Medium", "Large"]
                 for i, variant_data in enumerate(variants):
@@ -172,6 +172,17 @@ class ShopifyGraphQLSeeder:
                             "compareAtPrice": variant_data.get("compareAtPrice"),
                             "taxable": variant_data["taxable"],
                             "inventoryPolicy": variant_data["inventoryPolicy"],
+                            "inventoryItem": {
+                                "tracked": True,
+                                "requiresShipping": True,
+                            },
+                            "inventoryQuantities": [
+                                {
+                                    "locationId": "gid://shopify/Location/78228324491",
+                                    "name": "available",
+                                    "quantity": variant_data["inventoryQuantity"],
+                                }
+                            ],
                             "optionValues": [{"optionName": "Size", "name": size}],
                         }
                     )
@@ -295,10 +306,16 @@ class ShopifyGraphQLSeeder:
         # Build two simple collections grouping created products
         product_ids = [p["id"] for p in self.created_products.values()]
         collections = []
+
+        # Use timestamp to make handles unique
+        import time
+
+        timestamp = int(time.time())
+
         collections.append(
             {
                 "title": "Summer Essentials",
-                "handle": "summer-essentials",
+                "handle": f"summer-essentials-{timestamp}",
                 "descriptionHtml": "Perfect for summer - clothing and accessories",
                 "productIds": product_ids[:10],
             }
@@ -306,7 +323,7 @@ class ShopifyGraphQLSeeder:
         collections.append(
             {
                 "title": "Tech Gear",
-                "handle": "tech-gear",
+                "handle": f"tech-gear-{timestamp}",
                 "descriptionHtml": "Latest technology and electronics",
                 "productIds": product_ids[10:],
             }
@@ -415,33 +432,19 @@ class ShopifyGraphQLSeeder:
 
         # Get some products and customers for orders
         customer_ids = [c["id"] for c in self.created_customers.values()]
+        product_list = list(self.created_products.values())
 
-        # Create a few orders
-        for i in range(1, 4):  # Create 3 orders
+        # Create orders following the original customer journey (12 orders)
+        for i in range(1, 13):  # Create 12 orders to match original seed script
             try:
                 # Pick random customer and products
                 customer_id = random.choice(customer_ids)
-                product_ids = list(self.created_products.values())
-                selected_products = random.sample(product_ids, min(2, len(product_ids)))
+                selected_products = random.sample(
+                    product_list, min(2, len(product_list))
+                )
 
-                # Create draft order
-                draft_mutation = """
-                mutation draftOrderCreate($input: DraftOrderInput!) {
-                    draftOrderCreate(input: $input) {
-                        draftOrder {
-                            id
-                            name
-                        }
-                        userErrors {
-                            field
-                            message
-                        }
-                    }
-                }
-                """
-
-                line_items = []
                 # Create line items using product variants
+                line_items = []
                 for product in selected_products:
                     if product.get("variants"):
                         variant_id = product["variants"][0]  # Use first variant
@@ -457,6 +460,23 @@ class ShopifyGraphQLSeeder:
                     print(f"  ⚠️ Skipping order {i} - no variants available")
                     continue
 
+                # Step 1: Create draft order
+                draft_mutation = """
+                mutation draftOrderCreate($input: DraftOrderInput!) {
+                    draftOrderCreate(input: $input) {
+                        draftOrder {
+                            id
+                            name
+                            invoiceUrl
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }
+                """
+
                 draft_variables = {
                     "input": {
                         "lineItems": line_items,
@@ -466,25 +486,32 @@ class ShopifyGraphQLSeeder:
                     }
                 }
 
-                result = self._graphql_request(draft_mutation, draft_variables)
+                draft_result = self._graphql_request(draft_mutation, draft_variables)
 
-                if result["data"]["draftOrderCreate"]["userErrors"]:
+                if draft_result["data"]["draftOrderCreate"]["userErrors"]:
                     errors = [
                         error["message"]
-                        for error in result["data"]["draftOrderCreate"]["userErrors"]
+                        for error in draft_result["data"]["draftOrderCreate"][
+                            "userErrors"
+                        ]
                     ]
                     print(f"  ⚠️ Draft order {i} creation errors: {', '.join(errors)}")
                     continue
 
-                draft_order = result["data"]["draftOrderCreate"]["draftOrder"]
+                draft_order = draft_result["data"]["draftOrderCreate"]["draftOrder"]
 
-                # Complete the draft order
+                # Step 2: Complete the draft order to create paid order
                 complete_mutation = """
                 mutation draftOrderComplete($id: ID!) {
                     draftOrderComplete(id: $id) {
                         draftOrder {
                             id
-                            status
+                            order {
+                                id
+                                name
+                                displayFinancialStatus
+                                totalPrice
+                            }
                         }
                         userErrors {
                             field
@@ -507,12 +534,20 @@ class ShopifyGraphQLSeeder:
                         ]
                     ]
                     print(f"  ⚠️ Order completion errors: {', '.join(errors)}")
-                else:
-                    self.created_orders[f"order_{i}"] = {
-                        "id": draft_order["id"],
-                        "name": draft_order["name"],
-                    }
-                    print(f"  ✅ Order: {draft_order['name']} ({draft_order['id']})")
+                    continue
+
+                order = complete_result["data"]["draftOrderComplete"]["draftOrder"][
+                    "order"
+                ]
+                self.created_orders[f"order_{i}"] = {
+                    "id": order["id"],
+                    "name": order["name"],
+                    "totalPrice": order["totalPrice"],
+                    "financialStatus": order["displayFinancialStatus"],
+                }
+                print(
+                    f"  ✅ Order: {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']}) ({order['id']})"
+                )
 
             except Exception as e:
                 print(f"  ❌ Order {i} failed: {e}")
@@ -538,10 +573,13 @@ class ShopifyGraphQLSeeder:
         await self.create_orders()
 
         print("\n🎯 Seeding Summary:")
-        print(f"  ✅ Products:   {len(self.created_products)}")
+        print(
+            f"  ✅ Products:   {len(self.created_products)} (with inventory tracking)"
+        )
         print(f"  ✅ Customers:  {len(self.created_customers)}")
         print(f"  ✅ Collections:{len(self.created_collections)}")
         print(f"  ✅ Orders:     {len(self.created_orders)}")
+        print(f"  📦 Inventory: Tracked for all product variants")
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
 
