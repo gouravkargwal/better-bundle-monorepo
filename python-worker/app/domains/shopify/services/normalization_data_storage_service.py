@@ -114,17 +114,6 @@ class NormalizationDataStorageService:
 
             # Extract line items BEFORE preparing order data
             line_items = canonical_data.get("line_items", [])
-            self.logger.info(
-                f"🔍 STORAGE SERVICE: Extracted {len(line_items)} line items from canonical data"
-            )
-            if line_items:
-                self.logger.info(
-                    f"🔍 STORAGE SERVICE: First line item: {line_items[0]}"
-                )
-            else:
-                self.logger.warning(
-                    f"🔍 STORAGE SERVICE: No line items found in canonical data. Keys: {list(canonical_data.keys())}"
-                )
 
             # Use canonical data directly - it's already aligned with DB schema
             order_data = canonical_data.copy()
@@ -141,10 +130,6 @@ class NormalizationDataStorageService:
             order_record_id = None
 
             async with get_transaction_context() as session:
-                self.logger.info(
-                    "🔐 Order normalization transaction started",
-                    extra={"orderId": order_id, "shop_id": shop_id},
-                )
 
                 # Check for existing order
                 result = await session.execute(
@@ -226,22 +211,7 @@ class NormalizationDataStorageService:
                         upsert_errors += 1
                         continue
 
-                    self.logger.debug(
-                        f"Processing order {i+1}/{len(canonical_data_list)}: {order_id}"
-                    )
-
                     line_items = canonical_data.get("line_items", [])
-                    self.logger.info(
-                        f"🔍 STORAGE SERVICE: Extracted {len(line_items)} line items from canonical data"
-                    )
-                    if line_items:
-                        self.logger.info(
-                            f"🔍 STORAGE SERVICE: First line item: {line_items[0]}"
-                        )
-                    else:
-                        self.logger.warning(
-                            f"🔍 STORAGE SERVICE: No line items found in canonical data. Keys: {list(canonical_data.keys())}"
-                        )
 
                     # Use canonical data directly - it's already aligned with DB schema
                     order_data = canonical_data.copy()

@@ -127,6 +127,9 @@ class UnifiedGorseService:
                 candidates.append(await max_created(ProductData, "created_at"))
                 candidates.append(await max_created(CustomerData, "created_at"))
                 candidates.append(await max_created(CollectionData, "created_at"))
+                candidates.append(
+                    await max_created(InteractionFeatures, "last_computed_at")
+                )
 
                 # Normalize to timezone-aware UTC to prevent comparison errors
                 valid = [self._ensure_aware_utc(c) for c in candidates if c]

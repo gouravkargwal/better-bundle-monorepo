@@ -68,22 +68,12 @@ class GraphQLOrderAdapter(BaseAdapter):
             "edges", []
         ) or []  # Updated to snake_case
 
-        self.logger.info(
-            f"🔍 GraphQL Adapter: Found {len(li_edges)} line item edges in payload"
-        )
-        self.logger.info(
-            f"🔍 GraphQL Adapter: Line items structure: {list(payload.get('line_items', {}).keys()) if payload.get('line_items') else 'No line_items key'}"
-        )
         for i, edge in enumerate(li_edges):
             node = edge.get("node", {})
             variant = node.get("variant", {}) or {}
             product = (
                 node.get("product", {}) or {}
             )  # Product is directly on the node, not nested in variant
-
-            self.logger.info(
-                f"🔍 GraphQL Adapter: Processing line item {i+1}: product_id={product.get('id')}, variant_id={variant.get('id')}, price={node.get('original_unit_price')}"
-            )
 
             # Extract price information - handle both direct price and price sets
             original_unit_price = None
@@ -224,14 +214,6 @@ class GraphQLOrderAdapter(BaseAdapter):
         )
 
         result = model.dict()
-        line_items_count = len(result.get("line_items", []))
-        self.logger.info(
-            f"🔍 CANONICAL MODEL: Created order with {line_items_count} line items"
-        )
-        if line_items_count > 0:
-            self.logger.info(
-                f"🔍 CANONICAL MODEL: First line item: {result.get('line_items', [])[0]}"
-            )
         return result
 
     def _extract_refunds(
