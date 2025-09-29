@@ -292,7 +292,8 @@ class UserFeatureGenerator(BaseFeatureGenerator):
         all_prices = []
 
         for order in customer_orders:
-            line_items = order.get("lineItems", [])
+            # Use snake_case field names as they come from the database
+            line_items = order.get("line_items", [])
 
             for item in line_items:
                 # Get product ID
@@ -403,7 +404,12 @@ class UserFeatureGenerator(BaseFeatureGenerator):
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        # Direct product ID
+        # Use snake_case field names as they come from the database
+        # The LineItemData model stores product_id directly
+        if "product_id" in line_item:
+            return str(line_item["product_id"])
+
+        # Fallback to camelCase for backward compatibility
         if "productId" in line_item:
             return str(line_item["productId"])
 
@@ -424,7 +430,11 @@ class UserFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Find product information from products list or line item"""
         # First try to find in products list
+        # Use snake_case field names as they come from the database
         for product in products:
+            if product.get("product_id") == product_id:
+                return product
+            # Fallback to camelCase for backward compatibility
             if product.get("productId") == product_id:
                 return product
 

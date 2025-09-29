@@ -172,17 +172,28 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         """Get all purchases of a product by a customer"""
         purchases = []
 
+        logger.info(
+            f"🔍 INTERACTION FEATURE: Looking for purchases for customer {customer_id}, product {product_id}"
+        )
+        logger.info(f"🔍 INTERACTION FEATURE: Processing {len(orders)} orders")
+
         for order in orders:
             # Check if order is for this customer
             # Customer IDs are already normalized at data ingestion level
-            order_customer_id = order.get("customerId", "")
+            # Use snake_case field names as they come from the database
+            order_customer_id = order.get("customer_id", "")
             if order_customer_id != customer_id:
                 continue
 
             # Check line items for this product
-            line_items = order.get("lineItems", [])
+            # Use snake_case field names as they come from the database
+            line_items = order.get("line_items", [])
             if line_items is None:
                 line_items = []
+
+            logger.info(
+                f"🔍 INTERACTION FEATURE: Order {order.get('order_id')} has {len(line_items)} line items"
+            )
             for item in line_items:
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure
@@ -195,8 +206,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                     if mapped_product_id == product_id:
                         purchases.append(
                             {
-                                "order_id": order.get("orderId"),
-                                "order_date": order.get("orderDate"),
+                                "order_id": order.get("order_id"),
+                                "order_date": order.get("order_date"),
                                 "quantity": item.get("quantity", 1),
                                 "price": item.get("price", 0.0),
                             }
@@ -206,22 +217,25 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                     # Fallback to direct comparison if no mapping provided
                     purchases.append(
                         {
-                            "order_id": order.get("orderId"),
-                            "order_date": order.get("orderDate"),
+                            "order_id": order.get("order_id"),
+                            "order_date": order.get("order_date"),
                             "quantity": item.get("quantity", 1),
                             "price": item.get("price", 0.0),
                         }
                     )
                     break  # Only count once per order
 
+        logger.info(
+            f"🔍 INTERACTION FEATURE: Found {len(purchases)} purchases for customer {customer_id}, product {product_id}"
+        )
         return purchases
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        # This depends on your line item structure
-        # Might be stored as productId, product.id, or in a variant
-        if "productId" in line_item:
-            return line_item["productId"]
+        # Use snake_case field names as they come from the database
+        # The LineItemData model stores product_id directly
+        if "product_id" in line_item:
+            return line_item["product_id"]
 
         # If stored as GID
         if "product" in line_item and isinstance(line_item["product"], dict):

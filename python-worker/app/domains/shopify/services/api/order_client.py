@@ -101,7 +101,7 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                     id
                                     title
                                     quantity
-                                    originalUnitPrice
+                                    original_unit_price: originalUnitPrice
                                     sku
                                     variant {
                                         id

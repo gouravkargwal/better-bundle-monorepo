@@ -589,6 +589,18 @@ class UnifiedGorseService:
                     result = await session.execute(stmt)
                     interactions = result.scalars().all()
 
+                    logger.info(
+                        f"🔍 GORSE SYNC: Found {len(interactions)} interaction features for shop {shop_id}"
+                    )
+                    if since_time:
+                        logger.info(
+                            f"🔍 GORSE SYNC: Filtering by since_time: {since_time}"
+                        )
+                    if interactions:
+                        logger.info(
+                            f"🔍 GORSE SYNC: First interaction last_computed_at: {interactions[0].last_computed_at}"
+                        )
+
                     if not interactions:
                         break
 
@@ -597,6 +609,14 @@ class UnifiedGorseService:
                     for interaction in interactions:
                         # Create multiple feedback records based on actual interaction counts
                         # This ensures Gorse gets the full picture of user behavior
+
+                        # Debug logging for interaction counts
+                        purchase_count = getattr(interaction, "purchase_count", 0)
+                        view_count = getattr(interaction, "view_count", 0)
+                        cart_add_count = getattr(interaction, "cart_add_count", 0)
+                        logger.info(
+                            f"🔍 GORSE SYNC: Interaction {interaction.customer_id}-{interaction.product_id}: purchase_count={purchase_count}, view_count={view_count}, cart_add_count={cart_add_count}"
+                        )
 
                         # Create view feedback records (one for each view)
                         # Use slightly different timestamps to avoid Gorse unique constraint issues

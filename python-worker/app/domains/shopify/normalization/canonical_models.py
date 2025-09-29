@@ -59,8 +59,8 @@ class CanonicalProductInCollection(BaseModel):
 class CanonicalLineItem(BaseModel):
     """Canonical line item model - stores complete line item data from paginated orders"""
 
-    productId: Optional[str] = None
-    variantId: Optional[str] = None
+    product_id: Optional[str] = None
+    variant_id: Optional[str] = None
     title: Optional[str] = None
     quantity: int = 0
     price: float = 0.0
@@ -95,8 +95,8 @@ class CanonicalOrder(BaseModel):
     cancelled_at: Optional[datetime] = None  # cancelledAt
     cancel_reason: Optional[str] = ""  # cancelReason
     order_locale: Optional[str] = "en"  # orderLocale
-    currency_code: Optional[str] = "USD"  # currencyCode
-    presentment_currency_code: Optional[str] = "USD"  # presentmentCurrencyCode
+    currency_code: Optional[str] = None  # currencyCode
+    presentment_currency_code: Optional[str] = None  # presentmentCurrencyCode
     confirmed: bool = False  # confirmed
     test: bool = False  # test
     financial_status: Optional[str] = None  # financialStatus
@@ -105,7 +105,7 @@ class CanonicalOrder(BaseModel):
     tags: Any = Field(default_factory=list)  # tags (JSON)
     note: Optional[str] = ""  # note
     note_attributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
-    lineItems: List[CanonicalLineItem] = Field(
+    line_items: List[CanonicalLineItem] = Field(
         default_factory=list
     )  # Extracted separately for LineItemData records - complete paginated line items
     shipping_address: Any = Field(default_factory=dict)  # shippingAddress (JSON)

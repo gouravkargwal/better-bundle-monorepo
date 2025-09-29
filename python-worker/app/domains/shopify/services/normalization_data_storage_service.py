@@ -113,14 +113,26 @@ class NormalizationDataStorageService:
                 return False
 
             # Extract line items BEFORE preparing order data
-            line_items = canonical_data.get("lineItems", [])
+            line_items = canonical_data.get("line_items", [])
+            self.logger.info(
+                f"🔍 STORAGE SERVICE: Extracted {len(line_items)} line items from canonical data"
+            )
+            if line_items:
+                self.logger.info(
+                    f"🔍 STORAGE SERVICE: First line item: {line_items[0]}"
+                )
+            else:
+                self.logger.warning(
+                    f"🔍 STORAGE SERVICE: No line items found in canonical data. Keys: {list(canonical_data.keys())}"
+                )
 
             # Use canonical data directly - it's already aligned with DB schema
             order_data = canonical_data.copy()
 
             # Remove line items since they're handled separately
+            # Note: We keep line_items in order_data for processing, but remove lineItems (camelCase)
             order_data.pop("lineItems", None)
-            order_data.pop("line_items", None)
+            # Don't remove line_items - we need them for processing
 
             # Clean internal fields
             self._clean_internal_fields(order_data)
@@ -218,10 +230,18 @@ class NormalizationDataStorageService:
                         f"Processing order {i+1}/{len(canonical_data_list)}: {order_id}"
                     )
 
-                    line_items = canonical_data.get("lineItems", [])
-                    self.logger.debug(
-                        f"Order {order_id} has {len(line_items)} line items"
+                    line_items = canonical_data.get("line_items", [])
+                    self.logger.info(
+                        f"🔍 STORAGE SERVICE: Extracted {len(line_items)} line items from canonical data"
                     )
+                    if line_items:
+                        self.logger.info(
+                            f"🔍 STORAGE SERVICE: First line item: {line_items[0]}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"🔍 STORAGE SERVICE: No line items found in canonical data. Keys: {list(canonical_data.keys())}"
+                        )
 
                     # Use canonical data directly - it's already aligned with DB schema
                     order_data = canonical_data.copy()
@@ -268,6 +288,8 @@ class NormalizationDataStorageService:
                         await self._create_line_items(
                             session, order_record_id, line_items
                         )
+                    else:
+                        self.logger.warning(f"No line items found for order {order_id}")
 
                     processed_count += 1
                     self.logger.debug(f"Successfully processed order {order_id}")

@@ -444,7 +444,7 @@ class FeatureRepository(IFeatureRepository):
                     line_items_result = await session.execute(line_items_stmt)
                     line_items = line_items_result.scalars().all()
 
-                    order_dict["lineItems"] = [
+                    order_dict["line_items"] = [
                         line_item.to_dict() for line_item in line_items
                     ]
                     orders_data.append(order_dict)
@@ -718,7 +718,7 @@ class FeatureRepository(IFeatureRepository):
                     line_items_result = await session.execute(line_items_stmt)
                     line_items = line_items_result.scalars().all()
 
-                    order_dict["lineItems"] = [
+                    order_dict["line_items"] = [
                         line_item.to_dict() for line_item in line_items
                     ]
                     orders_data.append(order_dict)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.logging import get_logger
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalLineItem, CanonicalOrder
 
@@ -50,6 +51,9 @@ def _extract_numeric_gid(gid: Optional[str]) -> Optional[str]:
 
 
 class GraphQLOrderAdapter(BaseAdapter):
+    def __init__(self):
+        self.logger = get_logger(__name__)
+
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         # IDs
         entity_id = _extract_numeric_gid(payload.get("id")) or ""
@@ -63,22 +67,42 @@ class GraphQLOrderAdapter(BaseAdapter):
         li_edges = (payload.get("line_items", {}) or {}).get(
             "edges", []
         ) or []  # Updated to snake_case
-        for edge in li_edges:
+
+        self.logger.info(
+            f"🔍 GraphQL Adapter: Found {len(li_edges)} line item edges in payload"
+        )
+        self.logger.info(
+            f"🔍 GraphQL Adapter: Line items structure: {list(payload.get('line_items', {}).keys()) if payload.get('line_items') else 'No line_items key'}"
+        )
+        for i, edge in enumerate(li_edges):
             node = edge.get("node", {})
             variant = node.get("variant", {}) or {}
-            product = variant.get("product", {}) or {}
+            product = (
+                node.get("product", {}) or {}
+            )  # Product is directly on the node, not nested in variant
 
-            # Extract price information from price sets
+            self.logger.info(
+                f"🔍 GraphQL Adapter: Processing line item {i+1}: product_id={product.get('id')}, variant_id={variant.get('id')}, price={node.get('original_unit_price')}"
+            )
+
+            # Extract price information - handle both direct price and price sets
             original_unit_price = None
             discounted_unit_price = None
             currency_code = None
 
-            # Extract from originalUnitPriceSet
-            original_price_set = node.get("original_unit_price_set", {})
-            if original_price_set:
-                shop_money = original_price_set.get("shop_money", {})
-                original_unit_price = _to_float(shop_money.get("amount"))
-                currency_code = shop_money.get("currency_code")
+            # First try direct price field (from your raw data)
+            if node.get("original_unit_price"):
+                original_unit_price = _to_float(node.get("original_unit_price"))
+                # Get currency from order level
+                currency_code = payload.get("currency_code")
+
+            # Fallback to price sets if direct price not available
+            if original_unit_price is None:
+                original_price_set = node.get("original_unit_price_set", {})
+                if original_price_set:
+                    shop_money = original_price_set.get("shop_money", {})
+                    original_unit_price = _to_float(shop_money.get("amount"))
+                    currency_code = shop_money.get("currency_code")
 
             # Extract from discountedUnitPriceSet
             discounted_price_set = node.get("discounted_unit_price_set", {})
@@ -111,11 +135,13 @@ class GraphQLOrderAdapter(BaseAdapter):
 
             line_items.append(
                 CanonicalLineItem(
-                    productId=_extract_numeric_gid(node.get("product_id")),
-                    variantId=_extract_numeric_gid(node.get("variant_id")),
+                    product_id=_extract_numeric_gid(product.get("id")),
+                    variant_id=_extract_numeric_gid(variant.get("id")),
                     title=node.get("title"),
                     quantity=int(node.get("quantity") or 0),
-                    price=_to_float(node.get("price")),
+                    price=original_unit_price
+                    or _to_float(node.get("original_unit_price"))
+                    or 0.0,
                     original_unit_price=original_unit_price,
                     discounted_unit_price=discounted_unit_price,
                     currency_code=currency_code,
@@ -124,25 +150,13 @@ class GraphQLOrderAdapter(BaseAdapter):
                 )
             )
 
-        # Totals from *Set nodes - now using snake_case field names
-        total_amount = _money_from_set(
-            payload.get("total_price_set", {}) or {}
-        )  # Updated to snake_case
-        subtotal_amount = _money_from_set(
-            payload.get("subtotal_price_set", {}) or {}
-        )  # Updated to snake_case
-        total_tax_amount = _money_from_set(
-            payload.get("total_tax_set", {}) or {}
-        )  # Updated to snake_case
-        total_shipping_amount = _money_from_set(
-            payload.get("total_shipping_price_set", {}) or {}  # Updated to snake_case
-        )
-        total_refunded_amount = _money_from_set(
-            payload.get("total_refunded_set", {}) or {}  # Updated to snake_case
-        )
-        total_outstanding_amount = _money_from_set(
-            payload.get("total_outstanding_set", {}) or {}  # Updated to snake_case
-        )
+        # Extract order totals - use direct field names from the raw data
+        total_amount = _to_float(payload.get("total_price", 0.0))
+        subtotal_amount = _to_float(payload.get("subtotal_price", 0.0))
+        total_tax_amount = _to_float(payload.get("total_tax", 0.0))
+        total_shipping_amount = _to_float(payload.get("total_shipping", 0.0))
+        total_refunded_amount = _to_float(payload.get("total_refunded", 0.0))
+        total_outstanding_amount = _to_float(payload.get("total_outstanding", 0.0))
 
         # Tags can be array in GQL
         tags = payload.get("tags") or []
@@ -186,18 +200,16 @@ class GraphQLOrderAdapter(BaseAdapter):
             test=payload.get("test", False),
             order_name=payload.get("name"),
             note=payload.get("note"),
-            customer_email=payload.get("email"),
-            customer_phone=payload.get("phone"),
-            customer_display_name=(payload.get("customer") or {}).get(
-                "display_name"
-            ),  # Updated to snake_case
+            customer_email=(payload.get("customer") or {}).get("email"),
+            customer_phone=(payload.get("customer") or {}).get("phone"),
+            customer_display_name=f"{(payload.get('customer') or {}).get('firstName', '')} {(payload.get('customer') or {}).get('lastName', '')}".strip(),
             financial_status=payload.get("financial_status") or None,
             fulfillment_status=payload.get("fulfillment_status") or None,
             customer_id=customer_id,
             tags=tags,
             note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
-            lineItems=line_items,
+            line_items=line_items,
             billing_address=payload.get("billing_address"),  # Updated to snake_case
             shipping_address=payload.get("shipping_address"),  # Updated to snake_case
             discount_applications=(
@@ -211,7 +223,16 @@ class GraphQLOrderAdapter(BaseAdapter):
             extras={},
         )
 
-        return model.dict()
+        result = model.dict()
+        line_items_count = len(result.get("line_items", []))
+        self.logger.info(
+            f"🔍 CANONICAL MODEL: Created order with {line_items_count} line items"
+        )
+        if line_items_count > 0:
+            self.logger.info(
+                f"🔍 CANONICAL MODEL: First line item: {result.get('line_items', [])[0]}"
+            )
+        return result
 
     def _extract_refunds(
         self, payload: Dict[str, Any], shop_id: str
