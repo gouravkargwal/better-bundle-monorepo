@@ -29,6 +29,7 @@ from app.core.database.models import (
     UserSession,
     UserInteraction,
     PurchaseAttribution,
+    PipelineWatermark,
 )
 
 logger = get_logger(__name__)
@@ -107,43 +108,65 @@ class UnifiedGorseService:
             return False
 
     async def _get_last_sync_timestamp(self, shop_id: str) -> Optional[datetime]:
-        """Get the last sync timestamp for incremental sync using SQLAlchemy sources"""
+        """Get the last sync timestamp from PipelineWatermark table (consistent with other services)"""
         try:
             async with get_session_context() as session:
-                candidates: List[Optional[datetime]] = []
-
-                async def max_created(
-                    model, field_name: str = "created_at"
-                ) -> Optional[datetime]:
-                    field = getattr(model, field_name, None)
-                    if field is None:
-                        return None
-                    stmt = select(func.max(field)).where(model.shop_id == shop_id)
-                    return (await session.execute(stmt)).scalar_one()
-
-                candidates.append(await max_created(UserInteraction))
-                candidates.append(await max_created(UserSession))
-                candidates.append(await max_created(PurchaseAttribution))
-                candidates.append(await max_created(ProductData, "created_at"))
-                candidates.append(await max_created(CustomerData, "created_at"))
-                candidates.append(await max_created(CollectionData, "created_at"))
-                candidates.append(
-                    await max_created(InteractionFeatures, "last_computed_at")
+                # Get the latest Gorse sync timestamp from PipelineWatermark
+                # Use first() instead of scalar_one_or_none() to handle multiple records
+                result = await session.execute(
+                    select(PipelineWatermark.last_gorse_synced_at)
+                    .where(PipelineWatermark.shop_id == shop_id)
+                    .where(PipelineWatermark.data_type == "gorse_sync")
+                    .order_by(PipelineWatermark.last_gorse_synced_at.desc())
                 )
+                last_sync = result.scalar_one_or_none()
 
-                # Normalize to timezone-aware UTC to prevent comparison errors
-                valid = [self._ensure_aware_utc(c) for c in candidates if c]
-                if valid:
-                    last_sync = max(valid)
-                    return last_sync - timedelta(minutes=5)
-
-                return now_utc() - timedelta(hours=24)
+                if last_sync:
+                    # Normalize to timezone-aware UTC to prevent comparison errors
+                    last_sync = self._ensure_aware_utc(last_sync)
+                    logger.info(f"Found last Gorse sync timestamp: {last_sync}")
+                    return last_sync
+                else:
+                    logger.info("No previous Gorse sync found, using 24 hours ago")
+                    return now_utc() - timedelta(hours=24)
 
         except Exception as e:
             logger.error(
-                f"Failed to get last sync timestamp for shop {shop_id}: {str(e)}"
+                f"Failed to get last Gorse sync timestamp for shop {shop_id}: {str(e)}"
             )
             return now_utc() - timedelta(hours=24)
+
+    async def _update_gorse_watermark(self, shop_id: str, sync_timestamp: datetime):
+        """Update the Gorse sync watermark in PipelineWatermark table (consistent with other services)"""
+        try:
+            async with get_session_context() as session:
+                # Find existing watermark or create new one
+                result = await session.execute(
+                    select(PipelineWatermark)
+                    .where(PipelineWatermark.shop_id == shop_id)
+                    .where(PipelineWatermark.data_type == "gorse_sync")
+                )
+                watermark = result.scalar_one_or_none()
+
+                if watermark:
+                    # Update existing watermark
+                    watermark.last_gorse_synced_at = sync_timestamp
+                    watermark.updated_at = now_utc()
+                else:
+                    # Create new watermark
+                    watermark = PipelineWatermark(
+                        shop_id=shop_id,
+                        data_type="gorse_sync",
+                        last_gorse_synced_at=sync_timestamp,
+                        status="completed",
+                    )
+                    session.add(watermark)
+
+                await session.commit()
+                logger.info(f"Updated Gorse sync watermark: {sync_timestamp}")
+
+        except Exception as e:
+            logger.error(f"Failed to update Gorse sync watermark: {str(e)}")
 
     async def sync_and_train(
         self,
@@ -171,20 +194,16 @@ class UnifiedGorseService:
         logger.info(f"Starting unified sync and training for shop {shop_id}")
 
         try:
-            # Determine sync scope with proper incremental logic
+            # Use watermark table to determine sync scope (consistent with other services)
             since_time = None
             if sync_type == "incremental":
-                if since_hours > 0:
-                    # Use provided hours
-                    since_time = now_utc() - timedelta(hours=since_hours)
+                # Get the last Gorse sync timestamp from watermark table
+                since_time = await self._get_last_sync_timestamp(shop_id)
+                if since_time:
+                    logger.info(f"Using watermark-based incremental sync: {since_time}")
                 else:
-                    # Auto-detect last sync timestamp
-                    since_time = await self._get_last_sync_timestamp(shop_id)
-                    if since_time:
-                        logger.info(f"Auto-detected last sync time: {since_time}")
-                    else:
-                        logger.info("No previous sync found, doing full sync")
-                        sync_type = "all"
+                    logger.info("No previous Gorse sync found, doing full sync")
+                    sync_type = "all"
 
             # Ensure since_time is timezone-aware UTC for downstream comparisons
             if since_time is not None:
@@ -350,6 +369,9 @@ class UnifiedGorseService:
             results["duration_seconds"] = (
                 results["end_time"] - start_time
             ).total_seconds()
+
+            # Update Gorse sync watermark (consistent with other services)
+            await self._update_gorse_watermark(shop_id, results["end_time"])
 
             logger.info(f"Unified sync completed for shop {shop_id}: {results}")
             return results

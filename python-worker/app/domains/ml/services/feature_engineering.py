@@ -592,6 +592,17 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 _get_pw("collections"), "last_features_computed_at", None
             )
 
+            # Check if this is a new shop (no watermarks exist) - if so, switch to historical mode
+            has_any_watermarks = any(
+                [products_since, customers_since, orders_since, collections_since]
+            )
+
+            if incremental and not has_any_watermarks:
+                logger.info(
+                    f"🔄 No watermarks found for shop {shop_id}, switching to historical mode"
+                )
+                incremental = False
+
             # Handle incremental vs full data loading with chunked processing
             if incremental:
                 logger.info(f"🔄 Running incremental processing for shop {shop_id}")
@@ -746,41 +757,10 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     ),
                 )
 
-                # If no recent data, skip processing
-                logger.info(f"🔍 Checking if there's recent data to process...")
-                has_recent_data = any(
-                    [
-                        products,
-                        customers,
-                        orders,
-                        collections,
-                        user_interactions,
-                        user_sessions,
-                        purchase_attributions,
-                    ]
-                )
-                logger.info(f"📊 Recent data check: has_recent_data={has_recent_data}")
-
-                if not has_recent_data:
-
-                    return {
-                        "success": True,
-                        "shop_id": shop_id,
-                        "message": "No recent data to process - incremental processing skipped",
-                        "incremental": True,
-                        "timestamp": now_utc().isoformat(),
-                        "results": {
-                            "products": {"saved_count": 0, "total_processed": 0},
-                            "users": {"saved_count": 0, "total_processed": 0},
-                            "collections": {"saved_count": 0, "total_processed": 0},
-                            "customer_behaviors": {
-                                "saved_count": 0,
-                                "total_processed": 0,
-                            },
-                        },
-                    }
-            else:
+                # Data has been loaded based on watermarks - no need to check again
+            if not incremental:
                 # Load all data using chunked processing - use much larger batch sizes for historical processing
+                logger.info(f"🔄 Running historical processing for shop {shop_id}")
                 products = await self.process_entities_in_chunks(
                     shop_id,
                     "products",
@@ -822,6 +802,8 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     10000,
                     chunk_size=100,  # Process up to 10k attributions
                 )
+
+            # Data loading is based on watermarks - if we reach here, we have data to process
 
             # Compute all features using unified analytics data
             all_features = await self.compute_all_features_for_shop(
