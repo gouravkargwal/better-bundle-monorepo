@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from app.core.database.session import get_session_context
 from sqlalchemy import select
+from app.core.database.models import Shop
 
 from ..interfaces.feature_engineering import IFeatureEngineeringService
 
@@ -481,12 +482,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             Dict with processing results
         """
         try:
-            logger.info(f"🚀 Starting unified feature pipeline for shop {shop_id}")
-            logger.info(f"📋 Pipeline params: batch_size={batch_size}")
-
-            # Load shop data using SQLAlchemy
-            logger.info(f"🔍 Loading shop data for {shop_id}")
-            from app.core.database.models import Shop
 
             async with get_session_context() as session:
                 result = await session.execute(select(Shop).where(Shop.id == shop_id))
@@ -516,10 +511,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "created_at": shop_record.created_at,
                 "updated_at": shop_record.updated_at,
             }
-            logger.info(f"✅ Shop data loaded successfully")
-
-            # Load all data for the shop - no complex mode switching
-            logger.info(f"📦 Loading all data for shop {shop_id}")
 
             # Load core entities
             products = await self.process_entities_in_chunks(
@@ -544,13 +535,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             )
             purchase_attributions = await self.process_entities_in_chunks(
                 shop_id, "purchase_attributions", batch_size, chunk_size=100
-            )
-
-            logger.info(
-                f"📊 Data loaded: products={len(products)}, customers={len(customers)}, orders={len(orders)}, collections={len(collections)}"
-            )
-            logger.info(
-                f"📊 Analytics: interactions={len(user_interactions)}, sessions={len(user_sessions)}, attributions={len(purchase_attributions)}"
             )
 
             # Compute all features using unified analytics data
@@ -602,16 +586,6 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         f"Feature type {feature_type} missing from save results"
                     )
                     all_features_succeeded = False
-
-            # Log the overall success status
-            if all_features_succeeded:
-                logger.info(
-                    f"✅ All feature types processed successfully for shop {shop_id}"
-                )
-            else:
-                logger.warning(
-                    f"Some feature types failed for shop {shop_id} - will retry on next run"
-                )
 
             return {
                 "success": True,
@@ -1296,9 +1270,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             gorse_service = UnifiedGorseService()
 
             # Run unified sync and training - no complex mode switching
-            result = await gorse_service.sync_and_train(shop_id=shop_id)
-
-            logger.info(f"✅ Gorse sync completed for shop {shop_id}: {result}")
+            await gorse_service.sync_and_train(shop_id=shop_id)
 
         except Exception as e:
             logger.error(

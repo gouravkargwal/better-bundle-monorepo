@@ -56,15 +56,6 @@ def create_engine() -> AsyncEngine:
     try:
         url_obj = make_url(database_url)
         safe_url = url_obj.set(password="***")
-        logger.info(
-            "Resolved database URL",
-            extra={
-                "drivername": safe_url.drivername,
-                "host": safe_url.host,
-                "port": safe_url.port,
-                "database": safe_url.database,
-            },
-        )
     except Exception:
         # Avoid failing on logging; continue silently
         pass
@@ -177,9 +168,6 @@ async def _create_engine():
 
     for attempt in range(max_attempts):
         try:
-            logger.info(
-                f"Creating database engine (attempt {attempt + 1}/{max_attempts})"
-            )
 
             # Create engine
             _engine = create_engine()
@@ -190,7 +178,6 @@ async def _create_engine():
                 timeout=settings.DATABASE_CONNECT_TIMEOUT,
             )
 
-            logger.info("Database engine created successfully")
             _connection_attempts = 0
             return
 
@@ -207,7 +194,6 @@ async def _create_engine():
         # Exponential backoff
         if attempt < max_attempts - 1:
             delay = base_delay * (2**attempt)
-            logger.info(f"Retrying database engine creation in {delay} seconds...")
             await asyncio.sleep(delay)
 
     # All attempts failed
@@ -252,7 +238,6 @@ async def close_engine() -> None:
     await _cleanup_engine()
     _last_health_check = 0
     _connection_attempts = 0
-    logger.info("Database engine closed and cleaned up")
 
 
 async def check_engine_health() -> bool:

@@ -28,7 +28,6 @@ class KafkaTopicManager:
                 **kafka_settings.admin_config,
             )
             await self.admin_client.start()
-            logger.info("Kafka admin client initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Kafka admin client: {e}")
             raise
@@ -64,7 +63,6 @@ class KafkaTopicManager:
                         },
                     )
                     new_topics.append(new_topic)
-                    logger.info(f"Will create topic: {topic_name}")
 
             if new_topics:
                 # Create topics

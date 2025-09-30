@@ -25,7 +25,6 @@ class KafkaAdmin:
                 **self.config.get("admin_config", {}),
             )
             await self._admin.start()
-            logger.info("Kafka admin client initialized")
         except Exception as e:
             logger.exception(f"Failed to initialize Kafka admin: {e}")
             raise
@@ -49,13 +48,11 @@ class KafkaAdmin:
                 await self._admin.create_topics([new_topic])
 
                 results[topic_name] = True
-                logger.info(f"Topic '{topic_name}' created successfully")
 
             except Exception as e:
                 # aiokafka raises generic errors for existing topics depending on broker
                 if "TopicExistsError" in str(e) or "already exists" in str(e):
                     results[topic_name] = True
-                    logger.info(f"Topic '{topic_name}' already exists")
                 else:
                     results[topic_name] = False
                     logger.exception(f"Failed to create topic '{topic_name}': {e}")
@@ -73,7 +70,6 @@ class KafkaAdmin:
             await self._admin.delete_topics(topic_names)
             for topic_name in topic_names:
                 results[topic_name] = True
-                logger.info(f"Topic '{topic_name}' deleted successfully")
         except Exception as e:
             logger.exception(f"Failed to delete topics: {e}")
             for topic_name in topic_names:
@@ -139,6 +135,5 @@ class KafkaAdmin:
         if self._admin:
             try:
                 await self._admin.close()
-                logger.info("Kafka admin client closed")
             except Exception as e:
                 logger.exception(f"Error closing admin client: {e}")

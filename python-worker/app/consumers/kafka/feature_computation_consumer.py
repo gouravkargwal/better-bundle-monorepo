@@ -101,7 +101,6 @@ class FeatureComputationKafkaConsumer:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual feature computation messages"""
         try:
-            logger.info(f"🔄 Processing feature computation message: {message}")
 
             payload = message.get("value") or message
             if isinstance(payload, str):

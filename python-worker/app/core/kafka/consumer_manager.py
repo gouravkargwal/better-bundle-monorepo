@@ -41,11 +41,9 @@ class KafkaConsumerManager:
     async def initialize(self):
         """Initialize all Kafka consumers"""
         if self._initialized:
-            logger.info("Consumer manager already initialized")
             return
 
         try:
-            logger.info("Initializing Kafka consumer manager...")
 
             # Initialize all consumers
             self.consumers = {
@@ -64,7 +62,6 @@ class KafkaConsumerManager:
             async def _init_one(name: str, consumer: Any):
                 try:
                     await consumer.initialize()
-                    logger.info(f"✅ Initialized {name} consumer")
                 except Exception as e:
                     logger.exception(f"❌ Failed to initialize {name} consumer: {e}")
                     raise
@@ -77,7 +74,6 @@ class KafkaConsumerManager:
             )
 
             self._initialized = True
-            logger.info("🎉 All Kafka consumers initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize consumer manager: {e}")
@@ -90,23 +86,19 @@ class KafkaConsumerManager:
             await self.initialize()
 
         if self._running:
-            logger.info("Consumers already running")
             return
 
         try:
-            logger.info("Starting all Kafka consumers...")
 
             # Start each consumer in a background task
             for name, consumer in self.consumers.items():
                 try:
                     # Create background task for each consumer
                     asyncio.create_task(self._run_consumer(name, consumer))
-                    logger.info(f"🚀 Started {name} consumer")
                 except Exception as e:
                     logger.error(f"❌ Failed to start {name} consumer: {e}")
 
             self._running = True
-            logger.info("🎉 All Kafka consumers started successfully")
 
         except Exception as e:
             logger.error(f"Failed to start consumers: {e}")
@@ -118,7 +110,6 @@ class KafkaConsumerManager:
 
         while self._running:
             try:
-                logger.info(f"🔄 Starting {name} consumer...")
                 await consumer.start_consuming()
             except Exception as e:
                 # Check if this is a ConsumerStoppedError (normal during shutdown)
@@ -152,35 +143,27 @@ class KafkaConsumerManager:
                     else:
                         # Exponential backoff: 5s, 10s, 20s, 40s, max 60s
                         delay = min(5 * (2 ** min(restart_count - 1, 4)), 60)
-                        logger.info(
-                            f"🔄 Restarting {name} consumer in {delay} seconds... (attempt {restart_count})"
-                        )
+
                         await asyncio.sleep(delay)
                 else:
-                    logger.info(f"🛑 Stopping {name} consumer (manager shutting down)")
                     break
 
     async def stop_all_consumers(self):
         """Stop all consumers gracefully"""
         if not self._running:
-            logger.info("No consumers running")
             return
 
         try:
-            logger.info("Stopping all Kafka consumers...")
             self._running = False  # Signal consumers to stop
 
             # Close each consumer with timeout
             for name, consumer in self.consumers.items():
                 try:
                     await asyncio.wait_for(consumer.close(), timeout=10.0)
-                    logger.info(f"✅ Stopped {name} consumer")
                 except asyncio.TimeoutError:
                     logger.warning(f"⚠️ Timeout stopping {name} consumer")
                 except Exception as e:
                     logger.exception(f"❌ Error stopping {name} consumer: {e}")
-
-            logger.info("🎉 All Kafka consumers stopped")
 
         except Exception as e:
             logger.exception(f"Error stopping consumers: {e}")
@@ -190,7 +173,6 @@ class KafkaConsumerManager:
         await self.stop_all_consumers()
         self.consumers.clear()
         self._initialized = False
-        logger.info("Consumer manager closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status of all consumers"""
@@ -217,7 +199,6 @@ class KafkaConsumerManager:
             raise ValueError(f"Consumer {consumer_name} not found")
 
         try:
-            logger.info(f"Restarting {consumer_name} consumer...")
 
             # Stop the consumer
             await self.consumers[consumer_name].close()
@@ -229,8 +210,6 @@ class KafkaConsumerManager:
             asyncio.create_task(
                 self._run_consumer(consumer_name, self.consumers[consumer_name])
             )
-
-            logger.info(f"✅ {consumer_name} consumer restarted")
 
         except Exception as e:
             logger.exception(f"❌ Failed to restart {consumer_name} consumer: {e}")

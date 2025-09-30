@@ -64,7 +64,6 @@ async def check_database_health() -> DatabaseHealthStatus:
 
 async def reconnect_database() -> bool:
     """Reconnect to database with retry logic"""
-    logger.info("Attempting database reconnection")
 
     try:
         from .simple_db_client import close_database
@@ -82,7 +81,6 @@ async def reconnect_database() -> bool:
         health_status = await check_database_health()
 
         if health_status.is_healthy:
-            logger.info("Database reconnection successful")
             return True
         else:
             logger.error("Database reconnection failed - health check failed")
@@ -97,18 +95,12 @@ async def wait_for_database_ready(
     max_attempts: int = 30, delay_seconds: float = 2.0
 ) -> bool:
     """Wait for database to be ready (useful for container startup)"""
-    logger.info(
-        "Waiting for database to be ready",
-        max_attempts=max_attempts,
-        delay_seconds=delay_seconds,
-    )
 
     for attempt in range(max_attempts):
         try:
             health_status = await check_database_health()
 
             if health_status.is_healthy:
-                logger.info("Database is ready", attempt=attempt + 1)
                 return True
 
         except Exception as e:
@@ -127,9 +119,6 @@ async def wait_for_database_ready(
 
 async def monitor_database_health(interval_seconds: int = 60) -> None:
     """Continuous database health monitoring"""
-    logger.info(
-        "Starting database health monitoring", interval_seconds=interval_seconds
-    )
 
     while True:
         try:

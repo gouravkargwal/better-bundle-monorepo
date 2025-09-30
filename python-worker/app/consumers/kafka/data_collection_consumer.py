@@ -201,7 +201,6 @@ class DataCollectionKafkaConsumer:
 
             # Check if this is a deletion event
             if event_type.endswith("_deleted"):
-                logger.info(f"🗑️ Handling deletion event: {event_type} for {shopify_id}")
                 await self._handle_deletion_event(
                     event_type, shopify_id, shop_data["id"]
                 )

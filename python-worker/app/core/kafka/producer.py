@@ -38,7 +38,6 @@ class KafkaProducer:
 
             self._producer = AIOKafkaProducer(**producer_config)
             await self._producer.start()
-            logger.info("Kafka producer initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Kafka producer: {e}")
             raise
@@ -87,12 +86,6 @@ class KafkaProducer:
                         ):
                             logger.warning(
                                 f"⚠️ Partition error for {topic}, retrying without partition: {partition_error}"
-                            )
-                            logger.info(
-                                f"🔍 Partition details: requested_partition={partition}, topic={topic}"
-                            )
-                            logger.info(
-                                f"🔍 Message details: key={key}, has_key={bool(key)}"
                             )
                             future = self._producer.send(
                                 topic, value=message_with_metadata, key=key
@@ -153,7 +146,6 @@ class KafkaProducer:
                 results.append(None)
 
         self._batch_count += 1
-        logger.info(f"Batch sent: {successful}/{len(messages)} messages successful")
 
         return results
 
@@ -182,16 +174,12 @@ class KafkaProducer:
         """Flush all pending messages"""
         if self._producer:
             await self._producer.flush()
-            logger.debug("Producer flushed")
 
     async def close(self):
         """Close producer"""
         if self._producer:
             try:
                 await self._producer.stop()
-                logger.info(
-                    f"Producer closed. Sent {self._message_count} messages, {self._error_count} errors, {self._batch_count} batches"
-                )
             except Exception as e:
                 logger.error(f"Error closing producer: {e}")
 

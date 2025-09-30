@@ -23,7 +23,6 @@ async def create_all_tables():
             await conn.run_sync(Base.metadata.create_all)
             await conn.commit()
 
-        logger.info("✅ All database tables created/verified successfully!")
         return True
 
     except Exception as e:
@@ -33,7 +32,6 @@ async def create_all_tables():
             keyword in error_msg
             for keyword in ["already exists", "duplicate", "relation"]
         ):
-            logger.info("✅ Database tables/indexes already exist - skipping creation")
             return True
         else:
             logger.error(f"❌ Failed to create tables: {e}")
@@ -49,7 +47,6 @@ async def drop_all_tables():
             # Drop all tables
             await conn.run_sync(Base.metadata.drop_all)
 
-        logger.info("✅ All database tables dropped!")
         return True
 
     except Exception as e:

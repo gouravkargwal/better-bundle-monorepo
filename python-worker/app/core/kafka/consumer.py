@@ -81,11 +81,6 @@ class KafkaConsumer:
             self._is_initialized = True
             self._last_heartbeat = time.time()
 
-            logger.info(
-                f"✅ Kafka consumer initialized - topics: {topics}, group: {group_id}, "
-                f"instance_id: {self._static_group_instance_id}, client_id: {self._client_id}"
-            )
-
         except Exception as e:
             logger.exception(f"❌ Failed to initialize Kafka consumer: {e}")
             self._is_initialized = False
@@ -263,7 +258,6 @@ class KafkaConsumer:
                             TopicPartition(topic, p) for p in partitions
                         ]
                         self._consumer.seek_to_beginning(*topic_partitions)
-                        logger.info(f"Seeked to beginning of topic: {topic}")
         except Exception as e:
             logger.exception(f"Failed to seek to beginning: {e}")
 
@@ -274,10 +268,6 @@ class KafkaConsumer:
                 await self._consumer.stop()
                 self._consumer = None
                 self._is_initialized = False
-                logger.info(
-                    f"✅ Consumer closed. Processed {self._message_count} messages, "
-                    f"{self._error_count} errors, {self._committed_count} commits"
-                )
             except Exception as e:
                 logger.exception(f"Error closing consumer: {e}")
                 self._consumer = None
