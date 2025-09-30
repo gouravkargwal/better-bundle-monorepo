@@ -32,7 +32,6 @@ class NormalizationKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("Normalization Kafka consumer initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize normalization consumer: {e}")
@@ -44,7 +43,6 @@ class NormalizationKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("Starting normalization consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)

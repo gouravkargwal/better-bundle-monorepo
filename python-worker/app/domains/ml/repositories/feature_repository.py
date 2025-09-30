@@ -208,7 +208,6 @@ class FeatureRepository(IFeatureRepository):
                 result = await session.execute(stmt)
                 await session.commit()
 
-                logger.info(f"Successfully upserted {len(prepared_data)} {table_name}")
                 return len(prepared_data)
 
         except Exception as e:
@@ -246,10 +245,6 @@ class FeatureRepository(IFeatureRepository):
 
                 result = await session.execute(stmt)
                 await session.commit()
-
-                logger.info(
-                    f"Successfully upserted {len(prepared_data)} product features"
-                )
                 return len(prepared_data)
 
         except Exception as e:
@@ -288,7 +283,6 @@ class FeatureRepository(IFeatureRepository):
                 result = await session.execute(stmt)
                 await session.commit()
 
-                logger.info(f"Successfully upserted {len(prepared_data)} user features")
                 return len(prepared_data)
 
         except Exception as e:
@@ -329,9 +323,6 @@ class FeatureRepository(IFeatureRepository):
                 result = await session.execute(stmt)
                 await session.commit()
 
-                logger.info(
-                    f"Successfully upserted {len(prepared_data)} collection features"
-                )
                 return len(prepared_data)
 
         except Exception as e:

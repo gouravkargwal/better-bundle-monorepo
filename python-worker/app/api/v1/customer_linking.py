@@ -288,8 +288,6 @@ async def delete_customer_link(shop_id: str, link_id: str) -> Dict[str, Any]:
         # Delete the link
         await db.useridentitylink.delete(where={"id": link_id})
 
-        logger.info(f"Deleted customer link {link_id} for shop {shop_id}")
-
         return {
             "status": "success",
             "message": f"Customer link {link_id} deleted successfully",

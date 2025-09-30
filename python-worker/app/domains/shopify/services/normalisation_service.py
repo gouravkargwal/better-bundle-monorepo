@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
 from app.domains.shopify.normalization.factory import get_adapter
-from app.domains.shopify.normalization.canonical_models import NormalizeJob
 from app.domains.shopify.services.normalization_data_storage_service import (
     NormalizationDataStorageService,
 )
@@ -446,7 +444,30 @@ class OrderNormalizationService:
 
             # Only publish events for webhook processing (not historical batch processing)
             if is_webhook:
-                await self._publish_order_events(shop_id, canonical.get("orderId"))
+                order_id = canonical.get("order_id")
+
+                # Log what we're about to do
+                self.logger.info(
+                    f"📤 Publishing attribution events for order {order_id}",
+                    extra={
+                        "shop_id": shop_id,
+                        "order_id": order_id,
+                        "is_webhook": is_webhook,
+                    },
+                )
+
+                # 1️⃣ ALWAYS publish purchase attribution event
+                await self._publish_order_events(shop_id, order_id)
+
+                # 2️⃣ Check if order has refunds and publish refund attribution events
+                refunds = canonical.get("refunds", [])
+                if refunds:
+                    self.logger.info(
+                        f"💸 Order {order_id} has {len(refunds)} refunds, publishing refund attribution events"
+                    )
+                    await self._publish_refund_events(shop_id, order_id, refunds)
+                else:
+                    self.logger.debug(f"📦 Order {order_id} has no refunds")
 
             return True
 
@@ -543,21 +564,6 @@ class OrderNormalizationService:
             self.logger.info(
                 f"✅ Order batch upsert completed: {processed_count} orders saved"
             )
-            # ✨ NEW: Publish attribution events for webhook-triggered orders
-            if is_webhook:
-                self.logger.info(
-                    f"📤 Publishing attribution events for {len(canonical_data_list)} webhook orders"
-                )
-                for canonical in canonical_data_list:
-                    try:
-                        await self._publish_order_events(
-                            shop_id, canonical.get("orderId")
-                        )
-                    except Exception as e:
-                        self.logger.error(
-                            f"Failed to publish attribution event for order {canonical.get('orderId')}: {e}"
-                        )
-                        continue
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
@@ -614,6 +620,80 @@ class OrderNormalizationService:
                 await publisher.close()
         except Exception as e:
             self.logger.error(f"Failed to publish order events: {e}")
+
+    async def _publish_refund_events(
+        self, shop_id: str, order_id: str, refunds: List[Dict[str, Any]]
+    ):
+        """
+        Publish refund attribution events for all refunds in an order.
+
+        Args:
+            shop_id: Shop identifier
+            order_id: Order identifier
+            refunds: List of refund dictionaries from canonical format
+        """
+        if not refunds:
+            self.logger.debug("No refunds to publish")
+            return
+
+        try:
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+
+            try:
+                published_count = 0
+
+                for refund in refunds:
+                    # Extract refund ID (handle different possible field names)
+                    refund_id = (
+                        refund.get("refund_id")
+                        or refund.get("refundId")
+                        or str(refund.get("id", ""))
+                    )
+
+                    if not refund_id:
+                        self.logger.warning(
+                            f"⚠️ Refund missing ID in order {order_id}, skipping",
+                            extra={"refund_data": refund},
+                        )
+                        continue
+
+                    # Publish refund attribution event
+                    await publisher.publish_refund_attribution_event(
+                        {
+                            "event_type": "refund_created",
+                            "shop_id": shop_id,
+                            "order_id": order_id,
+                            "refund_id": refund_id,
+                            "timestamp": now_utc().isoformat(),
+                        }
+                    )
+
+                    published_count += 1
+
+                    self.logger.info(
+                        f"✅ Refund attribution event published",
+                        extra={
+                            "shop_id": shop_id,
+                            "order_id": order_id,
+                            "refund_id": refund_id,
+                            "refund_amount": refund.get("total_refund_amount", 0),
+                        },
+                    )
+
+                self.logger.info(
+                    f"📤 Published {published_count} refund attribution events for order {order_id}"
+                )
+
+            finally:
+                await publisher.close()
+
+        except Exception as e:
+            self.logger.error(
+                f"❌ Failed to publish refund events for order {order_id}: {e}",
+                exc_info=True,
+            )
+            # Don't raise - we don't want refund event publishing to fail the whole normalization
 
 
 class FeatureComputationService:

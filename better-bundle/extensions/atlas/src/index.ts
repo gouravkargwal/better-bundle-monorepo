@@ -18,43 +18,76 @@ register(({ analytics, init, browser }) => {
     return;
   }
 
-  const customerId = init?.data?.customer?.id || null;
   const userAgent = init?.context?.navigator?.userAgent;
   const pageUrl = init?.context?.document?.location?.href;
   const referrer = init?.context?.document?.referrer;
   const shopDomain = init?.data?.shop?.myshopifyDomain;
   const sessionStorage = browser?.sessionStorage;
   const sendBeacon = browser?.sendBeacon;
-  let clientId: string | null = null;
 
-  console.log("Atlas pixel initialized for shop:", shopDomain); // Helper function to handle customer linking detection
+  // ✅ Use an object to hold mutable state (reference type)
+  const state = {
+    customerId: init?.data?.customer?.id || null,
+    clientId: null as string | null,
+  };
+
+  console.log("Atlas pixel initialized for shop:", shopDomain);
+  console.log("Initial customer ID:", state.customerId || "anonymous");
+
+  // ✅ Helper to extract customer ID from event
+  const getCustomerIdFromEvent = (event: any): string | null => {
+    // Try multiple sources for customer ID
+    return (
+      event?.data?.checkout?.order?.customer?.id ||
+      event?.data?.checkout?.customer?.id ||
+      event?.customerId ||
+      event?.data?.customer?.id ||
+      state.customerId // Fallback to current customerId
+    );
+  };
+
+  // Helper function to handle customer linking detection
   const handleCustomerLinking = async (event: any) => {
     await safeExecute(async () => {
       // Extract clientId from the event if available
-      if (event?.clientId && !clientId) {
-        clientId = event.clientId;
+      if (event?.clientId && !state.clientId) {
+        state.clientId = event.clientId;
+        console.log("Client ID detected:", state.clientId);
+      }
 
-        // Send customer linking event now that we have both customerId and clientId
-        // Backend will handle deduplication using database constraints
-        if (customerId) {
-          await trackInteraction(
-            {
-              name: "customer_linked",
-              id: `customer_linked_${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              customerId: customerId,
-              clientId: clientId,
-            },
-            shopDomain,
-            userAgent,
-            customerId,
-            "customer_linked",
-            pageUrl,
-            referrer,
-            sessionStorage,
-            sendBeacon,
-          );
-        }
+      // Extract customer ID from event (not just init)
+      const eventCustomerId = getCustomerIdFromEvent(event);
+
+      // Update global customerId if we found one in the event
+      if (eventCustomerId && !state.customerId) {
+        state.customerId = eventCustomerId;
+        console.log("Customer ID identified from event:", state.customerId);
+      }
+
+      // Fire customer_linked event when we have BOTH clientId and customerId
+      if (state.clientId && state.customerId) {
+        console.log("Firing customer_linked event:", {
+          clientId: state.clientId,
+          customerId: state.customerId,
+        });
+
+        await trackInteraction(
+          {
+            name: "customer_linked",
+            id: `customer_linked_${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            customerId: state.customerId,
+            clientId: state.clientId,
+          },
+          shopDomain,
+          userAgent,
+          state.customerId,
+          "customer_linked",
+          pageUrl,
+          referrer,
+          sessionStorage,
+          sendBeacon,
+        );
       }
     }, "handleCustomerLinking");
   };
@@ -132,7 +165,7 @@ register(({ analytics, init, browser }) => {
 
       return {
         ...event,
-        ...(customerId && { customerId }),
+        ...(state.customerId && { customerId: state.customerId }), // ✅ Use state.customerId
         ...(attributionData && {
           ref: attributionData.ref,
           src: attributionData.src,
@@ -149,15 +182,17 @@ register(({ analytics, init, browser }) => {
   const createEventHandler = (eventType: string) => {
     return async (event: any) => {
       await safeExecute(async () => {
-        // Handle customer linking detection (only on first event with clientId)
+        // Handle customer linking detection (updates state.customerId)
         await handleCustomerLinking(event);
 
         const enhancedEvent = await enhanceEventWithCustomerId(event);
+
+        // ✅ Use state.customerId (always current value)
         await trackInteraction(
           enhancedEvent,
           shopDomain,
           userAgent,
-          customerId,
+          state.customerId, // ✅ Reads current value from state object
           eventType,
           pageUrl,
           referrer,
@@ -174,7 +209,7 @@ register(({ analytics, init, browser }) => {
       // Extract and store attribution from URL parameters
       await extractAndStoreAttribution(event);
 
-      // Handle customer linking detection (only on first event with clientId)
+      // Handle customer linking detection
       await handleCustomerLinking(event);
 
       const enhancedEvent = await enhanceEventWithCustomerId(event);
@@ -184,7 +219,7 @@ register(({ analytics, init, browser }) => {
         enhancedEvent,
         shopDomain,
         userAgent,
-        customerId,
+        state.customerId, // ✅ Use state.customerId
         SUBSCRIBABLE_EVENTS.PAGE_VIEWED,
         pageUrl,
         referrer,
@@ -193,6 +228,7 @@ register(({ analytics, init, browser }) => {
       );
     }, "PAGE_VIEWED");
   });
+
   // Subscribe to all events with error handling
   analytics.subscribe(
     SUBSCRIBABLE_EVENTS.PRODUCT_ADDED_TO_CART,

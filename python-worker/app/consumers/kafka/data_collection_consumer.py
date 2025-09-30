@@ -41,7 +41,6 @@ class DataCollectionKafkaConsumer:
         if not self._initialized:
             await self.initialize()
         try:
-            logger.info("Starting data collection consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
@@ -61,7 +60,6 @@ class DataCollectionKafkaConsumer:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual data collection messages"""
         try:
-            logger.info(f"🔄 Processing data collection message: {message}")
 
             payload = message.get("value") or message
             if isinstance(payload, str):
@@ -73,7 +71,6 @@ class DataCollectionKafkaConsumer:
                     pass
 
             event_type = payload.get("event_type")
-            logger.info(f"📋 Extracted event_type: {event_type}")
 
             # Resolve shop data once for all event types
             shop_data = await self._resolve_shop_data(payload)
@@ -91,9 +88,7 @@ class DataCollectionKafkaConsumer:
                 "collection_created",
                 "collection_deleted",
                 "order_paid",
-                "order_created",
-                "order_updated",
-                "order_cancelled",
+                "refund_created",
                 "customer_created",
                 "customer_updated",
                 "inventory_updated",
@@ -117,9 +112,7 @@ class DataCollectionKafkaConsumer:
             "collection_created",
             "collection_deleted",
             "order_paid",
-            "order_created",
-            "order_updated",
-            "order_cancelled",
+            "refund_created",
             "customer_created",
             "customer_updated",
             "inventory_updated",
@@ -173,9 +166,7 @@ class DataCollectionKafkaConsumer:
             "collection_created",
             "collection_deleted",
             "order_paid",
-            "order_created",
-            "order_updated",
-            "order_cancelled",
+            "refund_created",
             "customer_created",
             "customer_updated",
             "inventory_updated",
@@ -225,13 +216,6 @@ class DataCollectionKafkaConsumer:
             # Create data collection job
             job_id = f"webhook_{event_type}_{shopify_id}_{event.get('timestamp', '')}"
 
-            logger.info(
-                "🔄 Converting webhook event to data collection job",
-                event_type=event_type,
-                shopify_id=shopify_id,
-                job_id=job_id,
-            )
-
             # Process as data collection job with resolved shop data
             await self._process_data_collection_job(
                 job_id, shop_data["id"], collection_payload, shop_data
@@ -277,15 +261,7 @@ class DataCollectionKafkaConsumer:
                 "data_types": ["orders"],
                 "specific_ids": {"orders": [shopify_id]},
             },
-            "order_created": {
-                "data_types": ["orders"],
-                "specific_ids": {"orders": [shopify_id]},
-            },
-            "order_updated": {
-                "data_types": ["orders"],
-                "specific_ids": {"orders": [shopify_id]},
-            },
-            "order_cancelled": {
+            "refund_created": {
                 "data_types": ["orders"],
                 "specific_ids": {"orders": [shopify_id]},
             },
@@ -360,8 +336,6 @@ class DataCollectionKafkaConsumer:
             else:
                 logger.warning(f"❌ Unknown deletion event type: {event_type}")
                 return
-
-            logger.info(f"🗑️ Processing {data_type} deletion for {shopify_id}")
 
             # Use the normalization service to handle deletion
             from app.domains.shopify.services.normalisation_service import (

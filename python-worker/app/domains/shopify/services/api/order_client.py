@@ -76,24 +76,18 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             firstName
                             lastName
                             company
-                            address1
-                            address2
                             city
                             province
                             country
-                            zip
                         }
                         billing_address: billingAddress {
                             id
                             firstName
                             lastName
                             company
-                            address1
-                            address2
                             city
                             province
                             country
-                            zip
                         }
                         line_items: lineItems(first: 10) {
                             edges {
@@ -239,24 +233,18 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     first_name: firstName
                     last_name: lastName
                     company
-                    address1
-                    address2
                     city
                     province
                     country
-                    zip
                 }
                 billing_address: billingAddress {
                     id
                     first_name: firstName
                     last_name: lastName
                     company
-                    address1
-                    address2
                     city
                     province
                     country
-                    zip
                 }
                 line_items: lineItems(first: 10) {
                     edges {

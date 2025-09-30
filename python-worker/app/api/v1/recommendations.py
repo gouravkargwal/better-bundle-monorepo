@@ -67,9 +67,6 @@ async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
 
             if shop and shop.shop_domain:
                 shop_domain = shop.shop_domain
-                logger.info(
-                    f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
-                )
                 return shop_domain
             else:
                 logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
@@ -258,10 +255,6 @@ async def extract_session_data_from_behavioral_events(
             },
         }
 
-        logger.info(
-            f"🔍 Extracted session data | user_id={user_id} | cart_items={len(cart_contents)} | views={len(recent_views)} | adds={len(recent_adds)}"
-        )
-
         return session_metadata
 
     except Exception as e:
@@ -377,10 +370,6 @@ def _apply_time_decay_filtering(
                 logger.debug(
                     f"✅ Including product {product_id} | reason={reason} | interactions={interaction_count} | hours_ago={hours_ago:.1f}"
                 )
-
-        logger.info(
-            f"⏰ Time decay filtering complete | user_id={user_id} | total_products={len(product_interactions)} | excluded={len(excluded_products)} | included={len(product_interactions) - len(excluded_products)}"
-        )
 
         return excluded_products
 
@@ -791,9 +780,6 @@ async def execute_fallback_chain(
         Recommendation result with fallback information
     """
     levels = FALLBACK_LEVELS.get(context, ["popular"])
-    logger.info(
-        f"🔄 Starting fallback chain | context={context} | levels={levels} | limit={limit}"
-    )
 
     for i, level in enumerate(levels, 1):
         try:
@@ -814,9 +800,7 @@ async def execute_fallback_chain(
 
             if result["success"] and result.get("items"):
                 items = result["items"]
-                logger.info(
-                    f"✅ Level {level} succeeded | context={context} | items={len(items)} | source={result.get('source', 'unknown')}"
-                )
+
                 return result
             else:
                 items = result.get("items", [])
@@ -855,9 +839,7 @@ async def get_recommendations(request: RecommendationRequest):
         # Handle shop_domain: use provided value or lookup from customer_id
         shop_domain = request.shop_domain
         if not shop_domain and request.user_id:
-            logger.info(
-                f"🔍 Shop domain not provided, looking up from customer_id: {request.user_id}"
-            )
+
             shop_domain = await get_shop_domain_from_customer_id(request.user_id)
             if shop_domain:
                 request.shop_domain = shop_domain
@@ -876,11 +858,6 @@ async def get_recommendations(request: RecommendationRequest):
                 detail="Either shop_domain or user_id must be provided to determine the shop.",
             )
 
-        logger.info(
-            f"📊 Recommendation request received | shop={request.shop_domain} | context={request.context} | user_id={request.user_id} | product_ids={request.product_ids} | limit={request.limit}"
-        )
-
-        # Validate context
         valid_contexts = [
             "product_page",
             "homepage",
@@ -916,10 +893,6 @@ async def get_recommendations(request: RecommendationRequest):
                     status_code=404, detail=f"Shop {request.shop_domain} not found"
                 )
 
-            logger.info(
-                f"✅ Shop validated | shop_id={shop.id} | shop_domain={request.shop_domain}"
-            )
-
         # Auto-detect category if missing and product_ids are provided
         category = request.category
         if not category and request.product_ids:
@@ -934,15 +907,9 @@ async def get_recommendations(request: RecommendationRequest):
                     logger.debug(f"⚠️ Category detection failed for product {pid}: {e}")
             if len(detected_categories) == 1:
                 category = next(iter(detected_categories))
-                logger.info(
-                    f"✅ Auto-detected single category '{category}' from product_ids"
-                )
             elif len(detected_categories) > 1:
                 # Mixed categories: avoid over-filtering
                 category = None
-                logger.info(
-                    f"🧭 Mixed-category context detected; disabling category filter | categories={list(detected_categories)[:5]}"
-                )
             else:
                 logger.debug("⚠️ No categories detected from provided product_ids")
 
@@ -982,10 +949,6 @@ async def get_recommendations(request: RecommendationRequest):
                     )
                     cart_interactions = cart_interactions_result.scalars().all()
 
-                logger.info(
-                    f"🔍 Found {len(cart_interactions)} cart interactions for user {request.user_id} in last 48 hours"
-                )
-
                 # Apply time decay logic to determine which products to exclude
                 time_decay_exclusions = _apply_time_decay_filtering(
                     cart_interactions, request.user_id
@@ -993,13 +956,6 @@ async def get_recommendations(request: RecommendationRequest):
 
                 if time_decay_exclusions:
                     exclude_items.extend(time_decay_exclusions)
-                    logger.info(
-                        f"🚫 Time decay exclusions | user_id={request.user_id} | excluded_products={len(time_decay_exclusions)} | products={time_decay_exclusions[:5]}{'...' if len(time_decay_exclusions) > 5 else ''}"
-                    )
-                else:
-                    logger.info(
-                        f"🔍 No time decay exclusions for user {request.user_id}"
-                    )
 
             except Exception as e:
                 logger.warning(
@@ -1008,11 +964,6 @@ async def get_recommendations(request: RecommendationRequest):
 
         # Remove duplicates and convert to set for efficient lookup
         exclude_items = list(set(exclude_items)) if exclude_items else None
-
-        if exclude_items:
-            logger.info(
-                f"🚫 Total products to exclude: {len(exclude_items)} | exclude_ids={exclude_items[:5]}{'...' if len(exclude_items) > 5 else ''}"
-            )
 
         # Generate cache key (include exclude_items to ensure cart filtering is respected)
         logger.debug(
@@ -1064,9 +1015,6 @@ async def get_recommendations(request: RecommendationRequest):
             ]
             recommendations = available_recommendations
 
-            logger.info(
-                f"🎯 Cache hit! Returning filtered cached recommendations | context={request.context} | count={len(recommendations)}"
-            )
             return RecommendationResponse(
                 success=True,
                 recommendations=recommendations,
@@ -1084,15 +1032,9 @@ async def get_recommendations(request: RecommendationRequest):
         if request.context == "checkout":
             # Limit recommendations for speed
             request.limit = min(request.limit, 3)
-            logger.info(
-                f"⚡ Checkout optimization: limited to {request.limit} recommendations"
-            )
 
         # Try hybrid recommendations first (except for checkout which uses simple fallback)
         if request.context != "checkout":
-            logger.info(
-                f"🔄 Attempting hybrid recommendations | context={request.context} | limit={request.limit}"
-            )
 
             # Extract session data from behavioral events to enhance metadata
             enhanced_metadata = request.metadata or {}
@@ -1102,9 +1044,6 @@ async def get_recommendations(request: RecommendationRequest):
                 )
                 # Merge session data with existing metadata
                 enhanced_metadata.update(session_data)
-                logger.info(
-                    f"📊 Enhanced metadata with session data | cart_items={len(session_data.get('cart_contents', []))} | views={len(session_data.get('recent_views', []))}"
-                )
 
             # If the cart spans multiple categories, avoid over-filtering by category
             effective_category = category
@@ -1117,9 +1056,6 @@ async def get_recommendations(request: RecommendationRequest):
                 if isinstance(product_types, list):
                     unique_types = {t for t in product_types if t}
                     if len(unique_types) > 1:
-                        logger.info(
-                            f"🧭 Mixed-category cart detected; disabling category filter | categories={list(unique_types)[:5]}"
-                        )
                         effective_category = None
             except Exception:
                 # Non-fatal: fallback to original category
@@ -1177,15 +1113,9 @@ async def get_recommendations(request: RecommendationRequest):
                     metadata=request.metadata,
                     exclude_items=exclude_items,
                 )
-            else:
-                logger.info(
-                    f"✅ Hybrid recommendations successful | items_count={len(result.get('items', []))} | source={result.get('source', 'unknown')}"
-                )
+
         else:
             # For checkout, use simple fallback chain for speed
-            logger.info(
-                f"⚡ Using simple fallback chain for checkout | limit={request.limit}"
-            )
             result = await execute_fallback_chain(
                 context=request.context,
                 shop_id=shop.id,
@@ -1200,9 +1130,6 @@ async def get_recommendations(request: RecommendationRequest):
 
         if not result["success"] or not result["items"]:
             # No recommendations available - return empty results
-            logger.info(
-                f"ℹ️ No recommendations available | success={result['success']} | items_count={len(result.get('items', []))} | source={result.get('source', 'unknown')}"
-            )
             return RecommendationResponse(
                 success=True,
                 recommendations=[],
@@ -1213,9 +1140,6 @@ async def get_recommendations(request: RecommendationRequest):
             )
 
         # Enrich with Shopify product data
-        logger.info(
-            f"🎨 Enriching {len(result['items'])} items with Shopify data | source={result['source']}"
-        )
         item_ids = result["items"]
         enriched_items = await enrichment_service.enrich_items(
             shop.id, item_ids, request.context, result["source"]
@@ -1240,10 +1164,6 @@ async def get_recommendations(request: RecommendationRequest):
             logger.debug(
                 f"✅ Excluded items filtered | after_count={len(available_items)}"
             )
-
-        logger.info(
-            f"✅ Enrichment complete | enriched_count={len(enriched_items)} | available_count={len(available_items)} | original_count={len(item_ids)}"
-        )
 
         # Use available items for the rest of the processing
         enriched_items = available_items
@@ -1281,9 +1201,6 @@ async def get_recommendations(request: RecommendationRequest):
             )
         )
 
-        logger.info(
-            f"🎉 Recommendation request completed successfully | shop={request.shop_domain} | context={request.context} | count={len(enriched_items)} | source={result['source']}"
-        )
         return RecommendationResponse(
             success=True,
             recommendations=enriched_items,
@@ -1313,7 +1230,6 @@ async def recommendations_health_check():
     Health check for the recommendations system including cache and category services
     """
     try:
-        logger.info("🏥 Starting recommendations health check")
 
         # Check Gorse health
         logger.debug("🔍 Checking Gorse health")
@@ -1337,7 +1253,6 @@ async def recommendations_health_check():
             for context, ttl in cache_service.CACHE_TTL.items()
         }
 
-        logger.info("✅ Recommendations health check passed | all services healthy")
         return {
             "success": True,
             "status": "healthy",

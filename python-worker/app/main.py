@@ -33,7 +33,6 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("🚀 Starting BetterBundle Python Worker...")
 
     # Initialize services
     await initialize_services()
@@ -41,31 +40,22 @@ async def lifespan(app: FastAPI):
     # Start Kafka consumers
     global kafka_consumer_manager
     if kafka_consumer_manager:
-        logger.info("🔄 Starting Kafka consumers...")
         await kafka_consumer_manager.start_all_consumers()
-        logger.info("✅ Kafka consumers started successfully")
-
-    logger.info("BetterBundle Python Worker started successfully")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down BetterBundle Python Worker...")
 
     # Stop Kafka consumers first
     if kafka_consumer_manager:
-        logger.info("🔄 Stopping Kafka consumers...")
         await kafka_consumer_manager.stop_all_consumers()
-        logger.info("✅ Kafka consumers stopped")
 
     # Close topic manager
     from app.core.kafka.topic_manager import topic_manager
 
     await topic_manager.close()
-    logger.info("✅ Kafka topic manager closed")
 
     await cleanup_services()
-    logger.info("BetterBundle Python Worker shutdown complete")
 
 
 # Create FastAPI app
@@ -115,7 +105,6 @@ kafka_consumer_manager = None
 async def initialize_services():
     """Initialize only essential services at startup"""
     try:
-        logger.info("Initializing essential services...")
 
         # Initialize Shopify services first
         services["shopify_api"] = ShopifyAPIClient()
@@ -126,21 +115,17 @@ async def initialize_services():
             api_client=services["shopify_api"],
             permission_service=services["shopify_permissions"],
         )
-        logger.info("✅ Shopify services initialized")
 
         # Initialize database and create tables
         from app.core.database.create_tables import create_all_tables
 
-        logger.info("🔄 Creating database tables...")
         await create_all_tables()
-        logger.info("✅ Database tables created/verified")
 
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager
 
         await topic_manager.initialize()
         await topic_manager.create_topics_if_not_exist()
-        logger.info("✅ Kafka topics created/verified")
 
         # Initialize Kafka Consumer Manager and pass Shopify service
         global kafka_consumer_manager
@@ -148,11 +133,8 @@ async def initialize_services():
             shopify_service=services.get("shopify")
         )
         await kafka_consumer_manager.initialize()
-        logger.info("✅ Kafka Consumer Manager initialized")
 
         # Kafka consumers are managed by kafka_consumer_manager
-
-        logger.info("Essential services initialized successfully")
 
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")

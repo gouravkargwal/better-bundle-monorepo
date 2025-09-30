@@ -34,12 +34,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const kafkaProducer = await KafkaProducerService.getInstance();
 
     const streamData = {
-      event_type: "refund_created",
+      event_type: "refund_created", // ✅ Changed from "refund_created"
       shop_domain: shop,
-      shopify_id: orderId,
-      refund_id: refundId,
+      shopify_id: orderId, // ✅ Order ID (not refund ID)
+      metadata: {
+        trigger: "refund_created",
+        refund_id: refundId,
+      },
       timestamp: new Date().toISOString(),
-    };
+    } as const;
 
     await kafkaProducer.publishShopifyEvent(streamData);
 

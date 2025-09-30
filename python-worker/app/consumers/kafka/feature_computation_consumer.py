@@ -36,7 +36,6 @@ class FeatureComputationKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("Feature computation Kafka consumer initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize feature computation consumer: {e}")
@@ -48,7 +47,6 @@ class FeatureComputationKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("Starting feature computation consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
@@ -64,7 +62,6 @@ class FeatureComputationKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        logger.info("Feature computation consumer closed")
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get the status of a feature computation job"""
@@ -136,10 +133,6 @@ class FeatureComputationKafkaConsumer:
                     features_ready = False
             metadata = payload.get("metadata", {})
 
-            logger.info(
-                f"📋 Extracted: job_id={job_id}, shop_id={shop_id}, features_ready={features_ready}"
-            )
-
             if not job_id or not shop_id:
                 logger.error("Invalid message: missing job_id or shop_id")
                 return
@@ -154,12 +147,7 @@ class FeatureComputationKafkaConsumer:
 
             # Only process if features are not ready (need to be computed)
             if not features_ready:
-                logger.info(f"🚀 Starting feature computation for shop {shop_id}")
                 await self._compute_features_for_shop(job_id, shop_id, metadata)
-            else:
-                logger.info(
-                    f"⏭️ Skipping feature computation - features already ready for shop {shop_id}"
-                )
 
             # Mark job as completed
             if job_id in self.active_feature_jobs:
@@ -182,7 +170,6 @@ class FeatureComputationKafkaConsumer:
             # Determine batch size based on metadata or use default
             batch_size = metadata.get("batch_size", 100)
 
-            logger.info(f"🚀 Full feature computation for shop {shop_id}")
             await self.feature_service.run_comprehensive_pipeline_for_shop(
                 shop_id=shop_id, batch_size=batch_size
             )

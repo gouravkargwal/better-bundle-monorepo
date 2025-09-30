@@ -4,9 +4,8 @@ Manages all Kafka consumers and their lifecycle
 """
 
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any
 from app.core.logging import get_logger
-from app.core.config.kafka_settings import kafka_settings
 
 # Import all Kafka consumers
 from app.consumers.kafka.normalization_consumer import NormalizationKafkaConsumer
@@ -20,6 +19,8 @@ from app.consumers.kafka.purchase_attribution_consumer import (
 from app.consumers.kafka.refund_attribution_consumer import (
     RefundAttributionKafkaConsumer,
 )
+from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
+from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
 
 logger = get_logger(__name__)
 
@@ -50,11 +51,13 @@ class KafkaConsumerManager:
             self.consumers = {
                 "data_collection": DataCollectionKafkaConsumer(
                     shopify_service=self.shopify_service
-                ),  # Handles both analysis triggers and webhook events
+                ),
                 "normalization": NormalizationKafkaConsumer(),
                 "feature_computation": FeatureComputationKafkaConsumer(),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
                 "refund_attribution": RefundAttributionKafkaConsumer(),
+                "customer_linking": CustomerLinkingKafkaConsumer(),
+                "billing": BillingKafkaConsumer(),
             }
 
             # Initialize each consumer in parallel to reduce overall startup time
