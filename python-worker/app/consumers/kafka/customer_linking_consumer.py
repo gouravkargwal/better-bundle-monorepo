@@ -2,7 +2,6 @@
 Kafka-based customer linking consumer for processing customer identity resolution and backfill jobs
 """
 
-import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from app.core.kafka.consumer import KafkaConsumer
@@ -14,6 +13,8 @@ from app.domains.analytics.services.cross_session_linking_service import (
     CrossSessionLinkingService,
 )
 from app.core.logging import get_logger
+from app.repository.ShopRepository import ShopRepository
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -26,10 +27,8 @@ class CustomerLinkingKafkaConsumer:
         self.identity_resolution_service = CustomerIdentityResolutionService()
         self.cross_session_linking_service = CrossSessionLinkingService()
         self._initialized = False
-
-        # Customer linking job tracking
-        self.active_linking_jobs: Dict[str, Dict[str, Any]] = {}
-        self.job_timeout = 300  # 5 minutes for customer linking
+        self.shop_repo = ShopRepository()
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -71,47 +70,6 @@ class CustomerLinkingKafkaConsumer:
             await self.consumer.close()
         logger.info("Customer linking consumer closed")
 
-    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get status of a customer linking job"""
-        return self.active_linking_jobs.get(job_id)
-
-    async def get_all_job_statuses(self) -> Dict[str, Dict[str, Any]]:
-        """Get status of all customer linking jobs"""
-        return self.active_linking_jobs.copy()
-
-    async def cleanup_completed_jobs(self, max_age_hours: int = 24):
-        """Clean up completed jobs older than max_age_hours"""
-        try:
-            current_time = datetime.utcnow()
-            jobs_to_remove = []
-
-            for job_id, job_data in self.active_linking_jobs.items():
-                if job_data.get("status") in ["completed", "failed"]:
-                    completed_at = job_data.get("completed_at")
-                    if completed_at:
-                        age_hours = (current_time - completed_at).total_seconds() / 3600
-                        if age_hours > max_age_hours:
-                            jobs_to_remove.append(job_id)
-
-            for job_id in jobs_to_remove:
-                del self.active_linking_jobs[job_id]
-
-            if jobs_to_remove:
-                logger.info(f"Cleaned up {len(jobs_to_remove)} completed jobs")
-
-        except Exception as e:
-            logger.error(f"Error cleaning up completed jobs: {str(e)}")
-
-    async def get_health_status(self) -> Dict[str, Any]:
-        """Get health status of the customer linking consumer"""
-        await self.cleanup_completed_jobs()
-
-        return {
-            "status": "running" if self._initialized else "stopped",
-            "active_jobs": len(self.active_linking_jobs),
-            "last_health_check": datetime.utcnow().isoformat(),
-        }
-
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual customer linking messages"""
         try:
@@ -146,13 +104,20 @@ class CustomerLinkingKafkaConsumer:
                 f"🔄 Processing customer linking job - job_id: {job_id}, shop_id: {shop_id}, customer_id: {customer_id}, event_type: {event_type}"
             )
 
-            # Track the job
-            self.active_linking_jobs[job_id] = {
-                "shop_id": shop_id,
-                "customer_id": customer_id,
-                "started_at": datetime.utcnow(),
-                "status": "processing",
-            }
+            if not await self.shop_repo.is_shop_active(shop_id):
+                logger.warning(
+                    "Shop is not active for customer linking",
+                    shop_id=shop_id,
+                )
+                await self.dlq_service.send_to_dlq(
+                    original_message=payload,
+                    reason="shop_suspended",
+                    original_topic="customer-linking-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+                await self.consumer.commit(message)
+                logger.info(f"✅ Shop {shop_id} is suspended")
+                return
 
             # Process based on event type
             if event_type == "customer_linking":
@@ -168,20 +133,12 @@ class CustomerLinkingKafkaConsumer:
             else:
                 logger.warning(f"Unknown event type: {event_type}")
 
-            # Mark job as completed
-            if job_id in self.active_linking_jobs:
-                self.active_linking_jobs[job_id]["status"] = "completed"
-                self.active_linking_jobs[job_id]["completed_at"] = datetime.utcnow()
-
             logger.info(
                 f"Customer linking job completed", job_id=job_id, shop_id=shop_id
             )
 
         except Exception as e:
             logger.error(f"Error processing customer linking message: {str(e)}")
-            if job_id in self.active_linking_jobs:
-                self.active_linking_jobs[job_id]["status"] = "failed"
-                self.active_linking_jobs[job_id]["error"] = str(e)
             raise
 
     async def _process_customer_linking(
@@ -218,7 +175,7 @@ class CustomerLinkingKafkaConsumer:
                     f"✅ Cross-session linking completed: {len(linked_sessions)} sessions linked - {linked_sessions}"
                 )
 
-                # ✅ FIX: Always include trigger_session_id in backfill
+                # Always include trigger_session_id in backfill
                 sessions_to_backfill = []
 
                 if trigger_session_id:

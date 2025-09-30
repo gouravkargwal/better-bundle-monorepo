@@ -1,9 +1,11 @@
+from datetime import datetime
 from typing import Dict, Any
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.logging import get_logger
 from app.repository.ShopRepository import ShopRepository
 from app.services.shop_cache_service import get_shop_cache_service
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -11,11 +13,12 @@ logger = get_logger(__name__)
 class DataCollectionKafkaConsumer:
     """Kafka consumer for data collection jobs - handles events directly"""
 
-    def __init__(self, shopify_service=None, shop_repo: ShopRepository = None):
+    def __init__(self, shopify_service=None):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self.shopify_service = shopify_service
-        self.shop_repo = shop_repo or ShopRepository()
+        self.shop_repo = ShopRepository()
         self._initialized = False
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -76,7 +79,17 @@ class DataCollectionKafkaConsumer:
             shop_data = await self._resolve_shop_data(payload)
             if not shop_data:
                 return
-
+            if not shop_data.get("is_active"):
+                logger.warning(f"❌ Shop {shop_data.get('id')} is suspended")
+                await self.dlq_service.send_to_dlq(
+                    original_message=payload,
+                    reason="shop_suspended",
+                    original_topic="data-collection-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+                await self.consumer.commit(message)
+                logger.info(f"✅ Shop {shop_data.get('id')} is suspended")
+                return
             # Route to appropriate handler
             if event_type == "data_collection":
                 await self._handle_data_collection_job(payload, shop_data)
@@ -138,6 +151,7 @@ class DataCollectionKafkaConsumer:
                 "id": shop_record.id,
                 "domain": shop_record.shop_domain,
                 "access_token": shop_record.access_token,
+                "is_active": shop_record.is_active,
             }
 
         # For webhook events, use shop_domain

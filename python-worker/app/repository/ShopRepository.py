@@ -58,3 +58,12 @@ class ShopRepository:
 
             # Return a single result or None
             return result.scalar_one_or_none()
+
+    async def is_shop_active(self, shop_id: str) -> bool:
+        """
+        Check if a shop is active.
+        """
+        async with self.session_factory() as session:
+            statement = select(Shop.is_active).where(Shop.id == shop_id)
+            result = await session.execute(statement)
+            return result.scalar_one_or_none() is not None

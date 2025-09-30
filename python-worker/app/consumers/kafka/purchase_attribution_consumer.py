@@ -5,12 +5,22 @@ Kafka-based purchase attribution consumer for processing purchase attribution ev
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import select, and_, or_
+from sqlalchemy.orm import selectinload
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models import (
+    OrderData,
+    LineItemData,
+    UserSession,
+    UserInteraction,
+)
 from app.domains.billing.services.billing_service import BillingService
 from app.domains.billing.models import PurchaseEvent
 from app.core.logging import get_logger
+from app.repository.ShopRepository import ShopRepository
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -21,6 +31,8 @@ class PurchaseAttributionKafkaConsumer:
     def __init__(self):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self._initialized = False
+        self.shop_repo = ShopRepository()
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -94,80 +106,115 @@ class PurchaseAttributionKafkaConsumer:
                 )
                 return
 
-            db = await get_database()
-
-            # Load normalized order and line items
-            order = await db.orderdata.find_first(
-                where={"shopId": shop_id, "orderId": str(order_id)}
-            )
-            if not order:
+            if not await self.shop_repo.is_shop_active(shop_id):
                 logger.warning(
-                    "OrderData not found for attribution",
+                    "Shop is not active for purchase attribution",
                     shop_id=shop_id,
-                    order_id=order_id,
                 )
+                # Send to DLQ instead of dropping
+                await self.dlq_service.send_to_dlq(
+                    original_message=payload,
+                    reason="shop_suspended",
+                    original_topic="purchase-attribution-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+
+                # Commit the message (remove from original queue)
+                await self.consumer.commit(message)
                 return
 
-            line_items = await db.lineitemdata.find_many(where={"orderId": order.id})
-
-            # Construct PurchaseEvent
-            products = []
-            for li in line_items or []:
-                products.append(
-                    {
-                        "id": li.productId,  # Changed from product_id to id
-                        "variant_id": li.variantId,
-                        "quantity": li.quantity,
-                        "price": li.price,
-                        "properties": getattr(li, "properties", None) or {},
-                    }
+            # Use SQLAlchemy session for database operations
+            async with get_transaction_context() as session:
+                # Load normalized order and line items
+                order_query = select(OrderData).where(
+                    and_(
+                        OrderData.shop_id == shop_id,
+                        OrderData.order_id == str(order_id),
+                    )
                 )
+                order_result = await session.execute(order_query)
+                order = order_result.scalar_one_or_none()
 
-            total_amount = float(getattr(order, "totalAmount", 0.0) or 0.0)
-            currency = getattr(order, "currencyCode", None) or "USD"
-            customer_id = getattr(order, "customerId", None)
+                if not order:
+                    logger.warning(
+                        "OrderData not found for attribution",
+                        shop_id=shop_id,
+                        order_id=order_id,
+                    )
+                    return
 
-            logger.info(
-                f"🔍 Created {len(products)} products for order {order_id}: {products}"
-            )
-
-            # Try to find a recent session for this customer (optional)
-            session = None
-            if customer_id:
-                session = await db.usersession.find_first(
-                    where={"shopId": shop_id, "customerId": customer_id},
-                    order={"createdAt": "desc"},
+                line_items_query = select(LineItemData).where(
+                    LineItemData.order_id == order.id
                 )
+                line_items_result = await session.execute(line_items_query)
+                line_items = line_items_result.scalars().all()
 
-            # PRE-CHECK: Only process if customer has extension interactions
-            if not await self._has_extension_interactions(
-                db, shop_id, customer_id, session
-            ):
+                # Construct PurchaseEvent
+                products = []
+                for li in line_items or []:
+                    products.append(
+                        {
+                            "id": li.product_id,  # Updated to use SQLAlchemy field name
+                            "variant_id": li.variant_id,
+                            "quantity": li.quantity,
+                            "price": li.price,
+                            "properties": getattr(li, "properties", None) or {},
+                        }
+                    )
+
+                total_amount = float(getattr(order, "total_amount", 0.0) or 0.0)
+                currency = getattr(order, "currency_code", None) or "USD"
+                customer_id = getattr(order, "customer_id", None)
+
                 logger.info(
-                    f"⏭️ Skipping attribution for order {order_id} - no extension interactions found",
-                    shop_id=shop_id,
-                    customer_id=customer_id,
+                    f"🔍 Created {len(products)} products for order {order_id}: {products}"
                 )
-                return
 
-            purchase_event = PurchaseEvent(
-                order_id=order_id,
-                customer_id=customer_id,
-                shop_id=shop_id,
-                session_id=getattr(session, "id", None),
-                total_amount=total_amount,
-                currency=currency,
-                products=products,
-                created_at=getattr(order, "orderDate", None) or datetime.utcnow(),
-                metadata={
-                    "source": "normalization",
-                    "line_item_count": len(products),
-                },
-            )
+                # Try to find a recent session for this customer (optional)
+                user_session = None
+                if customer_id:
+                    session_query = (
+                        select(UserSession)
+                        .where(
+                            and_(
+                                UserSession.shop_id == shop_id,
+                                UserSession.customer_id == customer_id,
+                            )
+                        )
+                        .order_by(UserSession.created_at.desc())
+                    )
+                    session_result = await session.execute(session_query)
+                    user_session = session_result.scalar_one_or_none()
 
-            # Process attribution
-            billing = BillingService(await get_database())
-            await billing.process_purchase_attribution(purchase_event)
+                # PRE-CHECK: Only process if customer has extension interactions
+                if not await self._has_extension_interactions(
+                    session, shop_id, customer_id, user_session
+                ):
+                    logger.info(
+                        f"⏭️ Skipping attribution for order {order_id} - no extension interactions found",
+                        shop_id=shop_id,
+                        customer_id=customer_id,
+                    )
+                    return
+
+                purchase_event = PurchaseEvent(
+                    order_id=order_id,
+                    customer_id=customer_id,
+                    shop_id=shop_id,
+                    session_id=getattr(user_session, "id", None),
+                    total_amount=total_amount,
+                    currency=currency,
+                    products=products,
+                    created_at=getattr(order, "order_date", None) or datetime.utcnow(),
+                    metadata={
+                        "source": "normalization",
+                        "line_item_count": len(products),
+                    },
+                )
+
+                # Process attribution
+                billing = BillingService(session)
+                await billing.process_purchase_attribution(purchase_event)
 
             logger.info(
                 "Purchase attribution stored",
@@ -181,7 +228,7 @@ class PurchaseAttributionKafkaConsumer:
             raise
 
     async def _has_extension_interactions(
-        self, db, shop_id: str, customer_id: str, session
+        self, session, shop_id: str, customer_id: str, user_session
     ) -> bool:
         """
         Check if customer has any extension interactions that could drive attribution.
@@ -192,32 +239,31 @@ class PurchaseAttributionKafkaConsumer:
             cutoff_time = datetime.utcnow() - timedelta(days=30)
 
             # Build query conditions
-            where_conditions = {
-                "shopId": shop_id,
-                "createdAt": {"gte": cutoff_time},
-            }
+            query_conditions = [
+                UserInteraction.shop_id == shop_id,
+                UserInteraction.created_at >= cutoff_time,
+                UserInteraction.extension_type.in_(
+                    [
+                        "phoenix",
+                        "venus",
+                        "apollo",
+                    ]
+                ),  # Attribution-eligible extensions
+            ]
 
             # Add customer or session filter
             if customer_id:
-                where_conditions["customerId"] = customer_id
-            elif session and hasattr(session, "id"):
-                where_conditions["sessionId"] = session.id
+                query_conditions.append(UserInteraction.customer_id == customer_id)
+            elif user_session and hasattr(user_session, "id"):
+                query_conditions.append(UserInteraction.session_id == user_session.id)
 
             # Check for any interactions from attribution-eligible extensions
-            # (Phoenix, Venus, Apollo - excluding Atlas web pixel tracking)
-            interactions = await db.userinteraction.find_many(
-                where={
-                    **where_conditions,
-                    "extensionType": {
-                        "in": [
-                            "phoenix",
-                            "venus",
-                            "apollo",
-                        ]  # Attribution-eligible extensions
-                    },
-                },
-                take=1,  # We only need to know if any exist
-            )
+            interactions_query = (
+                select(UserInteraction).where(and_(*query_conditions)).limit(1)
+            )  # We only need to know if any exist
+
+            interactions_result = await session.execute(interactions_query)
+            interactions = interactions_result.scalars().all()
 
             has_interactions = len(interactions) > 0
 

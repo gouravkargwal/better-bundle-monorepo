@@ -11,6 +11,8 @@ from app.core.logging import get_logger
 from app.domains.shopify.services.normalisation_service import (
     NormalizationService,
 )
+from app.repository.ShopRepository import ShopRepository
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -22,6 +24,8 @@ class NormalizationKafkaConsumer:
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self._initialized = False
         self.normalization_service = NormalizationService()
+        self.shop_repo = ShopRepository()
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -77,6 +81,25 @@ class NormalizationKafkaConsumer:
                 except Exception:
                     pass
             event_type = payload.get("event_type")
+            shop_id = payload.get("shop_id")
+            if not shop_id:
+                logger.error("❌ Invalid normalization event: missing shop_id")
+                return
+
+            if not await self.shop_repo.is_shop_active(shop_id):
+                logger.warning(
+                    "Shop is not active for normalization",
+                    shop_id=shop_id,
+                )
+                await self.dlq_service.send_to_dlq(
+                    original_message=payload,
+                    reason="shop_suspended",
+                    original_topic="normalization-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+                await self.consumer.commit(message)
+                logger.info(f"✅ Shop {shop_id} is suspended")
+                return
 
             if event_type == "normalize_data":
                 await self._handle_unified_normalization(payload)
@@ -87,33 +110,32 @@ class NormalizationKafkaConsumer:
 
     async def _handle_unified_normalization(self, payload: Dict[str, Any]):
         """Unified normalization handler - no complex mode switching"""
+        try:
+            shop_id = payload.get("shop_id")
+            data_type = payload.get("data_type")
+            format_type = payload.get("format", "graphql")
+            shopify_id = payload.get("shopify_id")
+            source = payload.get("source", "unknown")
 
-        shop_id = payload.get("shop_id")
-        data_type = payload.get("data_type")
-        format_type = payload.get("format", "graphql")
-        shopify_id = payload.get("shopify_id")
-        source = payload.get("source", "unknown")
+            # Create simplified normalization parameters
+            normalization_params = {
+                "shopify_id": shopify_id,
+                "format": format_type,
+                "source": source,
+            }
 
-        if not shop_id or not data_type:
-            logger.error("❌ Invalid normalization event: missing shop_id or data_type")
-            return
-
-        # Create simplified normalization parameters
-        normalization_params = {
-            "shopify_id": shopify_id,
-            "format": format_type,
-            "source": source,
-        }
-
-        # Use unified normalization method
-        success = await self.normalization_service.normalize_data(
-            shop_id, data_type, normalization_params
-        )
-
-        if success:
-            # Trigger feature computation for the processed data type
-            await self.normalization_service.feature_service.trigger_feature_computation(
-                shop_id, data_type
+            # Use unified normalization method
+            success = await self.normalization_service.normalize_data(
+                shop_id, data_type, normalization_params
             )
-        else:
-            logger.error(f"❌ Normalization failed for {data_type}")
+
+            if success:
+                # Trigger feature computation for the processed data type
+                await self.normalization_service.feature_service.trigger_feature_computation(
+                    shop_id, data_type
+                )
+            else:
+                logger.error(f"❌ Normalization failed for {data_type}")
+        except Exception as e:
+            logger.error(f"Normalization failed: {e}")
+            raise

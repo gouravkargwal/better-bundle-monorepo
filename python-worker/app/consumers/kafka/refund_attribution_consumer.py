@@ -4,10 +4,15 @@ Kafka-based refund attribution consumer for processing refund attribution events
 
 from typing import Any, Dict, List
 from datetime import datetime
+from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models import RefundAttribution, RawOrder, OrderData
 from app.core.logging import get_logger
+from app.repository.ShopRepository import ShopRepository
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -18,6 +23,8 @@ class RefundAttributionKafkaConsumer:
     def __init__(self):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self._initialized = False
+        self.shop_repo = ShopRepository()
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -118,13 +125,29 @@ class RefundAttributionKafkaConsumer:
                 )
                 return
 
+            if not await self.shop_repo.is_shop_active(shop_id):
+                logger.warning(
+                    "Shop is not active for refund attribution",
+                    shop_id=shop_id,
+                )
+                await self.dlq_service.send_to_dlq(
+                    original_message=message,
+                    reason="shop_suspended",
+                    original_topic="refund-attribution-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+                await self.consumer.commit(message)
+                return
+
             logger.info(
                 f"📋 Processing individual refund attribution: shop_id={shop_id}, refund_id={refund_id}, order_id={order_id}"
             )
 
-            # Use shared processing logic
-            db = await get_database()
-            await self._process_single_refund_attribution(refund_id, shop_id, db)
+            # Use shared processing logic with SQLAlchemy session
+            async with get_transaction_context() as session:
+                await self._process_single_refund_attribution(
+                    refund_id, shop_id, session
+                )
 
         except Exception as e:
             logger.error(
@@ -148,17 +171,16 @@ class RefundAttributionKafkaConsumer:
             f"🔄 Processing batch refund attribution: shop_id={shop_id}, refund_count={len(refund_ids)}"
         )
 
-        db = await get_database()
         successful = 0
         failed = 0
 
         # Process all refunds in a single transaction for consistency
         try:
-            async with db.tx() as transaction:
+            async with get_transaction_context() as session:
                 for refund_id in refund_ids:
                     try:
                         await self._process_single_refund_attribution(
-                            refund_id, shop_id, transaction
+                            refund_id, shop_id, session
                         )
                         successful += 1
                     except Exception as e:
@@ -177,13 +199,19 @@ class RefundAttributionKafkaConsumer:
             raise
 
     async def _process_single_refund_attribution(
-        self, refund_id: str, shop_id: str, db_client: Any
+        self, refund_id: str, shop_id: str, session: Any
     ):
         """Process attribution for a single refund using single RefundAttribution table."""
         # Check if attribution already exists (idempotency)
-        existing_attribution = await db_client.refundattribution.find_first(
-            where={"shopId": shop_id, "refundId": refund_id}
+        existing_attribution_query = select(RefundAttribution).where(
+            and_(
+                RefundAttribution.shop_id == shop_id,
+                RefundAttribution.refund_id == refund_id,
+            )
         )
+        existing_attribution_result = await session.execute(existing_attribution_query)
+        existing_attribution = existing_attribution_result.scalar_one_or_none()
+
         if existing_attribution:
             logger.info(
                 f"✅ Refund attribution already exists - skipping",
@@ -193,10 +221,13 @@ class RefundAttributionKafkaConsumer:
             return
 
         # Load refund data from RawOrder (single source of truth)
-        raw_order = await db_client.raworder.find_first(
-            where={"shopId": shop_id, "shopifyId": refund_id}
+        raw_order_query = select(RawOrder).where(
+            and_(RawOrder.shop_id == shop_id, RawOrder.shopify_id == refund_id)
         )
-        if not raw_order or not getattr(raw_order, "payload", None):
+        raw_order_result = await session.execute(raw_order_query)
+        raw_order = raw_order_result.scalar_one_or_none()
+
+        if not raw_order or not raw_order.payload:
             logger.warning(
                 "RawOrder not found for refund attribution",
                 shop_id=shop_id,
@@ -225,9 +256,12 @@ class RefundAttributionKafkaConsumer:
 
         # Load original order for customer and session data
         order_id = str(payload_data.get("id", ""))
-        order = await db_client.orderdata.find_first(
-            where={"shopId": shop_id, "orderId": order_id}
+        order_query = select(OrderData).where(
+            and_(OrderData.shop_id == shop_id, OrderData.order_id == order_id)
         )
+        order_result = await session.execute(order_query)
+        order = order_result.scalar_one_or_none()
+
         if not order:
             logger.warning(
                 "OrderData not found for refund attribution",
@@ -242,30 +276,27 @@ class RefundAttributionKafkaConsumer:
         )
 
         # Create single RefundAttribution record
-        await db_client.refundattribution.create(
-            data={
-                "shopId": shop_id,
-                "customerId": order.customerId,
-                "sessionId": order.sessionId if hasattr(order, "sessionId") else None,
-                "orderId": order_id,
-                "refundId": refund_id,
-                "refundedAt": refund_obj.get("created_at", datetime.utcnow()),
-                "totalRefundAmount": float(refund_obj.get("total_refund_amount", 0.0)),
-                "currencyCode": refund_obj.get("currency_code", "USD"),
-                "contributingExtensions": attribution_data["contributing_extensions"],
-                "attributionWeights": attribution_data["attribution_weights"],
-                "totalRefundedRevenue": float(
-                    refund_obj.get("total_refund_amount", 0.0)
-                ),
-                "attributedRefund": attribution_data["attributed_refund"],
-                "totalInteractions": attribution_data["total_interactions"],
-                "interactionsByExtension": attribution_data[
-                    "interactions_by_extension"
-                ],
-                "attributionAlgorithm": "multi_touch",
-                "metadata": attribution_data["metadata"],
-            }
+        refund_attribution = RefundAttribution(
+            shop_id=shop_id,
+            customer_id=order.customer_id,
+            session_id=getattr(order, "session_id", None),
+            order_id=order_id,
+            refund_id=refund_id,
+            refunded_at=refund_obj.get("created_at", datetime.utcnow()),
+            total_refund_amount=float(refund_obj.get("total_refund_amount", 0.0)),
+            currency_code=refund_obj.get("currency_code", "USD"),
+            contributing_extensions=attribution_data["contributing_extensions"],
+            attribution_weights=attribution_data["attribution_weights"],
+            total_refunded_revenue=float(refund_obj.get("total_refund_amount", 0.0)),
+            attributed_refund=attribution_data["attributed_refund"],
+            total_interactions=attribution_data["total_interactions"],
+            interactions_by_extension=attribution_data["interactions_by_extension"],
+            attribution_algorithm="multi_touch",
+            attribution_metadata=attribution_data["metadata"],
         )
+
+        session.add(refund_attribution)
+        await session.flush()  # Flush to get the ID if needed
 
         logger.info(
             f"✅ Refund attribution created successfully",

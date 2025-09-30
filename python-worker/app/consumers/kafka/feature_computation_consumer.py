@@ -2,14 +2,15 @@
 Kafka-based feature computation consumer for processing feature engineering jobs
 """
 
-import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 from datetime import datetime
 
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.domains.ml.services import FeatureEngineeringService
 from app.core.logging import get_logger
+from app.repository.ShopRepository import ShopRepository
+from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
 
@@ -21,10 +22,8 @@ class FeatureComputationKafkaConsumer:
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
         self.feature_service = FeatureEngineeringService()
         self._initialized = False
-
-        # Feature computation job tracking
-        self.active_feature_jobs: Dict[str, Dict[str, Any]] = {}
-        self.job_timeout = 1800  # 30 minutes for feature computation
+        self.shop_repo = ShopRepository()
+        self.dlq_service = DLQService()
 
     async def initialize(self):
         """Initialize consumer"""
@@ -63,41 +62,6 @@ class FeatureComputationKafkaConsumer:
         if self.consumer:
             await self.consumer.close()
 
-    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get the status of a feature computation job"""
-        return self.active_feature_jobs.get(job_id)
-
-    async def cleanup_old_jobs(self):
-        """Clean up old completed jobs to prevent memory leaks"""
-        current_time = datetime.utcnow()
-        jobs_to_remove = []
-
-        for job_id, job_data in self.active_feature_jobs.items():
-            # Remove jobs older than timeout or completed more than 1 hour ago
-            if job_data["status"] == "completed":
-                completed_at = job_data.get("completed_at", current_time)
-                if (current_time - completed_at).total_seconds() > 3600:  # 1 hour
-                    jobs_to_remove.append(job_id)
-            elif (
-                current_time - job_data["started_at"]
-            ).total_seconds() > self.job_timeout:
-                # Mark timed out jobs as failed
-                job_data["status"] = "timeout"
-                jobs_to_remove.append(job_id)
-
-        for job_id in jobs_to_remove:
-            del self.active_feature_jobs[job_id]
-
-    async def get_health_status(self) -> Dict[str, Any]:
-        """Get health status of the feature computation consumer"""
-        await self.cleanup_old_jobs()
-
-        return {
-            "status": "running" if self._initialized else "stopped",
-            "active_jobs": len(self.active_feature_jobs),
-            "last_health_check": datetime.utcnow().isoformat(),
-        }
-
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual feature computation messages"""
         try:
@@ -115,7 +79,7 @@ class FeatureComputationKafkaConsumer:
             job_id = payload.get("job_id")
             shop_id = payload.get("shop_id")
             features_ready_raw = payload.get("features_ready", False)
-            # Robust boolean parsing (handles bool/str/int)
+
             if isinstance(features_ready_raw, bool):
                 features_ready = features_ready_raw
             elif isinstance(features_ready_raw, (int, float)):
@@ -136,22 +100,23 @@ class FeatureComputationKafkaConsumer:
                 logger.error("Invalid message: missing job_id or shop_id")
                 return
 
-            # Track the job
-            self.active_feature_jobs[job_id] = {
-                "shop_id": shop_id,
-                "started_at": datetime.utcnow(),
-                "status": "processing",
-                "metadata": metadata,
-            }
+            if not await self.shop_repo.is_shop_active(shop_id):
+                logger.warning(
+                    "Shop is not active for feature computation",
+                    shop_id=shop_id,
+                )
+                await self.dlq_service.send_to_dlq(
+                    original_message=message,
+                    reason="shop_suspended",
+                    original_topic="feature-computation-jobs",
+                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                )
+                await self.consumer.commit(message)
+                return
 
             # Only process if features are not ready (need to be computed)
             if not features_ready:
                 await self._compute_features_for_shop(job_id, shop_id, metadata)
-
-            # Mark job as completed
-            if job_id in self.active_feature_jobs:
-                self.active_feature_jobs[job_id]["status"] = "completed"
-                self.active_feature_jobs[job_id]["completed_at"] = datetime.utcnow()
 
         except Exception as e:
             logger.error(

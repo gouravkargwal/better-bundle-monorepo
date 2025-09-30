@@ -85,7 +85,7 @@ class AnalyticsTrackingService:
                 interaction_type=interaction_type,
                 customer_id=customer_id,
                 shop_id=shop_id,
-                metadata=metadata or {},
+                interaction_metadata=metadata or {},
             )
 
             # Save interaction to database
@@ -204,7 +204,7 @@ class AnalyticsTrackingService:
                         ),
                         customer_id=interaction_data.customer_id,
                         shop_id=interaction_data.shop_id,
-                        metadata=interaction_data.metadata,
+                        interaction_metadata=interaction_data.metadata,
                         created_at=interaction_data.created_at,
                     )
                     interactions.append(interaction)
@@ -285,7 +285,7 @@ class AnalyticsTrackingService:
                         ),
                         customer_id=interaction_data.customer_id,
                         shop_id=interaction_data.shop_id,
-                        metadata=interaction_data.metadata,
+                        interaction_metadata=interaction_data.metadata,
                         created_at=interaction_data.created_at,
                     )
                     interactions.append(interaction)
@@ -448,7 +448,7 @@ class AnalyticsTrackingService:
                     interaction_type=interaction_data.interaction_type.value,
                     customer_id=interaction_data.customer_id,
                     shop_id=interaction_data.shop_id,
-                    metadata=interaction_data.metadata,
+                    interaction_metadata=interaction_data.metadata,
                     created_at=utcnow(),
                 )
 
@@ -466,7 +466,7 @@ class AnalyticsTrackingService:
                     ),
                     customer_id=interaction_model.customer_id,
                     shop_id=interaction_model.shop_id,
-                    metadata=interaction_model.metadata,
+                    metadata=interaction_model.interaction_metadata,
                     created_at=interaction_model.created_at,
                 )
 
