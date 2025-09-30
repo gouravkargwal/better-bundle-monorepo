@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import {
   recommendationApi,
   type ProductRecommendation,
+  type ExtensionContext,
 } from "../api/recommendations";
-import { analyticsApi, type ViewedProduct } from "../api/analytics";
+import { analyticsApi } from "../api/analytics";
 
 interface Product {
   id: string;
@@ -17,14 +18,7 @@ interface Product {
 }
 
 interface UseRecommendationsProps {
-  context:
-    | "profile"
-    | "order_status"
-    | "order_history"
-    | "product_page"
-    | "homepage"
-    | "cart"
-    | "checkout";
+  context: ExtensionContext;
   limit: number;
   customerId: string;
   shopDomain?: string;
@@ -54,24 +48,30 @@ export function useRecommendations({
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
 
-  const trackRecommendationClick = (
+  const trackRecommendationClick = async (
     productId: string,
     position: number,
     productUrl: string,
-  ): string => {
-    // Track interaction in background (non-blocking)
+  ): Promise<string> => {
+    // Track interaction using unified analytics (non-blocking)
     analyticsApi
-      .trackInteraction({
-        session_id: sessionId,
-        product_id: productId,
-        interaction_type: "click",
-        position,
-        extension_type: "venus",
+      .trackRecommendationClick(
+        shopDomain?.replace(".myshopify.com", "") || "",
         context,
-        metadata: { source: `${context}_recommendation` },
-      })
+        productId,
+        position,
+        customerId,
+        { source: `${context}_recommendation` },
+      )
       .catch((error) => {
         console.error(`Failed to track ${context} click:`, error);
+      });
+
+    // Store attribution in cart for order processing
+    analyticsApi
+      .storeCartAttribution(sessionId, productId, context, position)
+      .catch((error) => {
+        console.error(`Failed to store cart attribution:`, error);
       });
 
     // Add attribution parameters to track recommendation source
@@ -129,22 +129,17 @@ export function useRecommendations({
 
           setProducts(transformedProducts);
 
-          // Create recommendation session with viewed products
-          const viewedProducts: ViewedProduct[] = transformedProducts.map(
-            (product, index) => ({
-              product_id: product.id,
-              position: index + 1,
-            }),
-          );
-
-          await analyticsApi.createSession({
-            extension_type: "venus",
-            context,
-            user_id: customerId,
-            session_id: sessionId,
-            viewed_products: viewedProducts,
-            metadata: { source: `${context}_page` },
-          });
+          // Only track recommendation view if there are actually products to display
+          if (transformedProducts.length > 0) {
+            const productIds = transformedProducts.map((product) => product.id);
+            await analyticsApi.trackRecommendationView(
+              shopDomain,
+              context,
+              customerId,
+              productIds,
+              { source: `${context}_page` },
+            );
+          }
         } else {
           throw new Error(`Failed to fetch ${context} recommendations`);
         }

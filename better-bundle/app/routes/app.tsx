@@ -1,58 +1,43 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
+import {
+  Outlet,
+  useLoaderData,
+  useRouteError,
+  useLocation,
+} from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
-import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
+import { EnhancedNavMenu } from "../components/Navigation/EnhancedNavMenu";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-
-  // Ensure shop record exists (fallback if afterAuth didn't run)
-  try {
-    const existingShop = await prisma.shop.findUnique({
-      where: { shopDomain: session.shop },
-    });
-
-    if (!existingShop) {
-      console.log(
-        "🏪 Shop record missing, creating fallback record for:",
-        session.shop,
-      );
-      await prisma.shop.create({
-        data: {
-          shopDomain: session.shop,
-          accessToken: "", // Will be updated by session storage
-          isActive: true,
-          customDomain: null, // Will be updated when shop data is fetched
-        },
-      });
-    }
-  } catch (err) {
-    console.error("❌ Fallback shop creation error:", err);
-  }
-
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  console.log("session", session, "In app layout");
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    session, // Pass session to child routes
+  };
 };
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const location = useLocation();
+
+  // Hide navigation on onboarding page
+  const isOnboardingPage = location.pathname === "/app/onboarding";
+  const showNavigation = !isOnboardingPage;
+
+  console.log("🔍 App layout - current path:", location.pathname);
+  console.log("🔍 App layout - isOnboardingPage:", isOnboardingPage);
+  console.log("🔍 App layout - showNavigation:", showNavigation);
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
-      <NavMenu>
-        <Link to="/app" rel="home">
-          Home
-        </Link>
-        <Link to="/app/dashboard">Analytics Dashboard</Link>
-        <Link to="/app/widget-config">Widget Configuration</Link>
-        <Link to="/app/additional">Additional page</Link>
-      </NavMenu>
+      {showNavigation && <EnhancedNavMenu />}
       <Outlet />
     </AppProvider>
   );

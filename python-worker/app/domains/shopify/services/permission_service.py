@@ -25,7 +25,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "read_products",
             "read_orders",
             "read_customers",
-            "read_customer_events",
         ]
 
         # Scope to data type mapping
@@ -39,7 +38,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             ],
             "read_orders": ["orders", "line_items", "financials"],
             "read_customers": ["customers", "customer_addresses"],
-            "read_customer_events": ["customer_events", "browsing_behavior"],
         }
 
         # Redis cache service for permissions
@@ -58,17 +56,23 @@ class ShopifyPermissionService(IShopifyPermissionService):
         self, shop_domain: str, access_token: str = None
     ) -> Dict[str, bool]:
         """Check what permissions the app has for a shop"""
+        logger.info(
+            f"🔍 check_shop_permissions called for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
+        )
+
         # Simple recursion guard - return basic permissions to avoid infinite loops
         if not hasattr(self, "_checking_permissions"):
             self._checking_permissions = set()
 
         if shop_domain in self._checking_permissions:
+            logger.info(
+                f"🔄 Recursion guard triggered for {shop_domain}, returning basic permissions"
+            )
             return {
                 "products": True,
                 "orders": True,
                 "customers": True,
                 "collections": True,
-                "customer_events": True,
                 "has_access": True,
             }
 
@@ -78,10 +82,15 @@ class ShopifyPermissionService(IShopifyPermissionService):
             # Check cache first
             cached = await self._get_cached_permissions(shop_domain)
             if cached:
+                logger.info(f"✅ Using cached permissions for {shop_domain}: {cached}")
                 return cached
 
             # Get actual granted scopes from Shopify
+            logger.info(f"🚀 Getting scopes from Shopify for {shop_domain}")
             scopes = await self._get_shopify_scopes(shop_domain, access_token)
+            logger.info(
+                f"✅ Checking permissions for {shop_domain} with scopes: {scopes}"
+            )
 
             # Check permissions based on granted scopes
             products_permission = any(
@@ -97,10 +106,9 @@ class ShopifyPermissionService(IShopifyPermissionService):
             collections_permission = any(
                 scope in ["read_products", "write_products"] for scope in scopes
             )
-            # Customer events use read_customer_events scope
-            customer_events_permission = any(
-                scope in ["read_customer_events", "write_customer_events"]
-                for scope in scopes
+
+            logger.info(
+                f"Permission check results for {shop_domain}: products={products_permission}, orders={orders_permission}, customers={customers_permission}, collections={collections_permission}"
             )
 
             permissions = {
@@ -108,14 +116,21 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 "orders": orders_permission,
                 "customers": customers_permission,
                 "collections": collections_permission,
-                "customer_events": customer_events_permission,
             }
 
             # Check overall access
             permissions["has_access"] = any(permissions.values())
 
-            # Cache the results
-            await self._cache_permissions(shop_domain, permissions)
+            # Only cache if we got scopes from the API (successful response)
+            if scopes:  # Only cache when API returned actual scopes
+                logger.info(
+                    f"✅ Caching successful permission results for {shop_domain}"
+                )
+                await self._cache_permissions(shop_domain, permissions)
+            else:
+                logger.warning(
+                    f"⚠️ Not caching permissions for {shop_domain} - API returned empty scopes"
+                )
 
             # Log the results
             await self.log_permission_check(shop_domain, permissions)
@@ -150,11 +165,7 @@ class ShopifyPermissionService(IShopifyPermissionService):
         if not permissions.get("customers"):
             missing_scopes.append("read_customers")
         if not permissions.get("collections"):
-            missing_scopes.append(
-                "read_products"
-            )  # Collections are part of read_products
-        if not permissions.get("customer_events"):
-            missing_scopes.append("read_customer_events")
+            missing_scopes.append("read_products")
 
         return missing_scopes
 
@@ -199,19 +210,33 @@ class ShopifyPermissionService(IShopifyPermissionService):
     ) -> List[str]:
         """Get the actual scopes granted to the app from Shopify GraphQL API"""
         try:
+            logger.info(
+                f"🔍 Getting scopes for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
+            )
+
             # Ensure API client is connected
             await self.api_client.connect()
+            logger.info(f"✅ API client connected for {shop_domain}")
 
             # Set access token for API client
             if access_token:
                 await self.api_client.set_access_token(shop_domain, access_token)
+                logger.info(f"✅ Access token set for {shop_domain}")
+            else:
+                logger.warning(f"⚠️ No access token provided for {shop_domain}")
 
             # Use the API client to get scopes
+            logger.info(f"🚀 Calling get_app_installation_scopes for {shop_domain}")
             scopes = await self.api_client.get_app_installation_scopes(shop_domain)
+            logger.info(f"✅ Retrieved scopes for {shop_domain}: {scopes}")
             return scopes
 
         except Exception as e:
-            logger.error(f"Failed to get scopes for {shop_domain}: {e}")
+            logger.error(f"❌ Failed to get scopes for {shop_domain}: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Error details: {str(e)}")
+            # No fallback - return empty list to indicate API failure
+            logger.warning(f"⚠️ API failed for {shop_domain}, returning empty scopes")
             return []
 
     async def get_collection_strategy(
@@ -231,8 +256,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             collectable_data.append("customers")
         if permissions.get("collections"):
             collectable_data.append("collections")
-        if permissions.get("customer_events"):
-            collectable_data.append("customer_events")
 
         # Determine collection priority
         collection_priority = self._get_collection_priority(collectable_data)
@@ -312,11 +335,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
                 "Request 'read_products' scope to access product collections and categorization"
             )
 
-        if "read_customer_events" in missing_scopes:
-            recommendations.append(
-                "Request 'read_customer_events' scope to access customer browsing behavior and engagement data"
-            )
-
         if len(missing_scopes) >= 3:
             recommendations.append(
                 "Consider requesting all missing scopes for comprehensive data collection and ML training"
@@ -332,7 +350,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "orders",
             "customers",
             "collections",
-            "customer_events",
         ]
 
         # Filter to only include collectable data and maintain priority order
@@ -348,7 +365,6 @@ class ShopifyPermissionService(IShopifyPermissionService):
             "orders": {"minutes": 10, "complexity": "high"},
             "customers": {"minutes": 3, "complexity": "low"},
             "collections": {"minutes": 2, "complexity": "low"},
-            "customer_events": {"minutes": 3, "complexity": "medium"},
         }
 
         total_minutes = sum(

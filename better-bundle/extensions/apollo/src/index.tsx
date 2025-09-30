@@ -1,11 +1,9 @@
 /**
- * Extend Shopify Checkout with a custom Post Purchase user experience.
- * This template provides two extension points:
+ * BetterBundle Apollo Post-Purchase Extension
  *
- *  1. ShouldRender - Called first, during the checkout process, when the
- *     payment page loads.
- *  2. Render - If requested by `ShouldRender`, will be rendered after checkout
- *     completes
+ * This extension provides personalized product recommendations after checkout completion.
+ * It follows Shopify's post-purchase extension guidelines and integrates with our
+ * unified analytics system for tracking and attribution.
  */
 import React from "react";
 
@@ -23,6 +21,12 @@ import {
   View,
 } from "@shopify/post-purchase-ui-extensions-react";
 
+import { apolloAnalytics } from "./api/analytics";
+import {
+  apolloRecommendationApi,
+  type ProductRecommendation,
+} from "./api/recommendations";
+
 /**
  * Entry point for the `ShouldRender` Extension Point.
  *
@@ -31,154 +35,91 @@ import {
  * extension point.
  */
 extend("Checkout::PostPurchase::ShouldRender", async ({ storage }) => {
-  // For now, we'll fetch recommendations without order/customer context
-  // In a real implementation, you might get this from the extension context
-  const initialState = await getRenderData();
-  const render = initialState.recommendations.length > 0;
+  try {
+    // For post-purchase extensions, we'll fetch recommendations without order context
+    // The order context will be available in the Render extension point
+    const initialState = await getPostPurchaseRecommendations({
+      limit: 3,
+    });
 
-  if (render) {
-    // Saves initial state, provided to `Render` via `storage.initialData`
-    await storage.update(initialState);
+    // Only render if we have recommendations
+    const render = initialState.recommendations.length > 0;
+
+    if (render) {
+      // Save initial state for the Render extension point
+      await storage.update(initialState);
+    }
+
+    return {
+      render,
+    };
+  } catch (error) {
+    console.error("Error in ShouldRender:", error);
+    // Don't render if there's an error
+    return {
+      render: false,
+    };
   }
-
-  return {
-    render,
-  };
 });
 
-// Dummy data for testing - will be replaced with real API later
-const dummyRecommendations = [
-  {
-    id: "prod_1",
-    title: "Premium Wireless Headphones",
-    image:
-      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&h=300&fit=crop",
-    reason: "Customers who bought this also bought these headphones",
-    variants: [
-      {
-        id: "var_1_1",
-        title: "Black",
-        price: "$199.99",
-        available: true,
-        inventory_quantity: 15,
-      },
-      {
-        id: "var_1_2",
-        title: "White",
-        price: "$199.99",
-        available: true,
-        inventory_quantity: 8,
-      },
-      {
-        id: "var_1_3",
-        title: "Silver",
-        price: "$219.99",
-        available: true,
-        inventory_quantity: 3,
-      },
-    ],
-    default_variant_id: "var_1_1",
-  },
-  {
-    id: "prod_2",
-    title: "Organic Cotton T-Shirt",
-    image:
-      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=300&h=300&fit=crop",
-    reason: "Perfect match for your style",
-    variants: [
-      {
-        id: "var_2_1",
-        title: "Small / Navy",
-        price: "$24.99",
-        available: true,
-        inventory_quantity: 20,
-      },
-      {
-        id: "var_2_2",
-        title: "Medium / Navy",
-        price: "$24.99",
-        available: true,
-        inventory_quantity: 25,
-      },
-      {
-        id: "var_2_3",
-        title: "Large / Navy",
-        price: "$24.99",
-        available: true,
-        inventory_quantity: 18,
-      },
-      {
-        id: "var_2_4",
-        title: "Small / White",
-        price: "$24.99",
-        available: true,
-        inventory_quantity: 12,
-      },
-      {
-        id: "var_2_5",
-        title: "Medium / White",
-        price: "$24.99",
-        available: true,
-        inventory_quantity: 15,
-      },
-      {
-        id: "var_2_6",
-        title: "Large / White",
-        price: "$24.99",
-        available: false,
-        inventory_quantity: 0,
-      },
-    ],
-    default_variant_id: "var_2_2",
-  },
-  {
-    id: "prod_3",
-    title: "Smart Fitness Watch",
-    image:
-      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop",
-    reason: "Complete your fitness journey",
-    variants: [
-      {
-        id: "var_3_1",
-        title: "40mm / Sport Band",
-        price: "$299.99",
-        available: true,
-        inventory_quantity: 10,
-      },
-      {
-        id: "var_3_2",
-        title: "44mm / Sport Band",
-        price: "$329.99",
-        available: true,
-        inventory_quantity: 7,
-      },
-      {
-        id: "var_3_3",
-        title: "40mm / Leather Band",
-        price: "$349.99",
-        available: true,
-        inventory_quantity: 4,
-      },
-      {
-        id: "var_3_4",
-        title: "44mm / Leather Band",
-        price: "$379.99",
-        available: false,
-        inventory_quantity: 0,
-      },
-    ],
-    default_variant_id: "var_3_1",
-  },
-];
+/**
+ * Fetch post-purchase recommendations from the API
+ */
+async function getPostPurchaseRecommendations(request: {
+  order_id?: string;
+  customer_id?: string;
+  shop_domain?: string;
+  purchased_products?: Array<{
+    product_id: string;
+    variant_id: string;
+    quantity: number;
+    price: number;
+  }>;
+  limit?: number;
+}) {
+  try {
+    const response =
+      await apolloRecommendationApi.getPostPurchaseRecommendations({
+        shop_domain: request.shop_domain,
+        context: "post_purchase",
+        order_id: request.order_id,
+        customer_id: request.customer_id,
+        purchased_products: request.purchased_products,
+        limit: request.limit || 3,
+      });
 
-// Fetch dummy recommendations - will be replaced with real API later
-async function getRenderData() {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500));
+    return response;
+  } catch (error) {
+    console.error("Failed to fetch post-purchase recommendations:", error);
 
-  return {
-    recommendations: dummyRecommendations,
-  };
+    // Return fallback recommendations if the main API fails
+    try {
+      const fallbackRecommendations =
+        await apolloRecommendationApi.getFallbackRecommendations(
+          request.shop_domain || "",
+          request.limit || 3,
+        );
+
+      return {
+        success: true,
+        recommendations: fallbackRecommendations,
+        count: fallbackRecommendations.length,
+        source: "fallback",
+        context: "post_purchase",
+        timestamp: new Date().toISOString(),
+      };
+    } catch (fallbackError) {
+      console.error("Fallback recommendations also failed:", fallbackError);
+      return {
+        success: false,
+        recommendations: [],
+        count: 0,
+        source: "error",
+        context: "post_purchase",
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
 }
 
 /**
@@ -199,16 +140,38 @@ export function App({
   storage: any;
 }) {
   const initialState = storage.initialData;
-  const { recommendations = [] } = initialState || {};
+  const {
+    recommendations = [],
+    orderId,
+    customerId,
+    shopDomain,
+    purchasedProducts = [],
+  } = initialState || {};
 
-  // Get order and customer information from the extension point
-  const orderId = extensionPoint?.order?.id;
-  const customerId = extensionPoint?.order?.customer?.id;
-  const shopDomain = extensionPoint?.shop?.domain;
+  // Track recommendation view when component mounts
+  React.useEffect(() => {
+    if (shopDomain && recommendations.length > 0) {
+      const productIds = recommendations.map(
+        (rec: ProductRecommendation) => rec.id,
+      );
 
-  // Get purchased products for context (but we won't display them)
-  const purchasedProducts = extensionPoint?.order?.lineItems || [];
-  console.log("Purchased products:", purchasedProducts);
+      apolloAnalytics
+        .trackRecommendationView(
+          shopDomain.replace(".myshopify.com", ""),
+          customerId,
+          orderId,
+          productIds,
+          {
+            source: "apollo_post_purchase",
+            recommendation_count: recommendations.length,
+            purchased_products_count: purchasedProducts.length,
+          },
+        )
+        .catch((error) => {
+          console.error("Failed to track recommendation view:", error);
+        });
+    }
+  }, [recommendations, shopDomain, customerId, orderId, purchasedProducts]);
 
   // Helper functions for variant handling - simplified approach
   const getDefaultVariant = (product: any) => {
@@ -229,7 +192,10 @@ export function App({
   };
 
   // Handle adding product to order
-  const handleAddToOrder = async (product: any) => {
+  const handleAddToOrder = async (
+    product: ProductRecommendation,
+    position: number,
+  ) => {
     try {
       const defaultVariant = getDefaultVariant(product);
 
@@ -238,38 +204,61 @@ export function App({
         return;
       }
 
-      // For now, we'll just log the action since post-purchase extensions have limited API access
-      // In a real implementation, this would need to be handled differently
-      console.log(
-        `Would add variant ${defaultVariant.id} of product ${product.id} to order`,
-      );
+      // Track recommendation click first
+      if (shopDomain) {
+        await apolloAnalytics.trackRecommendationClick(
+          shopDomain.replace(".myshopify.com", ""),
+          product.id,
+          position,
+          customerId,
+          orderId,
+          {
+            source: "apollo_post_purchase",
+            variant_id: defaultVariant.id,
+            product_title: product.title,
+            variant_title: defaultVariant.title,
+            price: defaultVariant.price.amount,
+          },
+        );
+      }
+
+      // Track add to order action
+      if (shopDomain) {
+        await apolloAnalytics.trackAddToOrder(
+          shopDomain.replace(".myshopify.com", ""),
+          product.id,
+          defaultVariant.id,
+          position,
+          customerId,
+          orderId,
+          {
+            source: "apollo_post_purchase",
+            product_title: product.title,
+            variant_title: defaultVariant.title,
+            price: defaultVariant.price.amount,
+            currency: defaultVariant.price.currency_code,
+          },
+        );
+      }
 
       // Note: Post-purchase extensions cannot directly add products to completed orders
       // This would typically be handled through a separate flow or API
+      // For now, we'll redirect to the product page with attribution parameters
 
-      // Track analytics
-      try {
-        await fetch("/api/v1/analytics", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            event: "recommendation_click",
-            context: "post_purchase",
-            productId: product.id,
-            variantId: defaultVariant.id,
-            customerId,
-            shopDomain,
-            orderId,
-            timestamp: new Date().toISOString(),
-          }),
-        });
-      } catch (analyticsError) {
-        console.error("Analytics tracking failed:", analyticsError);
-        // Don't fail the main flow if analytics fails
-      }
+      const attributionParams = new URLSearchParams({
+        ref: `apollo_${orderId?.slice(-6)}`,
+        src: product.id,
+        pos: position.toString(),
+        variant: defaultVariant.id,
+      });
 
+      const productUrl = product.url || `/products/${product.handle}`;
+      const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
+
+      // In a real implementation, this would open the product page or handle the upsell flow
+      console.log(`Redirecting to: ${productUrlWithAttribution}`);
+
+      // For post-purchase extensions, we might show a success message instead
       console.log(
         `Variant ${defaultVariant.id} of product ${product.id} added to order successfully`,
       );
@@ -378,7 +367,7 @@ export function App({
                 {/* @ts-ignore */}
                 <Button
                   submit
-                  onPress={() => handleAddToOrder(product)}
+                  onPress={() => handleAddToOrder(product, index + 1)}
                   disabled={!isVariantAvailable(product)}
                 >
                   Add to Order - {getDefaultPrice(product)}

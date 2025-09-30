@@ -13,57 +13,64 @@ automatically_update_urls_on_dev = true
 api_version = "2024-01"
 
   [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "refunds/create" ]
-  uri = "/webhooks/refunds/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/paid" ]
-  uri = "/webhooks/orders/paid"
-
-
-  [[webhooks.subscriptions]]
-  topics = [ "products/create" ]
-  uri = "/webhooks/products/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "products/update" ]
-  uri = "/webhooks/products/update"
+  topics = [ "collections/update" ]
+  uri = "/webhooks/collections/update"
 
   [[webhooks.subscriptions]]
   topics = [ "products/delete" ]
   uri = "/webhooks/products/delete"
 
   [[webhooks.subscriptions]]
+  topics = [ "customers/update" ]
+  uri = "/webhooks/customers/update"
+
+  [[webhooks.subscriptions]]
   topics = [ "customers/create" ]
   uri = "/webhooks/customers/create"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/update" ]
-  uri = "/webhooks/customers/update"
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
 
   [[webhooks.subscriptions]]
   topics = [ "collections/create" ]
   uri = "/webhooks/collections/create"
 
   [[webhooks.subscriptions]]
-  topics = [ "collections/update" ]
-  uri = "/webhooks/collections/update"
+  topics = [ "products/create" ]
+  uri = "/webhooks/products/create"
 
   [[webhooks.subscriptions]]
   topics = [ "collections/delete" ]
   uri = "/webhooks/collections/delete"
 
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/approaching_capped_amount" ]
+  uri = "/webhooks/billing/charge_failed"
+
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/update" ]
+  uri = "/webhooks/billing/charge_created"
+
+  [[webhooks.subscriptions]]
+  topics = [ "products/update" ]
+  uri = "/webhooks/products/update"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_analytics,read_content,read_customer_events,read_customers,read_discounts,read_inventory,read_locales,read_marketing_events,read_orders,read_products,read_themes,write_pixels,write_products,read_pixels,read_returns"
+scopes = "read_analytics,read_content,read_customer_events,read_customers,read_discounts,read_inventory,read_locales,read_marketing_events,read_orders,read_pixels,read_products,read_returns,read_themes,write_pixels,write_products"
 
 [auth]
 redirect_urls = [

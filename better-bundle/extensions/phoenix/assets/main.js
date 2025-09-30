@@ -1,5 +1,6 @@
 // Main initialization and coordination
 
+
 // Import classes (they will be available globally after script loading)
 // RecommendationAPI and ProductCardManager are loaded from api.js and product-cards.js
 
@@ -9,13 +10,17 @@ class RecommendationCarousel {
     this.cardManager = window.productCardManager; // Use global instance
     this.analyticsApi = window.analyticsApi;
     this.config = this.getConfig();
-    this.sessionId = this.generateSessionId();
+    this.sessionId = window.sessionId; // Use session ID from Liquid template
+
+    console.log('🔧 Phoenix RecommendationCarousel initialized:', {
+      hasApi: !!this.api,
+      hasCardManager: !!this.cardManager,
+      hasAnalyticsApi: !!this.analyticsApi,
+      hasSessionId: !!this.sessionId,
+      config: this.config
+    });
   }
 
-  // Generate unique session ID for analytics tracking
-  generateSessionId() {
-    return `phoenix_cart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
 
   // Get configuration from Liquid template
   getConfig() {
@@ -35,13 +40,6 @@ class RecommendationCarousel {
   // Initialize the recommendation carousel
   async init() {
     try {
-      console.log('🚀 Initializing recommendation carousel with config:', this.config);
-      console.log('🔍 Debug - Global variables:', {
-        shopDomain: window.shopDomain,
-        customerId: window.customerId,
-        cartProductIds: window.cartProductIds,
-        designMode: window.designMode
-      });
 
       // Set global swiper config for product card manager
       window.swiperConfig = {
@@ -51,41 +49,78 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
-      // Fetch recommendations
+      // Get or create session ID from analytics API
+      let sessionId;
+      if (this.analyticsApi && this.config.shopDomain) {
+        try {
+          sessionId = await this.analyticsApi.getOrCreateSession(
+            this.config.shopDomain,
+            this.config.customerId ? String(this.config.customerId) : undefined
+          );
+          console.log('✅ Phoenix: Session ID obtained from analytics API:', sessionId);
+        } catch (error) {
+          console.error('❌ Phoenix: Failed to get session from analytics API:', error);
+          this.hideCarousel();
+          return;
+        }
+      } else {
+        console.error('❌ Phoenix: Analytics API not available');
+        this.hideCarousel();
+        return;
+      }
+
+      // Fetch recommendations first
       const recommendations = await this.api.fetchRecommendations(
         this.config.productIds,
-        this.config.customerId,
+        this.config.customerId ? String(this.config.customerId) : undefined,
         this.config.limit
       );
 
       if (recommendations && recommendations.length > 0) {
-        // Create analytics session first
-        const viewedProducts = recommendations.map((product, index) => ({
-          product_id: product.id,
-          position: index + 1
-        }));
-
-        await this.analyticsApi.createSession({
-          extension_type: "phoenix",
-          context: this.config.context,
-          user_id: String(this.config.customerId), // Convert to string as backend expects string
-          session_id: this.sessionId,
-          viewed_products: viewedProducts,
-          metadata: { source: `${this.config.context}_page` }
-        });
+        const productIds = recommendations.map((product) => product.id);
+        if (this.analyticsApi) {
+          try {
+            await this.analyticsApi.trackRecommendationView(
+              this.config.shopDomain || '',
+              this.config.context,
+              this.config.customerId ? String(this.config.customerId) : undefined,
+              productIds,
+              {
+                source: 'phoenix_theme_extension',
+                cart_product_count: this.config.productIds?.length || 0,
+                recommendation_count: productIds.length
+              }
+            );
+          } catch (error) {
+            console.error('❌ Phoenix: Failed to track recommendation view:', error);
+          }
+        } else {
+          console.warn('⚠️ Phoenix: Analytics API not available, skipping recommendation tracking');
+        }
 
         // Update product cards with real recommendations and analytics tracking
-        this.cardManager.updateProductCards(recommendations, this.analyticsApi, this.sessionId, this.config.context);
+        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
       } else {
-        console.log('No recommendations available, hiding carousel');
-        // Hide the entire carousel if no recommendations
         this.hideCarousel();
       }
     } catch (error) {
-      console.error('Error initializing recommendation carousel:', error);
-      console.log('API failed, hiding carousel');
-      // Hide the entire carousel if API fails
       this.hideCarousel();
+    }
+  }
+
+  // Show skeleton loading state
+  showSkeleton() {
+    const skeletonContainer = document.querySelector('.skeleton-container');
+    if (skeletonContainer) {
+      skeletonContainer.style.display = 'block';
+    }
+  }
+
+  // Hide skeleton loading state
+  hideSkeleton() {
+    const skeletonContainer = document.querySelector('.skeleton-container');
+    if (skeletonContainer) {
+      skeletonContainer.style.display = 'none';
     }
   }
 
@@ -94,7 +129,6 @@ class RecommendationCarousel {
     const carouselContainer = document.querySelector('.shopify-app-block');
     if (carouselContainer) {
       carouselContainer.style.display = 'none';
-      console.log('Carousel hidden due to API failure or no recommendations');
     }
   }
 }

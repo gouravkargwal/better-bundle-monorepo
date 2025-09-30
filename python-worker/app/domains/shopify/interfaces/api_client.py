@@ -139,6 +139,8 @@ class IShopifyAPIClient(ABC):
         shop_domain: str,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
+        query: Optional[str] = None,
+        collection_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Get collections from shop

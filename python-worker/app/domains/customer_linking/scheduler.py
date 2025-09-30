@@ -60,16 +60,27 @@ class CustomerLinkingScheduler:
 
             for link in all_links:
                 # Check if there are any events with this clientId that still need backfilling
-                events_needing_backfill = await db.behavioralevents.find_first(
+                # We need to find sessions with this clientId first, then check their interactions
+                sessions_with_client_id = await db.usersession.find_many(
                     where={
                         "shopId": link.shopId,
-                        "clientId": link.clientId,
-                        "customerId": None,
+                        "browserSessionId": link.clientId,  # clientId maps to browserSessionId
                     }
                 )
+                
+                if sessions_with_client_id:
+                    # Check if any interactions for these sessions need backfilling
+                    session_ids = [s.id for s in sessions_with_client_id]
+                    events_needing_backfill = await db.userinteraction.find_first(
+                        where={
+                            "shopId": link.shopId,
+                            "sessionId": {"in": session_ids},
+                            "customerId": None,
+                        }
+                    )
 
-                if events_needing_backfill:
-                    unprocessed_links.append(link)
+                    if events_needing_backfill:
+                        unprocessed_links.append(link)
 
             logger.info(f"Found {len(unprocessed_links)} unprocessed customer links")
             return unprocessed_links
@@ -97,21 +108,35 @@ class CustomerLinkingScheduler:
 
             for link in links:
                 try:
-                    # Update all events with this clientId that don't have a customerId
-                    # Also update the timestamp to trigger feature computation
+                    # Find sessions with this clientId (browserSessionId)
+                    sessions_with_client_id = await db.usersession.find_many(
+                        where={
+                            "shopId": link.shopId,
+                            "browserSessionId": link.clientId,
+                        }
+                    )
+                    
+                    if not sessions_with_client_id:
+                        logger.warning(f"No sessions found for clientId: {link.clientId}")
+                        continue
+                    
+                    # Get session IDs
+                    session_ids = [s.id for s in sessions_with_client_id]
+                    
+                    # Update all events for these sessions that don't have a customerId
                     from datetime import datetime
 
                     now_utc = lambda: datetime.now()
 
-                    updated_count = await db.behavioralevents.update_many(
+                    updated_count = await db.userinteraction.update_many(
                         where={
                             "shopId": link.shopId,
-                            "clientId": link.clientId,
+                            "sessionId": {"in": session_ids},
                             "customerId": None,
                         },
                         data={
                             "customerId": link.customerId,
-                            "timestamp": now_utc(),  # Update timestamp to trigger feature computation
+                            "updatedAt": now_utc(),  # Update timestamp to trigger feature computation
                         },
                     )
 

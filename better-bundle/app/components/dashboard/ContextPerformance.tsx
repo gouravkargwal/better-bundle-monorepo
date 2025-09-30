@@ -48,6 +48,7 @@ export function ContextPerformance({ data }: ContextPerformanceProps) {
     formatPercentage(item.conversion_rate),
     item.clicks.toLocaleString(),
     item.recommendations_shown.toLocaleString(),
+    item.customers.toLocaleString(),
   ]);
 
   return (
@@ -60,13 +61,14 @@ export function ContextPerformance({ data }: ContextPerformanceProps) {
           See how your recommendations perform across different pages
         </Text>
         <DataTable
-          columnContentTypes={["text", "text", "text", "text", "text"]}
+          columnContentTypes={["text", "text", "text", "text", "text", "text"]}
           headings={[
             "Context",
             "Revenue",
             "Conversion Rate",
             "Clicks",
             "Recommendations Shown",
+            "Customers",
           ]}
           rows={rows}
           footerContent={`Showing data for ${data.length} contexts`}

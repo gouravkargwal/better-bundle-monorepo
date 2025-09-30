@@ -1,2 +1,0 @@
-# Requirements for test data generation
-# No external dependencies required - uses only Python standard library

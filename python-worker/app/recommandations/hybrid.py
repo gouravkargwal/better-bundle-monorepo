@@ -1,10 +1,14 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
-
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.config.settings import settings
+from app.shared.constants.interaction_types import (
+    GorseFeedbackType,
+    map_to_gorse_feedback_type,
+)
+from app.recommandations.user_neighbors import UserNeighborsService
 
 logger = get_logger(__name__)
 gorse_client = GorseApiClient(
@@ -29,10 +33,10 @@ class HybridRecommendationService:
             "popular": 0.4,  # 40% popular items
         },
         "cart": {
-            "session_recommendations": 0.4,  # 40% session-based
+            "session_recommendations": 0.5,  # 50% session-based
             "user_recommendations": 0.3,  # 30% personalized
             "popular": 0.2,  # 20% popular items
-            "user_neighbors": 0.1,  # 10% neighbor-based
+            "user_neighbors": 0.0,  # 0% neighbor-based (often fails)
         },
         "profile": {
             "user_recommendations": 0.5,  # 50% personalized
@@ -292,11 +296,29 @@ class HybridRecommendationService:
                 exclude_items=gorse_exclude_items,
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_user_recommendations",
-                }
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in result["recommendations"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_user_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ User recommendations returned only empty items for user {user_id}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_user_recommendations_empty",
+                        "error": "All recommendations were empty",
+                    }
             return result
 
         elif source == "session_recommendations":
@@ -332,15 +354,15 @@ class HybridRecommendationService:
             )
             logger.info(f"📊 Session data built: {session_data}")
 
-            if not session_data or (not session_id and not has_session_context):
+            if not session_data:
                 logger.warning(
-                    "⚠️ Skipping session_recommendations: no session_id and no session context in metadata"
+                    "⚠️ Skipping session_recommendations: no session data available"
                 )
                 return {
                     "success": False,
                     "items": [],
                     "source": "gorse_session_recommendations_skipped",
-                    "error": "No session_id or session context",
+                    "error": "No session data available",
                 }
 
             result = await self.gorse_client.get_session_recommendations(
@@ -350,13 +372,33 @@ class HybridRecommendationService:
             if result.get("success"):
                 # Check if we actually got recommendations
                 recommendations = result.get("recommendations", [])
-                if recommendations:
+
+                # Handle case where recommendations is None
+                if recommendations is None:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned None | session_data_count={len(session_data)}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_none",
+                        "error": "Gorse returned None recommendations",
+                    }
+
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in recommendations
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
                     logger.info(
-                        f"✅ Session recommendations successful | count={len(recommendations)}"
+                        f"✅ Session recommendations successful | count={len(valid_recommendations)}"
                     )
                     return {
                         "success": True,
-                        "items": recommendations,
+                        "items": valid_recommendations,
                         "source": "gorse_session_recommendations",
                     }
                 logger.warning(
@@ -378,11 +420,29 @@ class HybridRecommendationService:
                 n=limit, category=category
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular",
-                }
+                # Filter out empty or invalid recommendations
+                valid_items = [
+                    item
+                    for item in result["items"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_items:
+                    return {
+                        "success": True,
+                        "items": valid_items,
+                        "source": "gorse_popular",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Popular recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_popular_empty",
+                        "error": "All popular recommendations were empty",
+                    }
             return result
 
         elif source == "latest":
@@ -411,8 +471,6 @@ class HybridRecommendationService:
 
         elif source == "user_neighbors" and user_id:
             # Use the UserNeighborsService for collaborative filtering
-            from app.recommandations.user_neighbors import UserNeighborsService
-
             user_neighbors_service = UserNeighborsService()
             return await user_neighbors_service.get_neighbor_recommendations(
                 user_id=user_id, shop_id=shop_id, limit=limit, category=category
@@ -434,7 +492,7 @@ class HybridRecommendationService:
         # Create a base feedback object for the session
         base_feedback = {
             "Comment": f"session_{session_id}",
-            "FeedbackType": "view",  # Default feedback type
+            "FeedbackType": GorseFeedbackType.VIEW,  # Default feedback type
             "ItemId": "",  # Will be filled if we have cart contents
             "Timestamp": datetime.now().isoformat(),
             "UserId": user_id or "",
@@ -448,7 +506,7 @@ class HybridRecommendationService:
                     cart_feedback["ItemId"] = (
                         f"shop_{shop_id}_{item_id}" if shop_id else item_id
                     )
-                    cart_feedback["FeedbackType"] = "add_to_cart"
+                    cart_feedback["FeedbackType"] = GorseFeedbackType.CART_ADD
                     cart_feedback["Comment"] = f"cart_item_{item_id}"
                     feedback_objects.append(cart_feedback)
 
@@ -459,7 +517,7 @@ class HybridRecommendationService:
                     view_feedback["ItemId"] = (
                         f"shop_{shop_id}_{item_id}" if shop_id else item_id
                     )
-                    view_feedback["FeedbackType"] = "view"
+                    view_feedback["FeedbackType"] = GorseFeedbackType.VIEW
                     view_feedback["Comment"] = f"recent_view_{item_id}"
                     feedback_objects.append(view_feedback)
 
@@ -483,7 +541,7 @@ class HybridRecommendationService:
                         cart_feedback["ItemId"] = (
                             f"shop_{shop_id}_{product_id}" if shop_id else product_id
                         )
-                        cart_feedback["FeedbackType"] = "add_to_cart"
+                        cart_feedback["FeedbackType"] = GorseFeedbackType.CART_ADD
                         cart_feedback["Comment"] = f"cart_product_{product_id}"
                         feedback_objects.append(cart_feedback)
 

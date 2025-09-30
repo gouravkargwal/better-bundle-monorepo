@@ -1,90 +1,136 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
 
-CANONICAL_VERSION = 1
+class CanonicalVariantData(BaseModel):
+    """Canonical variant data model - stores complete variant information from paginated products"""
+
+    variant_id: Optional[str] = None
+    title: Optional[str] = None
+    price: Optional[float] = None
+    compare_at_price: Optional[float] = None
+    inventory_quantity: Optional[int] = None
+    sku: Optional[str] = None
+    barcode: Optional[str] = None
+    taxable: Optional[bool] = None
+    inventory_policy: Optional[str] = None
+    position: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    selected_options: Any = Field(default_factory=list)  # selectedOptions (JSON)
+
+
+class CanonicalImageData(BaseModel):
+    """Canonical image data model - stores complete image information from paginated products"""
+
+    image_id: Optional[str] = None
+    url: Optional[str] = None
+    alt_text: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class CanonicalMetafieldData(BaseModel):
+    """Canonical metafield data model - stores complete metafield information from paginated data"""
+
+    metafield_id: Optional[str] = None
+    namespace: Optional[str] = None
+    key: Optional[str] = None
+    value: Optional[str] = None
+    type: Optional[str] = None
+
+
+class CanonicalProductInCollection(BaseModel):
+    """Canonical product in collection model - stores product data within collections"""
+
+    product_id: Optional[str] = None
+    title: Optional[str] = None
+    handle: Optional[str] = None
+    product_type: Optional[str] = None
+    vendor: Optional[str] = None
+    tags: Any = Field(default_factory=list)
+    price_range: Any = Field(default_factory=dict)  # priceRangeV2 data
 
 
 class CanonicalLineItem(BaseModel):
-    productId: Optional[str] = None
-    variantId: Optional[str] = None
+    """Canonical line item model - stores complete line item data from paginated orders"""
+
+    product_id: Optional[str] = None
+    variant_id: Optional[str] = None
     title: Optional[str] = None
     quantity: int = 0
     price: float = 0.0
+    original_unit_price: Optional[float] = None  # From originalUnitPriceSet
+    discounted_unit_price: Optional[float] = None  # From discountedUnitPriceSet
+    currency_code: Optional[str] = None  # From price sets
+    variant_data: Any = Field(default_factory=dict)  # Complete variant information
+    properties: Any = Field(default_factory=dict)
 
 
 class CanonicalOrder(BaseModel):
     """Canonical order model - matches OrderData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
-    shopId: str
-    entityId: str  # Maps to orderId
-
-    # Exact field mapping to OrderData table
-    orderName: Optional[str] = None  # orderName
-    customerId: Optional[str] = None  # customerId
-    customerEmail: Optional[str] = None  # customerEmail (was email)
-    customerPhone: Optional[str] = None  # customerPhone (was phone)
-    customerDisplayName: Optional[str] = None  # customerDisplayName
-    customerState: Optional[str] = None  # customerState
-    customerVerifiedEmail: Optional[bool] = False  # customerVerifiedEmail
-    customerCreatedAt: Optional[datetime] = None  # customerCreatedAt
-    customerUpdatedAt: Optional[datetime] = None  # customerUpdatedAt
-    customerDefaultAddress: Optional[Dict[str, Any]] = None  # customerDefaultAddress
-    totalAmount: float = 0.0  # totalAmount
-    subtotalAmount: Optional[float] = 0.0  # subtotalAmount
-    totalTaxAmount: Optional[float] = 0.0  # totalTaxAmount
-    totalShippingAmount: Optional[float] = 0.0  # totalShippingAmount
-    totalRefundedAmount: Optional[float] = 0.0  # totalRefundedAmount
-    totalOutstandingAmount: Optional[float] = 0.0  # totalOutstandingAmount
-    orderDate: datetime  # orderDate (shopifyCreatedAt)
-    processedAt: Optional[datetime] = None  # processedAt
-    cancelledAt: Optional[datetime] = None  # cancelledAt
-    cancelReason: Optional[str] = ""  # cancelReason
-    orderLocale: Optional[str] = "en"  # orderLocale
-    currencyCode: Optional[str] = "USD"  # currencyCode
-    presentmentCurrencyCode: Optional[str] = "USD"  # presentmentCurrencyCode
+    shop_id: str
+    order_id: str  # Maps to orderId
+    order_name: Optional[str] = None  # orderName
+    customer_id: Optional[str] = None  # customerId
+    customer_email: Optional[str] = None  # customerEmail (was email)
+    customer_phone: Optional[str] = None  # customerPhone (was phone)
+    customer_display_name: Optional[str] = None  # customerDisplayName
+    customer_state: Optional[str] = None  # customerState
+    customer_verified_email: Optional[bool] = False  # customerVerifiedEmail
+    customer_default_address: Optional[Dict[str, Any]] = None  # customerDefaultAddress
+    total_amount: float = 0.0  # totalAmount
+    subtotal_amount: Optional[float] = 0.0  # subtotalAmount
+    total_tax_amount: Optional[float] = 0.0  # totalTaxAmount
+    total_shipping_amount: Optional[float] = 0.0  # totalShippingAmount
+    total_refunded_amount: Optional[float] = 0.0  # totalRefundedAmount
+    total_outstanding_amount: Optional[float] = 0.0  # totalOutstandingAmount
+    order_date: datetime  # orderDate (shopifyCreatedAt)
+    processed_at: Optional[datetime] = None  # processedAt
+    cancelled_at: Optional[datetime] = None  # cancelledAt
+    cancel_reason: Optional[str] = ""  # cancelReason
+    order_locale: Optional[str] = "en"  # orderLocale
+    currency_code: Optional[str] = None  # currencyCode
+    presentment_currency_code: Optional[str] = None  # presentmentCurrencyCode
     confirmed: bool = False  # confirmed
     test: bool = False  # test
-    financialStatus: Optional[str] = None  # financialStatus
-    fulfillmentStatus: Optional[str] = None  # fulfillmentStatus
-    orderStatus: Optional[str] = None  # orderStatus
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
+    financial_status: Optional[str] = None  # financialStatus
+    fulfillment_status: Optional[str] = None  # fulfillmentStatus
+    order_status: Optional[str] = None  # orderStatus
+    tags: Any = Field(default_factory=list)  # tags (JSON)
     note: Optional[str] = ""  # note
-    noteAttributes: List[Dict[str, Any]] = Field(
+    note_attributes: Any = Field(default_factory=list)  # noteAttributes (JSON)
+    line_items: List[CanonicalLineItem] = Field(
         default_factory=list
-    )  # noteAttributes (JSON)
-    lineItems: List[CanonicalLineItem] = Field(default_factory=list)  # lineItems (JSON)
-    shippingAddress: Optional[Dict[str, Any]] = None  # shippingAddress (JSON)
-    billingAddress: Optional[Dict[str, Any]] = None  # billingAddress (JSON)
-    discountApplications: List[Dict[str, Any]] = Field(
+    )  # Extracted separately for LineItemData records - complete paginated line items
+    shipping_address: Any = Field(default_factory=dict)  # shippingAddress (JSON)
+    billing_address: Any = Field(default_factory=dict)  # billingAddress (JSON)
+    discount_applications: Any = Field(
         default_factory=list
     )  # discountApplications (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
-    fulfillments: List[Dict[str, Any]] = Field(
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
+    fulfillments: Any = Field(default_factory=list)  # fulfillments (JSON)
+    transactions: Any = Field(default_factory=list)  # transactions (JSON)
+    refunds: List[Dict[str, Any]] = Field(
         default_factory=list
-    )  # fulfillments (JSON)
-    transactions: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # transactions (JSON)
+    )  # refunds from GraphQL orders
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for orderDate
-    shopifyUpdatedAt: datetime
-
-    # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime  # Used for orderDate
+    updated_at: datetime
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalVariant(BaseModel):
-    variantId: Optional[str] = None
+    variant_id: Optional[str] = None
     title: Optional[str] = None
     price: Optional[float] = None
-    compareAtPrice: Optional[float] = None
+    compare_at_price: Optional[float] = None
     sku: Optional[str] = None
     barcode: Optional[str] = None
     inventory: Optional[int] = None
@@ -93,109 +139,107 @@ class CanonicalVariant(BaseModel):
 class CanonicalProduct(BaseModel):
     """Canonical product model - matches ProductData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
-    shopId: str
-    entityId: str  # Maps to productId
-
+    shop_id: str
+    product_id: str  # Maps to productId
     # Exact field mapping to ProductData table
     title: str  # title (required)
     handle: str  # handle (required)
+    # Core product information (essential for ML)
     description: Optional[str] = None  # description
-    descriptionHtml: Optional[str] = None  # descriptionHtml
-    productType: Optional[str] = ""  # productType
+    product_type: Optional[str] = ""  # productType
     vendor: Optional[str] = ""  # vendor
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
+    tags: Any = Field(default_factory=list)  # tags (JSON)
     status: Optional[str] = "ACTIVE"  # status
-    totalInventory: Optional[int] = 0  # totalInventory
+    total_inventory: Optional[int] = 0  # totalInventory
+
+    # Pricing data (essential for ML)
     price: float = 0.0  # price
-    compareAtPrice: Optional[float] = 0.0  # compareAtPrice
-    inventory: Optional[int] = 0  # inventory
-    imageUrl: Optional[str] = None  # imageUrl
-    imageAlt: Optional[str] = None  # imageAlt
-    productCreatedAt: Optional[datetime] = None  # productCreatedAt
-    productUpdatedAt: Optional[datetime] = None  # productUpdatedAt
-    onlineStoreUrl: Optional[str] = None  # onlineStoreUrl
-    onlineStorePreviewUrl: Optional[str] = None  # onlineStorePreviewUrl
-    seoTitle: Optional[str] = None  # seoTitle
-    seoDescription: Optional[str] = None  # seoDescription
-    templateSuffix: Optional[str] = None  # templateSuffix
-    variants: List[CanonicalVariant] = Field(default_factory=list)  # variants (JSON)
-    images: List[Dict[str, Any]] = Field(default_factory=list)  # images (JSON)
-    options: List[Dict[str, Any]] = Field(default_factory=list)  # options (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    compare_at_price: Optional[float] = 0.0  # compareAtPrice
+    price_range: Any = Field(default_factory=dict)  # price_range (JSON)
+
+    # Collections data (critical for ML features)
+    collections: Any = Field(default_factory=list)  # collections (JSON)
+
+    # Timestamps (used in recency features)
+    created_at: Optional[datetime] = None  # createdAt
+    updated_at: Optional[datetime] = None  # updatedAt
+
+    # SEO data (valuable for content-based ML features)
+    seo_title: Optional[str] = None  # seoTitle
+    seo_description: Optional[str] = None  # seoDescription
+    template_suffix: Optional[str] = None  # templateSuffix
+
+    # Detailed product data (essential for ML) - now stores complete paginated data
+    variants: Any = Field(
+        default_factory=list
+    )  # variants (JSON) - all variants from pagination
+    images: Any = Field(
+        default_factory=list
+    )  # images (JSON) - all images from pagination
+    media: Any = Field(default_factory=list)  # media (JSON) - all media from pagination
+    options: Any = Field(default_factory=list)  # options (JSON)
+    metafields: Any = Field(
+        default_factory=list
+    )  # metafields (JSON) - all metafields from pagination
+
+    # Note: Derived metrics are computed in feature engineering, not stored
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for productCreatedAt
-    shopifyUpdatedAt: datetime  # Used for productUpdatedAt
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True  # For soft deletes
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCollection(BaseModel):
     """Canonical collection model - matches CollectionData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
-    shopId: str
-    entityId: str  # Maps to collectionId
-
-    # Exact field mapping to CollectionData table
+    shop_id: str
+    collection_id: str  # Maps to collectionId
     title: str  # title (required)
     handle: str  # handle (required)
     description: Optional[str] = ""  # description
-    templateSuffix: Optional[str] = ""  # templateSuffix
-    seoTitle: Optional[str] = ""  # seoTitle
-    seoDescription: Optional[str] = ""  # seoDescription
-    imageUrl: Optional[str] = None  # imageUrl
-    imageAlt: Optional[str] = None  # imageAlt
-    productCount: int = 0  # productCount
-    isAutomated: bool = False  # isAutomated
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    template_suffix: Optional[str] = ""  # templateSuffix
+    seo_title: Optional[str] = ""  # seoTitle
+    seo_description: Optional[str] = ""  # seoDescription
+    image_url: Optional[str] = None  # imageUrl -> image_url to match DB schema
+    image_alt: Optional[str] = None  # imageAlt
+    product_count: int = 0  # productCount
+    is_automated: bool = False  # isAutomated
+    metafields: Any = Field(default_factory=list)  # metafields (JSON)
+    products: Any = Field(
+        default_factory=list
+    )  # products (JSON) - complete paginated product data
 
     # Internal fields
-    shopifyCreatedAt: datetime
-    shopifyUpdatedAt: datetime
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool = True  # For soft deletes
+    extras: Any = Field(default_factory=dict)
 
 
 class CanonicalCustomer(BaseModel):
     """Canonical customer model - matches CustomerData table structure exactly"""
 
-    canonicalVersion: int = Field(default=CANONICAL_VERSION)
-    shopId: str
-    entityId: str  # Maps to customerId
-
+    shop_id: str
+    customer_id: str  # Maps to customerId
     # Exact field mapping to CustomerData table
-    email: Optional[str] = None  # email
-    firstName: Optional[str] = None  # firstName
-    lastName: Optional[str] = None  # lastName
-    totalSpent: float = 0.0  # totalSpent
-    orderCount: int = 0  # orderCount
-    lastOrderDate: Optional[datetime] = None  # lastOrderDate
-    tags: List[str] = Field(default_factory=list)  # tags (JSON)
-    createdAtShopify: Optional[datetime] = None  # createdAtShopify
-    lastOrderId: Optional[str] = None  # lastOrderId
-    location: Optional[Dict[str, Any]] = None  # location (JSON)
-    metafields: List[Dict[str, Any]] = Field(default_factory=list)  # metafields (JSON)
+    first_name: Optional[str] = None  # firstName
+    last_name: Optional[str] = None  # lastName
+    total_spent: float = 0.0  # totalSpent
+    order_count: int = 0  # orderCount
+    last_order_date: Optional[datetime] = None  # lastOrderDate
+    last_order_id: Optional[str] = None  # lastOrderId
+    verified_email: bool = False  # verifiedEmail
+    tax_exempt: bool = False  # taxExempt
+    customer_locale: Optional[str] = "en"  # customerLocale
+    tags: Any = Field(default_factory=list)  # tags (JSON)
     state: Optional[str] = ""  # state
-    verifiedEmail: bool = False  # verifiedEmail
-    taxExempt: bool = False  # taxExempt
-    defaultAddress: Optional[Dict[str, Any]] = None  # defaultAddress (JSON)
-    addresses: List[Dict[str, Any]] = Field(default_factory=list)  # addresses (JSON)
-    currencyCode: Optional[str] = "USD"  # currencyCode
-    customerLocale: Optional[str] = "en"  # customerLocale
+    default_address: Any = Field(default_factory=dict)  # defaultAddress (JSON)
 
     # Internal fields
-    shopifyCreatedAt: datetime  # Used for createdAtShopify
-    shopifyUpdatedAt: datetime
-    isActive: bool = True  # For soft deletes
-
-    # Preserve unknown fields from raw payloads
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime  # Used for createdAt
+    updated_at: datetime  # Used for updatedAt
+    is_active: bool = True  # For soft deletes
+    extras: Any = Field(default_factory=dict)
 
 
 class NormalizeJob(BaseModel):
@@ -204,5 +248,5 @@ class NormalizeJob(BaseModel):
     format: str  # rest|graphql
     shop_id: str
     raw_id: Optional[str] = None
-    shopify_id: Optional[str] = None
+    shopify_id: Optional[Union[str, int]] = None  # Accept both string and integer
     timestamp: datetime

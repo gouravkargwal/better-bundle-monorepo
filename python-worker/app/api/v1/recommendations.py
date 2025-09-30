@@ -12,7 +12,11 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models.shop import Shop
+from app.core.database.models.customer_data import CustomerData
+from app.core.database.models.user_interaction import UserInteraction
+from app.core.database.models.product_data import ProductData
 from app.core.config.settings import settings
 from app.core.redis_client import get_redis_client
 from app.recommandations.models import RecommendationRequest, RecommendationResponse
@@ -22,6 +26,7 @@ from app.recommandations.hybrid import HybridRecommendationService
 from app.recommandations.analytics import RecommendationAnalytics
 from app.recommandations.user_neighbors import UserNeighborsService
 from app.recommandations.enrichment import ProductEnrichment
+from sqlalchemy import select, and_, or_, desc
 
 logger = get_logger(__name__)
 
@@ -35,36 +40,40 @@ gorse_client = GorseApiClient(
 
 async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
     """
-    Get shop domain from customer ID using Prisma ORM
+    Get shop domain from customer ID using SQLAlchemy
     """
     try:
-        db = await get_database()
 
-        # First, find the customer by customerId (not id)
-        customer = await db.customerdata.find_first(where={"customerId": customer_id})
-
-        if not customer:
-            logger.warning(f"⚠️ Customer not found with customerId: {customer_id}")
-            return None
-
-        # Get the shopId from the customer
-        shop_id = customer.shopId
-        if not shop_id:
-            logger.warning(f"⚠️ No shopId found for customer {customer_id}")
-            return None
-
-        # Now find the shop by shopId to get shopDomain
-        shop = await db.shop.find_unique(where={"id": shop_id})
-
-        if shop and shop.shopDomain:
-            shop_domain = shop.shopDomain
-            logger.info(
-                f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
+        async with get_transaction_context() as session:
+            # First, find the customer by customer_id
+            result = await session.execute(
+                select(CustomerData).where(CustomerData.customer_id == customer_id)
             )
-            return shop_domain
-        else:
-            logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
-            return None
+            customer = result.scalar_one_or_none()
+
+            if not customer:
+                logger.warning(f"⚠️ Customer not found with customer_id: {customer_id}")
+                return None
+
+            # Get the shop_id from the customer
+            shop_id = customer.shop_id
+            if not shop_id:
+                logger.warning(f"⚠️ No shop_id found for customer {customer_id}")
+                return None
+
+            # Now find the shop by shop_id to get shop_domain
+            shop_result = await session.execute(select(Shop).where(Shop.id == shop_id))
+            shop = shop_result.scalar_one_or_none()
+
+            if shop and shop.shop_domain:
+                shop_domain = shop.shop_domain
+                logger.info(
+                    f"🔍 Found shop_domain for customer {customer_id}: {shop_domain}"
+                )
+                return shop_domain
+            else:
+                logger.warning(f"⚠️ No shop_domain found for shop {shop_id}")
+                return None
 
     except Exception as e:
         logger.error(f"❌ Error looking up shop_domain for customer {customer_id}: {e}")
@@ -76,80 +85,158 @@ async def extract_session_data_from_behavioral_events(
 ) -> Dict[str, Any]:
     """Extract recent cart and browsing data from behavioral events for session recommendations"""
     try:
-        db = await get_database()
-
-        # Get recent cart_viewed events (last 30 minutes)
         from datetime import timezone
 
         now = datetime.now(timezone.utc)
-        recent_cart_events = await db.behavioralevents.find_many(
-            where={
-                "customerId": user_id,
-                "shopId": shop_id,
-                "eventType": "cart_viewed",
-                "timestamp": {"gte": now - timedelta(minutes=30)},
-            },
-            take=5,
-            order={"timestamp": "desc"},
-        )
+        cutoff_time = now - timedelta(hours=24)
 
-        # Get recent product_viewed events (last 2 hours)
-        recent_view_events = await db.behavioralevents.find_many(
-            where={
-                "customerId": user_id,
-                "shopId": shop_id,
-                "eventType": "product_viewed",
-                "timestamp": {"gte": now - timedelta(hours=2)},
-            },
-            take=20,
-            order={"timestamp": "desc"},
-        )
+        async with get_transaction_context() as session:
+            # Get recent cart interactions (last 24 hours) - both cart_viewed and individual cart events
+            cart_events_result = await session.execute(
+                select(UserInteraction)
+                .where(
+                    and_(
+                        UserInteraction.customer_id == user_id,
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.interaction_type.in_(
+                            [
+                                "cart_viewed",
+                                "product_added_to_cart",
+                                "product_removed_from_cart",
+                            ]
+                        ),
+                        UserInteraction.created_at >= cutoff_time,
+                    )
+                )
+                .order_by(desc(UserInteraction.created_at))
+                .limit(20)
+            )
+            recent_cart_events = cart_events_result.scalars().all()
 
-        # Get recent add_to_cart events (last 1 hour)
-        recent_add_events = await db.behavioralevents.find_many(
-            where={
-                "customerId": user_id,
-                "shopId": shop_id,
-                "eventType": "product_added_to_cart",
-                "timestamp": {"gte": now - timedelta(hours=1)},
-            },
-            take=10,
-            order={"timestamp": "desc"},
-        )
+            # Get recent product_viewed events (last 24 hours)
+            view_events_result = await session.execute(
+                select(UserInteraction)
+                .where(
+                    and_(
+                        UserInteraction.customer_id == user_id,
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.interaction_type == "product_viewed",
+                        UserInteraction.created_at >= cutoff_time,
+                    )
+                )
+                .order_by(desc(UserInteraction.created_at))
+                .limit(20)
+            )
+            recent_view_events = view_events_result.scalars().all()
 
-        # Extract cart contents from cart_viewed events
-        cart_contents = []
-        cart_data = None
-        for event in recent_cart_events:
-            if event.eventData and event.eventData.get("cart", {}).get("lines"):
-                cart_data = event.eventData["cart"]
-                for line in event.eventData["cart"]["lines"]:
-                    if line.get("merchandise", {}).get("product", {}).get("id"):
-                        product_id = line["merchandise"]["product"]["id"]
-                        if product_id not in cart_contents:
+            # Get recent add_to_cart events (last 24 hours)
+            add_events_result = await session.execute(
+                select(UserInteraction)
+                .where(
+                    and_(
+                        UserInteraction.customer_id == user_id,
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.interaction_type == "product_added_to_cart",
+                        UserInteraction.created_at >= cutoff_time,
+                    )
+                )
+                .order_by(desc(UserInteraction.created_at))
+                .limit(10)
+            )
+            recent_add_events = add_events_result.scalars().all()
+
+            # Extract cart contents from cart events
+            cart_contents = []
+            cart_data = None
+            for event in recent_cart_events:
+                metadata = event.metadata or {}
+
+                # Handle cart_viewed events (full cart data)
+                if event.interaction_type == "cart_viewed" and metadata.get(
+                    "cart", {}
+                ).get("lines"):
+                    cart_data = metadata["cart"]
+                    for line in metadata["cart"]["lines"]:
+                        if line.get("merchandise", {}).get("product", {}).get("id"):
+                            product_id = line["merchandise"]["product"]["id"]
+                            if product_id not in cart_contents:
+                                cart_contents.append(product_id)
+
+                # Handle individual cart events (product_added_to_cart, product_removed_from_cart)
+                elif event.interaction_type in [
+                    "product_added_to_cart",
+                    "product_removed_from_cart",
+                ]:
+                    product_id = None
+
+                    # Try different metadata structures for product ID
+                    if "product_id" in metadata:
+                        product_id = metadata.get("product_id")
+                    elif "data" in metadata and "cartLine" in metadata["data"]:
+                        cart_line = metadata["data"]["cartLine"]
+                        if (
+                            "merchandise" in cart_line
+                            and "product" in cart_line["merchandise"]
+                        ):
+                            product_id = cart_line["merchandise"]["product"].get("id")
+                    elif "productId" in metadata:
+                        product_id = metadata.get("productId")
+
+                    if product_id:
+                        if (
+                            event.interaction_type == "product_added_to_cart"
+                            and product_id not in cart_contents
+                        ):
                             cart_contents.append(product_id)
+                    elif (
+                        event.interactionType == "product_removed_from_cart"
+                        and product_id in cart_contents
+                    ):
+                        cart_contents.remove(product_id)
 
         # Extract recent views
         recent_views = []
         product_types = set()
         for event in recent_view_events:
-            if event.eventData and event.eventData.get("product", {}).get("id"):
-                product_id = event.eventData["product"]["id"]
-                if product_id not in recent_views:
-                    recent_views.append(product_id)
+            metadata = event.metadata or {}
+            product_id = None
 
-                # Extract product type
-                product_type = event.eventData["product"].get("type")
-                if product_type:
-                    product_types.add(product_type)
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
+
+            if product_id and product_id not in recent_views:
+                recent_views.append(product_id)
+
+            # Extract product type
+            product_type = metadata.get("product_type")
+            if product_type:
+                product_types.add(product_type)
 
         # Extract recent adds to cart
         recent_adds = []
         for event in recent_add_events:
-            if event.eventData and event.eventData.get("product", {}).get("id"):
-                product_id = event.eventData["product"]["id"]
-                if product_id not in recent_adds:
-                    recent_adds.append(product_id)
+            metadata = event.metadata or {}
+            product_id = None
+
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
+
+            if product_id and product_id not in recent_adds:
+                recent_adds.append(product_id)
 
         # Build session metadata
         session_metadata = {
@@ -164,7 +251,7 @@ async def extract_session_data_from_behavioral_events(
                 "total_adds": len(recent_adds),
                 "categories": list(product_types),
                 "last_activity": (
-                    recent_cart_events[0].timestamp.isoformat()
+                    recent_cart_events[0].createdAt.isoformat()
                     if recent_cart_events
                     else None
                 ),
@@ -218,15 +305,28 @@ def _apply_time_decay_filtering(
 
         # Group interactions by product ID
         for interaction in cart_interactions:
-            if not interaction.productId:
+            # Extract product ID from metadata
+            metadata = interaction.metadata or {}
+            product_id = None
+
+            # Try different metadata structures for product ID
+            if "product_id" in metadata:
+                product_id = metadata.get("product_id")
+            elif "data" in metadata and "cartLine" in metadata["data"]:
+                cart_line = metadata["data"]["cartLine"]
+                if "merchandise" in cart_line and "product" in cart_line["merchandise"]:
+                    product_id = cart_line["merchandise"]["product"].get("id")
+            elif "productId" in metadata:
+                product_id = metadata.get("productId")
+
+            if not product_id:
                 continue
 
-            product_id = interaction.productId
             if product_id not in product_interactions:
                 product_interactions[product_id] = []
 
             # Ensure timestamp is timezone-aware
-            timestamp = interaction.timestamp
+            timestamp = interaction.createdAt
             if timestamp.tzinfo is None:
                 # If timestamp is naive, assume it's UTC
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
@@ -255,35 +355,18 @@ def _apply_time_decay_filtering(
             # Count total interactions for this product
             interaction_count = len(interactions)
 
-            # Apply time decay logic
+            # Apply industry-standard time decay logic
+            # Industry best practice: Only exclude items currently in cart or very recently purchased
             should_exclude = False
             reason = ""
 
-            if hours_ago < 2:
-                # Very recent (last 2 hours) - always exclude
+            # Industry standard: Only exclude items that are currently in cart (very recent)
+            if hours_ago < 0.01:  # Last ~36 seconds - likely current cart item
                 should_exclude = True
-                reason = f"very_recent_{hours_ago:.1f}h"
-            elif hours_ago < 6:
-                # Recent (last 6 hours) - usually exclude
-                should_exclude = True
-                reason = f"recent_{hours_ago:.1f}h"
-            elif hours_ago < 24:
-                # Yesterday - exclude if multiple interactions
-                if interaction_count >= 2:
-                    should_exclude = True
-                    reason = f"yesterday_multiple_{interaction_count}times"
-                else:
-                    reason = f"yesterday_single_{hours_ago:.1f}h"
-            elif hours_ago < 48:
-                # Day before - exclude only if many interactions
-                if interaction_count >= 3:
-                    should_exclude = True
-                    reason = f"day_before_many_{interaction_count}times"
-                else:
-                    reason = f"day_before_few_{hours_ago:.1f}h"
+                reason = f"current_cart_item_{hours_ago:.1f}h"
             else:
-                # Too old - don't exclude
-                reason = f"too_old_{hours_ago:.1f}h"
+                # Don't exclude recently interacted items; handle recency in ranking, not filtering
+                reason = f"included_{hours_ago:.1f}h"
 
             if should_exclude:
                 excluded_products.append(product_id)
@@ -311,7 +394,7 @@ def _apply_time_decay_filtering(
         for interaction in cart_interactions:
             if interaction.productId:
                 # Ensure timestamp is timezone-aware for comparison
-                timestamp = interaction.timestamp
+                timestamp = interaction.createdAt
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
                 elif timestamp.tzinfo != timezone.utc:
@@ -338,16 +421,21 @@ user_neighbors_service = UserNeighborsService()
 async def debug_check_products(shop_id: str, limit: int = 10):
     """Debug endpoint to check what products exist in database"""
     try:
-        db = await get_database()
+        async with get_transaction_context() as session:
+            # Get sample products from database
+            products_result = await session.execute(
+                select(ProductData).where(ProductData.shop_id == shop_id).limit(limit)
+            )
+            products = products_result.scalars().all()
 
-        # Get sample products from database
-        products = await db.productdata.find_many(where={"shopId": shop_id}, take=limit)
+            # Get total count
+            count_result = await session.execute(
+                select(ProductData).where(ProductData.shop_id == shop_id)
+            )
+            total_count = len(count_result.scalars().all())
 
-        # Get total count
-        total_count = await db.productdata.count(where={"shopId": shop_id})
-
-        # Get sample product IDs
-        product_ids = [p.productId for p in products]
+            # Get sample product IDs
+            product_ids = [p.product_id for p in products]
 
         return {
             "shop_id": shop_id,
@@ -376,17 +464,22 @@ async def debug_check_products(shop_id: str, limit: int = 10):
 async def debug_check_missing_products(shop_id: str, product_ids: str):
     """Debug endpoint to check if specific product IDs exist in database"""
     try:
-        db = await get_database()
-
         # Parse comma-separated product IDs
         missing_ids = [pid.strip() for pid in product_ids.split(",")]
 
-        # Check which ones exist
-        existing_products = await db.productdata.find_many(
-            where={"shopId": shop_id, "productId": {"in": missing_ids}}
-        )
+        async with get_transaction_context() as session:
+            # Check which ones exist
+            existing_products_result = await session.execute(
+                select(ProductData).where(
+                    and_(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id.in_(missing_ids),
+                    )
+                )
+            )
+            existing_products = existing_products_result.scalars().all()
 
-        existing_ids = {p.productId for p in existing_products}
+            existing_ids = {p.product_id for p in existing_products}
         actually_missing = [pid for pid in missing_ids if pid not in existing_ids]
 
         return {
@@ -511,20 +604,39 @@ async def execute_recommendation_level(
                 exclude_items=gorse_exclude_items,
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_user_recommendations",
-                }
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in result["recommendations"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
 
-        elif level == "session_recommendations" and session_id:
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_user_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ User recommendations returned only empty items for user {user_id}"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_user_recommendations_empty",
+                        "error": "All recommendations were empty",
+                    }
+
+        elif level == "session_recommendations":
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
 
             # Build session data as array of feedback objects
             feedback_objects = []
+            effective_session_id = session_id or "auto"
             base_feedback = {
-                "Comment": f"session_{session_id}",
+                "Comment": f"session_{effective_session_id}",
                 "FeedbackType": "view",
                 "ItemId": "",
                 "Timestamp": datetime.now().isoformat(),
@@ -535,10 +647,23 @@ async def execute_recommendation_level(
             if metadata and metadata.get("cart_contents"):
                 for item_id in metadata["cart_contents"]:
                     cart_feedback = base_feedback.copy()
-                    cart_feedback["ItemId"] = item_id
+                    cart_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}"  # Apply shop prefix
+                    )
                     cart_feedback["FeedbackType"] = "add_to_cart"
                     cart_feedback["Comment"] = f"cart_item_{item_id}"
                     feedback_objects.append(cart_feedback)
+
+            # Add recent views if available
+            if metadata and metadata.get("recent_views"):
+                for item_id in metadata["recent_views"][:5]:  # Limit to 5 recent views
+                    view_feedback = base_feedback.copy()
+                    view_feedback["ItemId"] = (
+                        f"shop_{shop_id}_{item_id}"  # Apply shop prefix
+                    )
+                    view_feedback["FeedbackType"] = "view"
+                    view_feedback["Comment"] = f"recent_view_{item_id}"
+                    feedback_objects.append(view_feedback)
 
             # If no specific items, create a general session feedback
             if not feedback_objects:
@@ -548,20 +673,69 @@ async def execute_recommendation_level(
                 session_data=feedback_objects, n=limit, category=category
             )
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["recommendations"],
-                    "source": "gorse_session_recommendations",
-                }
+                # Handle case where recommendations is None
+                recommendations = result.get("recommendations", [])
+                if recommendations is None:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned None in fallback chain"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_none",
+                        "error": "Gorse returned None recommendations",
+                    }
+
+                # Filter out empty or invalid recommendations
+                valid_recommendations = [
+                    item
+                    for item in recommendations
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_recommendations:
+                    return {
+                        "success": True,
+                        "items": valid_recommendations,
+                        "source": "gorse_session_recommendations",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Session recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_session_recommendations_empty",
+                        "error": "All session recommendations were empty",
+                    }
 
         elif level == "popular":
             result = await gorse_client.get_popular_items(n=limit, category=category)
             if result["success"]:
-                return {
-                    "success": True,
-                    "items": result["items"],
-                    "source": "gorse_popular",
-                }
+                # Filter out empty or invalid recommendations
+                valid_items = [
+                    item
+                    for item in result["items"]
+                    if item and str(item).strip() and str(item).strip() != ""
+                ]
+
+                if valid_items:
+                    return {
+                        "success": True,
+                        "items": valid_items,
+                        "source": "gorse_popular",
+                    }
+                else:
+                    logger.warning(
+                        f"⚠️ Popular recommendations returned only empty items"
+                    )
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "gorse_popular_empty",
+                        "error": "All popular recommendations were empty",
+                    }
 
         elif level == "latest":
             result = await gorse_client.get_latest_items(n=limit, category=category)
@@ -725,21 +899,26 @@ async def get_recommendations(request: RecommendationRequest):
                 detail=f"Invalid context. Must be one of: {valid_contexts}",
             )
 
-        # Validate shop exists
+        # Validate shop exists using SQLAlchemy
         logger.debug(
             f"🔍 Validating shop existence | shop_domain={request.shop_domain}"
         )
-        db = await get_database()
-        shop = await db.shop.find_unique(where={"shopDomain": request.shop_domain})
-        if not shop:
-            logger.error(f"❌ Shop not found | shop_domain={request.shop_domain}")
-            raise HTTPException(
-                status_code=404, detail=f"Shop {request.shop_domain} not found"
-            )
 
-        logger.info(
-            f"✅ Shop validated | shop_id={shop.id} | shop_domain={request.shop_domain}"
-        )
+        async with get_transaction_context() as session:
+            result = await session.execute(
+                select(Shop).where(Shop.shop_domain == request.shop_domain)
+            )
+            shop = result.scalar_one_or_none()
+
+            if not shop:
+                logger.error(f"❌ Shop not found | shop_domain={request.shop_domain}")
+                raise HTTPException(
+                    status_code=404, detail=f"Shop {request.shop_domain} not found"
+                )
+
+            logger.info(
+                f"✅ Shop validated | shop_id={shop.id} | shop_domain={request.shop_domain}"
+            )
 
         # Auto-detect category if missing and product_ids are provided
         category = request.category
@@ -781,21 +960,27 @@ async def get_recommendations(request: RecommendationRequest):
         if request.user_id:
             try:
                 # Get cart interactions from the last 48 hours for time decay analysis
-                cart_interactions = await db.recommendationinteraction.find_many(
-                    where={
-                        "session": {
-                            "shopId": shop.id,
-                            "userId": request.user_id,
-                        },
-                        "interactionType": "add_to_cart",
-                        "timestamp": {
-                            "gte": datetime.utcnow()
-                            - timedelta(hours=48)  # Extended to 48 hours for time decay
-                        },
-                    },
-                    order={"timestamp": "desc"},
-                    take=100,  # Get more interactions for better time decay analysis
-                )
+                async with get_transaction_context() as session:
+                    cart_interactions_result = await session.execute(
+                        select(UserInteraction)
+                        .where(
+                            and_(
+                                UserInteraction.shop_id == shop.id,
+                                UserInteraction.customer_id == request.user_id,
+                                UserInteraction.interaction_type.in_(
+                                    [
+                                        "product_added_to_cart",
+                                        "product_removed_from_cart",
+                                    ]
+                                ),
+                                UserInteraction.created_at
+                                >= datetime.utcnow() - timedelta(hours=48),
+                            )
+                        )
+                        .order_by(desc(UserInteraction.created_at))
+                        .limit(100)
+                    )
+                    cart_interactions = cart_interactions_result.scalars().all()
 
                 logger.info(
                     f"🔍 Found {len(cart_interactions)} cart interactions for user {request.user_id} in last 48 hours"
@@ -1136,8 +1321,10 @@ async def recommendations_health_check():
 
         # Check database connection
         logger.debug("🔍 Checking database connection")
-        db = await get_database()
-        await db.shop.find_first()  # Simple query to test connection
+        async with get_transaction_context() as session:
+            await session.execute(
+                select(Shop).limit(1)
+            )  # Simple query to test connection
 
         # Check Redis cache connection
         logger.debug("🔍 Checking Redis cache connection")

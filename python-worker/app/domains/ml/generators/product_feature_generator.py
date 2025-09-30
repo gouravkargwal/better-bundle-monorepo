@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -18,6 +19,10 @@ logger = get_logger(__name__)
 
 class ProductFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for product features"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self,
@@ -46,7 +51,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             product_data = context.get("product_data", {})
             orders = context.get("orders", [])
             behavioral_events = context.get("behavioral_events", [])
-            collections = context.get("collections", [])
 
             # Compute 30-day metrics
             metrics_30d = self._compute_30day_metrics(
@@ -89,70 +93,105 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 product_data
             )
 
+            # NEW: Compute enhanced features using previously unused fields
+            content_quality_features = self._compute_content_quality_features(
+                product_data
+            )
+            product_lifecycle_features = self._compute_product_lifecycle_features(
+                product_data
+            )
+            category_features = self._compute_category_features(product_data)
+            availability_features = self._compute_availability_features(product_data)
+
             features = {
-                "shopId": shop_id,
-                "productId": product_id,
+                "shop_id": shop_id,
+                "product_id": product_id,
                 # 30-day metrics
-                "viewCount30d": metrics_30d["view_count"],
-                "uniqueViewers30d": metrics_30d["unique_viewers"],
-                "cartAddCount30d": metrics_30d["cart_add_count"],
-                "cartViewCount30d": metrics_30d["cart_view_count"],
-                "cartRemoveCount30d": metrics_30d["cart_remove_count"],
-                "purchaseCount30d": metrics_30d["purchase_count"],
-                "uniquePurchasers30d": metrics_30d["unique_purchasers"],
+                "view_count_30d": metrics_30d["view_count"],
+                "unique_viewers_30d": metrics_30d["unique_viewers"],
+                "cart_add_count_30d": metrics_30d["cart_add_count"],
+                "cart_view_count_30d": metrics_30d["cart_view_count"],
+                "cart_remove_count_30d": metrics_30d["cart_remove_count"],
+                "purchase_count_30d": metrics_30d["purchase_count"],
+                "unique_purchasers_30d": metrics_30d["unique_purchasers"],
                 # Conversion metrics
-                "viewToCartRate": conversion_metrics["view_to_cart_rate"],
-                "cartToPurchaseRate": conversion_metrics["cart_to_purchase_rate"],
-                "overallConversionRate": conversion_metrics["overall_conversion_rate"],
-                "cartAbandonmentRate": conversion_metrics["cart_abandonment_rate"],
-                "cartModificationRate": conversion_metrics["cart_modification_rate"],
-                "cartViewToPurchaseRate": conversion_metrics[
+                "view_to_cart_rate": conversion_metrics["view_to_cart_rate"],
+                "cart_to_purchase_rate": conversion_metrics["cart_to_purchase_rate"],
+                "overall_conversion_rate": conversion_metrics[
+                    "overall_conversion_rate"
+                ],
+                "cart_abandonment_rate": conversion_metrics["cart_abandonment_rate"],
+                "cart_modification_rate": conversion_metrics["cart_modification_rate"],
+                "cart_view_to_purchase_rate": conversion_metrics[
                     "cart_view_to_purchase_rate"
                 ],
                 # Temporal metrics
-                "lastViewedAt": temporal_metrics["last_viewed_at"],
-                "lastPurchasedAt": temporal_metrics["last_purchased_at"],
-                "firstPurchasedAt": temporal_metrics["first_purchased_at"],
-                "daysSinceFirstPurchase": temporal_metrics["days_since_first_purchase"],
-                "daysSinceLastPurchase": temporal_metrics["days_since_last_purchase"],
+                "last_viewed_at": temporal_metrics["last_viewed_at"],
+                "last_purchased_at": temporal_metrics["last_purchased_at"],
+                "first_purchased_at": temporal_metrics["first_purchased_at"],
+                "days_since_first_purchase": temporal_metrics[
+                    "days_since_first_purchase"
+                ],
+                "days_since_last_purchase": temporal_metrics[
+                    "days_since_last_purchase"
+                ],
                 # Price & Inventory
-                "avgSellingPrice": price_inventory_metrics["avg_selling_price"],
-                "priceVariance": price_inventory_metrics["price_variance"],
-                "totalInventory": price_inventory_metrics["total_inventory"],
-                "inventoryTurnover": price_inventory_metrics["inventory_turnover"],
-                "stockVelocity": price_inventory_metrics["stock_velocity"],
-                "priceTier": price_inventory_metrics["price_tier"],
+                "avg_selling_price": price_inventory_metrics["avg_selling_price"],
+                "price_variance": price_inventory_metrics["price_variance"],
+                "total_inventory": price_inventory_metrics["total_inventory"],
+                "inventory_turnover": price_inventory_metrics["inventory_turnover"],
+                "stock_velocity": price_inventory_metrics["stock_velocity"],
+                "price_tier": price_inventory_metrics["price_tier"],
                 # Enhanced metadata scores
-                "variantComplexity": metadata_scores["variant_complexity"],
-                "imageRichness": metadata_scores["image_richness"],
-                "tagDiversity": metadata_scores["tag_diversity"],
-                "metafieldUtilization": metadata_scores["metafield_utilization"],
+                "variant_complexity": metadata_scores["variant_complexity"],
+                "image_richness": metadata_scores["image_richness"],
+                "tag_diversity": metadata_scores["tag_diversity"],
+                "metafield_utilization": metadata_scores["metafield_utilization"],
                 # New enhanced features
-                "mediaRichness": enhanced_metadata_scores["media_richness"],
-                "seoOptimization": seo_features["seo_optimization"],
-                "seoTitleLength": seo_features["seo_title_length"],
-                "seoDescriptionLength": seo_features["seo_description_length"],
-                "hasVideoContent": media_features["has_video_content"],
-                "has3DContent": media_features["has_3d_content"],
-                "mediaCount": media_features["media_count"],
-                "hasOnlineStoreUrl": store_integration_features["has_online_store_url"],
-                "hasPreviewUrl": store_integration_features["has_preview_url"],
-                "hasCustomTemplate": store_integration_features["has_custom_template"],
+                "media_richness": enhanced_metadata_scores["media_richness"],
+                "seo_optimization": seo_features["seo_optimization"],
+                "seo_title_length": seo_features["seo_title_length"],
+                "seo_description_length": seo_features["seo_description_length"],
+                "has_video_content": media_features["has_video_content"],
+                "has_3d_content": media_features["has_3d_content"],
+                "media_count": media_features["media_count"],
+                "has_online_store_url": store_integration_features[
+                    "has_online_store_url"
+                ],
+                "has_preview_url": store_integration_features["has_preview_url"],
+                "has_custom_template": store_integration_features[
+                    "has_custom_template"
+                ],
                 # Computed scores
-                "popularityScore": popularity_trending["popularity_score"],
-                "trendingScore": popularity_trending["trending_score"],
+                "popularity_score": popularity_trending["popularity_score"],
+                "trending_score": popularity_trending["trending_score"],
                 # Refund metrics (NEW)
-                "refundedOrders": refund_metrics["refunded_orders"],
-                "refundRate": refund_metrics["refund_rate"],
-                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
-                "netRevenue": refund_metrics["net_revenue"],
-                "refundRiskScore": refund_metrics["refund_risk_score"],
-                "lastComputedAt": now_utc(),
+                "refunded_orders": refund_metrics["refunded_orders"],
+                "refund_rate": refund_metrics["refund_rate"],
+                "total_refunded_amount": refund_metrics["total_refunded_amount"],
+                "net_revenue": refund_metrics["net_revenue"],
+                "refund_risk_score": refund_metrics["refund_risk_score"],
+                # NEW: Enhanced features using previously unused fields
+                "content_richness_score": content_quality_features[
+                    "content_richness_score"
+                ],
+                "description_length": content_quality_features["description_length"],
+                "description_html_length": content_quality_features[
+                    "description_html_length"
+                ],
+                "product_age": product_lifecycle_features["product_age"],
+                "last_updated_days": product_lifecycle_features["last_updated_days"],
+                "update_frequency": product_lifecycle_features["update_frequency"],
+                "product_type": category_features["product_type"],
+                "category_complexity": category_features["category_complexity"],
+                "availability_score": availability_features["availability_score"],
+                "status_stability": availability_features["status_stability"],
+                "last_computed_at": now_utc(),
             }
 
             logger.debug(
                 f"Computed product features for product: {product_id} - "
-                f"Views: {features['viewCount30d']}, Purchases: {features['purchaseCount30d']}"
+                f"Views: {features['view_count_30d']}, Purchases: {features['purchase_count_30d']}"
             )
 
             return features
@@ -195,7 +234,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         cart_remove_count = 0
 
         for event in recent_events:
-            event_type = event.get("eventType", "")
+            event_type = event.get("interactionType", event.get("eventType", ""))
 
             if event_type == "product_viewed":
                 view_count += 1
@@ -222,23 +261,23 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         unique_purchasers = set()
 
         for order in orders:
-            order_date = self._parse_date(order.get("orderDate"))
+            order_date = self._parse_date(order.get("order_date"))
             if order_date and order_date >= thirty_days_ago:
                 # Check if this order contains the product
-                for line_item in order.get("lineItems", []):
+                for line_item in order.get("line_items", []):
                     item_product_id = self._extract_product_id_from_line_item(line_item)
                     # Use product ID mapping to match order product ID to ProductData product ID
                     if product_id_mapping and item_product_id:
                         mapped_product_id = product_id_mapping.get(item_product_id)
                         if mapped_product_id == product_id:
                             recent_orders.append(order)
-                            customer_id = order.get("customerId")
+                            customer_id = order.get("customer_id")
                             if customer_id:
                                 unique_purchasers.add(customer_id)
                             break
                     elif item_product_id == product_id:
                         recent_orders.append(order)
-                        customer_id = order.get("customerId")
+                        customer_id = order.get("customer_id")
                         if customer_id:
                             unique_purchasers.add(customer_id)
                         break
@@ -308,7 +347,10 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         # Find last view
         last_viewed_at = None
         for event in behavioral_events:
-            if event.get("eventType") == "product_viewed":
+            if (
+                event.get("interactionType", event.get("eventType", ""))
+                == "product_viewed"
+            ):
                 event_product_id = self._extract_product_id_from_event(event)
                 # Use product ID mapping to match behavioral event product ID to ProductData product ID
                 if product_id_mapping and event_product_id:
@@ -329,13 +371,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         last_purchased_at = None
 
         for order in orders:
-            for line_item in order.get("lineItems", []):
+            for line_item in order.get("line_items", []):
                 item_product_id = self._extract_product_id_from_line_item(line_item)
                 # Use product ID mapping to match order product ID to ProductData product ID
                 if product_id_mapping and item_product_id:
                     mapped_product_id = product_id_mapping.get(item_product_id)
                     if mapped_product_id == product_id:
-                        order_date = self._parse_date(order.get("orderDate"))
+                        order_date = self._parse_date(order.get("order_date"))
                         if order_date:
                             if (
                                 not first_purchased_at
@@ -346,7 +388,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                                 last_purchased_at = order_date
                         break
                 elif item_product_id == product_id:
-                    order_date = self._parse_date(order.get("orderDate"))
+                    order_date = self._parse_date(order.get("order_date"))
                     if order_date:
                         if not first_purchased_at or order_date < first_purchased_at:
                             first_purchased_at = order_date
@@ -382,9 +424,9 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         total_quantity_sold = 0
 
         for order in orders:
-            for line_item in order.get("lineItems", []):
+            for line_item in order.get("line_items", []):
                 item_product_id = self._extract_product_id_from_line_item(line_item)
-                if item_product_id == product_data.get("productId"):
+                if item_product_id == product_data.get("product_id"):
                     price = float(line_item.get("price", 0.0))
                     quantity = int(line_item.get("quantity", 1))
                     selling_prices.extend([price] * quantity)
@@ -402,7 +444,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             price_variance = 0.0
 
         # Calculate inventory turnover
-        total_inventory = int(product_data.get("totalInventory", 0))
+        total_inventory = int(product_data.get("total_inventory", 0))
         if total_inventory > 0 and total_quantity_sold > 0:
             # Simplified: assuming data covers 30 days
             inventory_turnover = total_quantity_sold / total_inventory
@@ -426,54 +468,21 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _compute_metadata_scores(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute product metadata richness scores (0-1 normalized)"""
 
-        # Variant complexity
+        # Compute counts from actual data (proper place for this computation)
         variants = product_data.get("variants", [])
-        if isinstance(variants, str):
-            try:
-                import json
-
-                variants = json.loads(variants)
-            except:
-                variants = []
-
         variant_count = len(variants) if isinstance(variants, list) else 0
         variant_complexity = min(variant_count / 10.0, 1.0)  # Normalize to 0-1
 
-        # Image richness
         images = product_data.get("images", [])
-        if isinstance(images, str):
-            try:
-                import json
-
-                images = json.loads(images)
-            except:
-                images = []
-
         image_count = len(images) if isinstance(images, list) else 0
         image_richness = min(image_count / 5.0, 1.0)  # Normalize to 0-1
 
-        # Tag diversity
         tags = product_data.get("tags", [])
-        if isinstance(tags, str):
-            try:
-                import json
-
-                tags = json.loads(tags)
-            except:
-                tags = []
-
         tag_count = len(tags) if isinstance(tags, list) else 0
         tag_diversity = min(tag_count / 10.0, 1.0)  # Normalize to 0-1
 
-        # Metafield utilization
+        # Metafield utilization (data already parsed from database)
         metafields = product_data.get("metafields", [])
-        if isinstance(metafields, str):
-            try:
-                import json
-
-                metafields = json.loads(metafields)
-            except:
-                metafields = []
 
         metafield_count = len(metafields) if isinstance(metafields, list) else 0
         metafield_utilization = min(metafield_count / 5.0, 1.0)  # Normalize to 0-1
@@ -531,35 +540,13 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             return "luxury"
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from behavioral event"""
-        event_type = event.get("eventType", "")
-        event_data = event.get("eventData", {})
-
-        if event_type == "product_viewed":
-            # Handle nested data structure: eventData.data.productVariant.product
-            if "data" in event_data:
-                product_variant = event_data.get("data", {}).get("productVariant", {})
-            else:
-                product_variant = event_data.get("productVariant", {})
-            product = product_variant.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "product_added_to_cart":
-            # Handle nested data structure: eventData.data.cartLine.merchandise.product
-            if "data" in event_data:
-                cart_line = event_data.get("data", {}).get("cartLine", {})
-            else:
-                cart_line = event_data.get("cartLine", {})
-            merchandise = cart_line.get("merchandise", {})
-            product = merchandise.get("product", {})
-            return product.get("id", "")
-
-        return None
+        """Extract product ID from behavioral event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        if "productId" in line_item:
-            return str(line_item["productId"])
+        if "product_id" in line_item:
+            return str(line_item["product_id"])
 
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
@@ -571,7 +558,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract session ID from event"""
         event_data = event.get("eventData", {})
-        return event_data.get("clientId")
+        return event_data.get("client_id")
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
         """Parse date from various formats"""
@@ -594,50 +581,61 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _get_default_features(self, shop_id: str, product_id: str) -> Dict[str, Any]:
         """Return default features when computation fails"""
         return {
-            "shopId": shop_id,
-            "productId": product_id,
-            "viewCount30d": 0,
-            "uniqueViewers30d": 0,
-            "cartAddCount30d": 0,
-            "purchaseCount30d": 0,
-            "uniquePurchasers30d": 0,
-            "viewToCartRate": None,
-            "cartToPurchaseRate": None,
-            "overallConversionRate": None,
-            "lastViewedAt": None,
-            "lastPurchasedAt": None,
-            "firstPurchasedAt": None,
-            "daysSinceFirstPurchase": None,
-            "daysSinceLastPurchase": None,
-            "avgSellingPrice": None,
-            "priceVariance": None,
-            "totalInventory": None,
-            "inventoryTurnover": None,
-            "stockVelocity": None,
-            "priceTier": None,
-            "variantComplexity": None,
-            "imageRichness": None,
-            "tagDiversity": None,
-            "metafieldUtilization": None,
-            "mediaRichness": 0,
-            "seoOptimization": 0,
-            "seoTitleLength": 0,
-            "seoDescriptionLength": 0,
-            "hasVideoContent": False,
-            "has3DContent": False,
-            "mediaCount": 0,
-            "hasOnlineStoreUrl": False,
-            "hasPreviewUrl": False,
-            "hasCustomTemplate": False,
-            "popularityScore": 0.0,
-            "trendingScore": 0.0,
+            "shop_id": shop_id,
+            "product_id": product_id,
+            "view_count_30d": 0,
+            "unique_viewers_30d": 0,
+            "cart_add_count_30d": 0,
+            "purchase_count_30d": 0,
+            "unique_purchasers_30d": 0,
+            "view_to_cart_rate": None,
+            "cart_to_purchase_rate": None,
+            "overall_conversion_rate": None,
+            "last_viewed_at": None,
+            "last_purchased_at": None,
+            "first_purchased_at": None,
+            "days_since_first_purchase": None,
+            "days_since_last_purchase": None,
+            "avg_selling_price": None,
+            "price_variance": None,
+            "total_inventory": None,
+            "inventory_turnover": None,
+            "stock_velocity": None,
+            "price_tier": None,
+            "variant_complexity": None,
+            "image_richness": None,
+            "tag_diversity": None,
+            "metafield_utilization": None,
+            "media_richness": 0,
+            "seo_optimization": 0,
+            "seo_title_length": 0,
+            "seo_description_length": 0,
+            "has_video_content": False,
+            "has_3d_content": False,
+            "media_count": 0,
+            "has_online_store_url": False,
+            "has_preview_url": False,
+            "has_custom_template": False,
+            "popularity_score": 0.0,
+            "trending_score": 0.0,
             # Refund metrics (NEW)
-            "refundedOrders": 0,
-            "refundRate": 0.0,
-            "totalRefundedAmount": 0.0,
-            "netRevenue": 0.0,
-            "refundRiskScore": 0.0,
-            "lastComputedAt": now_utc(),
+            "refunded_orders": 0,
+            "refund_rate": 0.0,
+            "total_refunded_amount": 0.0,
+            "net_revenue": 0.0,
+            "refund_risk_score": 0.0,
+            # NEW: Enhanced features using previously unused fields
+            "content_richness_score": 0,
+            "description_length": 0,
+            "description_html_length": 0,
+            "product_age": 0,
+            "last_updated_days": 0,
+            "update_frequency": 0.0,
+            "product_type": "",
+            "category_complexity": 0,
+            "availability_score": 0,
+            "status_stability": 0,
+            "last_computed_at": now_utc(),
         }
 
     def _compute_enhanced_metadata_scores(
@@ -682,8 +680,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
     def _compute_seo_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute SEO-related features"""
         try:
-            seo_title = product_data.get("seoTitle", "")
-            seo_description = product_data.get("seoDescription", "")
+            seo_title = product_data.get("seo_title", "")
+            seo_description = product_data.get("seo_description", "")
 
             # SEO optimization score (0-100)
             seo_optimization = 0
@@ -750,9 +748,9 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         """Compute store integration features"""
         try:
             return {
-                "has_online_store_url": bool(product_data.get("onlineStoreUrl")),
-                "has_preview_url": bool(product_data.get("onlineStorePreviewUrl")),
-                "has_custom_template": bool(product_data.get("templateSuffix")),
+                "has_online_store_url": bool(product_data.get("online_store_url")),
+                "has_preview_url": bool(product_data.get("online_store_preview_url")),
+                "has_custom_template": bool(product_data.get("template_suffix")),
             }
         except Exception as e:
             logger.error(f"Error computing store integration features: {str(e)}")
@@ -786,7 +784,7 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             refunded_orders = 0
 
             for order in orders:
-                line_items = order.get("lineItems", [])
+                line_items = order.get("line_items", [])
                 order_contains_product = False
                 order_revenue = 0.0
 
@@ -813,12 +811,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                     total_revenue += order_revenue
 
                     # Check if this order was refunded
-                    financial_status = order.get("financialStatus")
+                    financial_status = order.get("financial_status")
                     if financial_status == "refunded":
                         refunded_orders += 1
                         # Use totalRefundedAmount if available, otherwise use order_revenue
                         refunded_amount = float(
-                            order.get("totalRefundedAmount", order_revenue)
+                            order.get("total_refunded_amount", order_revenue)
                         )
                         total_refunded_amount += refunded_amount
 
@@ -857,4 +855,167 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "total_refunded_amount": 0.0,
                 "net_revenue": 0.0,
                 "refund_risk_score": 0.0,
+            }
+
+    def _compute_content_quality_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute content quality features using previously unused fields"""
+        try:
+            # Description analysis (currently unused)
+            description = product_data.get("description", "")
+            description_html = product_data.get("description_html", "")
+
+            description_length = len(description) if description else 0
+            description_html_length = len(description_html) if description_html else 0
+
+            # Content richness score (0-100)
+            content_richness_score = 0
+            if description_length > 0:
+                content_richness_score += min(
+                    description_length / 10, 50
+                )  # Max 50 points for description
+            if description_html_length > 0:
+                content_richness_score += min(
+                    description_html_length / 20, 30
+                )  # Max 30 points for HTML
+            if description_length > 100 and description_html_length > 50:
+                content_richness_score += 20  # Bonus for rich content
+
+            return {
+                "content_richness_score": min(content_richness_score, 100),
+                "description_length": description_length,
+                "description_html_length": description_html_length,
+            }
+        except Exception as e:
+            logger.error(f"Error computing content quality features: {str(e)}")
+            return {
+                "content_richness_score": 0,
+                "description_length": 0,
+                "description_html_length": 0,
+            }
+
+    def _compute_product_lifecycle_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute product lifecycle features using previously unused fields"""
+        try:
+            created_at = product_data.get("created_at")
+            updated_at = product_data.get("updated_at")
+
+            product_age = 0
+            last_updated_days = 0
+            update_frequency = 0.0
+
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at = datetime.datetime.fromisoformat(
+                        created_at.replace("Z", "+00:00")
+                    )
+                product_age = (now_utc() - created_at).days
+
+            if updated_at:
+                if isinstance(updated_at, str):
+                    updated_at = datetime.datetime.fromisoformat(
+                        updated_at.replace("Z", "+00:00")
+                    )
+                last_updated_days = (now_utc() - updated_at).days
+
+                # Calculate update frequency (updates per month)
+                if created_at and updated_at > created_at:
+                    days_since_creation = (updated_at - created_at).days
+                    if days_since_creation > 0:
+                        update_frequency = (
+                            30.0 / days_since_creation
+                        )  # Updates per month
+
+            return {
+                "product_age": product_age,
+                "last_updated_days": last_updated_days,
+                "update_frequency": round(update_frequency, 2),
+            }
+        except Exception as e:
+            logger.error(f"Error computing product lifecycle features: {str(e)}")
+            return {
+                "product_age": 0,
+                "last_updated_days": 0,
+                "update_frequency": 0.0,
+            }
+
+    def _compute_category_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute category features using previously unused fields"""
+        try:
+            product_type = product_data.get("product_type", "")
+
+            # Category complexity score based on product type
+            category_complexity = 0
+            if product_type:
+                # Simple categorization based on common product types
+                if any(
+                    keyword in product_type.lower()
+                    for keyword in ["electronics", "technology", "computer"]
+                ):
+                    category_complexity = 80  # High complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["clothing", "fashion", "apparel"]
+                ):
+                    category_complexity = 60  # Medium-high complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["book", "media", "digital"]
+                ):
+                    category_complexity = 40  # Medium complexity
+                elif any(
+                    keyword in product_type.lower()
+                    for keyword in ["food", "beverage", "consumable"]
+                ):
+                    category_complexity = 30  # Low-medium complexity
+                else:
+                    category_complexity = 50  # Default medium complexity
+
+            return {
+                "product_type": product_type,
+                "category_complexity": category_complexity,
+            }
+        except Exception as e:
+            logger.error(f"Error computing category features: {str(e)}")
+            return {
+                "product_type": "",
+                "category_complexity": 0,
+            }
+
+    def _compute_availability_features(
+        self, product_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Compute availability features using previously unused fields"""
+        try:
+            status = product_data.get("status", "")
+            is_active = product_data.get("is_active", True)
+
+            # Availability score (0-100)
+            availability_score = 0
+            if is_active:
+                availability_score += 50  # Base score for active products
+            if status and status.upper() == "ACTIVE":
+                availability_score += 30  # Bonus for explicit active status
+            elif status and status.upper() == "DRAFT":
+                availability_score += 10  # Lower score for draft products
+            elif status and status.upper() == "ARCHIVED":
+                availability_score = 0  # No score for archived products
+
+            # Status stability (how stable the product status is)
+            status_stability = 100 if status and status.upper() == "ACTIVE" else 50
+
+            return {
+                "availability_score": min(availability_score, 100),
+                "status_stability": status_stability,
+            }
+        except Exception as e:
+            logger.error(f"Error computing availability features: {str(e)}")
+            return {
+                "availability_score": 0,
+                "status_stability": 0,
             }

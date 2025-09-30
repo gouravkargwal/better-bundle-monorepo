@@ -11,7 +11,10 @@ class OrderGenerator(BaseGenerator):
     """Generates realistic order data with diverse purchase patterns."""
 
     def generate_orders(
-        self, customer_ids: List[str], product_variant_ids: List[str]
+        self,
+        customer_ids: List[str],
+        product_variant_ids: List[str],
+        product_ids: List[str],
     ) -> List[Dict[str, Any]]:
         """Generate 12 diverse orders with realistic patterns."""
         order_configs = [
@@ -132,7 +135,7 @@ class OrderGenerator(BaseGenerator):
         ]
 
         return self._build_order_payloads(
-            order_configs, customer_ids, product_variant_ids
+            order_configs, customer_ids, product_variant_ids, product_ids
         )
 
     def _build_order_payloads(
@@ -140,6 +143,7 @@ class OrderGenerator(BaseGenerator):
         order_configs: List[Dict],
         customer_ids: List[str],
         product_variant_ids: List[str],
+        product_ids: List[str],
     ) -> List[Dict[str, Any]]:
         """Build complete order payloads from configurations."""
         orders = []
@@ -191,6 +195,13 @@ class OrderGenerator(BaseGenerator):
                             "position": 1,
                             "createdAt": self.past_date(30).isoformat(),
                             "updatedAt": self.past_date(30).isoformat(),
+                            "product": {
+                                "id": (
+                                    product_ids[product_index]
+                                    if product_index < len(product_ids)
+                                    else f"gid://shopify/Product/{product_index}"
+                                )
+                            },
                         },
                     }
                 }
@@ -203,65 +214,61 @@ class OrderGenerator(BaseGenerator):
 
             # Build order payload
             order_payload = {
-                "order": {
-                    "id": order_id,
-                    "name": config["order_name"],
-                    "email": customer_data["email"],
-                    "customer": customer_data,
-                    "lineItems": {"edges": line_items},
-                    "totalPriceSet": {
-                        "shopMoney": {
-                            "amount": str(round(total_amount, 2)),
-                            "currencyCode": "USD",
-                        }
-                    },
-                    "subtotalPriceSet": {
-                        "shopMoney": {
-                            "amount": str(round(total_amount, 2)),
-                            "currencyCode": "USD",
-                        }
-                    },
-                    "totalTaxSet": {
-                        "shopMoney": {"amount": "0.00", "currencyCode": "USD"}
-                    },
-                    "totalShippingPriceSet": {
-                        "shopMoney": {"amount": "0.00", "currencyCode": "USD"}
-                    },
-                    "totalRefundedSet": {
-                        "shopMoney": {"amount": "0.00", "currencyCode": "USD"}
-                    },
-                    "totalOutstandingSet": {
-                        "shopMoney": {
-                            "amount": str(round(total_amount, 2)),
-                            "currencyCode": "USD",
-                        }
-                    },
-                    "fulfillments": [],
-                    "transactions": [
-                        {
-                            "id": f"gid://shopify/OrderTransaction/{i}",
-                            "kind": "SALE",
-                            "status": "SUCCESS",
-                            "amount": str(round(total_amount, 2)),
-                            "gateway": "shopify_payments",
-                            "createdAt": self.past_date(config["days_ago"]).isoformat(),
-                        }
-                    ],
-                    "createdAt": self.past_date(config["days_ago"]).isoformat(),
-                    "updatedAt": self.past_date(config["days_ago"]).isoformat(),
-                    "processedAt": self.past_date(config["days_ago"]).isoformat(),
-                    "cancelledAt": None,
-                    "cancelReason": None,
-                    "tags": ["processed", config["order_type"]],
-                    "note": config["description"],
-                    "confirmed": True,
-                    "test": False,
-                    "customerLocale": "en-US",
-                    "currencyCode": "USD",
-                    "presentmentCurrencyCode": "USD",
-                    "discountApplications": {"edges": []},
-                    "metafields": {"edges": []},
-                }
+                "id": order_id,
+                "name": config["order_name"],
+                "email": customer_data["email"],
+                "customer": customer_data,
+                "lineItems": {"edges": line_items},
+                "totalPriceSet": {
+                    "shopMoney": {
+                        "amount": str(round(total_amount, 2)),
+                        "currencyCode": "USD",
+                    }
+                },
+                "subtotalPriceSet": {
+                    "shopMoney": {
+                        "amount": str(round(total_amount, 2)),
+                        "currencyCode": "USD",
+                    }
+                },
+                "totalTaxSet": {"shopMoney": {"amount": "0.00", "currencyCode": "USD"}},
+                "totalShippingPriceSet": {
+                    "shopMoney": {"amount": "0.00", "currencyCode": "USD"}
+                },
+                "totalRefundedSet": {
+                    "shopMoney": {"amount": "0.00", "currencyCode": "USD"}
+                },
+                "totalOutstandingSet": {
+                    "shopMoney": {
+                        "amount": str(round(total_amount, 2)),
+                        "currencyCode": "USD",
+                    }
+                },
+                "fulfillments": [],
+                "transactions": [
+                    {
+                        "id": f"gid://shopify/OrderTransaction/{i}",
+                        "kind": "SALE",
+                        "status": "SUCCESS",
+                        "amount": str(round(total_amount, 2)),
+                        "gateway": "shopify_payments",
+                        "createdAt": self.past_date(config["days_ago"]).isoformat(),
+                    }
+                ],
+                "createdAt": self.past_date(config["days_ago"]).isoformat(),
+                "updatedAt": self.past_date(config["days_ago"]).isoformat(),
+                "processedAt": self.past_date(config["days_ago"]).isoformat(),
+                "cancelledAt": None,
+                "cancelReason": None,
+                "tags": ["processed", config["order_type"]],
+                "note": config["description"],
+                "confirmed": True,
+                "test": False,
+                "customerLocale": "en-US",
+                "currencyCode": "USD",
+                "presentmentCurrencyCode": "USD",
+                "discountApplications": {"edges": []},
+                "metafields": {"edges": []},
             }
 
             orders.append(order_payload)

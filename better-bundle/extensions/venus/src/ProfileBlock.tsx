@@ -1,3 +1,4 @@
+import React from "react";
 import {
   reactExtension,
   TextBlock,
@@ -9,6 +10,7 @@ import {
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
 import { useRecommendations } from "./hooks/useRecommendations";
+import { analyticsApi } from "./api/analytics";
 
 export default reactExtension("customer-account.profile.block.render", () => (
   <ProfileBlock />
@@ -17,6 +19,8 @@ export default reactExtension("customer-account.profile.block.render", () => (
 function ProfileBlock() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { navigate } = useNavigation();
+
+  // Extension activity is automatically tracked via recommendation API calls
 
   const { loading, products, error, trackRecommendationClick, columnConfig } =
     useRecommendations({
@@ -32,12 +36,12 @@ function ProfileBlock() {
     });
 
   // Override trackRecommendationClick to include navigation
-  const handleShopNow = (
+  const handleShopNow = async (
     productId: string,
     position: number,
     productUrl: string,
   ) => {
-    const urlWithAttribution = trackRecommendationClick(
+    const urlWithAttribution = await trackRecommendationClick(
       productId,
       position,
       productUrl,

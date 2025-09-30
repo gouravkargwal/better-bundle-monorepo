@@ -31,8 +31,13 @@ export const DEFAULT_CONFIG = {
   DEBUG: false,
 } as const;
 
-// API endpoints
+// Unified Analytics API endpoints
 export const API_ENDPOINTS = {
-  BEHAVIORAL_EVENTS: "/api/v1/behavioral-events",
-  HEALTH_CHECK: "/api/v1/health",
+  UNIFIED_ANALYTICS_BASE: "/api/atlas",
+  TRACK_INTERACTION: "/api/atlas/track-interaction",
+  GET_OR_CREATE_SESSION: "/api/atlas/get-or-create-session",
+  TRACK_PAGE_VIEW: "/api/atlas/track-page-view",
+  TRACK_PRODUCT_VIEW: "/api/atlas/track-product-view",
+  TRACK_SEARCH: "/api/atlas/track-search",
+  TRACK_FORM_SUBMISSION: "/api/atlas/track-form-submission",
 } as const;

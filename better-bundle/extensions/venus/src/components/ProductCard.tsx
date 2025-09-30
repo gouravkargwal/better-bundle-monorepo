@@ -23,7 +23,11 @@ interface Product {
 interface ProductCardProps {
   product: Product;
   position: number;
-  onShopNow: (productId: string, position: number, productUrl: string) => void;
+  onShopNow: (
+    productId: string,
+    position: number,
+    productUrl: string,
+  ) => Promise<void>;
 }
 
 export function ProductCard({
@@ -105,7 +109,13 @@ export function ProductCard({
         </BlockStack>
         <Button
           kind="primary"
-          onPress={() => onShopNow(product.id, position, product.url)}
+          onPress={async () => {
+            try {
+              await onShopNow(product.id, position, product.url);
+            } catch (error) {
+              console.error("Failed to handle shop now:", error);
+            }
+          }}
         >
           Shop Now
         </Button>

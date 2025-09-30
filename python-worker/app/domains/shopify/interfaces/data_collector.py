@@ -16,6 +16,7 @@ class IShopifyDataCollector(ABC):
         shop_domain: str,
         access_token: str = None,
         shop_id: str = None,
+        mode: str = "incremental",
         include_products: bool = True,
         include_orders: bool = True,
         include_customers: bool = True,
@@ -28,6 +29,7 @@ class IShopifyDataCollector(ABC):
             shop_domain: Shop domain to collect data from
             access_token: Shopify access token
             shop_id: Internal shop ID (optional, will be retrieved if not provided)
+            mode: Processing mode - "incremental" for new data only, "historical" for all data
             include_products: Whether to collect products data
             include_orders: Whether to collect orders data
             include_customers: Whether to collect customers data

@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..base_adapter import BaseAdapter
-from ..canonical_models import CanonicalProduct, CanonicalVariant
+from app.domains.shopify.normalization.base_adapter import BaseAdapter
+from app.domains.shopify.normalization.canonical_models import (
+    CanonicalProduct,
+    CanonicalVariant,
+)
 
 
 def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
@@ -46,74 +49,108 @@ class GraphQLProductAdapter(BaseAdapter):
         raw_tags = payload.get("tags") or []
         tags: List[str] = list(raw_tags) if isinstance(raw_tags, list) else []
 
-        # Variants via edges
+        # Variants via edges - now using snake_case field names from paginated data
         variants: List[CanonicalVariant] = []
         for edge in (payload.get("variants", {}) or {}).get("edges", []) or []:
             node = edge.get("node", {})
             variants.append(
                 CanonicalVariant(
-                    variantId=_extract_numeric_gid(node.get("id")),
+                    variant_id=_extract_numeric_gid(node.get("id")),
                     title=node.get("title"),
                     price=_to_float(node.get("price")),
-                    compareAtPrice=_to_float(node.get("compareAtPrice")),
+                    compare_at_price=_to_float(
+                        node.get("compare_at_price")
+                    ),  # Updated to snake_case
                     sku=node.get("sku"),
                     barcode=node.get("barcode"),
                     inventory=(
-                        int(node.get("inventoryQuantity") or 0)
-                        if node.get("inventoryQuantity") is not None
+                        int(
+                            node.get("inventory_quantity") or 0
+                        )  # Updated to snake_case
+                        if node.get("inventory_quantity") is not None
                         else None
                     ),
                 )
             )
 
-        # Derive key product fields
-        total_inventory = payload.get("totalInventory")
+        # Derive key product fields - now using snake_case field names
+        total_inventory = payload.get("total_inventory")  # Updated to snake_case
         if total_inventory is None and variants:
             total_inventory = sum([vi.inventory or 0 for vi in variants])
 
         price = variants[0].price if variants else None
-        compare_at = variants[0].compareAtPrice if variants else None
+        compare_at = variants[0].compare_at_price if variants else None
 
-        # Images/media/options via edges → arrays of nodes
-        def _edges_to_nodes(
+        # Note: Derived metrics (variant_count, image_count, tag_count, price_range, collections)
+        # are computed in feature engineering, not during normalization
+
+        # Images/media/options via edges → arrays of nodes with extracted IDs and snake_case fields
+        def _edges_to_nodes_with_extracted_ids(
             container: Optional[Dict[str, Any]],
         ) -> List[Dict[str, Any]]:
             if not isinstance(container, dict):
                 return []
-            return [edge.get("node", {}) for edge in container.get("edges", []) or []]
+            nodes = []
+            for edge in container.get("edges", []) or []:
+                node = edge.get("node", {})
+                # Extract numeric ID from GraphQL ID
+                if "id" in node:
+                    node["id"] = _extract_numeric_gid(node["id"])
+                # Convert altText to alt_text for images
+                if "altText" in node:
+                    node["alt_text"] = node.pop("altText")
+                nodes.append(node)
+            return nodes
 
-        images = _edges_to_nodes(payload.get("images"))
-        media = _edges_to_nodes(payload.get("media"))
-        options = payload.get("options") or []
+        images = _edges_to_nodes_with_extracted_ids(payload.get("images"))
+        media = _edges_to_nodes_with_extracted_ids(payload.get("media"))
+
+        # Process metafields - now using snake_case field names from paginated data
+        metafields = _edges_to_nodes_with_extracted_ids(payload.get("metafields"))
+
+        # Extract IDs from options array
+        options = []
+        for option in payload.get("options") or []:
+            option_copy = option.copy()
+            if "id" in option_copy:
+                option_copy["id"] = _extract_numeric_gid(option_copy["id"])
+            options.append(option_copy)
 
         seo = payload.get("seo") or {}
         seo_title = seo.get("title")
         seo_description = seo.get("description")
 
+        # Canonical internal timestamps (required) - now using snake_case field names
+        created_at = _parse_iso(payload.get("created_at"))  # Updated to snake_case
+        updated_at = (
+            _parse_iso(payload.get("updated_at")) or created_at
+        )  # Updated to snake_case
+
         model = CanonicalProduct(
-            shopId=shop_id,
-            entityId=entity_id,
-            originalGid=payload.get("id"),
-            productCreatedAt=_parse_iso(payload.get("createdAt")),
-            productUpdatedAt=_parse_iso(payload.get("updatedAt")) or datetime.utcnow(),
-            title=payload.get("title"),
-            handle=payload.get("handle"),
+            shop_id=shop_id,
+            product_id=entity_id,
+            created_at=created_at,
+            updated_at=updated_at,
+            title=payload.get("title") or "Untitled Product",
+            handle=payload.get("handle") or "untitled-product",
             description=payload.get("description"),
             vendor=payload.get("vendor"),
-            productType=payload.get("productType"),
+            product_type=payload.get("product_type"),  # Updated to snake_case
             status=payload.get("status"),
             tags=tags,
             price=price,
-            compareAtPrice=compare_at,
-            totalInventory=total_inventory,
-            isActive=True if payload.get("status") == "ACTIVE" else False,
+            compare_at_price=compare_at,
+            total_inventory=total_inventory,
+            is_active=True if payload.get("status") == "ACTIVE" else False,
             variants=variants,
             images=images,
             media=media,
             options=options,
-            seoTitle=seo_title,
-            seoDescription=seo_description,
-            templateSuffix=payload.get("templateSuffix"),
+            metafields=metafields,  # Added metafields processing
+            seo_title=seo_title,
+            seo_description=seo_description,
+            template_suffix=payload.get("template_suffix"),  # Updated to snake_case
+            # Derived metrics are computed in feature engineering, not normalization
             extras={},
         )
 

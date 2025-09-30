@@ -33,23 +33,46 @@ class GraphQLCustomerAdapter(BaseAdapter):
     def to_canonical(self, payload: Dict[str, Any], shop_id: str) -> Dict[str, Any]:
         entity_id = _extract_numeric_gid(payload.get("id")) or ""
 
+        created_at = (
+            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+        )  # Updated to snake_case
+        updated_at = (
+            _parse_iso(payload.get("updated_at")) or created_at
+        )  # Updated to snake_case
+
         model = CanonicalCustomer(
-            shopId=shop_id,
-            entityId=entity_id,
-            originalGid=payload.get("id"),
-            customerCreatedAt=_parse_iso(payload.get("createdAt")),
-            customerUpdatedAt=_parse_iso(payload.get("updatedAt")) or datetime.utcnow(),
-            email=payload.get("email"),
-            phone=payload.get("phone"),
-            firstName=payload.get("firstName"),
-            lastName=payload.get("lastName"),
-            state=payload.get("state"),
-            verifiedEmail=payload.get("verifiedEmail"),
-            defaultAddress=payload.get("defaultAddress"),
-            addresses=[],
+            shop_id=shop_id,
+            customer_id=entity_id,
+            first_name=payload.get("first_name"),  # Updated to snake_case
+            last_name=payload.get("last_name"),  # Updated to snake_case
+            total_spent=float(
+                (payload.get("total_spent") or {}).get("amount") or 0.0
+            ),  # Extract amount from totalSpent object
+            order_count=int(payload.get("orders_count") or 0),  # Updated to snake_case
+            last_order_date=_parse_iso(
+                (payload.get("last_order") or {}).get("created_at")
+            ),  # Extract date from lastOrder object
+            last_order_id=_extract_numeric_gid(
+                (payload.get("last_order") or {}).get("id")
+            ),  # Extract ID from lastOrder object
+            verified_email=bool(
+                payload.get("verified_email") or False
+            ),  # Updated to snake_case
+            tax_exempt=bool(
+                payload.get("tax_exempt") or False
+            ),  # Updated to snake_case
+            customer_locale=payload.get(
+                "customer_locale", "en"
+            ),  # Updated to snake_case
             tags=payload.get("tags") or [],
-            currency=None,
-            isActive=True,
+            state=(payload.get("default_address") or {}).get(
+                "province"
+            ),  # Updated to snake_case
+            default_address=payload.get("default_address"),  # Updated to snake_case
+            # Add required internal timestamps
+            created_at=created_at,
+            updated_at=updated_at,
+            is_active=True,
             extras={},
         )
 

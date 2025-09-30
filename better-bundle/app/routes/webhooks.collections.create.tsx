@@ -1,18 +1,15 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
-
-  if (!session || !shop) {
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
-
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
+    const { payload, session } = await authenticate.webhook(request);
+
+    if (!session) {
+      return json({ error: "Authentication failed" }, { status: 401 });
+    }
 
     // Extract collection data from payload
     const collection = payload;
@@ -23,83 +20,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No collection ID found" }, { status: 400 });
     }
 
-    // Get shop ID from database
-    const shopRecord = await prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { id: true },
-    });
+    const kafkaProducer = await KafkaProducerService.getInstance();
 
-    if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
+    const streamData = {
+      event_type: "collection_created",
+      shop_domain: session.shop,
+      shopify_id: collectionId,
+      timestamp: new Date().toISOString(),
+    };
 
-    // Store raw collection data immediately
-    const created = await prisma.rawCollection.create({
-      data: {
-        shopId: shopRecord.id,
-        payload: collection,
-        shopifyId: collectionId,
-        shopifyCreatedAt: collection.created_at
-          ? new Date(collection.created_at)
-          : new Date(),
-        shopifyUpdatedAt: collection.updated_at
-          ? new Date(collection.updated_at)
-          : new Date(),
-        source: "webhook" as any,
-        format: "rest" as any,
-        receivedAt: new Date() as any,
-      } as any,
-    });
-
-    console.log(
-      `✅ Collection ${collectionId} stored in raw table for shop ${shop}`,
-    );
-
-    // Publish to Redis Stream for real-time processing
-    try {
-      const streamService = await getRedisStreamService();
-
-      const streamData = {
-        event_type: "collection_created",
-        shop_id: shopRecord.id,
-        shopify_id: collectionId,
-        timestamp: new Date().toISOString(),
-      };
-
-      const messageId = await streamService.publishShopifyEvent(streamData);
-
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-      });
-
-      // Also publish a normalize job for canonical staging
-      const normalizeJob = {
-        event_type: "normalize_entity",
-        data_type: "collections",
-        format: "rest",
-        shop_id: shopRecord.id,
-        raw_id: created.id,
-        shopify_id: collectionId,
-        timestamp: new Date().toISOString(),
-      } as const;
-      await streamService.publishShopifyEvent(normalizeJob);
-    } catch (streamError) {
-      console.error(`❌ Error publishing to Redis Stream:`, streamError);
-      // Don't fail the webhook if stream publishing fails
-    }
+    await kafkaProducer.publishShopifyEvent(streamData);
 
     return json({
       success: true,
       collectionId: collectionId,
-      shopId: shopRecord.id,
-      message: "Collection data stored successfully",
+      shopDomain: session.shop,
+      message:
+        "Collection create webhook processed - will trigger specific data collection",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
+    console.error(`❌ Error processing collections create webhook:`, error);
     return json(
       {
         error: "Internal server error",

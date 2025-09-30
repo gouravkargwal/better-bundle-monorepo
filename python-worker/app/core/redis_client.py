@@ -135,6 +135,16 @@ class RedisStreamsManager:
             )
             raise
 
+    async def publish_shopify_event(self, event_data: Dict[str, Any]) -> str:
+        """Publish a Shopify normalization/processing event to the appropriate stream."""
+        if not self.redis:
+            await self.initialize()
+
+        # Use stream manager to route to correct stream based on event type
+        from app.core.stream_manager import stream_manager
+
+        return await stream_manager.publish_by_event_type(event_data)
+
     def _clean_for_serialization(self, obj: Any) -> Any:
         """
         Recursively clean objects for JSON serialization by converting datetime objects to ISO strings.
@@ -275,7 +285,12 @@ class RedisStreamsManager:
         if data_types:
             event_data["data_types"] = data_types
 
-        return await self.publish_event(settings.DATA_JOB_STREAM, event_data)
+        # Use stream manager to route to data collection stream
+        from app.core.stream_manager import stream_manager, StreamType
+
+        return await stream_manager.publish_to_domain(
+            StreamType.DATA_COLLECTION, event_data
+        )
 
     async def publish_ml_training_event(
         self,
@@ -400,6 +415,30 @@ class RedisStreamsManager:
             "status": "queued",
         }
         return await self.publish_event("betterbundle:gorse-training", event_data)
+
+    async def publish_customer_linking_event(
+        self,
+        job_id: str,
+        shop_id: str,
+        customer_id: str,
+        event_type: str = "customer_linking",
+        trigger_session_id: Optional[str] = None,
+        linked_sessions: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Publish a customer linking event for identity resolution and backfill"""
+        event_data = {
+            "job_id": job_id,
+            "shop_id": shop_id,
+            "customer_id": customer_id,
+            "event_type": event_type,
+            "trigger_session_id": trigger_session_id,
+            "linked_sessions": linked_sessions or [],
+            "metadata": metadata or {},
+            "status": "queued",
+        }
+
+        return await self.publish_event("betterbundle:customer-linking", event_data)
 
 
 # Global streams manager instance

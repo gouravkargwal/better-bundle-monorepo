@@ -20,7 +20,6 @@ from app.shared.constants.app import (
     DEFAULT_ERROR_SLEEP_SECONDS,
 )
 from app.shared.constants.redis import (
-    DATA_JOB_STREAM,
     ML_TRAINING_STREAM,
     ANALYSIS_RESULTS_STREAM,
     USER_NOTIFICATIONS_STREAM,
@@ -34,7 +33,6 @@ from app.shared.constants.redis import (
     COMPLETION_EVENTS_STREAM,
     BEHAVIORAL_EVENTS_STREAM,
     GORSE_SYNC_STREAM,
-    DATA_PROCESSOR_GROUP,
     MAIN_TABLE_PROCESSOR_GROUP,
     FEATURES_CONSUMER_GROUP,
     ML_TRAINING_GROUP,
@@ -50,12 +48,18 @@ from app.core.exceptions import ConfigurationError, EnvironmentVariableError
 class DatabaseSettings(BaseSettings):
     """Database configuration settings"""
 
-    DATABASE_URL: str = Field(default="sqlite:///./betterbundle.db", env="DATABASE_URL")
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5433/betterbundle",
+        env="DATABASE_URL",
+    )
+    # Control SQLAlchemy logging of SQL and pool events
+    SQLALCHEMY_ECHO: bool = Field(default=False, env="SQLALCHEMY_ECHO")
+    SQLALCHEMY_ECHO_POOL: bool = Field(default=False, env="SQLALCHEMY_ECHO_POOL")
 
     @validator("DATABASE_URL")
     def validate_database_url(cls, v):
         if not v:
-            return "sqlite:///./betterbundle.db"
+            return "postgresql+asyncpg://postgres:postgres@localhost:5433/betterbundle"
         return v
 
 
@@ -69,7 +73,6 @@ class RedisSettings(BaseSettings):
     REDIS_TLS: bool = Field(default=DEFAULT_REDIS_TLS, env="REDIS_TLS")
 
     # Redis Stream Names
-    DATA_JOB_STREAM: str = Field(default=DATA_JOB_STREAM, env="DATA_JOB_STREAM")
     ML_TRAINING_STREAM: str = Field(
         default=ML_TRAINING_STREAM, env="ML_TRAINING_STREAM"
     )
@@ -91,9 +94,6 @@ class RedisSettings(BaseSettings):
     GORSE_SYNC_STREAM: str = Field(default=GORSE_SYNC_STREAM, env="GORSE_SYNC_STREAM")
 
     # Consumer Group Names
-    DATA_PROCESSOR_GROUP: str = Field(
-        default=DATA_PROCESSOR_GROUP, env="DATA_PROCESSOR_GROUP"
-    )
     MAIN_TABLE_PROCESSOR_GROUP: str = Field(
         default=MAIN_TABLE_PROCESSOR_GROUP, env="MAIN_TABLE_PROCESSOR_GROUP"
     )
@@ -120,6 +120,13 @@ class ShopifySettings(BaseSettings):
 
     SHOPIFY_APP_URL: str = Field(default="http://localhost:3000", env="SHOPIFY_APP_URL")
     SHOPIFY_ACCESS_TOKEN: str = Field(default="", env="SHOPIFY_ACCESS_TOKEN")
+
+    # App Identity Configuration
+    # Note: SHOPIFY_APP_ID is the GraphQL app ID (gid://shopify/App/...), not the client_id from shopify.app.toml
+    SHOPIFY_APP_ID: str = Field(
+        default="gid://shopify/App/277451505665", env="SHOPIFY_APP_ID"
+    )
+    SHOPIFY_APP_TITLE: str = Field(default="BetterBundle", env="SHOPIFY_APP_TITLE")
 
     # API Configuration
     SHOPIFY_API_RATE_LIMIT: int = Field(default=40, env="SHOPIFY_API_RATE_LIMIT")
@@ -291,10 +298,6 @@ class Settings(BaseSettings):
 
     # Redis Stream Names (Direct access for backward compatibility)
     @property
-    def DATA_JOB_STREAM(self) -> str:
-        return self.redis.DATA_JOB_STREAM
-
-    @property
     def ML_TRAINING_STREAM(self) -> str:
         return self.redis.ML_TRAINING_STREAM
 
@@ -362,12 +365,19 @@ class Settings(BaseSettings):
     )  # Increased from 1.0 to 2.0
     RETRY_BACKOFF: float = Field(default=2.0, env="RETRY_BACKOFF")
 
-    # Database Timeout Configuration
-    DATABASE_CONNECT_TIMEOUT: int = Field(default=30, env="DATABASE_CONNECT_TIMEOUT")
+    # Database Timeout Configuration - Industry Standard
+    DATABASE_CONNECT_TIMEOUT: int = Field(
+        default=10, env="DATABASE_CONNECT_TIMEOUT"
+    )  # Reduced from 30
     DATABASE_QUERY_TIMEOUT: int = Field(
-        default=60, env="DATABASE_QUERY_TIMEOUT"
-    )  # Long timeout for heavy queries
-    DATABASE_POOL_TIMEOUT: int = Field(default=30, env="DATABASE_POOL_TIMEOUT")
+        default=30, env="DATABASE_QUERY_TIMEOUT"
+    )  # Reduced from 60
+    DATABASE_POOL_TIMEOUT: int = Field(
+        default=10, env="DATABASE_POOL_TIMEOUT"
+    )  # Reduced from 30
+    DATABASE_HEALTH_CHECK_INTERVAL: int = Field(
+        default=300, env="DATABASE_HEALTH_CHECK_INTERVAL"
+    )  # 5 minutes
 
     # Health Check Configuration
     HEALTH_CHECK_TIMEOUT: int = Field(

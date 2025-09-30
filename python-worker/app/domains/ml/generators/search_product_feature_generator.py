@@ -9,6 +9,7 @@ import statistics
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -16,6 +17,10 @@ logger = get_logger(__name__)
 
 class SearchProductFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for search query + product performance to match SearchProductFeatures schema"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self, search_product_data: Dict[str, Any], context: Dict[str, Any]
@@ -75,7 +80,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             features = self.validate_features(features)
 
             # Add lastComputedAt timestamp
-            features["lastComputedAt"] = now_utc()
+            features["last_computed_at"] = now_utc()
 
             logger.debug(
                 f"Computed {len(features)} search-product features for '{search_query}' + {product_id}"
@@ -93,31 +98,31 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Return empty search-product features when no events exist"""
         return {
-            "shopId": shop.get("id", ""),
-            "searchQuery": search_product_data.get("searchQuery", ""),
-            "productId": search_product_data.get("productId", ""),
-            "impressionCount": 0,
-            "clickCount": 0,
-            "purchaseCount": 0,
-            "avgPosition": None,
-            "clickThroughRate": None,
-            "conversionRate": None,
-            "lastOccurrence": None,
+            "shop_id": shop.get("id", ""),
+            "search_query": search_product_data.get("searchQuery", ""),
+            "product_id": search_product_data.get("productId", ""),
+            "impression_count": 0,
+            "click_count": 0,
+            "purchase_count": 0,
+            "avg_position": None,
+            "click_through_rate": None,
+            "conversion_rate": None,
+            "last_occurrence": None,
         }
 
     def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract session ID from event record"""
         # clientId is now stored directly in the event record
-        return event.get("clientId")
+        return event.get("client_id")
 
     def _compute_basic_features(
         self, search_product_data: Dict[str, Any], shop: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Compute basic identification features"""
         return {
-            "shopId": shop.get("id", ""),
-            "searchQuery": search_product_data.get("searchQuery", ""),
-            "productId": search_product_data.get("productId", ""),
+            "shop_id": shop.get("id", ""),
+            "search_query": search_product_data.get("searchQuery", ""),
+            "product_id": search_product_data.get("productId", ""),
         }
 
     def _compute_search_metrics(
@@ -137,7 +142,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             search_events = []
             for event in session:
                 if (
-                    event.get("eventType") in ["search_submitted", "search"]
+                    event.get("event_type") in ["search_submitted", "search"]
                     and self._extract_search_query(event) == search_query
                 ):
                     search_events.append(event)
@@ -147,7 +152,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
             # Find product interactions after any search event in this session
             for i, event in enumerate(session):
-                event_type = event.get("eventType", "")
+                event_type = event.get("event_type", "")
                 event_product_id = self._extract_product_id(event)
 
                 if event_product_id == product_id:
@@ -198,17 +203,17 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         avg_position = statistics.mean(positions) if positions else None
 
         return {
-            "impressionCount": impression_count,
-            "clickCount": click_count,
-            "purchaseCount": purchase_count,
-            "avgPosition": avg_position,
+            "impression_count": impression_count,
+            "click_count": click_count,
+            "purchase_count": purchase_count,
+            "avg_position": avg_position,
         }
 
     def _compute_conversion_rates(self, features: Dict[str, Any]) -> Dict[str, Any]:
         """Compute conversion rates from metrics"""
-        impressions = features.get("impressionCount", 0)
-        clicks = features.get("clickCount", 0)
-        purchases = features.get("purchaseCount", 0)
+        impressions = features.get("impression_count", 0)
+        clicks = features.get("click_count", 0)
+        purchases = features.get("purchase_count", 0)
 
         # Click-through rate (clicks / impressions)
         click_through_rate = (clicks / impressions) if impressions > 0 else None
@@ -217,8 +222,8 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         conversion_rate = (purchases / clicks) if clicks > 0 else None
 
         return {
-            "clickThroughRate": click_through_rate,
-            "conversionRate": conversion_rate,
+            "click_through_rate": click_through_rate,
+            "conversion_rate": conversion_rate,
         }
 
     def _compute_temporal_features(
@@ -229,7 +234,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
         # Find the most recent event related to this search query + product combination
         for event in reversed(sorted(events, key=lambda e: e.get("timestamp", ""))):
-            event_type = event.get("eventType", "")
+            event_type = event.get("event_type", "")
 
             # Check if this event is related to our search query + product
             is_search_event = (
@@ -251,7 +256,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
                 break
 
         return {
-            "lastOccurrence": last_occurrence,
+            "last_occurrence": last_occurrence,
         }
 
     def _group_events_by_session(
@@ -266,14 +271,14 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
         sessions = []
         current_session = [sorted_events[0]]
-        current_customer_id = sorted_events[0].get("customerId")
+        current_customer_id = sorted_events[0].get("customer_id")
 
         for i in range(1, len(sorted_events)):
             current_event = sorted_events[i]
             previous_event = sorted_events[i - 1]
 
             # Check if same customer/session
-            same_customer = current_event.get("customerId") == current_customer_id
+            same_customer = current_event.get("customer_id") == current_customer_id
 
             # Check time gap
             current_time = self._parse_datetime(current_event.get("timestamp"))
@@ -287,7 +292,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
             if not same_customer or time_gap_minutes > 30:
                 sessions.append(current_session)
                 current_session = [current_event]
-                current_customer_id = current_event.get("customerId")
+                current_customer_id = current_event.get("customer_id")
             else:
                 current_session.append(current_event)
 
@@ -296,51 +301,32 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
     def _extract_search_query(self, event: Dict[str, Any]) -> Optional[str]:
         """Extract search query from search event"""
-        event_data = event.get("eventData", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
+        event_data = event.get("event_data", {})
+        # Event data is already parsed from database (no JSON parsing needed)
 
         # Try different possible field names for search query
         query = (
             event_data.get("query")
-            or event_data.get("searchQuery")
-            or event_data.get("searchTerm")
+            or event_data.get("search_query")
+            or event_data.get("search_term")
             or event_data.get("q")
         )
 
         return query.lower().strip() if query else None
 
     def _extract_product_id(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from event"""
-        event_data = event.get("eventData", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
-
-        return (
-            event_data.get("productId")
-            or event_data.get("product_id")
-            or event_data.get("id")
-        )
+        """Extract product ID from event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _extract_search_position(self, event: Dict[str, Any]) -> Optional[int]:
         """Extract search result position from event"""
-        event_data = event.get("eventData", {})
-        if isinstance(event_data, str):
-            try:
-                event_data = json.loads(event_data)
-            except:
-                event_data = {}
+        event_data = event.get("event_data", {})
+        # Event data is already parsed from database (no JSON parsing needed)
 
         # Try different field names for position
         position = (
             event_data.get("position")
-            or event_data.get("searchPosition")
+            or event_data.get("search_position")
             or event_data.get("rank")
             or event_data.get("index")
         )

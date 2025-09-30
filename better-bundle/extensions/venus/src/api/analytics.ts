@@ -1,174 +1,312 @@
 /**
- * Analytics API Client for BetterBundle Venus Extension
+ * Unified Analytics API Client for BetterBundle Venus Extension
  *
- * This client handles all analytics and attribution tracking separately from recommendations.
+ * This client handles all analytics and attribution tracking using the unified analytics system.
  * Follows proper separation of concerns and single responsibility principle.
  */
 
-export interface AttributionData {
+// Unified Analytics Types
+export type ExtensionContext =
+  | "homepage"
+  | "product_page"
+  | "collection_page"
+  | "cart_page"
+  | "search_page"
+  | "customer_account"
+  | "checkout_page"
+  | "order_page"
+  | "thank_you_page"
+  | "profile"
+  | "order_status"
+  | "order_history";
+
+export type InteractionType =
+  | "page_viewed"
+  | "product_viewed"
+  | "product_added_to_cart"
+  | "product_removed_from_cart"
+  | "cart_viewed"
+  | "collection_viewed"
+  | "search_submitted"
+  | "checkout_started"
+  | "checkout_completed"
+  | "customer_linked"
+  | "recommendation_viewed"
+  | "recommendation_clicked"
+  | "recommendation_add_to_cart";
+
+// Unified Analytics Request Types
+export interface UnifiedInteractionRequest {
   session_id: string;
-  product_id: string;
-  extension_type: string;
-  context: string;
-  position: number;
-  timestamp: string;
+  shop_domain: string;
+  context: ExtensionContext;
+  interaction_type: InteractionType;
+  customer_id?: string;
+  product_id?: string;
+  collection_id?: string;
+  search_query?: string;
+  page_url?: string;
+  referrer?: string;
+  time_on_page?: number;
+  scroll_depth?: number;
+  metadata: Record<string, any>;
 }
 
-export interface ViewedProduct {
-  product_id: string;
-  position: number;
+export interface UnifiedSessionRequest {
+  shop_domain: string;
+  customer_id?: string;
+  browser_session_id?: string;
+  user_agent?: string;
+  ip_address?: string;
+  referrer?: string;
+  page_url?: string;
 }
 
-export interface SessionData {
-  shop_id?: string;
-  extension_type: string;
-  context: string;
-  user_id?: string;
-  session_id: string;
-  viewed_products?: ViewedProduct[];
-  metadata?: Record<string, any>;
-}
-
-export interface InteractionData {
-  session_id: string;
-  product_id: string;
-  interaction_type:
-    | "view"
-    | "click"
-    | "add_to_cart"
-    | "buy_now"
-    | "shop_now"
-    | "purchase";
-  position?: number;
-  extension_type: string;
-  context: string;
-  metadata?: Record<string, any>;
-}
-
-export interface AttributionResponse {
+export interface UnifiedResponse {
   success: boolean;
   message: string;
-  data?: Record<string, any>;
-}
-
-export interface MetricsResponse {
-  success: boolean;
-  metrics?: {
-    total_revenue: number;
-    total_attributions: number;
-    average_confidence: number;
-    extension_breakdown: Record<string, { count: number; revenue: number }>;
-    date_range: {
-      start: string;
-      end: string;
-    };
+  data?: {
+    session_id?: string;
+    interaction_id?: string;
+    customer_id?: string;
+    browser_session_id?: string;
+    expires_at?: string;
+    extensions_used?: string[];
+    context?: ExtensionContext;
+    [key: string]: any;
   };
-  error?: string;
 }
 
 class AnalyticsApiClient {
   private baseUrl: string;
+  private currentSessionId: string | null = null;
+  private sessionExpiresAt: number | null = null;
 
   constructor() {
-    // Use the analytics service URL
-    this.baseUrl = "https://d242bda5e5c7.ngrok-free.app/api/v1/analytics";
+    // Use the unified analytics service URL
+    this.baseUrl = "https://036cff6f721b.ngrok-free.app";
   }
 
   /**
-   * Create a new recommendation session for tracking
+   * Get or create a session for Venus tracking
    */
-  async createSession(sessionData: SessionData): Promise<boolean> {
+  async getOrCreateSession(
+    shopDomain: string,
+    customerId?: string,
+  ): Promise<string> {
+    // Check if we have a valid session
+    if (
+      this.currentSessionId &&
+      this.sessionExpiresAt &&
+      Date.now() < this.sessionExpiresAt
+    ) {
+      return this.currentSessionId;
+    }
+
     try {
-      const response = await fetch(`${this.baseUrl}/session`, {
+      const url = `${this.baseUrl}/api/venus/get-or-create-session`;
+
+      const payload: UnifiedSessionRequest = {
+        shop_domain: shopDomain,
+        customer_id: customerId,
+        browser_session_id: "",
+        user_agent: navigator.userAgent,
+        ip_address: null, // Will be detected server-side
+        referrer: null,
+        page_url: null,
+      };
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(sessionData),
+        body: JSON.stringify(payload),
+        keepalive: true,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Session creation failed: ${response.status}`);
       }
 
-      const result: AttributionResponse = await response.json();
-      return result.success;
+      const result: UnifiedResponse = await response.json();
+
+      if (result.success && result.data) {
+        this.currentSessionId = result.data.session_id!;
+        // Set session to expire 30 minutes from now (server handles actual expiration)
+        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
+
+        console.log(
+          "🔄 Venus session created/retrieved:",
+          this.currentSessionId,
+        );
+        return this.currentSessionId;
+      } else {
+        throw new Error(result.message || "Failed to create session");
+      }
     } catch (error) {
-      console.error("Failed to create analytics session:", error);
-      return false;
+      console.error("💥 Venus session creation error:", error);
+      throw error;
     }
   }
 
   /**
-   * Track a recommendation interaction
+   * Track interaction using unified analytics
    */
-  async trackInteraction(interactionData: InteractionData): Promise<boolean> {
+  async trackUnifiedInteraction(
+    request: UnifiedInteractionRequest,
+  ): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/interaction`, {
+      // Get or create session first
+      const sessionId = await this.getOrCreateSession(
+        request.shop_domain,
+        request.customer_id,
+      );
+
+      // Update request with session ID
+      const interactionData = {
+        ...request,
+        session_id: sessionId,
+      };
+
+      // Send to unified analytics endpoint
+      const url = `${this.baseUrl}/api/venus/track-interaction`;
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(interactionData),
+        keepalive: true,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Interaction tracking failed: ${response.status}`);
       }
 
-      const result: AttributionResponse = await response.json();
-      return result.success;
+      const result: UnifiedResponse = await response.json();
+
+      if (result.success) {
+        console.log(
+          "✅ Venus interaction tracked:",
+          result.data?.interaction_id,
+        );
+        return true;
+      } else {
+        throw new Error(result.message || "Failed to track interaction");
+      }
     } catch (error) {
-      console.error("Failed to track interaction:", error);
+      console.error("💥 Venus interaction tracking error:", error);
       return false;
     }
   }
 
   /**
-   * Get attribution metrics for a shop
+   * Track recommendation view (when recommendations are displayed)
    */
-  async getMetrics(
-    shopId: string,
-    startDate?: string,
-    endDate?: string,
-    extensionType?: string,
-  ): Promise<MetricsResponse> {
+  async trackRecommendationView(
+    shopDomain: string,
+    context: ExtensionContext,
+    customerId?: string,
+    productIds?: string[],
+    metadata?: Record<string, any>,
+  ): Promise<boolean> {
     try {
-      const params = new URLSearchParams();
-      if (startDate) params.append("start_date", startDate);
-      if (endDate) params.append("end_date", endDate);
-      if (extensionType) params.append("extension_type", extensionType);
-
-      const response = await fetch(
-        `${this.baseUrl}/metrics/${shopId}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
+      const request: UnifiedInteractionRequest = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_domain: shopDomain,
+        context,
+        interaction_type: "recommendation_viewed",
+        customer_id: customerId,
+        page_url: null,
+        referrer: null,
+        metadata: {
+          ...metadata,
+          extension_type: "venus",
+          product_ids: productIds,
+          recommendation_count: productIds?.length || 0,
+          source: "venus_recommendation",
         },
-      );
+      };
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
+      return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to get analytics metrics:", error);
-      return { success: false, error: String(error) };
+      console.error("Failed to track recommendation view:", error);
+      return false;
     }
   }
 
   /**
-   * Health check for analytics service
+   * Track recommendation click (when user clicks on a recommendation)
    */
-  async healthCheck(): Promise<boolean> {
+  async trackRecommendationClick(
+    shopDomain: string,
+    context: ExtensionContext,
+    productId: string,
+    position: number,
+    customerId?: string,
+    metadata?: Record<string, any>,
+  ): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
+      const request: UnifiedInteractionRequest = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_domain: shopDomain,
+        context,
+        interaction_type: "recommendation_clicked",
+        customer_id: customerId,
+        product_id: productId,
+        page_url: null,
+        referrer: null,
+        metadata: {
+          ...metadata,
+          extension_type: "venus",
+          position,
+          source: "venus_recommendation",
+          interaction_type: "recommendation_clicked",
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Analytics health check failed:", error);
+      console.error("Failed to track recommendation click:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Track shop now action (when user clicks "Shop Now" button)
+   */
+  async trackShopNow(
+    shopDomain: string,
+    context: ExtensionContext,
+    productId: string,
+    position: number,
+    customerId?: string,
+    metadata?: Record<string, any>,
+  ): Promise<boolean> {
+    try {
+      const request: UnifiedInteractionRequest = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_domain: shopDomain,
+        context,
+        interaction_type: "recommendation_clicked",
+        customer_id: customerId,
+        product_id: productId,
+        page_url: null,
+        referrer: null,
+        metadata: {
+          ...metadata,
+          extension_type: "venus",
+          position,
+          source: "venus_recommendation",
+          interaction_type: "recommendation_clicked",
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
+    } catch (error) {
+      console.error("Failed to track shop now:", error);
       return false;
     }
   }
@@ -177,7 +315,10 @@ class AnalyticsApiClient {
    * Store attribution data in cart attributes for order processing
    */
   async storeCartAttribution(
-    attributionData: AttributionData,
+    sessionId: string,
+    productId: string,
+    context: ExtensionContext,
+    position: number,
   ): Promise<boolean> {
     try {
       const response = await fetch("/cart/update.js", {
@@ -185,12 +326,12 @@ class AnalyticsApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           attributes: {
-            bb_recommendation_session_id: attributionData.session_id,
-            bb_recommendation_product_id: attributionData.product_id,
-            bb_recommendation_extension: attributionData.extension_type,
-            bb_recommendation_context: attributionData.context,
-            bb_recommendation_position: attributionData.position.toString(),
-            bb_recommendation_timestamp: attributionData.timestamp,
+            bb_recommendation_session_id: sessionId,
+            bb_recommendation_product_id: productId,
+            bb_recommendation_extension: "venus",
+            bb_recommendation_context: context,
+            bb_recommendation_position: position.toString(),
+            bb_recommendation_timestamp: new Date().toISOString(),
             bb_recommendation_source: "betterbundle",
           },
         }),

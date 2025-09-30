@@ -1,7 +1,9 @@
 from typing import Optional
 from app.core.redis_client import get_redis_client
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_transaction_context
+from app.core.database.models.product_data import ProductData
 from app.core.logging import get_logger
+from sqlalchemy import select
 
 logger = get_logger(__name__)
 
@@ -10,13 +12,7 @@ class CategoryDetectionService:
     """Service to auto-detect product categories with caching"""
 
     def __init__(self):
-        self.db = None
         self.redis_client = None
-
-    async def get_database(self):
-        if self.db is None:
-            self.db = await get_database()
-        return self.db
 
     async def get_redis_client(self):
         if self.redis_client is None:
@@ -52,21 +48,21 @@ class CategoryDetectionService:
                 )
 
             # Query database
-            db = await self.get_database()
-            product = await db.productdata.find_first(
-                where={"shopId": shop_id, "productId": product_id}
-            )
+            async with get_transaction_context() as session:
+                product_result = await session.execute(
+                    select(ProductData).where(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id == product_id,
+                    )
+                )
+                product = product_result.scalar_one_or_none()
 
             category = None
             if product:
-                # Prioritize productType over collections
-                if hasattr(product, "productType") and product.productType:
-                    category = product.productType
-                elif (
-                    hasattr(product, "collections")
-                    and product.collections
-                    and len(product.collections) > 0
-                ):
+                # Prioritize product_type over collections
+                if product.product_type:
+                    category = product.product_type
+                elif product.collections and len(product.collections) > 0:
                     # Use first collection as category
                     category = (
                         product.collections[0].get("title")

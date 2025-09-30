@@ -1,17 +1,15 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
-
-  if (!session || !shop) {
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
-
   try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
+    const { payload, session, shop } = await authenticate.webhook(request);
+
+    if (!session || !shop) {
+      return json({ error: "Authentication failed" }, { status: 401 });
+    }
 
     // Extract collection data from payload
     const collection = payload;
@@ -22,42 +20,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No collection ID found" }, { status: 400 });
     }
 
-    // Get shop ID from database
-    const shopRecord = await prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { id: true },
-    });
+    const kafkaProducer = await KafkaProducerService.getInstance();
 
-    if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
+    const eventData = {
+      event_type: "collection_deleted",
+      shop_domain: shop,
+      shopify_id: collectionId,
+      timestamp: new Date().toISOString(),
+    };
 
-    // Store raw collection data for deletion event
-    await prisma.rawCollection.create({
-      data: {
-        shopId: shopRecord.id,
-        payload: collection,
-        shopifyId: collectionId,
-        shopifyCreatedAt: collection.created_at
-          ? new Date(collection.created_at)
-          : new Date(),
-        shopifyUpdatedAt: new Date(), // Use current time for deletion
-      },
-    });
-
-    console.log(
-      `✅ Collection ${collectionId} deletion event stored in raw table for shop ${shop}`,
-    );
+    await kafkaProducer.publishShopifyEvent(eventData);
 
     return json({
       success: true,
       collectionId: collectionId,
-      shopId: shopRecord.id,
-      message: "Collection deletion event stored successfully",
+      shopDomain: shop,
+      message:
+        "Collection delete webhook processed - will trigger specific data collection",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
+    console.error(`❌ Error processing collections delete webhook:`, error);
     return json(
       {
         error: "Internal server error",

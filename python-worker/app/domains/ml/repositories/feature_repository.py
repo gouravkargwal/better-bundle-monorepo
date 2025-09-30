@@ -4,9 +4,33 @@ Feature repository for handling all database operations related to ML features
 
 from typing import Dict, Any, List
 from abc import ABC, abstractmethod
+from datetime import datetime
+
+from sqlalchemy import select, insert, update, delete, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from app.core.logging import get_logger
-from app.core.database.simple_db_client import get_database
+from app.core.database.session import get_session_context
+from app.core.database.models import (
+    ProductData,
+    OrderData,
+    LineItemData,
+    CustomerData,
+    CollectionData,
+    Shop,
+    UserInteraction,
+    UserSession,
+    PurchaseAttribution,
+    ProductFeatures,
+    UserFeatures,
+    CollectionFeatures,
+    InteractionFeatures,
+    SessionFeatures,
+    CustomerBehaviorFeatures,
+    ProductPairFeatures,
+    SearchProductFeatures,
+)
 
 logger = get_logger(__name__)
 
@@ -125,13 +149,7 @@ class FeatureRepository(IFeatureRepository):
     """Repository for handling all feature-related database operations"""
 
     def __init__(self):
-        self._db_client = None
-
-    async def _get_database(self):
-        """Get or initialize the database client"""
-        if self._db_client is None:
-            self._db_client = await get_database()
-        return self._db_client
+        pass
 
     async def _bulk_upsert_dict_generic(
         self,
@@ -139,187 +157,188 @@ class FeatureRepository(IFeatureRepository):
         batch_data: List[Dict[str, Any]],
         unique_key_fields: List[str],
     ) -> int:
-        """Generic bulk upsert method using Prisma's native methods"""
+        """Generic bulk upsert method using SQLAlchemy"""
         try:
             if not batch_data:
                 return 0
 
-            db = await self._get_database()
-
-            # Map table names to actual Prisma model names
+            # Map table names to SQLAlchemy models
             model_mapping = {
-                "ProductFeatures": "productfeatures",
-                "UserFeatures": "userfeatures",
-                "CollectionFeatures": "collectionfeatures",
-                "CustomerBehaviorFeatures": "customerbehaviorfeatures",
-                "InteractionFeatures": "interactionfeatures",
-                "SessionFeatures": "sessionfeatures",
-                "ProductPairFeatures": "productpairfeatures",
-                "SearchProductFeatures": "searchproductfeatures",
+                "ProductFeatures": ProductFeatures,
+                "UserFeatures": UserFeatures,
+                "CollectionFeatures": CollectionFeatures,
+                "InteractionFeatures": InteractionFeatures,
+                "SessionFeatures": SessionFeatures,
+                "CustomerBehaviorFeatures": CustomerBehaviorFeatures,
+                "ProductPairFeatures": ProductPairFeatures,
+                "SearchProductFeatures": SearchProductFeatures,
             }
 
-            model_name = model_mapping.get(table_name)
-            if not model_name:
+            model_class = model_mapping.get(table_name)
+            if not model_class:
                 raise ValueError(f"No model mapping found for table: {table_name}")
 
-            model = getattr(db, model_name, None)
-            if not model:
-                raise ValueError(
-                    f"No model found for table: {table_name} (mapped to: {model_name})"
-                )
-
-            # Use proper upsert approach with unique constraints
-            try:
-                logger.info(
-                    f"🔍 About to upsert {len(batch_data)} records in {table_name}"
-                )
-                logger.info(
-                    f"🔍 Sample data: {batch_data[0] if batch_data else 'No data'}"
-                )
-
-                upserted_count = 0
+            async with get_session_context() as session:
+                # Prepare data for bulk upsert
+                prepared_data = []
                 for record in batch_data:
-                    try:
-                        # Build the where clause for compound unique constraints
-                        if len(unique_key_fields) == 1:
-                            # Single field unique constraint
-                            where_clause = {
-                                unique_key_fields[0]: record[unique_key_fields[0]]
-                            }
-                        else:
-                            # Compound unique constraint - use the format expected by Prisma
-                            compound_key = "_".join(unique_key_fields)
-                            where_clause = {
-                                compound_key: {
-                                    field: record[field] for field in unique_key_fields
-                                }
-                            }
+                    record["last_computed_at"] = datetime.utcnow()
+                    prepared_data.append(record)
 
-                        # Use upsert to update existing or create new
-                        await model.upsert(
-                            where=where_clause,
-                            data={"update": record, "create": record},
-                        )
-                        upserted_count += 1
-                    except Exception as upsert_error:
-                        logger.error(
-                            f"Failed to upsert {table_name} record: {str(upsert_error)}"
-                        )
-                        continue
+                # Use PostgreSQL's ON CONFLICT for efficient upsert
+                stmt = pg_insert(model_class).values(prepared_data)
 
-                logger.info(
-                    f"Successfully upserted {upserted_count}/{len(batch_data)} records in {table_name}"
+                # Define the update clause for conflict resolution
+                update_dict = {
+                    col.name: stmt.excluded[col.name]
+                    for col in model_class.__table__.columns
+                    if col.name not in ["id", "created_at"]
+                }
+
+                # Set unique constraint based on the unique key fields
+                if len(unique_key_fields) == 1:
+                    constraint_elements = unique_key_fields
+                else:
+                    constraint_elements = unique_key_fields
+
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=constraint_elements, set_=update_dict
                 )
-                return upserted_count
-            except Exception as upsert_error:
-                logger.error(f"{table_name} upsert failed: {str(upsert_error)}")
-                return 0
+
+                result = await session.execute(stmt)
+                await session.commit()
+
+                logger.info(f"Successfully upserted {len(prepared_data)} {table_name}")
+                return len(prepared_data)
 
         except Exception as e:
             logger.error(f"Failed to bulk upsert {table_name}: {str(e)}")
-            raise
-
-    async def _bulk_upsert_generic(
-        self,
-        table_name: str,
-        batch_data: List[tuple],
-        expected_length: int,
-        field_names: List[str],
-        unique_key_fields: List[str],
-    ) -> int:
-        """Generic bulk upsert method to eliminate duplication across feature types"""
-        try:
-            if not batch_data:
-                return 0
-
-            db = await self._get_database()
-
-            # Prepare data for Prisma
-            create_data = []
-            for data in batch_data:
-                if len(data) != expected_length:
-                    logger.error(
-                        f"Invalid batch data length for {table_name}: {len(data)}, expected {expected_length}. Data: {data}"
-                    )
-                    continue
-
-                # Map tuple to dict using field_names
-                feature_data = {
-                    field_names[i]: data[i] for i in range(len(field_names))
-                }
-
-                create_data.append(feature_data)
-
-            if not create_data:
-                return 0
-
-            # Get the Prisma model for the table
-            model = getattr(db, table_name.lower() + "features", None)
-            if not model:
-                raise ValueError(f"No model found for table: {table_name}")
-
-            # Use individual upserts to properly update existing records
-            success_count = 0
-            for feature_data in create_data:
-                try:
-                    # Build unique key dynamically for Prisma compound unique constraints
-                    if len(unique_key_fields) == 1:
-                        unique_key = {
-                            unique_key_fields[0]: feature_data[unique_key_fields[0]]
-                        }
-                    else:
-                        # For compound unique constraints, use the format: field1_field2_field3
-                        compound_key = "_".join(unique_key_fields)
-                        unique_key = {
-                            compound_key: {
-                                field: feature_data[field]
-                                for field in unique_key_fields
-                            }
-                        }
-                    await model.upsert(
-                        where=unique_key,
-                        data={"create": feature_data, "update": feature_data},
-                    )
-                    success_count += 1
-                except Exception as upsert_error:
-                    logger.error(
-                        f"Failed to upsert {table_name} feature: {str(upsert_error)}"
-                    )
-                    continue
-
-            return success_count
-
-        except Exception as e:
-            logger.error(f"Failed to bulk upsert {table_name} features: {str(e)}")
             return 0
 
     async def bulk_upsert_product_features(
         self, batch_data: List[Dict[str, Any]]
     ) -> int:
-        """Bulk upsert product features using dictionary data structure"""
-        return await self._bulk_upsert_dict_generic(
-            table_name="ProductFeatures",
-            batch_data=batch_data,
-            unique_key_fields=["shopId", "productId"],
-        )
+        """Bulk upsert product features using SQLAlchemy"""
+        if not batch_data:
+            return 0
+
+        try:
+            async with get_session_context() as session:
+                # Data is already in snake_case format
+                prepared_data = []
+                for record in batch_data:
+                    record["last_computed_at"] = datetime.utcnow()
+                    prepared_data.append(record)
+
+                # Use PostgreSQL's ON CONFLICT for efficient upsert
+                stmt = pg_insert(ProductFeatures).values(prepared_data)
+
+                # Define the update clause for conflict resolution
+                update_dict = {
+                    col.name: stmt.excluded[col.name]
+                    for col in ProductFeatures.__table__.columns
+                    if col.name not in ["id", "shop_id", "product_id", "created_at"]
+                }
+
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["shop_id", "product_id"], set_=update_dict
+                )
+
+                result = await session.execute(stmt)
+                await session.commit()
+
+                logger.info(
+                    f"Successfully upserted {len(prepared_data)} product features"
+                )
+                return len(prepared_data)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to bulk upsert product features: {str(e)}", exc_info=True
+            )
+            return 0
 
     async def bulk_upsert_user_features(self, batch_data: List[Dict[str, Any]]) -> int:
-        """Bulk upsert user features using dictionary data structure"""
-        return await self._bulk_upsert_dict_generic(
-            table_name="UserFeatures",
-            batch_data=batch_data,
-            unique_key_fields=["shopId", "customerId"],
-        )
+        """Bulk upsert user features using SQLAlchemy"""
+        if not batch_data:
+            return 0
+
+        try:
+            async with get_session_context() as session:
+                # Data is already in snake_case format
+                prepared_data = []
+                for record in batch_data:
+                    record["last_computed_at"] = datetime.utcnow()
+                    prepared_data.append(record)
+
+                # Use PostgreSQL's ON CONFLICT for efficient upsert
+                stmt = pg_insert(UserFeatures).values(prepared_data)
+
+                # Define the update clause for conflict resolution
+                update_dict = {
+                    col.name: stmt.excluded[col.name]
+                    for col in UserFeatures.__table__.columns
+                    if col.name not in ["id", "shop_id", "customer_id", "created_at"]
+                }
+
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["shop_id", "customer_id"], set_=update_dict
+                )
+
+                result = await session.execute(stmt)
+                await session.commit()
+
+                logger.info(f"Successfully upserted {len(prepared_data)} user features")
+                return len(prepared_data)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to bulk upsert user features: {str(e)}", exc_info=True
+            )
+            return 0
 
     async def bulk_upsert_collection_features(
         self, batch_data: List[Dict[str, Any]]
     ) -> int:
-        """Bulk upsert collection features using dictionary data structure"""
-        return await self._bulk_upsert_dict_generic(
-            table_name="CollectionFeatures",
-            batch_data=batch_data,
-            unique_key_fields=["shopId", "collectionId"],
-        )
+        """Bulk upsert collection features using SQLAlchemy"""
+        if not batch_data:
+            return 0
+
+        try:
+            async with get_session_context() as session:
+                # Data is already in snake_case format
+                prepared_data = []
+                for record in batch_data:
+                    record["last_computed_at"] = datetime.utcnow()
+                    prepared_data.append(record)
+
+                # Use PostgreSQL's ON CONFLICT for efficient upsert
+                stmt = pg_insert(CollectionFeatures).values(prepared_data)
+
+                # Define the update clause for conflict resolution
+                update_dict = {
+                    col.name: stmt.excluded[col.name]
+                    for col in CollectionFeatures.__table__.columns
+                    if col.name not in ["id", "shop_id", "collection_id", "created_at"]
+                }
+
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["shop_id", "collection_id"], set_=update_dict
+                )
+
+                result = await session.execute(stmt)
+                await session.commit()
+
+                logger.info(
+                    f"Successfully upserted {len(prepared_data)} collection features"
+                )
+                return len(prepared_data)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to bulk upsert collection features: {str(e)}", exc_info=True
+            )
+            return 0
 
     async def bulk_upsert_interaction_features(
         self, batch_data: List[Dict[str, Any]]
@@ -328,7 +347,7 @@ class FeatureRepository(IFeatureRepository):
         return await self._bulk_upsert_dict_generic(
             table_name="InteractionFeatures",
             batch_data=batch_data,
-            unique_key_fields=["shopId", "customerId", "productId"],
+            unique_key_fields=["shop_id", "customer_id", "product_id"],
         )
 
     async def bulk_upsert_session_features(
@@ -338,7 +357,7 @@ class FeatureRepository(IFeatureRepository):
         return await self._bulk_upsert_dict_generic(
             table_name="SessionFeatures",
             batch_data=batch_data,
-            unique_key_fields=["shopId", "sessionId"],
+            unique_key_fields=["shop_id", "session_id"],
         )
 
     async def bulk_upsert_customer_behavior_features(
@@ -348,7 +367,7 @@ class FeatureRepository(IFeatureRepository):
         return await self._bulk_upsert_dict_generic(
             table_name="CustomerBehaviorFeatures",
             batch_data=batch_data,
-            unique_key_fields=["shopId", "customerId"],
+            unique_key_fields=["shop_id", "customer_id"],
         )
 
     async def bulk_upsert_product_pair_features(
@@ -358,7 +377,7 @@ class FeatureRepository(IFeatureRepository):
         return await self._bulk_upsert_dict_generic(
             table_name="ProductPairFeatures",
             batch_data=batch_data,
-            unique_key_fields=["shopId", "productId1", "productId2"],
+            unique_key_fields=["shop_id", "product_id1", "product_id2"],
         )
 
     async def bulk_upsert_search_product_features(
@@ -368,115 +387,199 @@ class FeatureRepository(IFeatureRepository):
         return await self._bulk_upsert_dict_generic(
             table_name="SearchProductFeatures",
             batch_data=batch_data,
-            unique_key_fields=["shopId", "searchQuery", "productId"],
+            unique_key_fields=["shop_id", "search_query", "product_id"],
         )
 
     async def get_products_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of products for a shop from main table"""
+        """Get a batch of products for a shop from main table using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "ProductData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(ProductData)
+                    .where(ProductData.shop_id == shop_id)
+                    .order_by(ProductData.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                products = result.scalars().all()
+
+                # Convert to dictionaries
+                return [product.to_dict() for product in products]
+
         except Exception as e:
-            logger.error(f"Failed to get products batch for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get products batch for shop {shop_id}: {str(e)}",
+                exc_info=True,
+            )
             return []
 
     async def get_orders_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of orders for a shop from main table"""
+        """Get a batch of orders for a shop from main table using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "OrderData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(OrderData)
+                    .where(OrderData.shop_id == shop_id)
+                    .order_by(OrderData.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                orders = result.scalars().all()
+
+                # Convert to dictionaries and include line items
+                orders_data = []
+                for order in orders:
+                    order_dict = order.to_dict()
+
+                    # Get line items for this order
+                    line_items_stmt = select(LineItemData).where(
+                        LineItemData.order_id == order.id
+                    )
+                    line_items_result = await session.execute(line_items_stmt)
+                    line_items = line_items_result.scalars().all()
+
+                    order_dict["line_items"] = [
+                        line_item.to_dict() for line_item in line_items
+                    ]
+                    orders_data.append(order_dict)
+
+                return orders_data
+
         except Exception as e:
-            logger.error(f"Failed to get orders batch for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get orders batch for shop {shop_id}: {str(e)}",
+                exc_info=True,
+            )
             return []
 
     async def get_customers_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of customers for a shop from main table"""
+        """Get a batch of customers for a shop from main table using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "CustomerData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(CustomerData)
+                    .where(CustomerData.shop_id == shop_id)
+                    .order_by(CustomerData.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                customers = result.scalars().all()
+
+                # Convert to dictionaries
+                return [customer.to_dict() for customer in customers]
+
         except Exception as e:
-            logger.error(f"Failed to get customers batch for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get customers batch for shop {shop_id}: {str(e)}",
+                exc_info=True,
+            )
             return []
 
     async def get_collections_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of collections for a shop from main table"""
+        """Get a batch of collections for a shop from main table using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "CollectionData" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(CollectionData)
+                    .where(CollectionData.shop_id == shop_id)
+                    .order_by(CollectionData.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                collections = result.scalars().all()
+
+                # Convert to dictionaries
+                return [collection.to_dict() for collection in collections]
+
         except Exception as e:
             logger.error(
-                f"Failed to get collections batch for shop {shop_id}: {str(e)}"
+                f"Failed to get collections batch for shop {shop_id}: {str(e)}",
+                exc_info=True,
             )
             return []
 
     async def get_events_batch(
         self, shop_id: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
-        """Get a batch of events for a shop"""
+        """Get a batch of user interactions for a shop using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "ShopifyE" WHERE "shopId" = $1 ORDER BY "id" LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserInteraction)
+                    .where(UserInteraction.shop_id == shop_id)
+                    .order_by(UserInteraction.id)
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
+
+                # Convert to dictionaries
+                return [interaction.to_dict() for interaction in interactions]
+
         except Exception as e:
-            logger.error(f"Failed to get events batch for shop {shop_id}: {str(e)}")
+            logger.error(
+                f"Failed to get events batch for shop {shop_id}: {str(e)}",
+                exc_info=True,
+            )
             return []
 
     async def get_last_feature_computation_time(self, shop_id: str) -> str:
-        """Get the last feature computation timestamp for a shop by checking feature tables"""
+        """Get the last feature computation timestamp for a shop by checking feature tables using SQLAlchemy"""
         try:
-            db = await self._get_database()
+            async with get_session_context() as session:
+                latest_timestamp = None
 
-            # Get the most recent feature computation time from all feature tables
-            feature_tables = [
-                db.productfeatures,
-                db.customerbehaviorfeatures,
-                db.collectionfeatures,
-                db.userfeatures,
-                db.interactionfeatures,
-                db.sessionfeatures,
-                db.productpairfeatures,
-                db.searchproductfeatures,
-            ]
+                # Get the most recent feature computation time from all feature tables
+                feature_models = [
+                    ProductFeatures,
+                    CustomerBehaviorFeatures,
+                    CollectionFeatures,
+                    UserFeatures,
+                    InteractionFeatures,
+                    SessionFeatures,
+                    ProductPairFeatures,
+                    SearchProductFeatures,
+                ]
 
-            latest_timestamp = None
-            for table in feature_tables:
-                try:
-                    # Get the most recent record for this shop based on lastComputedAt
-                    latest_record = await table.find_first(
-                        where={"shopId": shop_id}, order={"lastComputedAt": "desc"}
-                    )
-                    if latest_record and latest_record.lastComputedAt:
-                        if (
-                            latest_timestamp is None
-                            or latest_record.lastComputedAt > latest_timestamp
-                        ):
-                            latest_timestamp = latest_record.lastComputedAt
-                except Exception as e:
-                    logger.warning(f"Could not check feature table {table}: {str(e)}")
-                    continue
+                for model_class in feature_models:
+                    try:
+                        # Get the most recent record for this shop based on last_computed_at
+                        stmt = (
+                            select(model_class.last_computed_at)
+                            .where(model_class.shop_id == shop_id)
+                            .order_by(model_class.last_computed_at.desc())
+                            .limit(1)
+                        )
+                        result = await session.execute(stmt)
+                        record_timestamp = result.scalar()
 
-            if latest_timestamp:
-                return latest_timestamp.isoformat()
-            else:
-                # Return a very old timestamp for first run
-                return "1970-01-01T00:00:00Z"
+                        if record_timestamp:
+                            if (
+                                latest_timestamp is None
+                                or record_timestamp > latest_timestamp
+                            ):
+                                latest_timestamp = record_timestamp
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not check feature table {model_class.__tablename__}: {str(e)}"
+                        )
+                        continue
+
+                if latest_timestamp:
+                    return latest_timestamp.isoformat()
 
         except Exception as e:
             logger.error(
@@ -485,12 +588,13 @@ class FeatureRepository(IFeatureRepository):
             return "1970-01-01T00:00:00Z"
 
     async def get_shop_data(self, shop_id: str) -> Dict[str, Any]:
-        """Get shop data for processing"""
+        """Get shop data for processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "Shop" WHERE "id" = $1'
-            result = await db.query_raw(query, shop_id)
-            return dict(result[0]) if result else None
+            async with get_session_context() as session:
+                stmt = select(Shop).where(Shop.id == shop_id)
+                result = await session.execute(stmt)
+                shop = result.scalar_one_or_none()
+                return shop.to_dict() if shop else None
         except Exception as e:
             logger.error(f"Failed to get shop data for shop {shop_id}: {str(e)}")
             return None
@@ -498,12 +602,19 @@ class FeatureRepository(IFeatureRepository):
     async def get_behavioral_events_batch(
         self, shop_id: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get a batch of behavioral events for a shop"""
+        """Get a batch of behavioral events for a shop using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            query = 'SELECT * FROM "BehavioralEvents" WHERE "shopId" = $1 ORDER BY "timestamp" DESC LIMIT $2 OFFSET $3'
-            result = await db.query_raw(query, shop_id, limit, offset)
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserInteraction)
+                    .where(UserInteraction.shop_id == shop_id)
+                    .order_by(UserInteraction.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
+                return [interaction.to_dict() for interaction in interactions]
         except Exception as e:
             logger.error(
                 f"Failed to get behavioral events batch for shop {shop_id}: {str(e)}"
@@ -514,23 +625,27 @@ class FeatureRepository(IFeatureRepository):
     async def get_products_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get products modified since a specific timestamp for incremental processing"""
+        """Get products modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            logger.info(f"Querying products since {since_timestamp} for shop {shop_id}")
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
 
-            # Use Prisma's native find_many with where conditions
-            result = await db.productdata.find_many(
-                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
-                order={"updatedAt": "asc"},
-                take=limit,
-                skip=offset,
-            )
-
-            logger.info(
-                f"Found {len(result)} products modified since {since_timestamp}"
-            )
-            return [dict(row) for row in result] if result else []
+            async with get_session_context() as session:
+                stmt = (
+                    select(ProductData)
+                    .where(
+                        ProductData.shop_id == shop_id,
+                        ProductData.updated_at > since_dt,
+                    )
+                    .order_by(ProductData.updated_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                products = result.scalars().all()
+                return [product.to_dict() for product in products]
         except Exception as e:
             logger.error(
                 f"Failed to get products batch since {since_timestamp} for shop {shop_id}: {str(e)}"
@@ -540,17 +655,27 @@ class FeatureRepository(IFeatureRepository):
     async def get_customers_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get customers modified since a specific timestamp for incremental processing"""
+        """Get customers modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            # Use Prisma's native find_many with where conditions
-            result = await db.customerdata.find_many(
-                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
-                order={"updatedAt": "asc"},
-                take=limit,
-                skip=offset,
-            )
-            return [dict(row) for row in result] if result else []
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(CustomerData)
+                    .where(
+                        CustomerData.shop_id == shop_id,
+                        CustomerData.updated_at > since_dt,
+                    )
+                    .order_by(CustomerData.updated_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                customers = result.scalars().all()
+                return [customer.to_dict() for customer in customers]
         except Exception as e:
             logger.error(
                 f"Failed to get customers batch since {since_timestamp} for shop {shop_id}: {str(e)}"
@@ -560,17 +685,45 @@ class FeatureRepository(IFeatureRepository):
     async def get_orders_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get orders modified since a specific timestamp for incremental processing"""
+        """Get orders modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            # Use Prisma's native find_many with where conditions
-            result = await db.orderdata.find_many(
-                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
-                order={"updatedAt": "asc"},
-                take=limit,
-                skip=offset,
-            )
-            return [dict(row) for row in result] if result else []
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(OrderData)
+                    .where(
+                        OrderData.shop_id == shop_id,
+                        OrderData.updated_at > since_dt,
+                    )
+                    .order_by(OrderData.updated_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                orders = result.scalars().all()
+
+                # Convert to dictionaries and include line items
+                orders_data = []
+                for order in orders:
+                    order_dict = order.to_dict()
+
+                    # Get line items for this order
+                    line_items_stmt = select(LineItemData).where(
+                        LineItemData.order_id == order.id
+                    )
+                    line_items_result = await session.execute(line_items_stmt)
+                    line_items = line_items_result.scalars().all()
+
+                    order_dict["line_items"] = [
+                        line_item.to_dict() for line_item in line_items
+                    ]
+                    orders_data.append(order_dict)
+
+                return orders_data
         except Exception as e:
             logger.error(
                 f"Failed to get orders batch since {since_timestamp} for shop {shop_id}: {str(e)}"
@@ -580,17 +733,27 @@ class FeatureRepository(IFeatureRepository):
     async def get_collections_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get collections modified since a specific timestamp for incremental processing"""
+        """Get collections modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            # Use Prisma's native find_many with where conditions
-            result = await db.collectiondata.find_many(
-                where={"shopId": shop_id, "updatedAt": {"gt": since_timestamp}},
-                order={"updatedAt": "asc"},
-                take=limit,
-                skip=offset,
-            )
-            return [dict(row) for row in result] if result else []
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(CollectionData)
+                    .where(
+                        CollectionData.shop_id == shop_id,
+                        CollectionData.updated_at > since_dt,
+                    )
+                    .order_by(CollectionData.updated_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                collections = result.scalars().all()
+                return [collection.to_dict() for collection in collections]
         except Exception as e:
             logger.error(
                 f"Failed to get collections batch since {since_timestamp} for shop {shop_id}: {str(e)}"
@@ -600,57 +763,226 @@ class FeatureRepository(IFeatureRepository):
     async def get_behavioral_events_batch_since(
         self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get behavioral events since a specific timestamp for incremental processing"""
+        """Get behavioral events since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
-            db = await self._get_database()
-            # Use Prisma's native find_many with where conditions
-            result = await db.behavioralevents.find_many(
-                where={"shopId": shop_id, "timestamp": {"gt": since_timestamp}},
-                order={"timestamp": "asc"},
-                take=limit,
-                skip=offset,
-            )
-            return [dict(row) for row in result] if result else []
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserInteraction)
+                    .where(
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.created_at > since_dt,
+                    )
+                    .order_by(UserInteraction.created_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
+                return [interaction.to_dict() for interaction in interactions]
         except Exception as e:
             logger.error(
                 f"Failed to get behavioral events batch since {since_timestamp} for shop {shop_id}: {str(e)}"
             )
             return []
 
-    async def get_feature_counts_for_shop(self, shop_id: str) -> Dict[str, int]:
-        """Get counts of existing features for a shop to determine if incremental processing is needed"""
+    # Unified Analytics Data Loading Methods
+    async def get_user_interactions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of user interactions for a shop using SQLAlchemy"""
         try:
-            db = await self._get_database()
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserInteraction)
+                    .where(UserInteraction.shop_id == shop_id)
+                    .order_by(UserInteraction.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
+                return [interaction.to_dict() for interaction in interactions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get user interactions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
 
-            # Count features across all feature tables using Prisma
-            counts = {}
-            total_count = 0
+    async def get_user_interactions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get user interactions since a specific timestamp for incremental processing using SQLAlchemy"""
+        try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
 
-            # Use Prisma's count method for each feature table
-            feature_models = [
-                ("productfeatures", db.productfeatures),
-                ("userfeatures", db.userfeatures),
-                ("collectionfeatures", db.collectionfeatures),
-                ("customerbehaviorfeatures", db.customerbehaviorfeatures),
-                ("sessionfeatures", db.sessionfeatures),
-                ("interactionfeatures", db.interactionfeatures),
-                ("productpairfeatures", db.productpairfeatures),
-                ("searchproductfeatures", db.searchproductfeatures),
-            ]
-
-            for table_name, model in feature_models:
-                try:
-                    count = await model.count(where={"shopId": shop_id})
-                    counts[table_name] = count
-                    total_count += count
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to count features in {table_name}: {str(e)}"
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserInteraction)
+                    .where(
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.created_at > since_dt,
                     )
-                    counts[table_name] = 0
+                    .order_by(UserInteraction.created_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
+                return [interaction.to_dict() for interaction in interactions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get user interactions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
 
-            counts["total"] = total_count
-            return counts
+    async def get_user_sessions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of user sessions for a shop using SQLAlchemy"""
+        try:
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserSession)
+                    .where(UserSession.shop_id == shop_id)
+                    .order_by(UserSession.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
+                return [session.to_dict() for session in sessions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get user sessions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_user_sessions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get user sessions since a specific timestamp for incremental processing using SQLAlchemy"""
+        try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(UserSession)
+                    .where(
+                        UserSession.shop_id == shop_id,
+                        UserSession.created_at > since_dt,
+                    )
+                    .order_by(UserSession.created_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
+                return [session.to_dict() for session in sessions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get user sessions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_purchase_attributions_batch(
+        self, shop_id: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get a batch of purchase attributions for a shop using SQLAlchemy"""
+        try:
+            async with get_session_context() as session:
+                stmt = (
+                    select(PurchaseAttribution)
+                    .where(PurchaseAttribution.shop_id == shop_id)
+                    .order_by(PurchaseAttribution.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                attributions = result.scalars().all()
+                return [attribution.to_dict() for attribution in attributions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get purchase attributions batch for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_purchase_attributions_batch_since(
+        self, shop_id: str, since_timestamp: str, limit: int, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Get purchase attributions since a specific timestamp for incremental processing using SQLAlchemy"""
+        try:
+            # Convert string timestamp to datetime object
+            since_dt = datetime.fromisoformat(
+                since_timestamp.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+            async with get_session_context() as session:
+                stmt = (
+                    select(PurchaseAttribution)
+                    .where(
+                        PurchaseAttribution.shop_id == shop_id,
+                        PurchaseAttribution.created_at > since_dt,
+                    )
+                    .order_by(PurchaseAttribution.created_at.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.execute(stmt)
+                attributions = result.scalars().all()
+                return [attribution.to_dict() for attribution in attributions]
+        except Exception as e:
+            logger.error(
+                f"Failed to get purchase attributions batch since {since_timestamp} for shop {shop_id}: {str(e)}"
+            )
+            return []
+
+    async def get_feature_counts_for_shop(self, shop_id: str) -> Dict[str, int]:
+        """Get counts of existing features for a shop to determine if incremental processing is needed using SQLAlchemy"""
+        try:
+            async with get_session_context() as session:
+                counts = {}
+                total_count = 0
+
+                # Count features across all feature tables using SQLAlchemy
+                feature_models = [
+                    ("product_features", ProductFeatures),
+                    ("user_features", UserFeatures),
+                    ("collection_features", CollectionFeatures),
+                    ("customer_behavior_features", CustomerBehaviorFeatures),
+                    ("session_features", SessionFeatures),
+                    ("interaction_features", InteractionFeatures),
+                    ("product_pair_features", ProductPairFeatures),
+                    ("search_product_features", SearchProductFeatures),
+                ]
+
+                for table_name, model_class in feature_models:
+                    try:
+                        stmt = select(func.count(model_class.id)).where(
+                            model_class.shop_id == shop_id
+                        )
+                        result = await session.execute(stmt)
+                        count = result.scalar() or 0
+                        counts[table_name] = count
+                        total_count += count
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to count features in {table_name}: {str(e)}"
+                        )
+                        counts[table_name] = 0
+
+                counts["total"] = total_count
+                return counts
 
         except Exception as e:
             logger.error(f"Failed to get feature counts for shop {shop_id}: {str(e)}")

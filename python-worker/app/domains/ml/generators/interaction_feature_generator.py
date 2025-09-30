@@ -5,11 +5,9 @@ Aligned with InteractionFeatures table schema
 
 import datetime
 from typing import Dict, Any, List, Optional
-import statistics
-from datetime import timedelta
-
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -18,6 +16,10 @@ logger = get_logger(__name__)
 
 class InteractionFeatureGenerator(BaseFeatureGenerator):
     """Feature generator for customer-product interactions"""
+
+    def __init__(self):
+        super().__init__()
+        self.adapter_factory = InteractionEventAdapterFactory()
 
     async def generate_features(
         self,
@@ -40,10 +42,6 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             Dictionary matching InteractionFeatures table schema
         """
         try:
-            logger.debug(
-                f"Computing interaction features for shop: {shop_id}, "
-                f"customer: {customer_id}, product: {product_id}"
-            )
 
             # Get relevant data from context
             behavioral_events = context.get("behavioral_events", [])
@@ -88,29 +86,29 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
             refund_metrics = self._compute_refund_metrics(product_purchases, orders)
 
             features = {
-                "shopId": shop_id,
-                "customerId": customer_id,
-                "productId": product_id,
-                "viewCount": view_count,
-                "cartAddCount": cart_add_count,
-                "cartViewCount": cart_view_count,
-                "cartRemoveCount": cart_remove_count,
-                "purchaseCount": purchase_count,
-                "firstViewDate": temporal_features.get("first_view_date"),
-                "lastViewDate": temporal_features.get("last_view_date"),
-                "firstPurchaseDate": temporal_features.get("first_purchase_date"),
-                "lastPurchaseDate": temporal_features.get("last_purchase_date"),
-                "viewToPurchaseDays": temporal_features.get("view_to_purchase_days"),
-                "interactionSpanDays": temporal_features.get("interaction_span_days"),
-                "interactionScore": interaction_score,
-                "affinityScore": affinity_score,
+                "shop_id": shop_id,
+                "customer_id": customer_id,
+                "product_id": product_id,
+                "view_count": view_count,
+                "cart_add_count": cart_add_count,
+                "cart_view_count": cart_view_count,
+                "cart_remove_count": cart_remove_count,
+                "purchase_count": purchase_count,
+                "first_view_date": temporal_features.get("first_view_date"),
+                "last_view_date": temporal_features.get("last_view_date"),
+                "first_purchase_date": temporal_features.get("first_purchase_date"),
+                "last_purchase_date": temporal_features.get("last_purchase_date"),
+                "view_to_purchase_days": temporal_features.get("view_to_purchase_days"),
+                "interaction_span_days": temporal_features.get("interaction_span_days"),
+                "interaction_score": interaction_score,
+                "affinity_score": affinity_score,
                 # Refund metrics (NEW)
-                "refundedPurchases": refund_metrics["refunded_purchases"],
-                "refundRate": refund_metrics["refund_rate"],
-                "totalRefundedAmount": refund_metrics["total_refunded_amount"],
-                "netPurchaseValue": refund_metrics["net_purchase_value"],
-                "refundRiskScore": refund_metrics["refund_risk_score"],
-                "lastComputedAt": now_utc(),
+                "refunded_purchases": refund_metrics["refunded_purchases"],
+                "refund_rate": refund_metrics["refund_rate"],
+                "total_refunded_amount": refund_metrics["total_refunded_amount"],
+                "net_purchase_value": refund_metrics["net_purchase_value"],
+                "refund_risk_score": refund_metrics["refund_risk_score"],
+                "last_computed_at": now_utc(),
             }
 
             logger.debug(
@@ -157,41 +155,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return filtered_events
 
     def _extract_product_id_from_event(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from behavioral event"""
-        event_type = event.get("eventType", "")
-        event_data = event.get("eventData", {})
-
-        if event_type == "product_viewed":
-            # Handle both nested and direct structures
-            product_variant = event_data.get("data", {}).get(
-                "productVariant", {}
-            ) or event_data.get("productVariant", {})
-            product = product_variant.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "product_added_to_cart":
-            # Handle both nested and direct structures
-            cart_line = event_data.get("data", {}).get(
-                "cartLine", {}
-            ) or event_data.get("cartLine", {})
-            merchandise = cart_line.get("merchandise", {})
-            product = merchandise.get("product", {})
-            return product.get("id", "")
-
-        elif event_type == "checkout_completed":
-            # For checkout, we'd need to check all line items
-            checkout = event_data.get("data", {}).get("checkout", {}) or event_data.get(
-                "checkout", {}
-            )
-            line_items = checkout.get("lineItems", [])
-            for item in line_items:
-                variant = item.get("variant", {})
-                product = variant.get("product", {})
-                product_id = product.get("id", "")
-                if product_id:
-                    return product_id
-
-        return None
+        """Extract product ID from behavioral event using adapter pattern"""
+        return self.adapter_factory.extract_product_id(event)
 
     def _get_product_purchases(
         self,
@@ -206,12 +171,17 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         for order in orders:
             # Check if order is for this customer
             # Customer IDs are already normalized at data ingestion level
-            order_customer_id = order.get("customerId", "")
+            # Use snake_case field names as they come from the database
+            order_customer_id = order.get("customer_id", "")
             if order_customer_id != customer_id:
                 continue
 
             # Check line items for this product
-            line_items = order.get("lineItems", [])
+            # Use snake_case field names as they come from the database
+            line_items = order.get("line_items", [])
+            if line_items is None:
+                line_items = []
+
             for item in line_items:
                 # Extract product ID from line item
                 # Note: You might need to adjust this based on your line item structure
@@ -224,8 +194,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                     if mapped_product_id == product_id:
                         purchases.append(
                             {
-                                "order_id": order.get("orderId"),
-                                "order_date": order.get("orderDate"),
+                                "order_id": order.get("order_id"),
+                                "order_date": order.get("order_date"),
                                 "quantity": item.get("quantity", 1),
                                 "price": item.get("price", 0.0),
                             }
@@ -235,8 +205,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
                     # Fallback to direct comparison if no mapping provided
                     purchases.append(
                         {
-                            "order_id": order.get("orderId"),
-                            "order_date": order.get("orderDate"),
+                            "order_id": order.get("order_id"),
+                            "order_date": order.get("order_date"),
                             "quantity": item.get("quantity", 1),
                             "price": item.get("price", 0.0),
                         }
@@ -247,10 +217,10 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
 
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        # This depends on your line item structure
-        # Might be stored as productId, product.id, or in a variant
-        if "productId" in line_item:
-            return line_item["productId"]
+        # Use snake_case field names as they come from the database
+        # The LineItemData model stores product_id directly
+        if "product_id" in line_item:
+            return line_item["product_id"]
 
         # If stored as GID
         if "product" in line_item and isinstance(line_item["product"], dict):
@@ -266,7 +236,9 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
     def _count_product_views(self, product_events: List[Dict[str, Any]]) -> int:
         """Count product view events"""
         return sum(
-            1 for event in product_events if event.get("eventType") == "product_viewed"
+            1
+            for event in product_events
+            if event.get("interactionType", event.get("eventType")) == "product_viewed"
         )
 
     def _count_cart_adds(self, product_events: List[Dict[str, Any]]) -> int:
@@ -274,13 +246,16 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return sum(
             1
             for event in product_events
-            if event.get("eventType") == "product_added_to_cart"
+            if event.get("interactionType", event.get("eventType"))
+            == "product_added_to_cart"
         )
 
     def _count_cart_views(self, product_events: List[Dict[str, Any]]) -> int:
         """Count cart view events"""
         return sum(
-            1 for event in product_events if event.get("eventType") == "cart_viewed"
+            1
+            for event in product_events
+            if event.get("interactionType", event.get("eventType")) == "cart_viewed"
         )
 
     def _count_cart_removes(self, product_events: List[Dict[str, Any]]) -> int:
@@ -288,7 +263,8 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
         return sum(
             1
             for event in product_events
-            if event.get("eventType") == "product_removed_from_cart"
+            if event.get("interactionType", event.get("eventType"))
+            == "product_removed_from_cart"
         )
 
     def _compute_temporal_features(
@@ -422,27 +398,27 @@ class InteractionFeatureGenerator(BaseFeatureGenerator):
     ) -> Dict[str, Any]:
         """Return default features when computation fails"""
         return {
-            "shopId": shop_id,
-            "customerId": customer_id,
-            "productId": product_id,
-            "viewCount": 0,
-            "cartAddCount": 0,
-            "purchaseCount": 0,
-            "firstViewDate": None,
-            "lastViewDate": None,
-            "firstPurchaseDate": None,
-            "lastPurchaseDate": None,
-            "viewToPurchaseDays": None,
-            "interactionSpanDays": None,
-            "interactionScore": 0.0,
-            "affinityScore": 0.0,
+            "shop_id": shop_id,
+            "customer_id": customer_id,
+            "product_id": product_id,
+            "view_count": 0,
+            "cart_add_count": 0,
+            "purchase_count": 0,
+            "first_view_date": None,
+            "last_view_date": None,
+            "first_purchase_date": None,
+            "last_purchase_date": None,
+            "view_to_purchase_days": None,
+            "interaction_span_days": None,
+            "interaction_score": 0.0,
+            "affinity_score": 0.0,
             # Refund metrics (NEW)
-            "refundedPurchases": 0,
-            "refundRate": 0.0,
-            "totalRefundedAmount": 0.0,
-            "netPurchaseValue": 0.0,
-            "refundRiskScore": 0.0,
-            "lastComputedAt": now_utc(),
+            "refunded_purchases": 0,
+            "refund_rate": 0.0,
+            "total_refunded_amount": 0.0,
+            "net_purchase_value": 0.0,
+            "refund_risk_score": 0.0,
+            "last_computed_at": now_utc(),
         }
 
     def _compute_refund_metrics(

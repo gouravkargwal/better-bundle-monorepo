@@ -18,6 +18,7 @@ interface ActivityItemProps {
   recommendations: number;
   clicks: number;
   revenue: number;
+  customers: number;
   currencyCode: string;
   isHighlighted?: boolean;
 }
@@ -27,6 +28,7 @@ function ActivityItem({
   recommendations,
   clicks,
   revenue,
+  customers,
   currencyCode,
   isHighlighted,
 }: ActivityItemProps) {
@@ -76,6 +78,14 @@ function ActivityItem({
         </BlockStack>
         <BlockStack gap="100">
           <Text as="span" variant="bodySm" tone="subdued">
+            Customers
+          </Text>
+          <Text as="span" variant="bodyMd" fontWeight="bold">
+            {customers.toLocaleString()}
+          </Text>
+        </BlockStack>
+        <BlockStack gap="100">
+          <Text as="span" variant="bodySm" tone="subdued">
             Conv. Rate
           </Text>
           <Text as="span" variant="bodyMd" fontWeight="bold">
@@ -89,46 +99,71 @@ function ActivityItem({
 
 export function RecentActivity({ data }: RecentActivityProps) {
   return (
-    <Card>
-      <BlockStack gap="400">
-        <Text as="h2" variant="headingLg">
-          Recent Activity
-        </Text>
-        <Text as="p" variant="bodyMd" tone="subdued">
-          Performance over the last few days
-        </Text>
+    <BlockStack gap="500">
+      <div
+        style={{
+          padding: "24px",
+          backgroundColor: "#ECFDF5",
+          borderRadius: "12px",
+          border: "1px solid #A7F3D0",
+        }}
+      >
+        <div style={{ color: "#065F46" }}>
+          <Text as="h2" variant="headingLg" fontWeight="bold">
+            ⚡ Recent Activity
+          </Text>
+        </div>
+        <div style={{ marginTop: "8px" }}>
+          <Text as="p" variant="bodyMd" tone="subdued">
+            Performance over the last few days
+          </Text>
+        </div>
+      </div>
 
-        <BlockStack gap="300">
-          <ActivityItem
-            period="Today"
-            recommendations={data.today.recommendations}
-            clicks={data.today.clicks}
-            revenue={data.today.revenue}
-            currencyCode={data.currency_code}
-            isHighlighted={true}
-          />
+      <Card>
+        <BlockStack gap="400">
+          <Text as="h3" variant="headingMd" fontWeight="medium">
+            Daily Performance
+          </Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Track your extension performance day by day
+          </Text>
 
-          <Divider />
+          <BlockStack gap="300">
+            <ActivityItem
+              period="Today"
+              recommendations={data.today.recommendations}
+              clicks={data.today.clicks}
+              revenue={data.today.revenue}
+              customers={data.today.customers}
+              currencyCode={data.currency_code}
+              isHighlighted={true}
+            />
 
-          <ActivityItem
-            period="Yesterday"
-            recommendations={data.yesterday.recommendations}
-            clicks={data.yesterday.clicks}
-            revenue={data.yesterday.revenue}
-            currencyCode={data.currency_code}
-          />
+            <Divider />
 
-          <Divider />
+            <ActivityItem
+              period="Yesterday"
+              recommendations={data.yesterday.recommendations}
+              clicks={data.yesterday.clicks}
+              revenue={data.yesterday.revenue}
+              customers={data.yesterday.customers}
+              currencyCode={data.currency_code}
+            />
 
-          <ActivityItem
-            period="This Week"
-            recommendations={data.this_week.recommendations}
-            clicks={data.this_week.clicks}
-            revenue={data.this_week.revenue}
-            currencyCode={data.currency_code}
-          />
+            <Divider />
+
+            <ActivityItem
+              period="This Week"
+              recommendations={data.this_week.recommendations}
+              clicks={data.this_week.clicks}
+              revenue={data.this_week.revenue}
+              customers={data.this_week.customers}
+              currencyCode={data.currency_code}
+            />
+          </BlockStack>
         </BlockStack>
-      </BlockStack>
-    </Card>
+      </Card>
+    </BlockStack>
   );
 }

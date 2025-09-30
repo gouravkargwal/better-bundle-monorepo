@@ -1,67 +1,18 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { getRedisStreamService } from "../services/redis-stream.service";
-
-// Simple in-memory deduplication
-const recentWebhooks = new Map<string, number>();
+import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log("🚀 Webhook request received - products/update");
-  console.log("📋 Request method:", request.method);
-  console.log("📋 Request URL:", request.url);
-  console.log(
-    "📋 Request headers:",
-    Object.fromEntries(request.headers.entries()),
-  );
-
-  let payload, session, topic, shop;
-
   try {
-    const authResult = await authenticate.webhook(request);
-    payload = authResult.payload;
-    session = authResult.session;
-    topic = authResult.topic;
-    shop = authResult.shop;
-    console.log("✅ Authentication successful");
-    console.log("📋 Topic:", topic);
-    console.log("📋 Shop:", shop);
-  } catch (authError) {
-    console.log("❌ Authentication failed:", authError);
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
+    const { payload, session } = await authenticate.webhook(request);
 
-  if (!session || !shop) {
-    console.log(`❌ Session or shop missing for ${topic} webhook`);
-    return json({ error: "Authentication failed" }, { status: 401 });
-  }
-
-  try {
-    console.log(`🔔 ${topic} webhook received for ${shop}:`, payload);
-    console.log(`📊 Product update webhook payload structure:`, {
-      hasId: !!payload.id,
-      idType: typeof payload.id,
-      idValue: payload.id,
-      hasTitle: !!payload.title,
-      titleValue: payload.title,
-      hasHandle: !!payload.handle,
-      handleValue: payload.handle,
-      hasCreatedAt: !!payload.created_at,
-      createdAtValue: payload.created_at,
-      hasUpdatedAt: !!payload.updated_at,
-      updatedAtValue: payload.updated_at,
-      hasVariants: !!payload.variants,
-      variantsCount: payload.variants?.length || 0,
-      hasImages: !!payload.images,
-      imagesCount: payload.images?.length || 0,
-      hasTags: !!payload.tags,
-      tagsValue: payload.tags,
-      payloadKeys: Object.keys(payload),
-    });
+    if (!session) {
+      return json({ error: "Authentication failed" }, { status: 401 });
+    }
 
     // Extract product data from payload
-    const product = payload;
+    const product = payload as any;
     const productId = product.id?.toString();
 
     if (!productId) {
@@ -69,139 +20,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No product ID found" }, { status: 400 });
     }
 
-    // Get shop ID from database
-    const shopRecord = await prisma.shop.findUnique({
-      where: { shopDomain: shop },
-      select: { id: true },
-    });
+    console.log(product, "product ------------------->");
 
-    if (!shopRecord) {
-      console.error(`❌ Shop not found: ${shop}`);
-      return json({ error: "Shop not found" }, { status: 404 });
-    }
+    // Publish Kafka event with shop_domain - backend will resolve shop_id
+    const producer = await KafkaProducerService.getInstance();
+    const event = {
+      event_type: "product_updated",
+      shop_domain: session.shop,
+      shopify_id: productId,
+      timestamp: new Date().toISOString(),
+    } as const;
 
-    // Store raw product update data immediately
-    const rawProductData = {
-      shopId: shopRecord.id,
-      payload: product,
-      shopifyId: productId,
-      shopifyCreatedAt: product.created_at
-        ? new Date(product.created_at)
-        : new Date(),
-      shopifyUpdatedAt: product.updated_at
-        ? new Date(product.updated_at)
-        : new Date(),
-    };
-
-    console.log(`💾 Storing raw product update data:`, {
-      shopId: rawProductData.shopId,
-      shopifyId: rawProductData.shopifyId,
-      shopifyCreatedAt: rawProductData.shopifyCreatedAt,
-      shopifyUpdatedAt: rawProductData.shopifyUpdatedAt,
-      payloadSize: JSON.stringify(product).length,
-      payloadSample: {
-        id: product.id,
-        title: product.title,
-        handle: product.handle,
-        product_type: product.product_type,
-        vendor: product.vendor,
-        tags: product.tags,
-        status: product.status,
-        created_at: product.created_at,
-        updated_at: product.updated_at,
-      },
-    });
-
-    const created = await prisma.rawProduct.create({
-      data: ({
-        ...rawProductData,
-        source: "webhook",
-        format: "rest",
-        receivedAt: new Date(),
-      }) as any,
-    });
-
-    console.log(
-      `✅ Product ${productId} updated in raw table for shop ${shop}`,
-    );
-
-    // Publish to Redis Stream for real-time processing
-    try {
-      // Create deduplication key
-      const dedupKey = `${shopRecord.id}_${productId}_product_updated`;
-      const now = Date.now();
-
-      console.log(`🔍 Webhook deduplication check for key: ${dedupKey}`);
-      console.log(`📊 Current recentWebhooks size: ${recentWebhooks.size}`);
-
-      // Check if we've processed this webhook recently (within 2 seconds)
-      const lastProcessed = recentWebhooks.get(dedupKey);
-      if (lastProcessed && now - lastProcessed < 2000) {
-        console.log(
-          `🔄 Skipping duplicate webhook: ${dedupKey} (processed ${now - lastProcessed}ms ago)`,
-        );
-        return json({
-          success: true,
-          productId: productId,
-          shopId: shopRecord.id,
-          message: "Product data updated successfully (duplicate skipped)",
-        });
-      }
-
-      console.log(`✅ New webhook, proceeding with processing: ${dedupKey}`);
-
-      // Record this webhook
-      recentWebhooks.set(dedupKey, now);
-
-      // Clean up old entries (older than 10 seconds)
-      for (const [key, timestamp] of recentWebhooks.entries()) {
-        if (now - timestamp > 10000) {
-          recentWebhooks.delete(key);
-        }
-      }
-
-      const streamService = await getRedisStreamService();
-
-      const streamData = {
-        event_type: "product_updated",
-        shop_id: shopRecord.id,
-        shopify_id: productId,
-        timestamp: new Date().toISOString(),
-      };
-
-      const messageId = await streamService.publishShopifyEvent(streamData);
-
-      console.log(`📡 Published to Redis Stream:`, {
-        messageId,
-        eventType: streamData.event_type,
-        shopId: streamData.shop_id,
-        shopifyId: streamData.shopify_id,
-      });
-
-      // Also publish a normalize job for canonical staging
-      const normalizeJob = {
-        event_type: "normalize_entity",
-        data_type: "products",
-        format: "rest",
-        shop_id: shopRecord.id,
-        raw_id: created.id,
-        shopify_id: productId,
-        timestamp: new Date().toISOString(),
-      } as const;
-      await streamService.publishShopifyEvent(normalizeJob);
-    } catch (streamError) {
-      console.error(`❌ Error publishing to Redis Stream:`, streamError);
-      // Don't fail the webhook if stream publishing fails
-    }
+    await producer.publishShopifyEvent(event);
 
     return json({
       success: true,
-      productId: productId,
-      shopId: shopRecord.id,
-      message: "Product data updated successfully",
+      productId,
+      shopDomain: session.shop,
+      message:
+        "Product update webhook processed - will trigger specific data collection",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
+    console.error(`❌ Error processing products update webhook:`, error);
     return json(
       {
         error: "Internal server error",
