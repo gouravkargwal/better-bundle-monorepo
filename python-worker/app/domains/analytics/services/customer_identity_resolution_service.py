@@ -9,7 +9,13 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
-from app.core.database import get_database
+from sqlalchemy import select
+from app.core.database.session import get_session_context
+from app.core.database.models.user_session import UserSession as SAUserSession
+from app.core.database.models.user_interaction import (
+    UserInteraction as SAUserInteraction,
+)
+from app.core.database.models.identity import UserIdentityLink as SAUserIdentityLink
 from app.domains.analytics.models.session import (
     UserSession,
     SessionStatus,
@@ -18,8 +24,8 @@ from app.domains.analytics.models.session import (
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
-from app.core.redis_client import RedisStreamsManager
-from app.shared.constants.redis import CUSTOMER_LINKING_STREAM
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
 
 logger = get_logger(__name__)
 
@@ -44,8 +50,6 @@ class CustomerIdentityResolutionService:
 
     def __init__(self):
         self.session_service = UnifiedSessionService()
-        self.redis_manager = RedisStreamsManager()
-        # Industry-standard confidence thresholds
         self.deterministic_threshold = 0.95  # High confidence
         self.probabilistic_threshold = 0.70  # Medium confidence
         self.min_confidence_threshold = 0.60  # Minimum for linking
@@ -194,19 +198,17 @@ class CustomerIdentityResolutionService:
             if not current_session.ip_address or not current_session.user_agent:
                 return []
 
-            db = await get_database()
-
-            # Find sessions with matching IP and user agent
-            sessions = await db.usersession.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": {"equals": None},  # Only anonymous sessions
-                    "ipAddress": current_session.ip_address,
-                    "userAgent": current_session.user_agent,
-                    "status": SessionStatus.ACTIVE,
-                    "expiresAt": {"gt": utcnow()},
-                }
-            )
+            async with get_session_context() as session:
+                stmt = select(SAUserSession).where(
+                    SAUserSession.shop_id == shop_id,
+                    SAUserSession.customer_id.is_(None),
+                    SAUserSession.ip_address == current_session.ip_address,
+                    SAUserSession.user_agent == current_session.user_agent,
+                    SAUserSession.status == SessionStatus.ACTIVE,
+                    SAUserSession.expires_at > utcnow(),
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
 
             matches = []
             for session in sessions:
@@ -240,18 +242,17 @@ class CustomerIdentityResolutionService:
             if not current_session.browser_session_id:
                 return []
 
-            db = await get_database()
-
-            # Find sessions with matching browser session ID
-            sessions = await db.usersession.find_many(
-                where={
-                    "shopId": shop_id,
-                    "customerId": {"equals": None},  # Only anonymous sessions
-                    "browserSessionId": current_session.browser_session_id,
-                    "status": SessionStatus.ACTIVE,
-                    "expiresAt": {"gt": utcnow()},
-                }
-            )
+            async with get_session_context() as session:
+                stmt = select(SAUserSession).where(
+                    SAUserSession.shop_id == shop_id,
+                    SAUserSession.customer_id.is_(None),
+                    SAUserSession.browser_session_id
+                    == current_session.browser_session_id,
+                    SAUserSession.status == SessionStatus.ACTIVE,
+                    SAUserSession.expires_at > utcnow(),
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
 
             matches = []
             for session in sessions:
@@ -302,8 +303,6 @@ class CustomerIdentityResolutionService:
     ) -> List[IdentityMatch]:
         """Find sessions by email address (deterministic)"""
         try:
-            db = await get_database()
-
             # Look for sessions with email in metadata (simplified - no metadata field exists)
             # For now, return empty list since we don't have metadata field
             sessions = []
@@ -330,8 +329,6 @@ class CustomerIdentityResolutionService:
     ) -> List[IdentityMatch]:
         """Find sessions by phone number (deterministic)"""
         try:
-            db = await get_database()
-
             # Look for sessions with phone in metadata (simplified - no metadata field exists)
             # For now, return empty list since we don't have metadata field
             sessions = []
@@ -438,11 +435,16 @@ class CustomerIdentityResolutionService:
     async def _update_session_interactions(self, session_id: str, customer_id: str):
         """Update all interactions in a session with customer ID"""
         try:
-            db = await get_database()
-
-            await db.userinteraction.update_many(
-                where={"sessionId": session_id}, data={"customerId": customer_id}
-            )
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(SAUserInteraction).where(
+                        SAUserInteraction.session_id == session_id
+                    )
+                )
+                interactions = result.scalars().all()
+                for it in interactions:
+                    it.customer_id = customer_id
+                await session.commit()
 
         except Exception as e:
             logger.error(f"Error updating session interactions: {str(e)}")
@@ -455,18 +457,15 @@ class CustomerIdentityResolutionService:
             all_session_ids = [current_session_id] + linked_sessions
 
             # Get total interactions across all sessions
-            db = await get_database()
-
-            total_interactions = await db.userinteraction.count(
-                where={"sessionId": {"in": all_session_ids}}
-            )
-
-            # Get unique extensions used
-            interactions = await db.userinteraction.find_many(
-                where={"sessionId": {"in": all_session_ids}},
-            )
-
-            unique_extensions = list(set(i.extensionType for i in interactions))
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(SAUserInteraction).where(
+                        SAUserInteraction.session_id.in_(all_session_ids)
+                    )
+                )
+                interactions = result.scalars().all()
+                total_interactions = len(interactions)
+                unique_extensions = list(set(i.extension_type for i in interactions))
 
             return {
                 "total_sessions": len(all_session_ids),
@@ -487,15 +486,17 @@ class CustomerIdentityResolutionService:
             if not session_ids:
                 return 0
 
-            db = await get_database()
-
-            sessions = await db.usersession.find_many(where={"id": {"in": session_ids}})
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(SAUserSession).where(SAUserSession.id.in_(session_ids))
+                )
+                sessions = result.scalars().all()
 
             if not sessions:
                 return 0
 
-            earliest = min(session.createdAt for session in sessions)
-            latest = max(session.createdAt for session in sessions)
+            earliest = min(s.created_at for s in sessions)
+            latest = max(s.created_at for s in sessions)
 
             span = (latest - earliest).days
             return max(span, 1)  # Minimum 1 day
@@ -511,42 +512,39 @@ class CustomerIdentityResolutionService:
         current_session_id: str,
         linked_sessions: List[str],
     ) -> None:
-        """Fire Redis stream event for customer linking backfill operations"""
+        """Publish customer linking backfill event to Kafka"""
         try:
-            event_data = {
-                "event_type": "customer_linked",
-                "customer_id": customer_id,
-                "shop_id": shop_id,
-                "trigger_session_id": current_session_id,
-                "linked_session_ids": linked_sessions,
-                "total_sessions_linked": len(linked_sessions) + 1,
-                "timestamp": utcnow().isoformat(),
-                "source": "identity_resolution_service",
-                "backfill_needed": True,
-            }
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+            try:
+                linking_event = {
+                    "job_id": f"customer_linking_{customer_id}_{int(utcnow().timestamp())}",
+                    "shop_id": shop_id,
+                    "customer_id": customer_id,
+                    "event_type": "customer_linking",
+                    "trigger_session_id": current_session_id,
+                    "linked_sessions": linked_sessions,
+                    "metadata": {
+                        "source": "identity_resolution_service",
+                        "backfill_needed": True,
+                        "linked_session_ids": linked_sessions,
+                        "total_sessions_linked": len(linked_sessions) + 1,
+                        "timestamp": utcnow().isoformat(),
+                    },
+                }
 
-            # Initialize Redis manager if not already done
-            if not self.redis_manager.redis:
-                await self.redis_manager.initialize()
+                message_id = await publisher.publish_customer_linking_event(
+                    linking_event
+                )
 
-            # Fire event to customer linking stream for backfill processors
-            message_id = await self.redis_manager.publish_customer_linking_event(
-                job_id=f"customer_linking_{customer_id}_{int(utcnow().timestamp())}",
-                shop_id=shop_id,
-                customer_id=customer_id,
-                event_type="customer_linking",
-                trigger_session_id=current_session_id,
-                linked_sessions=linked_sessions,
-                metadata=event_data,
-            )
-
-            logger.info(
-                f"Customer linking event fired: {message_id} for customer {customer_id} "
-                f"with {len(linked_sessions)} linked sessions"
-            )
-
+                logger.info(
+                    f"Customer linking event published to Kafka: {message_id} for customer {customer_id} "
+                    f"with {len(linked_sessions)} linked sessions"
+                )
+            finally:
+                await publisher.close()
         except Exception as e:
-            logger.error(f"Error firing customer linking event: {str(e)}")
+            logger.error(f"Error publishing customer linking event to Kafka: {str(e)}")
             # Don't fail the main operation if event firing fails
 
     def _get_resolution_summary(self, matches: List[IdentityMatch]) -> Dict[str, Any]:
@@ -586,49 +584,47 @@ class CustomerIdentityResolutionService:
             linked_sessions: List of linked session IDs
         """
         try:
-            db = await get_database()
-
             # Get all session IDs that need to be linked
             all_session_ids = [current_session_id] + linked_sessions
-
-            # Get browser session IDs for these sessions
-            sessions_data = await db.usersession.find_many(
-                where={
-                    "id": {"in": all_session_ids},
-                    "shopId": shop_id,
-                },
-            )
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(SAUserSession).where(
+                        SAUserSession.id.in_(all_session_ids),
+                        SAUserSession.shop_id == shop_id,
+                    )
+                )
+                sessions_data = result.scalars().all()
 
             # Create identity links for each session
             for session_data in sessions_data:
-                browser_session_id = session_data.browserSessionId
+                browser_session_id = session_data.browser_session_id
 
                 # Check if link already exists
-                existing_link = await db.useridentitylink.find_first(
-                    where={
-                        "shopId": shop_id,
-                        "clientId": browser_session_id,
-                        "customerId": customer_id,
-                    }
-                )
+                async with get_session_context() as session:
+                    result = await session.execute(
+                        select(SAUserIdentityLink).where(
+                            SAUserIdentityLink.shop_id == shop_id,
+                            SAUserIdentityLink.client_id == browser_session_id,
+                            SAUserIdentityLink.customer_id == customer_id,
+                        )
+                    )
+                    existing_link = result.scalar_one_or_none()
 
-                if not existing_link:
-                    # Create new identity link
-                    await db.useridentitylink.create(
-                        data={
-                            "shopId": shop_id,
-                            "clientId": browser_session_id,
-                            "customerId": customer_id,
-                        }
-                    )
-
-                    logger.info(
-                        f"Created identity link: {browser_session_id} -> {customer_id}"
-                    )
-                else:
-                    logger.debug(
-                        f"Identity link already exists: {browser_session_id} -> {customer_id}"
-                    )
+                    if not existing_link:
+                        link = SAUserIdentityLink(
+                            shop_id=shop_id,
+                            client_id=browser_session_id,
+                            customer_id=customer_id,
+                        )
+                        session.add(link)
+                        await session.commit()
+                        logger.info(
+                            f"Created identity link: {browser_session_id} -> {customer_id}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Identity link already exists: {browser_session_id} -> {customer_id}"
+                        )
 
             logger.info(
                 f"Stored {len(sessions_data)} customer identity links for customer {customer_id}"

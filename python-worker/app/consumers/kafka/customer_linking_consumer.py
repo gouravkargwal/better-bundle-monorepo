@@ -282,36 +282,44 @@ class CustomerLinkingKafkaConsumer:
     ):
         """Process backfill of customer interactions"""
         try:
-            from app.core.database import get_database
+            from sqlalchemy import select
+            from app.core.database.session import get_session_context
+            from app.core.database.models.user_interaction import (
+                UserInteraction as SAUserInteraction,
+            )
 
             logger.info(
                 f"🔄 Processing interaction backfill for customer {customer_id} with {len(linked_sessions)} sessions: {linked_sessions}"
             )
 
-            db = await get_database()
-
             # Get all session IDs that need backfill
             all_session_ids = linked_sessions
             total_backfilled = 0
 
-            # Update all interactions in these sessions with customer_id
+            # Update all interactions in these sessions with missing customer_id
             for session_id in all_session_ids:
                 logger.info(
                     f"🔍 Backfilling session {session_id} for customer {customer_id}..."
                 )
 
-                result = await db.userinteraction.update_many(
-                    where={
-                        "sessionId": session_id,
-                        "customerId": None,  # Only update interactions without customer_id
-                    },
-                    data={"customerId": customer_id},
-                )
+                async with get_session_context() as session:
+                    stmt = select(SAUserInteraction).where(
+                        SAUserInteraction.session_id == session_id,
+                        SAUserInteraction.customer_id.is_(None),
+                    )
+                    result = await session.execute(stmt)
+                    interactions = result.scalars().all()
+
+                    for interaction in interactions:
+                        interaction.customer_id = customer_id
+                    await session.commit()
+
+                    backfilled_count = len(interactions)
 
                 logger.info(
-                    f"✅ Backfilled {result} interactions for session {session_id}"
+                    f"✅ Backfilled {backfilled_count} interactions for session {session_id}"
                 )
-                total_backfilled += result
+                total_backfilled += backfilled_count
 
             logger.info(f"📊 Total interactions backfilled: {total_backfilled}")
 
