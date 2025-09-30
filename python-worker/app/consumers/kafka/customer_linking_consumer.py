@@ -218,13 +218,26 @@ class CustomerLinkingKafkaConsumer:
                     f"✅ Cross-session linking completed: {len(linked_sessions)} sessions linked - {linked_sessions}"
                 )
 
-                # Trigger backfill for all linked sessions
+                # ✅ FIX: Always include trigger_session_id in backfill
+                sessions_to_backfill = []
+
+                if trigger_session_id:
+                    sessions_to_backfill.append(trigger_session_id)
+
+                # Add any additional linked sessions
                 if linked_sessions:
+                    sessions_to_backfill.extend(linked_sessions)
+
+                # Remove duplicates
+                sessions_to_backfill = list(set(sessions_to_backfill))
+
+                # Trigger backfill
+                if sessions_to_backfill:
                     logger.info(
-                        f"🔄 Starting backfill for {len(linked_sessions)} sessions..."
+                        f"🔄 Starting backfill for {len(sessions_to_backfill)} sessions: {sessions_to_backfill}"
                     )
                     await self._process_interaction_backfill(
-                        job_id, shop_id, customer_id, linked_sessions
+                        job_id, shop_id, customer_id, sessions_to_backfill
                     )
                 else:
                     logger.warning(

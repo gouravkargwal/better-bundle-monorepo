@@ -118,10 +118,10 @@ class NormalizationDataStorageService:
             # Use canonical data directly - it's already aligned with DB schema
             order_data = canonical_data.copy()
 
-            # Remove line items since they're handled separately
-            # Note: We keep line_items in order_data for processing, but remove lineItems (camelCase)
+            # Remove line items from main order payload since they're handled separately
+            # Keep a local copy in `line_items` for dedicated processing
             order_data.pop("lineItems", None)
-            # Don't remove line_items - we need them for processing
+            order_data.pop("line_items", None)
 
             # Clean internal fields
             self._clean_internal_fields(order_data)

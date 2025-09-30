@@ -11,6 +11,7 @@ export const getOrCreateSession = async (
   pageUrl: string,
   referrer: string,
   sessionStorage: any,
+  clientId: string,
 ): Promise<string> => {
   // Check if we have a valid session in sessionStorage (unified across all extensions)
   const storedSessionId = await sessionStorage.getItem("unified_session_id");
@@ -32,7 +33,7 @@ export const getOrCreateSession = async (
     const payload = {
       shop_domain: shopDomain,
       customer_id: customerId,
-      browser_session_id: await getBrowserSessionId(sessionStorage),
+      browser_session_id: clientId,
       user_agent: userAgent,
       ip_address: null, // Will be detected server-side
       referrer: referrer,
@@ -89,6 +90,8 @@ export const trackInteraction = async (
   sendBeacon: any,
 ): Promise<void> => {
   try {
+    const clientId = event?.clientId || null;
+
     const sessionId = await getOrCreateSession(
       shopDomain,
       userAgent,
@@ -96,6 +99,7 @@ export const trackInteraction = async (
       pageUrl,
       referrer,
       sessionStorage,
+      clientId,
     );
 
     const interactionData = {
@@ -127,17 +131,4 @@ export const trackInteraction = async (
   } catch (error) {
     throw error;
   }
-};
-
-/**
- * Get unified browser session ID (shared across all extensions)
- */
-const getBrowserSessionId = async (sessionStorage: any): Promise<string> => {
-  let sessionId = await sessionStorage.getItem("unified_browser_session_id");
-  if (!sessionId) {
-    sessionId =
-      "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    await sessionStorage.setItem("unified_browser_session_id", sessionId);
-  }
-  return sessionId;
 };

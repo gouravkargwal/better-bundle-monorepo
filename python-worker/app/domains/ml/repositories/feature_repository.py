@@ -179,16 +179,59 @@ class FeatureRepository(IFeatureRepository):
                 raise ValueError(f"No model mapping found for table: {table_name}")
 
             async with get_session_context() as session:
-                # Prepare data for bulk upsert
+                # Prepare data for bulk upsert (ensure plain Python values only)
+                def _coerce_plain(value):
+                    # Convert SQLAlchemy/decimal/numpy and other non-plain types to plain Python
+                    try:
+                        from sqlalchemy.orm.attributes import InstrumentedAttribute
+                        from sqlalchemy.sql.schema import Column
+                        from sqlalchemy.sql.elements import ClauseElement
+                    except Exception:
+                        InstrumentedAttribute = tuple()
+                        Column = tuple()
+                        ClauseElement = tuple()
+
+                    try:
+                        import decimal
+                    except Exception:
+                        decimal = None
+
+                    try:
+                        import numpy as np
+                    except Exception:
+                        np = None
+
+                    if isinstance(
+                        value, (InstrumentedAttribute, Column, ClauseElement)
+                    ):
+                        return None
+                    if decimal and isinstance(value, decimal.Decimal):
+                        return float(value)
+                    if np is not None:
+                        if isinstance(value, (np.floating,)):
+                            return float(value)
+                        if isinstance(value, (np.integer,)):
+                            return int(value)
+                        if isinstance(value, (np.ndarray,)):
+                            return value.tolist()
+                    return value
+
                 prepared_data = []
                 for record in batch_data:
-                    record["last_computed_at"] = datetime.utcnow()
-                    prepared_data.append(record)
+                    # Only keep keys that exist on the model table to avoid accidental Column refs
+                    model_columns = {c.name for c in model_class.__table__.columns}
+                    sanitized = {
+                        k: _coerce_plain(v)
+                        for k, v in record.items()
+                        if k in model_columns
+                    }
+                    sanitized["last_computed_at"] = datetime.utcnow()
+                    prepared_data.append(sanitized)
 
                 # Use PostgreSQL's ON CONFLICT for efficient upsert
                 stmt = pg_insert(model_class).values(prepared_data)
 
-                # Define the update clause for conflict resolution
+                # Define the update clause for conflict resolution (exclude immutable keys)
                 update_dict = {
                     col.name: stmt.excluded[col.name]
                     for col in model_class.__table__.columns

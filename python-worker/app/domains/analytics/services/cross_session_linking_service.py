@@ -9,7 +9,12 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
-from app.core.database import get_database
+from sqlalchemy import select
+from app.core.database.session import get_session_context
+from app.core.database.models.user_session import UserSession as SAUserSession
+from app.core.database.models.user_interaction import (
+    UserInteraction as SAUserInteraction,
+)
 from app.domains.analytics.models.session import (
     UserSession,
     SessionStatus,
@@ -58,34 +63,51 @@ class CrossSessionLinkingService:
     ) -> Dict[str, Any]:
         """
         Link all sessions for a customer using industry-standard methods
-
-        This is the main method that implements cross-session linking
-        for complete customer journey reconstruction.
-
-        Args:
-            customer_id: Customer identifier
-            shop_id: Shop identifier
-            trigger_session_id: Optional session that triggered the linking
-
-        Returns:
-            Dict with linking results
         """
         try:
             logger.info(f"Starting cross-session linking for customer {customer_id}")
+
+            # ✅ FIX: If trigger_session_id provided, update that session FIRST
+            if trigger_session_id:
+                logger.info(
+                    f"🔗 Updating trigger session {trigger_session_id} with customer_id {customer_id}"
+                )
+
+                # Update the trigger session with customer_id
+                await self.session_service.update_session(
+                    trigger_session_id, SessionUpdate(customer_id=customer_id)
+                )
+
+                # Backfill interactions in trigger session
+                await self._update_session_interactions(trigger_session_id, customer_id)
+
+                logger.info(
+                    f"✅ Trigger session {trigger_session_id} linked to customer {customer_id}"
+                )
 
             # Step 1: Get all existing sessions for this customer
             existing_sessions = await self._get_customer_sessions(customer_id, shop_id)
 
             if not existing_sessions:
+                logger.warning(f"No existing sessions found for customer {customer_id}")
+                # If we updated trigger session, return that as success
+                if trigger_session_id:
+                    return {
+                        "success": True,
+                        "customer_id": customer_id,
+                        "existing_sessions": 1,
+                        "linked_sessions": [],
+                        "total_sessions": 1,
+                    }
                 return {"success": False, "error": "No sessions found for customer"}
 
-            # Step 2: Find unlinked anonymous sessions that might belong to this customer
+            # Step 2: Find unlinked anonymous sessions
             potential_sessions = await self._find_potential_sessions(
                 existing_sessions, shop_id
             )
             logger.info(f"Found {len(potential_sessions)} potential sessions to link")
 
-            # Step 3: Calculate confidence scores for potential matches
+            # Step 3: Calculate confidence scores
             scored_sessions = await self._score_potential_sessions(
                 existing_sessions, potential_sessions
             )
@@ -99,12 +121,12 @@ class CrossSessionLinkingService:
             )
             logger.info(f"Successfully linked {len(linked_sessions)} sessions")
 
-            # Step 5: Create session links for tracking
+            # Step 5: Create session links
             session_links = await self._create_session_links(
                 existing_sessions, linked_sessions, customer_id
             )
 
-            # Step 6: Generate customer journey summary
+            # Step 6: Generate journey summary
             journey_summary = await self._generate_journey_summary(
                 customer_id, existing_sessions + linked_sessions
             )
@@ -113,7 +135,9 @@ class CrossSessionLinkingService:
                 "success": True,
                 "customer_id": customer_id,
                 "existing_sessions": len(existing_sessions),
-                "linked_sessions": linked_sessions,  # Return the actual list, not len()
+                "linked_sessions": [
+                    s.id for s in linked_sessions
+                ],  # ✅ Return session IDs
                 "total_sessions": len(existing_sessions) + len(linked_sessions),
                 "session_links": len(session_links),
                 "journey_summary": journey_summary,
@@ -134,42 +158,36 @@ class CrossSessionLinkingService:
     ) -> List[UserSession]:
         """Get all existing sessions for a customer"""
         try:
-            db = await get_database()
-
-            # Try a simpler query first - just get all sessions for this shop
-            all_sessions = await db.usersession.find_many(
-                where={"shopId": shop_id},
-                order={"createdAt": "asc"},
-            )
-
-            logger.info(f"Found {len(all_sessions)} total sessions for shop {shop_id}")
-
-            # Filter by customer_id in Python since Prisma query is failing
-            # Convert customer_id to string to match database format
-            customer_id_str = str(customer_id)
-            sessions_data = [s for s in all_sessions if s.customerId == customer_id_str]
-            logger.info(
-                f"Found {len(sessions_data)} sessions for customer {customer_id}"
-            )
-
-            sessions = []
-            for session_data in sessions_data:
-                session = UserSession(
-                    id=session_data.id,
-                    shop_id=session_data.shopId,
-                    customer_id=session_data.customerId,
-                    browser_session_id=session_data.browserSessionId,
-                    status=SessionStatus(session_data.status),
-                    created_at=session_data.createdAt,
-                    last_active=session_data.lastActive,
-                    expires_at=session_data.expiresAt,
-                    user_agent=session_data.userAgent,
-                    ip_address=session_data.ipAddress,
-                    referrer=session_data.referrer,
-                    extensions_used=session_data.extensionsUsed,
-                    total_interactions=session_data.totalInteractions,
+            async with get_session_context() as session:
+                stmt = (
+                    select(SAUserSession)
+                    .where(
+                        SAUserSession.shop_id == shop_id,
+                        SAUserSession.customer_id == str(customer_id),
+                    )
+                    .order_by(SAUserSession.created_at.asc())
                 )
-                sessions.append(session)
+                result = await session.execute(stmt)
+                rows = result.scalars().all()
+
+            sessions = [
+                UserSession(
+                    id=row.id,
+                    shop_id=row.shop_id,
+                    customer_id=row.customer_id,
+                    browser_session_id=row.browser_session_id,
+                    status=SessionStatus(row.status),
+                    created_at=row.created_at,
+                    last_active=row.last_active,
+                    expires_at=row.expires_at,
+                    user_agent=row.user_agent,
+                    ip_address=row.ip_address,
+                    referrer=row.referrer,
+                    extensions_used=row.extensions_used,
+                    total_interactions=row.total_interactions,
+                )
+                for row in rows
+            ]
 
             logger.info(
                 f"Returning {len(sessions)} UserSession objects for customer {customer_id}"
@@ -185,8 +203,6 @@ class CrossSessionLinkingService:
     ) -> List[UserSession]:
         """Find anonymous sessions that might belong to this customer"""
         try:
-            db = await get_database()
-
             # Get unique identifiers from existing sessions
             ip_addresses = list(
                 set(s.ip_address for s in existing_sessions if s.ip_address)
@@ -198,60 +214,68 @@ class CrossSessionLinkingService:
                 set(s.browser_session_id for s in existing_sessions)
             )
 
-            # Find anonymous sessions with matching identifiers
-            where_conditions = {
-                "shopId": shop_id,
-                "customerId": {"equals": None},  # Only anonymous sessions
-                "status": "active",  # Use string value instead of enum
-                "expiresAt": {"gt": utcnow()},
-            }
+            # If no identifiers, return empty
+            if not (ip_addresses or user_agents or browser_session_ids):
+                logger.info("No identifiers found for potential session matching")
+                return []
 
-            # Build OR conditions for matching
+            # ✅ FIX: Build OR conditions properly
+            from sqlalchemy import or_
+
             or_conditions = []
 
             if ip_addresses:
-                or_conditions.append({"ipAddress": {"in": ip_addresses}})
+                or_conditions.append(SAUserSession.ip_address.in_(ip_addresses))
 
             if user_agents:
-                or_conditions.append({"userAgent": {"in": user_agents}})
+                or_conditions.append(SAUserSession.user_agent.in_(user_agents))
 
             if browser_session_ids:
-                or_conditions.append({"browserSessionId": {"in": browser_session_ids}})
+                or_conditions.append(
+                    SAUserSession.browser_session_id.in_(browser_session_ids)
+                )
 
+            # If no conditions, return empty (shouldn't happen due to check above)
             if not or_conditions:
                 return []
 
-            # Find sessions matching any of the conditions
-            sessions_data = await db.usersession.find_many(
-                where={**where_conditions, "OR": or_conditions},
-                order={"createdAt": "asc"},
-            )
-
-            # Convert to UserSession objects
-            potential_sessions = []
-            existing_session_ids = {s.id for s in existing_sessions}
-
-            for session_data in sessions_data:
-                if (
-                    session_data.id not in existing_session_ids
-                ):  # Exclude existing sessions
-                    session = UserSession(
-                        id=session_data.id,
-                        shop_id=session_data.shopId,
-                        customer_id=session_data.customerId,
-                        browser_session_id=session_data.browserSessionId,
-                        status=SessionStatus(session_data.status),
-                        created_at=session_data.createdAt,
-                        last_active=session_data.lastActive,
-                        expires_at=session_data.expiresAt,
-                        user_agent=session_data.userAgent,
-                        ip_address=session_data.ipAddress,
-                        referrer=session_data.referrer,
-                        extensions_used=session_data.extensionsUsed,
-                        total_interactions=session_data.totalInteractions,
+            async with get_session_context() as session:
+                stmt = (
+                    select(SAUserSession)
+                    .where(
+                        SAUserSession.shop_id == shop_id,
+                        SAUserSession.customer_id.is_(None),
+                        SAUserSession.status == "active",
+                        SAUserSession.expires_at > utcnow(),
+                        or_(*or_conditions),  # ✅ Use or_() properly
                     )
-                    potential_sessions.append(session)
+                    .order_by(SAUserSession.created_at.asc())
+                )
+                result = await session.execute(stmt)
+                rows = result.scalars().all()
 
+            existing_session_ids = {s.id for s in existing_sessions}
+            potential_sessions = [
+                UserSession(
+                    id=row.id,
+                    shop_id=row.shop_id,
+                    customer_id=row.customer_id,
+                    browser_session_id=row.browser_session_id,
+                    status=SessionStatus(row.status),
+                    created_at=row.created_at,
+                    last_active=row.last_active,
+                    expires_at=row.expires_at,
+                    user_agent=row.user_agent,
+                    ip_address=row.ip_address,
+                    referrer=row.referrer,
+                    extensions_used=row.extensions_used,
+                    total_interactions=row.total_interactions,
+                )
+                for row in rows
+                if row.id not in existing_session_ids
+            ]
+
+            logger.info(f"Found {len(potential_sessions)} potential sessions to link")
             return potential_sessions
 
         except Exception as e:
@@ -431,11 +455,16 @@ class CrossSessionLinkingService:
     async def _update_session_interactions(self, session_id: str, customer_id: str):
         """Update all interactions in a session with customer ID"""
         try:
-            db = await get_database()
+            async with get_session_context() as session:
+                stmt = select(SAUserInteraction).where(
+                    SAUserInteraction.session_id == session_id
+                )
+                result = await session.execute(stmt)
+                interactions = result.scalars().all()
 
-            await db.userinteraction.update_many(
-                where={"sessionId": session_id}, data={"customerId": customer_id}
-            )
+                for interaction in interactions:
+                    interaction.customer_id = customer_id
+                await session.commit()
 
         except Exception as e:
             logger.error(f"Error updating session interactions: {str(e)}")

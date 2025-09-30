@@ -393,9 +393,14 @@ class UnifiedSessionService:
         browser_session_id: Optional[str],
         current_time: datetime,
     ) -> Optional[UserSession]:
-        """Find existing active session using optimized queries."""
+        """
+        Find existing active session and update customer_id if needed.
+
+        This method implements the key logic for linking anonymous sessions
+        to identified customers when they complete checkout.
+        """
         try:
-            # Try browser_session_id first (fastest lookup)
+            # Priority 1: Try browser_session_id first (Shopify's persistent clientId)
             if browser_session_id:
                 stmt = (
                     select(UserSessionModel)
@@ -413,9 +418,31 @@ class UnifiedSessionService:
                 session_data = result.scalar_one_or_none()
 
                 if session_data:
+                    # ✅ CRITICAL: Update customer_id if session was anonymous and now identified
+                    if customer_id and not session_data.customer_id:
+                        logger.info(
+                            f"🔗 Linking anonymous session {session_data.id} to customer {customer_id}"
+                        )
+
+                        # Update the session with customer_id
+                        session_data.customer_id = customer_id
+
+                        # Update expiration (identified sessions have shorter duration)
+                        session_data.expires_at = (
+                            current_time + self.identified_session_duration
+                        )
+
+                        # Commit the update
+                        await session.commit()
+                        await session.refresh(session_data)
+
+                        logger.info(
+                            f"✅ Session {session_data.id} successfully linked to customer {customer_id}"
+                        )
+
                     return self._convert_to_user_session(session_data)
 
-            # Fallback to customer_id lookup
+            # Priority 2: Fallback to customer_id lookup (if already identified)
             if customer_id:
                 stmt = (
                     select(UserSessionModel)

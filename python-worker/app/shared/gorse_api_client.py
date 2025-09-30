@@ -33,7 +33,10 @@ class GorseApiClient:
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.timeout = httpx.Timeout(30.0)  # 30 second timeout for API calls
+        # Configurable timeout and basic retry settings to improve resilience
+        self.timeout = httpx.Timeout(20.0)
+        self.max_retries = 3
+        self.retry_backoff = 0.5
 
     def _get_headers(self) -> Dict[str, str]:
         """Get HTTP headers for API requests"""
@@ -83,10 +86,26 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/users"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    url, json=gorse_users, headers=self._get_headers()
-                )
+            attempt = 0
+            while True:
+                try:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        response = await client.post(
+                            url, json=gorse_users, headers=self._get_headers()
+                        )
+                    break
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    httpx.RemoteProtocolError,
+                ) as e:
+                    attempt += 1
+                    if attempt > self.max_retries:
+                        raise
+                    logger.warning(
+                        f"Gorse users batch attempt {attempt} failed: {e}; retrying..."
+                    )
+                    await asyncio.sleep(self.retry_backoff * attempt)
 
                 # Check HTTP status
                 if response.status_code == 200:
@@ -167,10 +186,26 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/items"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    url, json=gorse_items, headers=self._get_headers()
-                )
+            attempt = 0
+            while True:
+                try:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        response = await client.post(
+                            url, json=gorse_items, headers=self._get_headers()
+                        )
+                    break
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    httpx.RemoteProtocolError,
+                ) as e:
+                    attempt += 1
+                    if attempt > self.max_retries:
+                        raise
+                    logger.warning(
+                        f"Gorse items batch attempt {attempt} failed: {e}; retrying..."
+                    )
+                    await asyncio.sleep(self.retry_backoff * attempt)
 
                 # Check HTTP status
                 if response.status_code == 200:
@@ -247,10 +282,26 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/feedback"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    url, json=gorse_feedback, headers=self._get_headers()
-                )
+            attempt = 0
+            while True:
+                try:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        response = await client.post(
+                            url, json=gorse_feedback, headers=self._get_headers()
+                        )
+                    break
+                except (
+                    httpx.ConnectError,
+                    httpx.TimeoutException,
+                    httpx.RemoteProtocolError,
+                ) as e:
+                    attempt += 1
+                    if attempt > self.max_retries:
+                        raise
+                    logger.warning(
+                        f"Gorse feedback batch attempt {attempt} failed: {e}; retrying..."
+                    )
+                    await asyncio.sleep(self.retry_backoff * attempt)
 
                 # Check HTTP status
                 if response.status_code == 200:
