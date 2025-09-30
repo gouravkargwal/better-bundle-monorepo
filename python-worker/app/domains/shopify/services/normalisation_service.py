@@ -543,20 +543,25 @@ class OrderNormalizationService:
             self.logger.info(
                 f"✅ Order batch upsert completed: {processed_count} orders saved"
             )
+            # ✨ NEW: Publish attribution events for webhook-triggered orders
+            if is_webhook:
+                self.logger.info(
+                    f"📤 Publishing attribution events for {len(canonical_data_list)} webhook orders"
+                )
+                for canonical in canonical_data_list:
+                    try:
+                        await self._publish_order_events(
+                            shop_id, canonical.get("orderId")
+                        )
+                    except Exception as e:
+                        self.logger.error(
+                            f"Failed to publish attribution event for order {canonical.get('orderId')}: {e}"
+                        )
+                        continue
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
             return 0
-
-        # Publish events after commit for webhook-only processing
-        if is_webhook:
-            for canonical in canonical_data_list:
-                try:
-                    await self._publish_order_events(shop_id, canonical.get("orderId"))
-                except Exception:
-                    continue
-
-        return processed_count
 
     def _parse_payload(self, raw_record: Any) -> Optional[Dict]:
         """Parse order payload."""

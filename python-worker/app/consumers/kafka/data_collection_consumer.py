@@ -96,6 +96,7 @@ class DataCollectionKafkaConsumer:
                 "order_cancelled",
                 "customer_created",
                 "customer_updated",
+                "inventory_updated",
             ]:
                 await self._handle_webhook_event(payload, shop_data)
             else:
@@ -121,6 +122,7 @@ class DataCollectionKafkaConsumer:
             "order_cancelled",
             "customer_created",
             "customer_updated",
+            "inventory_updated",
         ]
 
     async def _resolve_shop_data(self, event: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -176,6 +178,7 @@ class DataCollectionKafkaConsumer:
             "order_cancelled",
             "customer_created",
             "customer_updated",
+            "inventory_updated",
         ]
 
     async def _handle_data_collection_job(
@@ -294,6 +297,11 @@ class DataCollectionKafkaConsumer:
             "customer_updated": {
                 "data_types": ["customers"],
                 "specific_ids": {"customers": [shopify_id]},
+            },
+            "inventory_updated": {
+                "data_types": ["products"],
+                "specific_ids": {"inventory_items": [shopify_id]},
+                "include_inventory": True,
             },
         }
         return event_mapping.get(event_type)
