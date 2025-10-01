@@ -200,11 +200,6 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
             "purchase_count_30d",
         ),
         Index("ix_product_features_shop_id_refund_rate", "shop_id", "refund_rate"),
-        Index(
-            "ix_product_features_shop_id_refund_risk_score",
-            "shop_id",
-            "refund_risk_score",
-        ),
         Index("ix_product_features_shop_id_net_revenue", "shop_id", "net_revenue"),
         Index(
             "ix_product_features_shop_id_popularity_trending",
