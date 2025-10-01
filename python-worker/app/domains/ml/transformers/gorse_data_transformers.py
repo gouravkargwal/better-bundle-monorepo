@@ -246,9 +246,7 @@ class GorseDataTransformers:
                 "currency_preference": user.get("currency_preference", "USD"),
                 "customer_health_score": int(user.get("customer_health_score", 0)),
                 # NEW: Refund Metrics
-                "refunded_orders": int(user.get("refunded_orders", 0)),
                 "refund_rate": float(user.get("refund_rate", 0.0)),
-                "total_refunded_amount": float(user.get("total_refunded_amount", 0.0)),
                 "net_lifetime_value": float(user.get("net_lifetime_value", 0.0)),
                 "is_high_risk_customer": int(
                     float(user.get("refund_rate", 0.0)) > 0.25
@@ -354,16 +352,8 @@ class GorseDataTransformers:
             "popularity_score": float(product.get("popularity_score", 0)),
             "trending_score": float(product.get("trending_score", 0)),
             # NEW: Enhanced product features using previously unused fields
-            "content_richness_score": int(product.get("content_richness_score", 0)),
-            "description_length": int(product.get("description_length", 0)),
-            "description_html_length": int(product.get("description_html_length", 0)),
-            "product_age": product.get("product_age"),
-            "last_updated_days": product.get("last_updated_days"),
-            "update_frequency": float(product.get("update_frequency", 0)),
             "product_type": product.get("product_type", "unknown"),
             "category_complexity": float(product.get("category_complexity", 0)),
-            "availability_score": float(product.get("availability_score", 0)),
-            "status_stability": float(product.get("status_stability", 0)),
             # From InteractionFeatures (aggregated)
             "total_interactions": int(product.get("total_interactions", 0)),
             "interaction_score": float(product.get("interaction_score", 0)),
@@ -388,68 +378,24 @@ class GorseDataTransformers:
             "cart_view_to_purchase_rate": float(
                 product.get("cart_view_to_purchase_rate", 0)
             ),
-            "seo_optimization": float(product.get("seo_optimization", 0)),
-            "seo_title_length": int(product.get("seo_title_length", 0)),
-            "seo_description_length": int(product.get("seo_description_length", 0)),
-            "has_video_content": bool(product.get("has_video_content", False)),
-            "has_3d_content": bool(product.get("has_3d_content", False)),
-            "media_count": int(product.get("media_count", 0)),
-            "has_online_store_url": bool(product.get("has_online_store_url", False)),
-            "has_preview_url": bool(product.get("has_preview_url", False)),
-            "has_custom_template": bool(product.get("has_custom_template", False)),
-            "metafield_utilization": float(product.get("metafield_utilization", 0)),
-            "media_richness": float(product.get("media_richness", 0)),
-            "refunded_orders": int(product.get("refunded_orders", 0)),
             "refund_rate": float(product.get("refund_rate", 0)),
-            "total_refunded_amount": float(product.get("total_refunded_amount", 0)),
             "net_revenue": float(product.get("net_revenue", 0)),
-            "variant_complexity": (
-                float(product.get("variant_complexity", 0))
-                if product.get("variant_complexity")
-                else 0
-            ),
-            "image_richness": (
-                float(product.get("image_richness", 0))
-                if product.get("image_richness")
-                else 0
-            ),
-            "tag_diversity": (
-                float(product.get("tag_diversity", 0))
-                if product.get("tag_diversity")
-                else 0
-            ),
             # From ProductData
             "vendor": product.get("vendor", "unknown"),
             "in_stock": bool(product.get("total_inventory", 0) > 0),
             "has_discount": self._calculate_has_discount(product),
-            # NEW: Enhanced product segments using new data
-            "content_quality_segment": self._calculate_content_quality_segment(product),
-            "lifecycle_segment": self._calculate_product_lifecycle_segment(product),
-            "availability_segment": self._calculate_availability_segment(product),
-            # Collection features (from CollectionFeatures table)
             "collection_count": (
                 len(product.get("collections", []))
                 if isinstance(product.get("collections"), list)
                 else 0
             ),
             # NEW: Enhanced collection features using previously unused fields
-            "handle_quality": float(product.get("handle_quality", 0)),
-            "template_score": int(product.get("template_score", 0)),
             "seo_optimization_score": float(product.get("seo_optimization_score", 0)),
             "collection_age": product.get("collection_age"),
-            "collection_update_frequency": float(product.get("update_frequency", 0)),
             "lifecycle_stage": product.get("lifecycle_stage", "unknown"),
             # NEW: Enhanced product features using previously unused fields
-            "content_richness_score": int(product.get("content_richness_score", 0)),
-            "description_length": int(product.get("description_length", 0)),
-            "description_html_length": int(product.get("description_html_length", 0)),
-            "product_age": product.get("product_age"),
-            "last_updated_days": product.get("last_updated_days"),
-            "update_frequency": float(product.get("update_frequency", 0)),
             "product_type": product.get("product_type", "unknown"),
             "category_complexity": float(product.get("category_complexity", 0)),
-            "availability_score": float(product.get("availability_score", 0)),
-            "status_stability": float(product.get("status_stability", 0)),
             "collection_quality_score": float(
                 product.get("collection_performance_score", 0.5)
             ),
@@ -483,22 +429,9 @@ class GorseDataTransformers:
             "has_discount": int(bool(product.get("compare_at_price"))),
             "stock_level": min(int(product.get("total_inventory", 0)) / 100, 1.0),
             # Enhanced Product Features (from new Shopify data)
-            "media_richness": float(product.get("media_richness", 0)),
-            "seo_optimization": float(product.get("seo_optimization", 0)),
-            "seo_title_length": int(product.get("seo_title_length", 0)),
-            "seo_description_length": int(product.get("seo_description_length", 0)),
-            "has_video_content": int(product.get("has_video_content", False)),
-            "has_3d_content": int(product.get("has_3d_content", False)),
-            "media_count": int(product.get("media_count", 0)),
-            "has_online_store_url": int(product.get("has_online_store_url", False)),
-            "has_preview_url": int(product.get("has_preview_url", False)),
-            "has_custom_template": int(product.get("has_custom_template", False)),
             # NEW: Refund Metrics
-            "refunded_orders": int(product.get("refunded_orders", 0)),
             "refund_rate": float(product.get("refund_rate", 0.0)),
-            "total_refunded_amount": float(product.get("total_refunded_amount", 0.0)),
             "net_revenue": float(product.get("net_revenue", 0.0)),
-            "refund_risk_score": float(product.get("refund_risk_score", 0.0)),
             "is_high_risk_product": int(
                 float(product.get("refund_risk_score", 0.0)) > 70
             ),
@@ -1183,8 +1116,6 @@ class GorseDataTransformers:
                     f"price_variance:{collection_dict.get('price_variance', 0)}",
                     f"conversion_rate:{collection_dict.get('conversion_rate', 0)}",
                     f"revenue_contribution:{collection_dict.get('revenue_contribution', 0)}",
-                    f"seo_score:{collection_dict.get('seo_score', 0)}",
-                    f"image_score:{collection_dict.get('image_score', 0)}",
                     f"performance_score:{collection_dict.get('performance_score', 0)}",
                 ],
                 "IsHidden": False,
@@ -1403,76 +1334,4 @@ class GorseDataTransformers:
                 return "other"
         except Exception as e:
             logger.error(f"Error calculating traffic source segment: {e}")
-            return "unknown"
-
-    def _calculate_content_quality_segment(self, product: Dict[str, Any]) -> str:
-        """Calculate content quality segment based on product content data"""
-        try:
-            content_richness = int(product.get("content_richness_score", 0))
-            description_length = int(product.get("description_length", 0))
-            description_html_length = int(product.get("description_html_length", 0))
-
-            # High quality content
-            if content_richness > 80 and description_length > 200:
-                return "high_quality"
-            elif content_richness > 60 and description_length > 100:
-                return "medium_quality"
-            elif content_richness > 40 and description_length > 50:
-                return "basic_quality"
-            else:
-                return "low_quality"
-        except Exception as e:
-            logger.error(f"Error calculating content quality segment: {e}")
-            return "unknown"
-
-    def _calculate_product_lifecycle_segment(self, product: Dict[str, Any]) -> str:
-        """Calculate product lifecycle segment based on age and update frequency"""
-        try:
-            product_age = product.get("product_age")
-            update_frequency = float(product.get("update_frequency", 0))
-
-            if product_age is None:
-                return "unknown"
-
-            # Lifecycle segmentation
-            if product_age < 30:  # Less than 30 days
-                return "new_product"
-            elif product_age < 90:  # Less than 3 months
-                return "recent_product"
-            elif product_age < 365:  # Less than 1 year
-                return "established_product"
-            elif update_frequency > 0.5:  # Frequently updated
-                return "active_product"
-            else:
-                return "mature_product"
-        except Exception as e:
-            logger.error(f"Error calculating product lifecycle segment: {e}")
-            return "unknown"
-
-    def _calculate_availability_segment(self, product: Dict[str, Any]) -> str:
-        """Calculate availability segment based on inventory and status data"""
-        try:
-            availability_score = float(product.get("availability_score", 0))
-            status_stability = float(product.get("status_stability", 0))
-            total_inventory = int(product.get("total_inventory", 0))
-
-            # High availability
-            if (
-                availability_score > 80
-                and status_stability > 80
-                and total_inventory > 10
-            ):
-                return "high_availability"
-            elif (
-                availability_score > 60
-                and status_stability > 60
-                and total_inventory > 0
-            ):
-                return "medium_availability"
-            elif availability_score > 40 and status_stability > 40:
-                return "low_availability"
-            else:
-                return "unavailable"
-        except Exception as e:
-            logger.error(f"Error calculating availability segment: {e}")
             return "unknown"

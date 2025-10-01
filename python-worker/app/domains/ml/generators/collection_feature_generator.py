@@ -76,27 +76,11 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
                     }
                 )
 
-            # SEO and image scores
-            features.update(self._compute_seo_score(collection))
-            features.update(self._compute_image_score(collection))
-
-            # NEW: Compute enhanced collection features using previously unused fields
-            collection_metadata_features = self._compute_collection_metadata_features(
-                collection
-            )
-            collection_lifecycle_features = self._compute_collection_lifecycle_features(
-                collection
-            )
-
             # Performance score (composite)
             features.update(self._compute_performance_score(features))
 
             # Validate and clean features
             features = self.validate_features(features)
-
-            # Add enhanced collection features
-            features.update(collection_metadata_features)
-            features.update(collection_lifecycle_features)
 
             # Add lastComputedAt timestamp
             from app.shared.helpers import now_utc
@@ -349,58 +333,6 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             "top_vendors": top_vendor_names if top_vendor_names else [],
         }
 
-    def _compute_seo_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute SEO score as integer (not string tier)"""
-        score = 0
-
-        # Title quality (good length and exists)
-        title = collection.get("title", "")
-        if title and 10 <= len(title) <= 60:  # Optimal title length
-            score += 2
-        elif title and len(title) > 5:
-            score += 1
-
-        # Description quality
-        description = collection.get("description", "")
-        if (
-            description and 50 <= len(description) <= 160
-        ):  # Good meta description length
-            score += 2
-        elif description and len(description) > 20:
-            score += 1
-
-        # Handle quality (URL-friendly)
-        handle = collection.get("handle", "")
-        if handle and len(handle) > 3:
-            score += 1
-
-        # SEO-specific fields
-        seo_title = collection.get("seo_title", "")
-        if seo_title:
-            score += 1
-
-        seo_description = collection.get("seo_description", "")
-        if seo_description:
-            score += 1
-
-        return {"seo_score": score}  # Max score is 8
-
-    def _compute_image_score(self, collection: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute image quality score"""
-        score = 0
-
-        # Check if collection has an image
-        image_url = collection.get("image_url")
-        if image_url:
-            score += 3
-
-            # Check if image has alt text
-            image_alt = collection.get("image_alt")
-            if image_alt and len(image_alt.strip()) > 0:
-                score += 2
-
-        return {"image_score": score}  # Max score is 5
-
     def _compute_performance_score(self, features: Dict[str, Any]) -> Dict[str, Any]:
         """Compute composite performance score"""
         score = 0.0
@@ -437,138 +369,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             normalized_revenue = min(revenue_contribution / 10.0, 1.0)  # Cap at 10%
             score += normalized_revenue * 0.1
 
-        # SEO score (5% weight)
-        seo_score = features.get("seo_score", 0)
-        normalized_seo = seo_score / 8.0  # Max SEO score is 8
-        score += normalized_seo * 0.05
-
-        # Image score (5% weight)
-        image_score = features.get("image_score", 0)
-        normalized_image = image_score / 5.0  # Max image score is 5
-        score += normalized_image * 0.05
-
         return {"performance_score": score}
-
-    def _compute_collection_metadata_features(
-        self, collection: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute collection metadata features using previously unused fields"""
-        try:
-            # Handle and template features (currently unused)
-            handle = collection.get("handle", "")
-            template_suffix = collection.get("template_suffix", "")
-
-            # Handle quality score (URL-friendly)
-            handle_quality = 0
-            if handle and len(handle) > 3:
-                handle_quality = min(len(handle) / 10, 10)  # Max 10 points
-
-            # Template customization score
-            template_score = 10 if template_suffix else 0
-
-            # Metafields analysis (currently unused)
-            metafields = collection.get("metafields", [])
-            metafield_count = len(metafields) if isinstance(metafields, list) else 0
-            metafield_utilization = min(metafield_count / 5, 1.0)  # Normalize to 0-1
-
-            # Extras analysis (currently unused)
-            extras = collection.get("extras", {})
-            extras_count = len(extras) if isinstance(extras, dict) else 0
-            extras_utilization = min(extras_count / 3, 1.0)  # Normalize to 0-1
-
-            return {
-                "handle_quality": handle_quality,
-                "template_score": template_score,
-                "metafield_utilization": metafield_utilization,
-                "extras_utilization": extras_utilization,
-                "handle": handle,
-                "template_suffix": template_suffix,
-                "metafield_count": metafield_count,
-                "extras_count": extras_count,
-            }
-        except Exception as e:
-            logger.error(f"Error computing collection metadata features: {str(e)}")
-            return {
-                "handle_quality": 0,
-                "template_score": 0,
-                "metafield_utilization": 0.0,
-                "extras_utilization": 0.0,
-                "handle": "",
-                "template_suffix": "",
-                "metafield_count": 0,
-                "extras_count": 0,
-            }
-
-    def _compute_collection_lifecycle_features(
-        self, collection: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute collection lifecycle features using previously unused fields"""
-        try:
-            from app.shared.helpers import now_utc
-
-            # Collection age and update frequency
-            created_at = collection.get("created_at")
-            updated_at = collection.get("updated_at")
-
-            collection_age = 0
-            last_updated_days = 0
-            update_frequency = 0.0
-
-            if created_at:
-                if isinstance(created_at, str):
-                    created_at = datetime.fromisoformat(
-                        created_at.replace("Z", "+00:00")
-                    )
-                collection_age = (now_utc() - created_at).days
-
-            if updated_at:
-                if isinstance(updated_at, str):
-                    updated_at = datetime.fromisoformat(
-                        updated_at.replace("Z", "+00:00")
-                    )
-                last_updated_days = (now_utc() - updated_at).days
-
-                # Calculate update frequency (updates per month)
-                if created_at and updated_at > created_at:
-                    days_since_creation = (updated_at - created_at).days
-                    if days_since_creation > 0:
-                        update_frequency = (
-                            30.0 / days_since_creation
-                        )  # Updates per month
-
-            # Collection maturity score based on age and updates
-            maturity_score = 0
-            if collection_age > 365:  # More than 1 year old
-                maturity_score = 100
-            elif collection_age > 180:  # More than 6 months old
-                maturity_score = 75
-            elif collection_age > 90:  # More than 3 months old
-                maturity_score = 50
-            elif collection_age > 30:  # More than 1 month old
-                maturity_score = 25
-            else:
-                maturity_score = 10  # New collection
-
-            # Bonus for active maintenance
-            if update_frequency > 1.0:  # Updated more than once per month
-                maturity_score += 20
-            elif update_frequency > 0.5:  # Updated at least twice per month
-                maturity_score += 10
-
-            return {
-                "collection_age": collection_age,
-                "last_updated_days": last_updated_days,
-                "update_frequency": round(update_frequency, 2),
-                "maturity_score": min(maturity_score, 100),
-            }
-        except Exception as e:
-            logger.error(f"Error computing collection lifecycle features: {str(e)}")
-            return {
-                "collection_age": 0,
-                "last_updated_days": 0,
-                "update_frequency": 0.0,
-                "maturity_score": 0,
-            }
 
     def _extract_numeric_gid(self, gid: Optional[str]) -> Optional[str]:
         """Extract numeric ID from GraphQL ID"""

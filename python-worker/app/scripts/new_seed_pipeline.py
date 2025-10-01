@@ -256,7 +256,6 @@ class SeedPipelineRunner:
                 seo_description=(
                     product["seo"]["description"] if product["seo"] else None
                 ),
-                template_suffix=product["templateSuffix"],
                 variants=product["variants"],
                 images=product["media"],
                 media=product["media"],
@@ -391,7 +390,6 @@ class SeedPipelineRunner:
                 title=collection["title"],
                 handle=collection["handle"],
                 description=collection["description"],
-                template_suffix=collection["templateSuffix"],
                 seo_title=(collection["seo"]["title"] if collection["seo"] else None),
                 seo_description=(
                     collection["seo"]["description"] if collection["seo"] else None

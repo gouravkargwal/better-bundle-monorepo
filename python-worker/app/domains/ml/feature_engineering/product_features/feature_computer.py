@@ -732,7 +732,6 @@ class ProductFeatureComputer(BaseFeatureGenerator):
             return {
                 "has_online_store_url": bool(product_data.get("online_store_url")),
                 "has_preview_url": bool(product_data.get("online_store_preview_url")),
-                "has_custom_template": bool(product_data.get("template_suffix")),
             }
         except Exception as e:
             logger.error(f"Error computing store integration features: {str(e)}")

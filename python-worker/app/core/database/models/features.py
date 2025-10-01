@@ -164,46 +164,13 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     stock_velocity = Column(Float, nullable=True)
     price_tier = Column(String(20), nullable=True)
 
-    # Content features
-    variant_complexity = Column(Float, nullable=True)
-    image_richness = Column(Float, nullable=True)
-    tag_diversity = Column(Float, nullable=True)
-    metafield_utilization = Column(Float, nullable=True)
-    media_richness = Column(Float, nullable=True)
-    seo_optimization = Column(Float, nullable=True)
-    seo_title_length = Column(Integer, nullable=True)
-    seo_description_length = Column(Integer, nullable=True)
-
-    # Media features
-    has_video_content = Column(Boolean, default=False, nullable=False)
-    has_3d_content = Column(Boolean, default=False, nullable=False)
-    media_count = Column(Integer, default=0, nullable=False)
-    has_online_store_url = Column(Boolean, default=False, nullable=False)
-    has_preview_url = Column(Boolean, default=False, nullable=False)
-    has_custom_template = Column(Boolean, default=False, nullable=False)
-
     # Performance scores
     popularity_score = Column(Float, default=0, nullable=False, index=True)
     trending_score = Column(Float, default=0, nullable=False, index=True)
 
     # Refund metrics
-    refunded_orders = Column(Integer, default=0, nullable=False)
     refund_rate = Column(Float, default=0.0, nullable=False, index=True)
-    total_refunded_amount = Column(Float, default=0.0, nullable=False)
     net_revenue = Column(Float, default=0.0, nullable=False, index=True)
-    refund_risk_score = Column(Float, default=0.0, nullable=False, index=True)
-
-    # Enhanced content features
-    content_richness_score = Column(Integer, default=0, nullable=False)
-    description_length = Column(Integer, default=0, nullable=False)
-    description_html_length = Column(Integer, default=0, nullable=False)
-    product_age = Column(Integer, nullable=True)
-    last_updated_days = Column(Integer, nullable=True)
-    update_frequency = Column(Float, nullable=True)
-    product_type = Column(String(100), nullable=True)
-    category_complexity = Column(Float, nullable=True)
-    availability_score = Column(Float, nullable=True)
-    status_stability = Column(Float, nullable=True)
 
     # Computation tracking
     last_computed_at = Column(
@@ -294,26 +261,15 @@ class CollectionFeatures(BaseModel, ShopMixin):
 
     # Scores
     performance_score = Column(Float, default=0, nullable=False, index=True)
-    seo_score = Column(Integer, default=0, nullable=False)
-    image_score = Column(Integer, default=0, nullable=False)
 
     # Enhanced features
-    handle_quality = Column(Float, nullable=True)
-    template_score = Column(Integer, default=0, nullable=False)
     seo_optimization_score = Column(Float, nullable=True)
     collection_age = Column(Integer, nullable=True)
     update_frequency = Column(Float, nullable=True)
     lifecycle_stage = Column(String(50), nullable=True)
 
     # Additional fields from feature computation
-    handle = Column(String(255), nullable=True)
-    template_suffix = Column(String(100), nullable=True)
-    last_updated_days = Column(Integer, nullable=True)
-    metafield_count = Column(Integer, default=0, nullable=False)
-    extras_utilization = Column(Float, nullable=True)
     maturity_score = Column(Float, nullable=True)
-    extras_count = Column(Integer, default=0, nullable=False)
-    metafield_utilization = Column(Float, nullable=True)
 
     # Computation tracking
     last_computed_at = Column(

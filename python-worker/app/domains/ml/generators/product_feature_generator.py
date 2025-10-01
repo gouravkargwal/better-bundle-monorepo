@@ -69,10 +69,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             price_inventory_metrics = self._compute_price_inventory_metrics(
                 product_data, orders
             )
-
-            # Compute metadata scores
-            metadata_scores = self._compute_metadata_scores(product_data)
-
             # Compute popularity and trending scores
             popularity_trending = self._compute_popularity_trending_scores(
                 metrics_30d, temporal_metrics
@@ -82,26 +78,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             refund_metrics = self._compute_refund_metrics(
                 product_id, orders, product_id_mapping
             )
-
-            # Compute enhanced features from new data
-            enhanced_metadata_scores = self._compute_enhanced_metadata_scores(
-                product_data
-            )
-            seo_features = self._compute_seo_features(product_data)
-            media_features = self._compute_media_features(product_data)
-            store_integration_features = self._compute_store_integration_features(
-                product_data
-            )
-
-            # NEW: Compute enhanced features using previously unused fields
-            content_quality_features = self._compute_content_quality_features(
-                product_data
-            )
-            product_lifecycle_features = self._compute_product_lifecycle_features(
-                product_data
-            )
-            category_features = self._compute_category_features(product_data)
-            availability_features = self._compute_availability_features(product_data)
 
             features = {
                 "shop_id": shop_id,
@@ -142,50 +118,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
                 "inventory_turnover": price_inventory_metrics["inventory_turnover"],
                 "stock_velocity": price_inventory_metrics["stock_velocity"],
                 "price_tier": price_inventory_metrics["price_tier"],
-                # Enhanced metadata scores
-                "variant_complexity": metadata_scores["variant_complexity"],
-                "image_richness": metadata_scores["image_richness"],
-                "tag_diversity": metadata_scores["tag_diversity"],
-                "metafield_utilization": metadata_scores["metafield_utilization"],
-                # New enhanced features
-                "media_richness": enhanced_metadata_scores["media_richness"],
-                "seo_optimization": seo_features["seo_optimization"],
-                "seo_title_length": seo_features["seo_title_length"],
-                "seo_description_length": seo_features["seo_description_length"],
-                "has_video_content": media_features["has_video_content"],
-                "has_3d_content": media_features["has_3d_content"],
-                "media_count": media_features["media_count"],
-                "has_online_store_url": store_integration_features[
-                    "has_online_store_url"
-                ],
-                "has_preview_url": store_integration_features["has_preview_url"],
-                "has_custom_template": store_integration_features[
-                    "has_custom_template"
-                ],
                 # Computed scores
                 "popularity_score": popularity_trending["popularity_score"],
                 "trending_score": popularity_trending["trending_score"],
                 # Refund metrics (NEW)
-                "refunded_orders": refund_metrics["refunded_orders"],
                 "refund_rate": refund_metrics["refund_rate"],
-                "total_refunded_amount": refund_metrics["total_refunded_amount"],
                 "net_revenue": refund_metrics["net_revenue"],
-                "refund_risk_score": refund_metrics["refund_risk_score"],
-                # NEW: Enhanced features using previously unused fields
-                "content_richness_score": content_quality_features[
-                    "content_richness_score"
-                ],
-                "description_length": content_quality_features["description_length"],
-                "description_html_length": content_quality_features[
-                    "description_html_length"
-                ],
-                "product_age": product_lifecycle_features["product_age"],
-                "last_updated_days": product_lifecycle_features["last_updated_days"],
-                "update_frequency": product_lifecycle_features["update_frequency"],
-                "product_type": category_features["product_type"],
-                "category_complexity": category_features["category_complexity"],
-                "availability_score": availability_features["availability_score"],
-                "status_stability": availability_features["status_stability"],
                 "last_computed_at": now_utc(),
             }
 
@@ -465,35 +403,6 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "price_tier": price_tier,
         }
 
-    def _compute_metadata_scores(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute product metadata richness scores (0-1 normalized)"""
-
-        # Compute counts from actual data (proper place for this computation)
-        variants = product_data.get("variants", [])
-        variant_count = len(variants) if isinstance(variants, list) else 0
-        variant_complexity = min(variant_count / 10.0, 1.0)  # Normalize to 0-1
-
-        images = product_data.get("images", [])
-        image_count = len(images) if isinstance(images, list) else 0
-        image_richness = min(image_count / 5.0, 1.0)  # Normalize to 0-1
-
-        tags = product_data.get("tags", [])
-        tag_count = len(tags) if isinstance(tags, list) else 0
-        tag_diversity = min(tag_count / 10.0, 1.0)  # Normalize to 0-1
-
-        # Metafield utilization (data already parsed from database)
-        metafields = product_data.get("metafields", [])
-
-        metafield_count = len(metafields) if isinstance(metafields, list) else 0
-        metafield_utilization = min(metafield_count / 5.0, 1.0)  # Normalize to 0-1
-
-        return {
-            "variant_complexity": round(variant_complexity, 3),
-            "image_richness": round(image_richness, 3),
-            "tag_diversity": round(tag_diversity, 3),
-            "metafield_utilization": round(metafield_utilization, 3),
-        }
-
     def _compute_popularity_trending_scores(
         self, metrics_30d: Dict[str, Any], temporal_metrics: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -602,163 +511,12 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             "inventory_turnover": None,
             "stock_velocity": None,
             "price_tier": None,
-            "variant_complexity": None,
-            "image_richness": None,
-            "tag_diversity": None,
-            "metafield_utilization": None,
-            "media_richness": 0,
-            "seo_optimization": 0,
-            "seo_title_length": 0,
-            "seo_description_length": 0,
-            "has_video_content": False,
-            "has_3d_content": False,
-            "media_count": 0,
-            "has_online_store_url": False,
-            "has_preview_url": False,
-            "has_custom_template": False,
             "popularity_score": 0.0,
             "trending_score": 0.0,
-            # Refund metrics (NEW)
-            "refunded_orders": 0,
             "refund_rate": 0.0,
-            "total_refunded_amount": 0.0,
             "net_revenue": 0.0,
-            "refund_risk_score": 0.0,
-            # NEW: Enhanced features using previously unused fields
-            "content_richness_score": 0,
-            "description_length": 0,
-            "description_html_length": 0,
-            "product_age": 0,
-            "last_updated_days": 0,
-            "update_frequency": 0.0,
-            "product_type": "",
-            "category_complexity": 0,
-            "availability_score": 0,
-            "status_stability": 0,
             "last_computed_at": now_utc(),
         }
-
-    def _compute_enhanced_metadata_scores(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute enhanced metadata scores from new product fields"""
-        try:
-            # Media richness score based on media content
-            media_data = product_data.get("media", [])
-            media_richness = 0
-
-            if media_data:
-                # Count different types of media
-                video_count = sum(
-                    1
-                    for media in media_data
-                    if media.get("node", {}).get("__typename") == "Video"
-                )
-                model_3d_count = sum(
-                    1
-                    for media in media_data
-                    if media.get("node", {}).get("__typename") == "Model3d"
-                )
-                image_count = sum(
-                    1
-                    for media in media_data
-                    if media.get("node", {}).get("__typename") == "MediaImage"
-                )
-
-                # Calculate richness score (0-100)
-                media_richness = min(
-                    100, (video_count * 30 + model_3d_count * 40 + image_count * 10)
-                )
-
-            return {
-                "media_richness": media_richness,
-            }
-        except Exception as e:
-            logger.error(f"Error computing enhanced metadata scores: {str(e)}")
-            return {"media_richness": 0}
-
-    def _compute_seo_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute SEO-related features"""
-        try:
-            seo_title = product_data.get("seo_title", "")
-            seo_description = product_data.get("seo_description", "")
-
-            # SEO optimization score (0-100)
-            seo_optimization = 0
-            if seo_title:
-                seo_optimization += 30
-            if seo_description:
-                seo_optimization += 30
-            if seo_title and len(seo_title) >= 30 and len(seo_title) <= 60:
-                seo_optimization += 20  # Optimal title length
-            if (
-                seo_description
-                and len(seo_description) >= 120
-                and len(seo_description) <= 160
-            ):
-                seo_optimization += 20  # Optimal description length
-
-            return {
-                "seo_optimization": seo_optimization,
-                "seo_title_length": len(seo_title) if seo_title else 0,
-                "seo_description_length": (
-                    len(seo_description) if seo_description else 0
-                ),
-            }
-        except Exception as e:
-            logger.error(f"Error computing SEO features: {str(e)}")
-            return {
-                "seo_optimization": 0,
-                "seo_title_length": 0,
-                "seo_description_length": 0,
-            }
-
-    def _compute_media_features(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute media-related features"""
-        try:
-            media_data = product_data.get("media", [])
-
-            has_video = False
-            has_3d = False
-            media_count = len(media_data)
-
-            for media in media_data:
-                media_type = media.get("node", {}).get("__typename", "")
-                if media_type == "Video":
-                    has_video = True
-                elif media_type == "Model3d":
-                    has_3d = True
-
-            return {
-                "has_video_content": has_video,
-                "has_3d_content": has_3d,
-                "media_count": media_count,
-            }
-        except Exception as e:
-            logger.error(f"Error computing media features: {str(e)}")
-            return {
-                "has_video_content": False,
-                "has_3d_content": False,
-                "media_count": 0,
-            }
-
-    def _compute_store_integration_features(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute store integration features"""
-        try:
-            return {
-                "has_online_store_url": bool(product_data.get("online_store_url")),
-                "has_preview_url": bool(product_data.get("online_store_preview_url")),
-                "has_custom_template": bool(product_data.get("template_suffix")),
-            }
-        except Exception as e:
-            logger.error(f"Error computing store integration features: {str(e)}")
-            return {
-                "has_online_store_url": False,
-                "has_preview_url": False,
-                "has_custom_template": False,
-            }
 
     def _compute_refund_metrics(
         self,
@@ -770,11 +528,8 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
         try:
             if not orders:
                 return {
-                    "refunded_orders": 0,
                     "refund_rate": 0.0,
-                    "total_refunded_amount": 0.0,
                     "net_revenue": 0.0,
-                    "refund_risk_score": 0.0,
                 }
 
             # Find orders containing this product
@@ -825,197 +580,14 @@ class ProductFeatureGenerator(BaseFeatureGenerator):
             refund_rate = refunded_orders / total_orders if total_orders > 0 else 0.0
             net_revenue = total_revenue - total_refunded_amount
 
-            # Calculate refund risk score (0-100, higher = more risky)
-            refund_risk_score = 0.0
-            if total_orders > 0:
-                if refund_rate > 0.5:  # More than 50% refund rate
-                    refund_risk_score = 90
-                elif refund_rate > 0.25:  # More than 25% refund rate
-                    refund_risk_score = 70
-                elif refund_rate > 0.1:  # More than 10% refund rate
-                    refund_risk_score = 50
-                elif refund_rate > 0.05:  # More than 5% refund rate
-                    refund_risk_score = 30
-                elif refund_rate > 0:  # Any refunds
-                    refund_risk_score = 10
-
             return {
-                "refunded_orders": refunded_orders,
                 "refund_rate": round(refund_rate, 3),
-                "total_refunded_amount": round(total_refunded_amount, 2),
                 "net_revenue": round(net_revenue, 2),
-                "refund_risk_score": refund_risk_score,
             }
 
         except Exception as e:
             logger.error(f"Failed to compute refund metrics: {str(e)}")
             return {
-                "refunded_orders": 0,
                 "refund_rate": 0.0,
-                "total_refunded_amount": 0.0,
                 "net_revenue": 0.0,
-                "refund_risk_score": 0.0,
-            }
-
-    def _compute_content_quality_features(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute content quality features using previously unused fields"""
-        try:
-            # Description analysis (currently unused)
-            description = product_data.get("description", "")
-            description_html = product_data.get("description_html", "")
-
-            description_length = len(description) if description else 0
-            description_html_length = len(description_html) if description_html else 0
-
-            # Content richness score (0-100)
-            content_richness_score = 0
-            if description_length > 0:
-                content_richness_score += min(
-                    description_length / 10, 50
-                )  # Max 50 points for description
-            if description_html_length > 0:
-                content_richness_score += min(
-                    description_html_length / 20, 30
-                )  # Max 30 points for HTML
-            if description_length > 100 and description_html_length > 50:
-                content_richness_score += 20  # Bonus for rich content
-
-            return {
-                "content_richness_score": min(content_richness_score, 100),
-                "description_length": description_length,
-                "description_html_length": description_html_length,
-            }
-        except Exception as e:
-            logger.error(f"Error computing content quality features: {str(e)}")
-            return {
-                "content_richness_score": 0,
-                "description_length": 0,
-                "description_html_length": 0,
-            }
-
-    def _compute_product_lifecycle_features(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute product lifecycle features using previously unused fields"""
-        try:
-            created_at = product_data.get("created_at")
-            updated_at = product_data.get("updated_at")
-
-            product_age = 0
-            last_updated_days = 0
-            update_frequency = 0.0
-
-            if created_at:
-                if isinstance(created_at, str):
-                    created_at = datetime.datetime.fromisoformat(
-                        created_at.replace("Z", "+00:00")
-                    )
-                product_age = (now_utc() - created_at).days
-
-            if updated_at:
-                if isinstance(updated_at, str):
-                    updated_at = datetime.datetime.fromisoformat(
-                        updated_at.replace("Z", "+00:00")
-                    )
-                last_updated_days = (now_utc() - updated_at).days
-
-                # Calculate update frequency (updates per month)
-                if created_at and updated_at > created_at:
-                    days_since_creation = (updated_at - created_at).days
-                    if days_since_creation > 0:
-                        update_frequency = (
-                            30.0 / days_since_creation
-                        )  # Updates per month
-
-            return {
-                "product_age": product_age,
-                "last_updated_days": last_updated_days,
-                "update_frequency": round(update_frequency, 2),
-            }
-        except Exception as e:
-            logger.error(f"Error computing product lifecycle features: {str(e)}")
-            return {
-                "product_age": 0,
-                "last_updated_days": 0,
-                "update_frequency": 0.0,
-            }
-
-    def _compute_category_features(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute category features using previously unused fields"""
-        try:
-            product_type = product_data.get("product_type", "")
-
-            # Category complexity score based on product type
-            category_complexity = 0
-            if product_type:
-                # Simple categorization based on common product types
-                if any(
-                    keyword in product_type.lower()
-                    for keyword in ["electronics", "technology", "computer"]
-                ):
-                    category_complexity = 80  # High complexity
-                elif any(
-                    keyword in product_type.lower()
-                    for keyword in ["clothing", "fashion", "apparel"]
-                ):
-                    category_complexity = 60  # Medium-high complexity
-                elif any(
-                    keyword in product_type.lower()
-                    for keyword in ["book", "media", "digital"]
-                ):
-                    category_complexity = 40  # Medium complexity
-                elif any(
-                    keyword in product_type.lower()
-                    for keyword in ["food", "beverage", "consumable"]
-                ):
-                    category_complexity = 30  # Low-medium complexity
-                else:
-                    category_complexity = 50  # Default medium complexity
-
-            return {
-                "product_type": product_type,
-                "category_complexity": category_complexity,
-            }
-        except Exception as e:
-            logger.error(f"Error computing category features: {str(e)}")
-            return {
-                "product_type": "",
-                "category_complexity": 0,
-            }
-
-    def _compute_availability_features(
-        self, product_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute availability features using previously unused fields"""
-        try:
-            status = product_data.get("status", "")
-            is_active = product_data.get("is_active", True)
-
-            # Availability score (0-100)
-            availability_score = 0
-            if is_active:
-                availability_score += 50  # Base score for active products
-            if status and status.upper() == "ACTIVE":
-                availability_score += 30  # Bonus for explicit active status
-            elif status and status.upper() == "DRAFT":
-                availability_score += 10  # Lower score for draft products
-            elif status and status.upper() == "ARCHIVED":
-                availability_score = 0  # No score for archived products
-
-            # Status stability (how stable the product status is)
-            status_stability = 100 if status and status.upper() == "ACTIVE" else 50
-
-            return {
-                "availability_score": min(availability_score, 100),
-                "status_stability": status_stability,
-            }
-        except Exception as e:
-            logger.error(f"Error computing availability features: {str(e)}")
-            return {
-                "availability_score": 0,
-                "status_stability": 0,
             }

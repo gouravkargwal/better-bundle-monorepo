@@ -211,8 +211,6 @@ class BaseFeatureGenerator(ABC):
             "price_tier",
             "product_type",
             "lifecycle_stage",
-            "handle",
-            "template_suffix",
         }
 
         for key, value in features.items():
