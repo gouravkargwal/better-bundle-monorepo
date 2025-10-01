@@ -78,6 +78,7 @@ class AnalyticsTrackingService:
                 logger.warning(f"Extension {extension_type} cannot run in context")
                 return None
 
+            logger.info(f"Metadata: {metadata}")
             # Create interaction record
             interaction_data = InteractionCreate(
                 session_id=session_id,
@@ -85,7 +86,7 @@ class AnalyticsTrackingService:
                 interaction_type=interaction_type,
                 customer_id=customer_id,
                 shop_id=shop_id,
-                interaction_metadata=metadata or {},
+                metadata=metadata or {},
             )
 
             # Save interaction to database
@@ -440,6 +441,11 @@ class AnalyticsTrackingService:
                 # Generate unique interaction ID
                 interaction_id = f"interaction_{uuid.uuid4().hex[:16]}"
 
+                logger.info(f"Interaction data: {interaction_data}")
+                logger.info(
+                    f"Interaction data metadata: {interaction_data.model_dump()}"
+                )
+
                 # Create interaction record using SQLAlchemy
                 interaction_model = UserInteractionModel(
                     id=interaction_id,
@@ -451,6 +457,8 @@ class AnalyticsTrackingService:
                     interaction_metadata=interaction_data.metadata,
                     created_at=utcnow(),
                 )
+
+                logger.info(f"Interaction model: {interaction_model}")
 
                 session.add(interaction_model)
                 await session.commit()
@@ -466,7 +474,7 @@ class AnalyticsTrackingService:
                     ),
                     customer_id=interaction_model.customer_id,
                     shop_id=interaction_model.shop_id,
-                    metadata=interaction_model.interaction_metadata,
+                    interaction_metadata=interaction_model.interaction_metadata,
                     created_at=interaction_model.created_at,
                 )
 
