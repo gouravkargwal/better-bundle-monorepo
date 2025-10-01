@@ -69,17 +69,12 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     net_lifetime_value = Column(Float, default=0.0, nullable=False, index=True)
 
     # Customer demographic data
-    customer_email = Column(String(255), nullable=True)
-    customer_first_name = Column(String(100), nullable=True)
-    customer_last_name = Column(String(100), nullable=True)
-    customer_location = Column(JSON, default={}, nullable=True)
     customer_tags = Column(JSON, default=[], nullable=True)
     customer_created_at_shopify = Column(TIMESTAMP(timezone=True), nullable=True)
     customer_last_order_id = Column(String(100), nullable=True)
     customer_metafields = Column(JSON, default=[], nullable=True)
     customer_verified_email = Column(Boolean, default=False, nullable=False)
     customer_tax_exempt = Column(Boolean, default=False, nullable=False)
-    customer_default_address = Column(JSON, default={}, nullable=True)
     customer_addresses = Column(JSON, default=[], nullable=True)
     customer_currency_code = Column(String(10), nullable=True)
     customer_locale = Column(String(10), nullable=True)
@@ -264,12 +259,6 @@ class CollectionFeatures(BaseModel, ShopMixin):
 
     # Enhanced features
     seo_optimization_score = Column(Float, nullable=True)
-    collection_age = Column(Integer, nullable=True)
-    update_frequency = Column(Float, nullable=True)
-    lifecycle_stage = Column(String(50), nullable=True)
-
-    # Additional fields from feature computation
-    maturity_score = Column(Float, nullable=True)
 
     # Computation tracking
     last_computed_at = Column(

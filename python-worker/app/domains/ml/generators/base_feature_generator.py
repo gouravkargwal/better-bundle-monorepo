@@ -202,15 +202,11 @@ class BaseFeatureGenerator(ABC):
             "language",
             "referrer_type",
             "traffic_source",
-            "customer_email",
-            "customer_first_name",
-            "customer_last_name",
             "customer_last_order_id",
             "customer_currency_code",
             "customer_locale",
             "price_tier",
             "product_type",
-            "lifecycle_stage",
         }
 
         for key, value in features.items():

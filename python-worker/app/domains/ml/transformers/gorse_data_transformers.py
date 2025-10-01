@@ -78,10 +78,6 @@ class GorseDataTransformers:
                 "most_active_day": user.get("most_active_day"),
                 "device_type": user.get("device_type", "unknown"),
                 "primary_referrer": user.get("primary_referrer", "direct"),
-                # NEW: Enhanced customer demographic features
-                "customer_email": user.get("customer_email", ""),
-                "customer_first_name": user.get("customer_first_name", ""),
-                "customer_last_name": user.get("customer_last_name", ""),
                 "customer_verified_email": bool(
                     user.get("customer_verified_email", False)
                 ),
@@ -187,7 +183,6 @@ class GorseDataTransformers:
                     float(user.get("discount_sensitivity") or 0) * 2, 1.0
                 ),
                 "conversion_score": self._calculate_conversion_score(user),
-                "lifecycle_stage": self._encode_lifecycle_stage(user),
                 "customer_value_tier": self._calculate_value_tier(
                     float(user.get("total_spent") or 0),
                     int(user.get("total_purchases") or 0),
@@ -391,8 +386,6 @@ class GorseDataTransformers:
             ),
             # NEW: Enhanced collection features using previously unused fields
             "seo_optimization_score": float(product.get("seo_optimization_score", 0)),
-            "collection_age": product.get("collection_age"),
-            "lifecycle_stage": product.get("lifecycle_stage", "unknown"),
             # NEW: Enhanced product features using previously unused fields
             "product_type": product.get("product_type", "unknown"),
             "category_complexity": float(product.get("category_complexity", 0)),
@@ -524,25 +517,6 @@ class GorseDataTransformers:
 
         # Weight purchase conversion higher
         return min(browse_to_cart * 0.3 + cart_to_purchase * 0.7, 1.0)
-
-    def _encode_lifecycle_stage(self, user: Dict[str, Any]) -> int:
-        """Encode customer lifecycle stage"""
-        total_spent = float(user.get("total_spent") or 0)
-        days_since_last = user.get("days_since_last_order") or 999
-        frequency = float(user.get("order_frequency_per_month") or 0)
-
-        if total_spent > 1000 and days_since_last < 30:
-            return 5  # Champions
-        elif frequency > 1 and days_since_last < 60:
-            return 4  # Loyal
-        elif total_spent > 100 and days_since_last < 90:
-            return 3  # Potential
-        elif days_since_last < 180:
-            return 2  # At risk
-        elif total_spent > 0:
-            return 1  # Lost
-        else:
-            return 0  # New
 
     def _calculate_value_tier(self, total_spent: float, total_purchases: int) -> int:
         """Calculate customer value tier"""

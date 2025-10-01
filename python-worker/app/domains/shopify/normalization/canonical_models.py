@@ -78,8 +78,6 @@ class CanonicalOrder(BaseModel):
     order_id: str  # Maps to orderId
     order_name: Optional[str] = None  # orderName
     customer_id: Optional[str] = None  # customerId
-    customer_email: Optional[str] = None  # customerEmail (was email)
-    customer_phone: Optional[str] = None  # customerPhone (was phone)
     customer_display_name: Optional[str] = None  # customerDisplayName
     customer_state: Optional[str] = None  # customerState
     customer_verified_email: Optional[bool] = False  # customerVerifiedEmail

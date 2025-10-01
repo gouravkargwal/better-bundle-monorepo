@@ -190,8 +190,6 @@ class GraphQLOrderAdapter(BaseAdapter):
             test=payload.get("test", False),
             order_name=payload.get("name"),
             note=payload.get("note"),
-            customer_email=(payload.get("customer") or {}).get("email"),
-            customer_phone=(payload.get("customer") or {}).get("phone"),
             customer_display_name=f"{(payload.get('customer') or {}).get('firstName', '')} {(payload.get('customer') or {}).get('lastName', '')}".strip(),
             financial_status=payload.get("financial_status") or None,
             fulfillment_status=payload.get("fulfillment_status") or None,

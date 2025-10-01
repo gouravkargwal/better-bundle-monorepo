@@ -25,7 +25,6 @@ class OrderData(BaseModel, ShopMixin):
     order_id = Column(String, nullable=False, index=True)
     order_name = Column(String(100), nullable=True)
     customer_id = Column(String(100), nullable=True, index=True)
-    customer_email = Column(String(255), nullable=True, index=True)
     customer_phone = Column(String(50), nullable=True)
     customer_display_name = Column(String(255), nullable=True)
     customer_state = Column(String(50), nullable=True, index=True)
