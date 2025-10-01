@@ -18,21 +18,23 @@ class UserIdentityLink(BaseModel, ShopMixin):
     # shop_id provided by ShopMixin
 
     # Identity information
-    client_id = Column(String, nullable=False, index=True)
+    identifier = Column(String, nullable=False, index=True)  # ✅ RENAMED from client_id
+    identifier_type = Column(String, nullable=False, index=True)
     customer_id = Column(String, nullable=False, index=True)
     linked_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
 
     # Indexes
     __table_args__ = (
         Index(
-            "ix_user_identity_link_shop_id_client_id_customer_id",
+            "ix_user_identity_link_shop_identifier_customer",
             "shop_id",
-            "client_id",
+            "identifier",
             "customer_id",
             unique=True,
         ),
-        Index("ix_user_identity_link_shop_id_client_id", "shop_id", "client_id"),
-        Index("ix_user_identity_link_shop_id_customer_id", "shop_id", "customer_id"),
+        Index("ix_user_identity_link_shop_identifier", "shop_id", "identifier"),
+        Index("ix_user_identity_link_shop_customer", "shop_id", "customer_id"),
+        Index("ix_user_identity_link_identifier_type", "identifier_type"),  # ✅ NEW
     )
 
     def __repr__(self) -> str:

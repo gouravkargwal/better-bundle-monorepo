@@ -161,6 +161,23 @@ class CustomerIdentityResolutionService:
         try:
             matches = []
 
+            if current_session.client_id:
+                client_id_matches = await self._find_sessions_by_client_id(
+                    current_session, shop_id
+                )
+                matches.extend(client_id_matches)
+                logger.info(f"Found {len(client_id_matches)} sessions by client_id")
+
+            # Priority 2: Browser session ID matching (deterministic, same session)
+            if current_session.browser_session_id:
+                browser_matches = await self._find_sessions_by_browser_session(
+                    current_session, shop_id
+                )
+                matches.extend(browser_matches)
+                logger.info(
+                    f"Found {len(browser_matches)} sessions by browser_session_id"
+                )
+
             # Method 1: IP + User Agent matching (probabilistic)
             ip_ua_matches = await self._find_sessions_by_ip_user_agent(
                 current_session, shop_id
@@ -189,6 +206,70 @@ class CustomerIdentityResolutionService:
         except Exception as e:
             logger.error(f"Error finding related sessions: {str(e)}")
             return []
+
+    # ✅ NEW METHOD: Find sessions by client_id
+    async def _find_sessions_by_client_id(
+        self, current_session: UserSession, shop_id: str
+    ) -> List[IdentityMatch]:
+        """
+        Find sessions by Shopify client_id (HIGHEST priority - deterministic)
+
+        client_id is the most reliable identifier because it:
+        - Persists across browser sessions (days/weeks)
+        - Survives cache/cookie clearing (in most cases)
+        - Is provided by Shopify (trusted source)
+        - Links multiple browsing sessions from same device
+        """
+        try:
+            if not current_session.client_id:
+                return []
+
+            async with get_session_context() as session:
+                stmt = select(SAUserSession).where(
+                    SAUserSession.shop_id == shop_id,
+                    SAUserSession.customer_id.is_(None),  # Only anonymous sessions
+                    SAUserSession.client_id == current_session.client_id,
+                    SAUserSession.status == SessionStatus.ACTIVE,
+                    SAUserSession.expires_at > utcnow(),
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
+
+            matches = []
+            for session_data in sessions:
+                if session_data.id != current_session.id:  # Exclude current session
+                    matches.append(
+                        IdentityMatch(
+                            session_id=session_data.id,
+                            confidence_score=0.98,  # Very high confidence
+                            match_type="deterministic",
+                            match_reason=f"Shopify client_id match: {current_session.client_id[:16]}...",
+                        )
+                    )
+
+            logger.info(
+                f"client_id matching found {len(matches)} sessions "
+                f"(client_id: {current_session.client_id[:16]}...)"
+            )
+            return matches
+
+        except Exception as e:
+            logger.error(f"Error in client_id matching: {str(e)}")
+            return []
+
+    def _deduplicate_matches(self, matches: List[IdentityMatch]) -> List[IdentityMatch]:
+        """
+        Remove duplicate session matches, keeping the highest confidence score
+        """
+        seen = {}
+        for match in matches:
+            if (
+                match.session_id not in seen
+                or match.confidence_score > seen[match.session_id].confidence_score
+            ):
+                seen[match.session_id] = match
+
+        return list(seen.values())
 
     async def _find_sessions_by_ip_user_agent(
         self, current_session: UserSession, shop_id: str
@@ -567,6 +648,7 @@ class CustomerIdentityResolutionService:
             ),
         }
 
+    # ✅ UPDATE: Store identity links for both client_id and browser_session_id
     async def _store_customer_identity_links(
         self,
         customer_id: str,
@@ -576,15 +658,10 @@ class CustomerIdentityResolutionService:
     ) -> None:
         """
         Store customer identity links in UserIdentityLink table
-
-        Args:
-            customer_id: The customer ID to link to
-            shop_id: The shop ID
-            current_session_id: The current session ID
-            linked_sessions: List of linked session IDs
+        Links BOTH client_id AND browser_session_id to customer
         """
         try:
-            # Get all session IDs that need to be linked
+            # Get all sessions to link
             all_session_ids = [current_session_id] + linked_sessions
             async with get_session_context() as session:
                 result = await session.execute(
@@ -596,40 +673,88 @@ class CustomerIdentityResolutionService:
                 sessions_data = result.scalars().all()
 
             # Create identity links for each session
+            links_created = 0
             for session_data in sessions_data:
-                browser_session_id = session_data.browser_session_id
-
-                # Check if link already exists
-                async with get_session_context() as session:
-                    result = await session.execute(
-                        select(SAUserIdentityLink).where(
-                            SAUserIdentityLink.shop_id == shop_id,
-                            SAUserIdentityLink.client_id == browser_session_id,
-                            SAUserIdentityLink.customer_id == customer_id,
-                        )
+                # Link browser_session_id (if exists)
+                if session_data.browser_session_id:
+                    created = await self._create_identity_link(
+                        shop_id,
+                        session_data.browser_session_id,
+                        customer_id,
+                        identifier_type="browser_session_id",
                     )
-                    existing_link = result.scalar_one_or_none()
+                    if created:
+                        links_created += 1
 
-                    if not existing_link:
-                        link = SAUserIdentityLink(
-                            shop_id=shop_id,
-                            client_id=browser_session_id,
-                            customer_id=customer_id,
-                        )
-                        session.add(link)
-                        await session.commit()
-                        logger.info(
-                            f"Created identity link: {browser_session_id} -> {customer_id}"
-                        )
-                    else:
-                        logger.debug(
-                            f"Identity link already exists: {browser_session_id} -> {customer_id}"
-                        )
+                # Link client_id (if exists) - PRIORITY
+                if session_data.client_id:
+                    created = await self._create_identity_link(
+                        shop_id,
+                        session_data.client_id,
+                        customer_id,
+                        identifier_type="client_id",
+                    )
+                    if created:
+                        links_created += 1
 
             logger.info(
-                f"Stored {len(sessions_data)} customer identity links for customer {customer_id}"
+                f"Created {links_created} identity links for {len(sessions_data)} sessions "
+                f"(customer: {customer_id})"
             )
 
         except Exception as e:
-            logger.error(f"Failed to store customer identity links: {str(e)}")
+            logger.error(f"Failed to store identity links: {str(e)}")
+            raise
+
+    # ✅ NEW METHOD: Create individual identity link
+    async def _create_identity_link(
+        self,
+        shop_id: str,
+        identifier: str,
+        customer_id: str,
+        identifier_type: str,
+    ) -> bool:
+        """
+        Create a single identity link if it doesn't exist
+
+        Returns:
+            bool: True if link was created, False if it already existed
+        """
+        try:
+            async with get_session_context() as session:
+                # Check if link already exists
+                result = await session.execute(
+                    select(SAUserIdentityLink).where(
+                        SAUserIdentityLink.shop_id == shop_id,
+                        SAUserIdentityLink.identifier == identifier,
+                        SAUserIdentityLink.customer_id == customer_id,
+                        SAUserIdentityLink.identifier_type == identifier_type,
+                    )
+                )
+                existing_link = result.scalar_one_or_none()
+
+                if not existing_link:
+                    link = SAUserIdentityLink(
+                        shop_id=shop_id,
+                        identifier=identifier,
+                        identifier_type=identifier_type,
+                        customer_id=customer_id,
+                        linked_at=utcnow(),
+                    )
+                    session.add(link)
+                    await session.commit()
+                    logger.debug(
+                        f"Created identity link ({identifier_type}): "
+                        f"{identifier[:16]}... -> {customer_id}"
+                    )
+                    return True
+                else:
+                    logger.debug(
+                        f"Identity link exists ({identifier_type}): "
+                        f"{identifier[:16]}... -> {customer_id}"
+                    )
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to create identity link: {str(e)}")
             raise

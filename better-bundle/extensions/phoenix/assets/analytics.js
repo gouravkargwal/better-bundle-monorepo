@@ -1,80 +1,85 @@
-/**
- * Unified Analytics API Client for BetterBundle Phoenix Extension
- * 
- * This client handles all analytics and attribution tracking using the unified analytics system.
- * Designed specifically for Shopify Theme Extensions with their unique constraints.
- */
-
 class AnalyticsApiClient {
   constructor() {
-    // Use the unified analytics service URL
-    // For production, this should be your actual backend URL
-    // For development, you can use ngrok or localhost
     this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
-
-    // Deduplication tracking to prevent duplicate events
+    this.clientId = null;  // ✅ Store client_id in memory
     this.trackedEvents = new Map();
     this.deduplicationWindow = 5000; // 5 seconds
   }
 
-  /**
-   * Get unified browser session ID (shared across all extensions)
-   */
+
   async getBrowserSessionId() {
     let sessionId = sessionStorage.getItem("unified_browser_session_id");
     if (!sessionId) {
       sessionId = "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
       sessionStorage.setItem("unified_browser_session_id", sessionId);
+      console.log("🆕 Phoenix: Generated new unified browser_session_id:", sessionId);
+    } else {
+      console.log("♻️ Phoenix: Reusing existing unified browser_session_id:", sessionId);
     }
     return sessionId;
   }
 
-  /**
-   * Get or create a session for Phoenix tracking - WITH UNIFIED SESSION STORAGE
-   */
-  async getOrCreateSession(shopDomain, customerId) {
-    // Check unified session storage first (shared across all extensions)
+  getClientIdFromStorage() {
     try {
+      const clientId = sessionStorage.getItem("unified_client_id");
+      if (clientId) {
+        console.log("📱 Phoenix: Found client_id in sessionStorage:", clientId.substring(0, 16) + "...");
+        return clientId;
+      }
+    } catch (error) {
+      console.warn("Phoenix: Failed to read client_id from sessionStorage:", error);
+    }
+    return null;
+  }
+
+  async getOrCreateSession(shopDomain, customerId) {
+    try {
+      if (!this.clientId) {
+        this.clientId = this.getClientIdFromStorage();
+      }
+
       const cachedSessionId = sessionStorage.getItem("unified_session_id");
       const cachedExpiry = sessionStorage.getItem("unified_session_expires_at");
 
       if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-        console.log("⚡ Phoenix session loaded from unified sessionStorage:", cachedSessionId);
+        console.log("⚡ Phoenix: Session loaded from unified sessionStorage:", cachedSessionId);
+        console.log("📱 Phoenix: Using client_id:", this.clientId ? this.clientId.substring(0, 16) + "..." : "none");
+
         this.currentSessionId = cachedSessionId;
         this.sessionExpiresAt = parseInt(cachedExpiry);
         return cachedSessionId;
       }
-    } catch (error) {
-      console.warn("Failed to read from session storage:", error);
-    }
 
-    // Check if we have a valid session in memory
-    if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
-      return this.currentSessionId;
-    }
 
-    try {
+      if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
+        return this.currentSessionId;
+      }
       const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
+
+      const browserSessionId = await this.getBrowserSessionId();
 
       const payload = {
         shop_domain: shopDomain,
         customer_id: customerId ? String(customerId) : undefined,
-        browser_session_id: await this.getBrowserSessionId(),
+        browser_session_id: browserSessionId,
+        client_id: this.clientId,  // ✅ Include client_id if available
         user_agent: navigator.userAgent,
-        ip_address: null, // Will be detected server-side
+        ip_address: null,
         referrer: document.referrer,
         page_url: window.location.href,
       };
 
-      console.log('🔍 Phoenix session request:', { url, payload });
+      console.log('🔍 Phoenix: Session request:', {
+        url,
+        has_client_id: !!this.clientId,
+        browser_session_id: browserSessionId
+      });
 
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
       });
@@ -87,34 +92,38 @@ class AnalyticsApiClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes
+        const expiresAt = Date.now() + 30 * 60 * 1000;
 
         // Store in memory
         this.currentSessionId = sessionId;
         this.sessionExpiresAt = expiresAt;
 
-        // Store in unified session storage for persistence (shared across all extensions)
-        try {
-          sessionStorage.setItem("unified_session_id", sessionId);
-          sessionStorage.setItem("unified_session_expires_at", expiresAt.toString());
-          console.log("💾 Phoenix session saved to unified sessionStorage:", sessionId);
-        } catch (error) {
-          console.warn("Failed to store session in session storage:", error);
+        // ✅ NEW: Store client_id from backend response
+        if (result.data.client_id && !this.clientId) {
+          this.clientId = result.data.client_id;
+          // Also store in sessionStorage for other extensions
+          try {
+            sessionStorage.setItem("unified_client_id", this.clientId);
+            console.log("📱 Phoenix: Stored client_id from backend:", this.clientId.substring(0, 16) + "...");
+          } catch (error) {
+            console.warn("Phoenix: Failed to store client_id:", error);
+          }
         }
 
+
+        sessionStorage.setItem("unified_session_id", sessionId);
+        sessionStorage.setItem("unified_session_expires_at", expiresAt.toString());
+        console.log("💾 Phoenix: Session saved to unified sessionStorage:", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Phoenix session creation error:", error);
+      console.error("💥 Phoenix: Session creation error:", error);
       throw error;
     }
   }
 
-  /**
-   * Check if an event should be deduplicated
-   */
   shouldDeduplicateEvent(eventKey) {
     const now = Date.now();
     const lastTracked = this.trackedEvents.get(eventKey);
@@ -127,30 +136,23 @@ class AnalyticsApiClient {
     return false;
   }
 
-  /**
-   * Track interaction using unified analytics
-   */
+
   async trackUnifiedInteraction(request) {
     try {
 
-      // Create deduplication key
       const eventKey = `${request.interaction_type}_${request.context}_${request.shop_domain}_${request.customer_id || 'anon'}`;
 
-      // Check for deduplication
       if (this.shouldDeduplicateEvent(eventKey)) {
         return true; // Return success but don't actually track
       }
 
-      // Get or create session first
       const sessionId = await this.getOrCreateSession(request.shop_domain, request.customer_id ? String(request.customer_id) : undefined);
 
-      // Update request with session ID
       const interactionData = {
         ...request,
         session_id: sessionId,
       };
 
-      // Send to unified analytics endpoint
       const url = `${this.baseUrl}/api/phoenix/track-interaction`;
 
       console.log('📊 Phoenix track-interaction request:', { url, interactionData });
@@ -189,14 +191,12 @@ class AnalyticsApiClient {
   }
 
 
-  /**
-   * Track recommendation view (when recommendations are displayed)
-   */
+
   async trackRecommendationView(shopDomain, context, customerId, productIds, metadata) {
     try {
 
       const request = {
-        session_id: "", // Will be set by trackUnifiedInteraction
+        session_id: "",
         shop_domain: shopDomain,
         context: context, // Use consistent context (cart)
         interaction_type: "recommendation_viewed",

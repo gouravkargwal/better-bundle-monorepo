@@ -71,6 +71,7 @@ class UnifiedSessionService:
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None,
         referrer: Optional[str] = None,
+        client_id: Optional[str] = None,  # ✅ NEW parameter
     ) -> UserSession:
         """
         Get existing session or create new one for unified tracking.
@@ -85,6 +86,7 @@ class UnifiedSessionService:
             shop_id: Shop identifier (required)
             customer_id: Customer identifier (optional for anonymous users)
             browser_session_id: Browser session identifier
+            client_id: Shopify client ID for device tracking (optional)  # ✅ NEW
             user_agent: User agent string
             ip_address: IP address
             referrer: Referrer URL
@@ -110,6 +112,15 @@ class UnifiedSessionService:
 
                 if existing_session:
                     # Update activity in background and return existing session
+                    # ✅ NEW: Update client_id if provided and not already set
+                    if client_id and not existing_session.client_id:
+                        existing_session.client_id = client_id
+                        await session.commit()
+                        await session.refresh(existing_session)
+                        logger.info(
+                            f"Updated session {existing_session.id} with client_id: {client_id}"
+                        )
+
                     asyncio.create_task(
                         self._update_session_activity_background(existing_session.id)
                     )
@@ -126,6 +137,7 @@ class UnifiedSessionService:
                     ip_address,
                     referrer,
                     current_time,
+                    client_id,  # ✅ NEW: Pass client_id
                 )
 
         except Exception as e:
@@ -394,13 +406,16 @@ class UnifiedSessionService:
         current_time: datetime,
     ) -> Optional[UserSession]:
         """
-        Find existing active session and update customer_id if needed.
+        Find existing active session with improved deduplication logic
 
-        This method implements the key logic for linking anonymous sessions
-        to identified customers when they complete checkout.
+        Priority order:
+        1. Match by customer_id (if provided)
+        2. Match by browser_session_id (if provided)
+        3. Match by recent session from same shop (within last 5 seconds - race condition)
         """
+
         try:
-            # Priority 1: Try browser_session_id first (Shopify's persistent clientId)
+            # ✅ Priority 1: Try browser_session_id first (most specific)
             if browser_session_id:
                 stmt = (
                     select(UserSessionModel)
@@ -418,31 +433,21 @@ class UnifiedSessionService:
                 session_data = result.scalar_one_or_none()
 
                 if session_data:
-                    # ✅ CRITICAL: Update customer_id if session was anonymous and now identified
+                    # ✅ Update customer_id if session was anonymous and now identified
                     if customer_id and not session_data.customer_id:
                         logger.info(
                             f"🔗 Linking anonymous session {session_data.id} to customer {customer_id}"
                         )
-
-                        # Update the session with customer_id
                         session_data.customer_id = customer_id
-
-                        # Update expiration (identified sessions have shorter duration)
                         session_data.expires_at = (
                             current_time + self.identified_session_duration
                         )
-
-                        # Commit the update
                         await session.commit()
                         await session.refresh(session_data)
 
-                        logger.info(
-                            f"✅ Session {session_data.id} successfully linked to customer {customer_id}"
-                        )
-
                     return self._convert_to_user_session(session_data)
 
-            # Priority 2: Fallback to customer_id lookup (if already identified)
+            # ✅ Priority 2: Fallback to customer_id lookup
             if customer_id:
                 stmt = (
                     select(UserSessionModel)
@@ -462,6 +467,30 @@ class UnifiedSessionService:
                 if session_data:
                     return self._convert_to_user_session(session_data)
 
+            # ✅ NEW: Priority 3 - Race condition detection
+            # If multiple requests hit at the same time, find very recent session from same shop
+            five_seconds_ago = current_time - timedelta(seconds=5)
+            stmt = (
+                select(UserSessionModel)
+                .where(
+                    and_(
+                        UserSessionModel.shop_id == shop_id,
+                        UserSessionModel.status == SessionStatus.ACTIVE,
+                        UserSessionModel.created_at > five_seconds_ago,
+                        UserSessionModel.expires_at > current_time,
+                    )
+                )
+                .order_by(desc(UserSessionModel.created_at))
+            )
+            result = await session.execute(stmt)
+            recent_session = result.scalar_one_or_none()
+
+            if recent_session:
+                logger.warning(
+                    f"⚠️ Possible race condition detected - reusing recent session: {recent_session.id}"
+                )
+                return self._convert_to_user_session(recent_session)
+
             return None
 
         except Exception as e:
@@ -478,6 +507,7 @@ class UnifiedSessionService:
         ip_address: Optional[str],
         referrer: Optional[str],
         current_time: datetime,
+        client_id: Optional[str] = None,  # ✅ NEW parameter
     ) -> UserSession:
         """Create new session with retry logic for race conditions."""
 
@@ -485,7 +515,7 @@ class UnifiedSessionService:
         await self._validate_shop(session, shop_id)
 
         # Generate session ID and expiration
-        session_id = browser_session_id or str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
         expires_at = current_time + (
             self.identified_session_duration
             if customer_id
@@ -510,6 +540,7 @@ class UnifiedSessionService:
                     customer_id=customer_id,
                     browser_session_id=browser_session_id,
                     status=SessionStatus.ACTIVE,
+                    client_id=client_id,  # ✅ NEW: Pass client_id
                     user_agent=user_agent,
                     ip_address=ip_address,
                     referrer=referrer,

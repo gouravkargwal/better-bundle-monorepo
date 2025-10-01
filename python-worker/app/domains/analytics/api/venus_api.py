@@ -36,6 +36,9 @@ class VenusSessionRequest(BaseModel):
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
     )
+    client_id: Optional[str] = Field(
+        None, description="Shopify client ID (optional)"
+    )  # ✅ NEW (optional for Venus)
     user_agent: Optional[str] = Field(None, description="User agent string")
     ip_address: Optional[str] = Field(None, description="IP address")
     referrer: Optional[str] = Field(None, description="Referrer URL")
@@ -79,7 +82,8 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=request.browser_session_id,
+            browser_session_id=None,  # Venus doesn't have this
+            client_id=None,
             user_agent=request.user_agent,
             ip_address=request.ip_address,
             referrer=request.referrer,
@@ -100,7 +104,8 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
             message="Venus session started successfully",
             data={
                 "session_id": session.id,
-                "customer_id": session.customer_id,
+                "browser_session_id": session.browser_session_id,  # May be null
+                "client_id": session.client_id,  # May be null
                 "created_at": session.created_at.isoformat(),
                 "expires_at": (
                     session.expires_at.isoformat() if session.expires_at else None

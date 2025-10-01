@@ -46,6 +46,7 @@ export interface UnifiedInteractionRequest {
   collection_id?: string;
   search_query?: string;
   page_url?: string;
+  client_id?: string;
   referrer?: string;
   time_on_page?: number;
   scroll_depth?: number;
@@ -73,6 +74,7 @@ export interface UnifiedResponse {
     expires_at?: string;
     extensions_used?: string[];
     context?: ExtensionContext;
+    client_id?: string; // ✅ NEW
     [key: string]: any;
   };
 }
@@ -81,40 +83,55 @@ class AnalyticsApiClient {
   private baseUrl: string;
   private currentSessionId: string | null = null;
   private sessionExpiresAt: number | null = null;
-
+  private clientId: string | null = null;
+  private customerId: string | null = null;
   constructor() {
     // Use the unified analytics service URL
     this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
   }
 
-  /**
-   * Get or create a session for Venus tracking
-   */
   async getOrCreateSession(
     shopDomain: string,
-    customerId?: string,
+    customerId: string, // ✅ Venus ALWAYS has customer_id (logged in context)
   ): Promise<string> {
-    // Check if we have a valid session
+    // ✅ STEP 1: Check if we have a valid session in memory
+    // This avoids multiple API calls within the same page session
     if (
       this.currentSessionId &&
       this.sessionExpiresAt &&
-      Date.now() < this.sessionExpiresAt
+      Date.now() < this.sessionExpiresAt &&
+      this.customerId === customerId // Ensure same customer
     ) {
+      console.log(
+        "⚡ Venus: Using cached session from memory:",
+        this.currentSessionId,
+      );
+      console.log(
+        "📱 Venus: client_id:",
+        this.clientId ? this.clientId.substring(0, 16) + "..." : "none",
+      );
       return this.currentSessionId;
     }
 
+    // ✅ STEP 2: No valid cached session, call backend
     try {
       const url = `${this.baseUrl}/api/venus/get-or-create-session`;
 
       const payload: UnifiedSessionRequest = {
         shop_domain: shopDomain,
-        customer_id: customerId,
-        browser_session_id: "",
+        customer_id: customerId, // Primary identifier for Venus
+        browser_session_id: null, // Venus doesn't have access to this
+        client_id: null, // Backend will return if available from other extensions
         user_agent: navigator.userAgent,
-        ip_address: null, // Will be detected server-side
-        referrer: null,
-        page_url: null,
+        ip_address: undefined,
+        referrer: undefined,
+        page_url: window.location.href,
       };
+
+      console.log("🌐 Venus: Creating session with:", {
+        shop_domain: shopDomain,
+        customer_id: customerId.substring(0, 20) + "...",
+      });
 
       const response = await fetch(url, {
         method: "POST",
@@ -131,21 +148,30 @@ class AnalyticsApiClient {
 
       const result: UnifiedResponse = await response.json();
 
-      if (result.success && result.data) {
-        this.currentSessionId = result.data.session_id!;
-        // Set session to expire 30 minutes from now (server handles actual expiration)
-        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
+      if (result.success && result.data && result.data.session_id) {
+        const sessionId = result.data.session_id;
 
-        console.log(
-          "🔄 Venus session created/retrieved:",
-          this.currentSessionId,
-        );
-        return this.currentSessionId;
+        // Store in memory (valid for component lifetime only)
+        this.currentSessionId = sessionId;
+        this.customerId = customerId;
+        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000; // 30 min cache
+
+        // ✅ Store client_id from backend if available
+        if (result.data.client_id) {
+          this.clientId = result.data.client_id;
+          console.log(
+            "📱 Venus: Received client_id from backend:",
+            this.clientId.substring(0, 16) + "...",
+          );
+        }
+
+        console.log("✅ Venus: Session created/retrieved:", sessionId);
+        return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Venus session creation error:", error);
+      console.error("💥 Venus: Session creation error:", error);
       throw error;
     }
   }

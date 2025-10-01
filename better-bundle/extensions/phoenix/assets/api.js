@@ -1,29 +1,16 @@
-// Unified API client for recommendation and product data
 
 class RecommendationAPI {
   constructor() {
-    // Use the unified analytics service URL
-    // For production, this should be your actual backend URL
-    // For development, you can use ngrok or localhost
     this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
     this.shopifyBaseUrl = window.location.origin; // For Shopify API calls
   }
 
 
-  // Fetch recommendations from unified API
+
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
       const context = 'cart';
       const shopDomain = window.shopDomain || '';
-
-      // Debug logging
-      console.log('🔍 Debug info:', {
-        shopDomain: shopDomain,
-        productIds: productIds,
-        customerId: customerId,
-        limit: limit
-      });
-
       // Validate required fields
       if (!shopDomain) {
         throw new Error('Shop domain is required but not provided');

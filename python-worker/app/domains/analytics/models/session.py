@@ -27,6 +27,7 @@ class UserSession(BaseModel):
     customer_id: Optional[str] = Field(
         None, description="Customer identifier (null for anonymous)"
     )
+    client_id: Optional[str] = None  # ✅ NEW
     browser_session_id: str = Field(..., description="Browser's session identifier")
     status: SessionStatus = Field(
         default=SessionStatus.ACTIVE, description="Session status"
@@ -63,6 +64,7 @@ class SessionCreate(BaseModel):
 
     shop_id: str = Field(..., description="Shop identifier")
     customer_id: Optional[str] = Field(None, description="Customer identifier")
+    client_id: Optional[str] = None  # ✅ NEW
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
     )
@@ -88,6 +90,7 @@ class SessionUpdate(BaseModel):
     """Model for updating an existing user session"""
 
     customer_id: Optional[str] = Field(None, description="Customer identifier")
+    client_id: Optional[str] = None  # ✅ NEW
     status: Optional[SessionStatus] = Field(None, description="New session status")
     last_active: Optional[datetime] = Field(None, description="Update last active time")
     extensions_used: Optional[List[str]] = Field(
@@ -106,6 +109,7 @@ class SessionQuery(BaseModel):
 
     shop_id: str = Field(..., description="Shop identifier")
     customer_id: Optional[str] = Field(None, description="Customer identifier")
+    client_id: Optional[str] = None  # ✅ NEW
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
     )

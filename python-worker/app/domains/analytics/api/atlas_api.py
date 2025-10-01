@@ -50,6 +50,9 @@ class AtlasSessionRequest(BaseModel):
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
     )
+    client_id: Optional[str] = Field(
+        None, description="Shopify client ID for device tracking"
+    )  # ✅ NEW
     user_agent: Optional[str] = Field(None, description="User agent string")
     ip_address: Optional[str] = Field(None, description="IP address")
     referrer: Optional[str] = Field(None, description="Referrer URL")
@@ -145,6 +148,7 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
             shop_id=shop_id,
             customer_id=request.customer_id,
             browser_session_id=request.browser_session_id,
+            client_id=request.client_id,  # ✅ NEW
             user_agent=request.user_agent,
             ip_address=request.ip_address,
             referrer=request.referrer,
@@ -162,6 +166,7 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
                 "session_id": session.id,
                 "customer_id": session.customer_id,
                 "browser_session_id": session.browser_session_id,
+                "client_id": session.client_id,  # ✅ NEW
                 "expires_at": (
                     session.expires_at.isoformat() if session.expires_at else None
                 ),

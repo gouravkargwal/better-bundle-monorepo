@@ -1,9 +1,3 @@
-// Main initialization and coordination
-
-
-// Import classes (they will be available globally after script loading)
-// RecommendationAPI and ProductCardManager are loaded from api.js and product-cards.js
-
 class RecommendationCarousel {
   constructor() {
     this.api = new RecommendationAPI();
@@ -135,106 +129,111 @@ class RecommendationCarousel {
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
-  // Global variables are now initialized in the Liquid template
+  try {
+    console.log('Phoenix: DOMContentLoaded');
+    // Global variables are now initialized in the Liquid template
+    // Initialize Swiper for both design and live mode
+    if (window.designMode) {
+      console.log('Design mode detected - initializing Swiper with dummy data');
+      // Initialize Swiper for design mode (dummy data already in HTML)
+      window.swiperConfig = {
+        enable_autoplay: window.enableAutoplay,
+        autoplay_delay: window.autoplayDelay,
+        show_arrows: window.showArrows,
+        show_pagination: window.showPagination
+      };
 
-  // Initialize Swiper for both design and live mode
-  if (window.designMode) {
-    console.log('Design mode detected - initializing Swiper with dummy data');
-    // Initialize Swiper for design mode (dummy data already in HTML)
-    window.swiperConfig = {
-      enable_autoplay: window.enableAutoplay,
-      autoplay_delay: window.autoplayDelay,
-      show_arrows: window.showArrows,
-      show_pagination: window.showPagination
-    };
-
-    // Initialize Swiper for design mode
-    const swiper = new Swiper('.swiper', {
-      slidesPerView: 1,
-      spaceBetween: 20,
-      loop: true,
-      autoplay: window.enableAutoplay ? {
-        delay: window.autoplayDelay,
-        disableOnInteraction: true,
-        pauseOnMouseEnter: true,
-      } : false,
-      navigation: {
-        nextEl: '.swiper-button-next',
-        prevEl: '.swiper-button-prev',
-      },
-      pagination: {
-        el: '.swiper-pagination',
-        clickable: true,
-      },
-      breakpoints: {
-        640: {
-          slidesPerView: 2,
-          spaceBetween: 20,
+      // Initialize Swiper for design mode
+      const swiper = new Swiper('.swiper', {
+        slidesPerView: 1,
+        spaceBetween: 20,
+        loop: true,
+        autoplay: window.enableAutoplay ? {
+          delay: window.autoplayDelay,
+          disableOnInteraction: true,
+          pauseOnMouseEnter: true,
+        } : false,
+        navigation: {
+          nextEl: '.swiper-button-next',
+          prevEl: '.swiper-button-prev',
         },
-        768: {
-          slidesPerView: 3,
-          spaceBetween: 20,
+        pagination: {
+          el: '.swiper-pagination',
+          clickable: true,
         },
-        1024: {
-          slidesPerView: 4,
-          spaceBetween: 20,
+        breakpoints: {
+          640: {
+            slidesPerView: 2,
+            spaceBetween: 20,
+          },
+          768: {
+            slidesPerView: 3,
+            spaceBetween: 20,
+          },
+          1024: {
+            slidesPerView: 4,
+            spaceBetween: 20,
+          },
         },
-      },
-    });
+      });
 
-    window.swiper = swiper;
-  } else {
-    // Initialize Swiper for skeleton loading in live mode
-    console.log('Live mode detected - initializing Swiper for skeleton loading');
-    window.swiperConfig = {
-      enable_autoplay: window.enableAutoplay,
-      autoplay_delay: window.autoplayDelay,
-      show_arrows: window.showArrows,
-      show_pagination: window.showPagination
-    };
+      window.swiper = swiper;
+    } else {
+      // Initialize Swiper for skeleton loading in live mode
+      console.log('Live mode detected - initializing Swiper for skeleton loading');
+      window.swiperConfig = {
+        enable_autoplay: window.enableAutoplay,
+        autoplay_delay: window.autoplayDelay,
+        show_arrows: window.showArrows,
+        show_pagination: window.showPagination
+      };
 
-    // Initialize Swiper for skeleton loading
-    const swiper = new Swiper('.swiper', {
-      slidesPerView: 1,
-      spaceBetween: 20,
-      loop: true,
-      autoplay: window.enableAutoplay ? {
-        delay: window.autoplayDelay,
-        disableOnInteraction: true,
-        pauseOnMouseEnter: true,
-      } : false,
-      navigation: {
-        nextEl: '.swiper-button-next',
-        prevEl: '.swiper-button-prev',
-      },
-      pagination: {
-        el: '.swiper-pagination',
-        clickable: true,
-      },
-      breakpoints: {
-        640: {
-          slidesPerView: 2,
-          spaceBetween: 20,
+      // Initialize Swiper for skeleton loading
+      const swiper = new Swiper('.swiper', {
+        slidesPerView: 1,
+        spaceBetween: 20,
+        loop: true,
+        autoplay: window.enableAutoplay ? {
+          delay: window.autoplayDelay,
+          disableOnInteraction: true,
+          pauseOnMouseEnter: true,
+        } : false,
+        navigation: {
+          nextEl: '.swiper-button-next',
+          prevEl: '.swiper-button-prev',
         },
-        768: {
-          slidesPerView: 3,
-          spaceBetween: 20,
+        pagination: {
+          el: '.swiper-pagination',
+          clickable: true,
         },
-        1024: {
-          slidesPerView: 4,
-          spaceBetween: 20,
+        breakpoints: {
+          640: {
+            slidesPerView: 2,
+            spaceBetween: 20,
+          },
+          768: {
+            slidesPerView: 3,
+            spaceBetween: 20,
+          },
+          1024: {
+            slidesPerView: 4,
+            spaceBetween: 20,
+          },
         },
-      },
-    });
+      });
 
-    window.swiper = swiper;
+      window.swiper = swiper;
 
-    // Initialize the carousel for live mode
-    const carousel = new RecommendationCarousel();
-    window.recommendationCarousel = carousel;
+      // Initialize the carousel for live mode
+      const carousel = new RecommendationCarousel();
+      window.recommendationCarousel = carousel;
 
-    // Initialize when page loads
-    carousel.init();
+      // Initialize when page loads
+      carousel.init();
+    }
+  }
+  catch (error) {
+    console.error('❌ Phoenix: Failed to initialize carousel:', error);
   }
 });
 
