@@ -87,7 +87,7 @@ class ApolloRecommendationClient {
 
   constructor() {
     // Use the recommendation service URL
-    this.baseUrl = "https://036cff6f721b.ngrok-free.app/api/v1/recommendations";
+    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app/api/v1/recommendations";
   }
 
   /**

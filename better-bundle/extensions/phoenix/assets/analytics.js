@@ -10,7 +10,7 @@ class AnalyticsApiClient {
     // Use the unified analytics service URL
     // For production, this should be your actual backend URL
     // For development, you can use ngrok or localhost
-    this.baseUrl = "https://036cff6f721b.ngrok-free.app"; // Update this to your actual backend URL
+    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
 

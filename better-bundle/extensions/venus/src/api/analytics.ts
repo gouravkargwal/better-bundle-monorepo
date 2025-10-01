@@ -84,7 +84,7 @@ class AnalyticsApiClient {
 
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = "https://036cff6f721b.ngrok-free.app";
+    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
   }
 
   /**
