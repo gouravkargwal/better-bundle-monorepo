@@ -52,12 +52,11 @@ class AnalyticsApiClient {
         return cachedSessionId;
       }
 
-
       if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
         return this.currentSessionId;
       }
-      const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
 
+      const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
       const browserSessionId = await this.getBrowserSessionId();
 
       const payload = {
@@ -77,14 +76,22 @@ class AnalyticsApiClient {
         browser_session_id: browserSessionId
       });
 
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        console.error(`❌ Analytics: Session creation failed with status ${response.status}`);
         throw new Error(`Session creation failed: ${response.status}`);
       }
 
@@ -110,7 +117,6 @@ class AnalyticsApiClient {
           }
         }
 
-
         sessionStorage.setItem("unified_session_id", sessionId);
         sessionStorage.setItem("unified_session_expires_at", expiresAt.toString());
         console.log("💾 Phoenix: Session saved to unified sessionStorage:", sessionId);
@@ -119,7 +125,11 @@ class AnalyticsApiClient {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Phoenix: Session creation error:", error);
+      if (error.name === 'AbortError') {
+        console.error("⏰ Analytics: Session creation timed out after 5 seconds");
+      } else {
+        console.error("💥 Phoenix: Session creation error:", error);
+      }
       throw error;
     }
   }

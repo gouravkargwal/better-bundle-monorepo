@@ -6,9 +6,8 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.domains.analytics.services.customer_identity_resolution_service import (
-    CustomerIdentityResolutionService,
-)
+
+# Removed deprecated CustomerIdentityResolutionService import
 from app.domains.analytics.services.cross_session_linking_service import (
     CrossSessionLinkingService,
 )
@@ -24,7 +23,6 @@ class CustomerLinkingKafkaConsumer:
 
     def __init__(self):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
-        self.identity_resolution_service = CustomerIdentityResolutionService()
         self.cross_session_linking_service = CrossSessionLinkingService()
         self._initialized = False
         self.shop_repo = ShopRepository()
@@ -285,7 +283,7 @@ class CustomerLinkingKafkaConsumer:
                 logger.info(
                     f"🚀 Firing feature computation event for shop {shop_id}..."
                 )
-                await self.identity_resolution_service.fire_feature_computation_event(
+                await self.cross_session_linking_service.fire_feature_computation_event(
                     shop_id=shop_id,
                     trigger_source="customer_linking_backfill",
                     interaction_id=None,

@@ -125,7 +125,7 @@ class UnifiedSessionService:
                         self._update_session_activity_background(existing_session.id)
                     )
                     logger.info(f"Resumed existing session: {existing_session.id}")
-                    return existing_session
+                    return self._convert_to_user_session(existing_session)
 
                 # Step 2: Create new session with race condition handling
                 return await self._create_new_session_with_retry(
@@ -404,7 +404,7 @@ class UnifiedSessionService:
         customer_id: Optional[str],
         browser_session_id: Optional[str],
         current_time: datetime,
-    ) -> Optional[UserSession]:
+    ) -> Optional[UserSessionModel]:
         """
         Find existing active session with improved deduplication logic
 
@@ -445,7 +445,7 @@ class UnifiedSessionService:
                         await session.commit()
                         await session.refresh(session_data)
 
-                    return self._convert_to_user_session(session_data)
+                    return session_data
 
             # ✅ Priority 2: Fallback to customer_id lookup
             if customer_id:
@@ -465,7 +465,7 @@ class UnifiedSessionService:
                 session_data = result.scalar_one_or_none()
 
                 if session_data:
-                    return self._convert_to_user_session(session_data)
+                    return session_data
 
             # ✅ NEW: Priority 3 - Race condition detection
             # If multiple requests hit at the same time, find very recent session from same shop
@@ -489,7 +489,7 @@ class UnifiedSessionService:
                 logger.warning(
                     f"⚠️ Possible race condition detected - reusing recent session: {recent_session.id}"
                 )
-                return self._convert_to_user_session(recent_session)
+                return recent_session
 
             return None
 

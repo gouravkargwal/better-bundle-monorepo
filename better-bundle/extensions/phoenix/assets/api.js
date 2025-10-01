@@ -11,8 +11,10 @@ class RecommendationAPI {
     try {
       const context = 'cart';
       const shopDomain = window.shopDomain || '';
+
       // Validate required fields
       if (!shopDomain) {
+        console.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');
       }
 
@@ -33,31 +35,43 @@ class RecommendationAPI {
       console.log('📦 Request body:', requestBody);
       console.log('🔗 Backend URL:', this.baseUrl);
 
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        console.error(`❌ API: Request failed with status ${response.status}`);
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('Recommendations received from unified API:', data);
+      console.log('✅ API: Recommendations received from unified API:', data);
 
       if (data.success && data.recommendations && data.recommendations.length > 0) {
         // Backend provides complete product data via webhooks - no need for additional API calls
-        console.log('Using recommendations directly from unified backend:', data.recommendations);
+        console.log('✅ API: Using recommendations directly from unified backend:', data.recommendations);
         return data.recommendations;
       } else {
-        console.log('No recommendations available from unified API');
+        console.log('⚠️ API: No recommendations available from unified API');
         return [];
       }
     } catch (error) {
-      console.error('Error fetching recommendations from unified API:', error);
+      if (error.name === 'AbortError') {
+        console.error('⏰ API: Request timed out after 8 seconds');
+      } else {
+        console.error('❌ API: Error fetching recommendations from unified API:', error);
+      }
       return [];
     }
   }

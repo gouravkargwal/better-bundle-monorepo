@@ -61,9 +61,9 @@ async def _run(shop_id: str, customer_id: str, session_id: Optional[str]) -> Non
 def main() -> None:
     asyncio.run(
         _run(
-            "cmg6eft3h0000v3nggxv6oxmf",
+            "cmg7osztj0003v3wqpa2e265c",
             "8667833041035",
-            "unified_1759227468401_038miqu92",
+            "fe251275-e711-46a5-9872-9556b5c4b50a",
         )
     )
 

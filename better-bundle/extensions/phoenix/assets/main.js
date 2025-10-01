@@ -1,6 +1,6 @@
 class RecommendationCarousel {
   constructor() {
-    this.api = new RecommendationAPI();
+    this.api = window.RecommendationAPI ? new window.RecommendationAPI() : null;
     this.cardManager = window.productCardManager; // Use global instance
     this.analyticsApi = window.analyticsApi;
     this.config = this.getConfig();
@@ -34,6 +34,7 @@ class RecommendationCarousel {
   // Initialize the recommendation carousel
   async init() {
     try {
+      console.log('🚀 Phoenix: Starting carousel initialization...');
 
       // Set global swiper config for product card manager
       window.swiperConfig = {
@@ -43,10 +44,17 @@ class RecommendationCarousel {
         show_pagination: this.config.showPagination
       };
 
+      // Set up timeout to prevent infinite loading
+      const loadingTimeout = setTimeout(() => {
+        console.warn('⏰ Phoenix: Loading timeout reached, hiding carousel');
+        this.hideCarousel();
+      }, 10000); // 10 second timeout
+
       // Get or create session ID from analytics API
       let sessionId;
       if (this.analyticsApi && this.config.shopDomain) {
         try {
+          console.log('🔍 Phoenix: Attempting to get session from analytics API...');
           sessionId = await this.analyticsApi.getOrCreateSession(
             this.config.shopDomain,
             this.config.customerId ? String(this.config.customerId) : undefined
@@ -54,24 +62,32 @@ class RecommendationCarousel {
           console.log('✅ Phoenix: Session ID obtained from analytics API:', sessionId);
         } catch (error) {
           console.error('❌ Phoenix: Failed to get session from analytics API:', error);
+          clearTimeout(loadingTimeout);
           this.hideCarousel();
           return;
         }
       } else {
         console.error('❌ Phoenix: Analytics API not available');
+        clearTimeout(loadingTimeout);
         this.hideCarousel();
         return;
       }
 
-      // Fetch recommendations first
+      // Fetch recommendations with timeout
+      console.log('🌐 Phoenix: Fetching recommendations...');
       const recommendations = await this.api.fetchRecommendations(
         this.config.productIds,
         this.config.customerId ? String(this.config.customerId) : undefined,
         this.config.limit
       );
 
+      // Clear timeout since we got a response
+      clearTimeout(loadingTimeout);
+
       if (recommendations && recommendations.length > 0) {
+        console.log('✅ Phoenix: Received recommendations, updating cards...');
         const productIds = recommendations.map((product) => product.id);
+
         if (this.analyticsApi) {
           try {
             await this.analyticsApi.trackRecommendationView(
@@ -87,6 +103,7 @@ class RecommendationCarousel {
             );
           } catch (error) {
             console.error('❌ Phoenix: Failed to track recommendation view:', error);
+            // Don't fail the entire flow for tracking errors
           }
         } else {
           console.warn('⚠️ Phoenix: Analytics API not available, skipping recommendation tracking');
@@ -95,9 +112,11 @@ class RecommendationCarousel {
         // Update product cards with real recommendations and analytics tracking
         this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
       } else {
+        console.log('❌ Phoenix: No recommendations available, hiding carousel');
         this.hideCarousel();
       }
     } catch (error) {
+      console.error('❌ Phoenix: Carousel initialization failed:', error);
       this.hideCarousel();
     }
   }
@@ -131,10 +150,29 @@ class RecommendationCarousel {
 document.addEventListener('DOMContentLoaded', function () {
   try {
     console.log('Phoenix: DOMContentLoaded');
+
+    // Global fallback timeout to prevent infinite skeleton loading
+    const globalFallbackTimeout = setTimeout(() => {
+      console.warn('⏰ Phoenix: Global fallback timeout - hiding carousel after 15 seconds');
+      const carouselContainer = document.querySelector('.shopify-app-block');
+      if (carouselContainer) {
+        carouselContainer.style.display = 'none';
+      }
+    }, 15000); // 15 second global timeout
+
+    // Clear global timeout when carousel successfully loads
+    const originalHideCarousel = RecommendationCarousel.prototype.hideCarousel;
+    RecommendationCarousel.prototype.hideCarousel = function () {
+      clearTimeout(globalFallbackTimeout);
+      return originalHideCarousel.call(this);
+    };
+
     // Global variables are now initialized in the Liquid template
     // Initialize Swiper for both design and live mode
     if (window.designMode) {
       console.log('Design mode detected - initializing Swiper with dummy data');
+      clearTimeout(globalFallbackTimeout); // Clear timeout in design mode
+
       // Initialize Swiper for design mode (dummy data already in HTML)
       window.swiperConfig = {
         enable_autoplay: window.enableAutoplay,
@@ -144,7 +182,7 @@ document.addEventListener('DOMContentLoaded', function () {
       };
 
       // Initialize Swiper for design mode
-      const swiper = new Swiper('.swiper', {
+      const swiper = new window.Swiper('.swiper', {
         slidesPerView: 1,
         spaceBetween: 20,
         loop: true,
@@ -189,7 +227,7 @@ document.addEventListener('DOMContentLoaded', function () {
       };
 
       // Initialize Swiper for skeleton loading
-      const swiper = new Swiper('.swiper', {
+      const swiper = new window.Swiper('.swiper', {
         slidesPerView: 1,
         spaceBetween: 20,
         loop: true,
@@ -234,6 +272,11 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   catch (error) {
     console.error('❌ Phoenix: Failed to initialize carousel:', error);
+    // Clear global timeout on error
+    const carouselContainer = document.querySelector('.shopify-app-block');
+    if (carouselContainer) {
+      carouselContainer.style.display = 'none';
+    }
   }
 });
 

@@ -95,13 +95,18 @@ class ProductCardManager {
     context = "cart",
   ) {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
-    if (!swiperWrapper) return;
+    if (!swiperWrapper) {
+      console.error('❌ ProductCardManager: Swiper wrapper not found');
+      return;
+    }
+
+    console.log('🔄 ProductCardManager: Updating product cards with', recommendations.length, 'recommendations');
 
     // Hide skeleton container when real content is loaded
     const skeletonContainer = document.querySelector('.skeleton-container');
     if (skeletonContainer) {
       skeletonContainer.style.display = 'none';
-      console.log('✅ Hiding skeleton - real content loaded');
+      console.log('✅ ProductCardManager: Hiding skeleton - real content loaded');
     }
 
     // Add fade-out transition to existing skeleton slides
@@ -115,35 +120,45 @@ class ProductCardManager {
 
     // Wait for fade-out transition, then replace content
     setTimeout(() => {
-      // Clear existing slides
-      swiperWrapper.innerHTML = "";
+      try {
+        // Clear existing slides
+        swiperWrapper.innerHTML = "";
 
-      // Store product data for variant price updates
-      recommendations.forEach((product) => {
-        this.productDataStore[product.id] = product;
-      });
+        // Store product data for variant price updates
+        recommendations.forEach((product) => {
+          this.productDataStore[product.id] = product;
+        });
 
-      // Create new slides from recommendations
-      recommendations.forEach((product, index) => {
-        const slide = this.createProductSlide(
-          product,
-          index,
-          analyticsApi,
-          sessionId,
-          context,
-        );
+        // Create new slides from recommendations
+        recommendations.forEach((product, index) => {
+          const slide = this.createProductSlide(
+            product,
+            index,
+            analyticsApi,
+            sessionId,
+            context,
+          );
 
-        // Add real-content class for fade-in animation
-        const productCard = slide.querySelector('.product-card');
-        if (productCard) {
-          productCard.classList.add('real-content');
+          // Add real-content class for fade-in animation
+          const productCard = slide.querySelector('.product-card');
+          if (productCard) {
+            productCard.classList.add('real-content');
+          }
+
+          swiperWrapper.appendChild(slide);
+        });
+
+        // Reinitialize Swiper with new content
+        this.initializeSwiper();
+        console.log('✅ ProductCardManager: Successfully updated product cards');
+      } catch (error) {
+        console.error('❌ ProductCardManager: Error updating product cards:', error);
+        // Fallback: hide the carousel if there's an error
+        const carouselContainer = document.querySelector('.shopify-app-block');
+        if (carouselContainer) {
+          carouselContainer.style.display = 'none';
         }
-
-        swiperWrapper.appendChild(slide);
-      });
-
-      // Reinitialize Swiper with new content
-      this.initializeSwiper();
+      }
     }, 300); // Match the CSS transition duration
   }
 

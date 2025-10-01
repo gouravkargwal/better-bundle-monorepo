@@ -17,25 +17,27 @@ class UserIdentityLink(BaseModel, ShopMixin):
     # Foreign key to Shop
     # shop_id provided by ShopMixin
 
-    # Identity information
-    identifier = Column(String, nullable=False, index=True)  # ✅ RENAMED from client_id
+    # Identity information - matches actual database schema
+    identifier = Column(String, nullable=False, index=True)
     identifier_type = Column(String, nullable=False, index=True)
     customer_id = Column(String, nullable=False, index=True)
     linked_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
 
-    # Indexes
+    # Indexes - matches actual database schema
     __table_args__ = (
         Index(
-            "ix_user_identity_link_shop_identifier_customer",
+            "ix_user_identity_link_shop_id_identifier_customer_id",
             "shop_id",
             "identifier",
             "customer_id",
             unique=True,
         ),
-        Index("ix_user_identity_link_shop_identifier", "shop_id", "identifier"),
-        Index("ix_user_identity_link_shop_customer", "shop_id", "customer_id"),
-        Index("ix_user_identity_link_identifier_type", "identifier_type"),  # ✅ NEW
+        Index("ix_user_identity_link_shop_id_identifier", "shop_id", "identifier"),
+        Index("ix_user_identity_link_shop_id_customer_id", "shop_id", "customer_id"),
+        Index("ix_user_identity_link_identifier", "identifier"),
+        Index("ix_user_identity_link_customer_id", "customer_id"),
+        Index("ix_user_identity_link_identifier_type", "identifier_type"),
     )
 
     def __repr__(self) -> str:
-        return f"<UserIdentityLink(shop_id={self.shop_id}, client_id={self.client_id}, customer_id={self.customer_id})>"
+        return f"<UserIdentityLink(shop_id={self.shop_id}, identifier={self.identifier}, customer_id={self.customer_id})>"

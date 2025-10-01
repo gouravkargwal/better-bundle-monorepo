@@ -15,17 +15,19 @@ from app.core.database.models.user_session import UserSession as SAUserSession
 from app.core.database.models.user_interaction import (
     UserInteraction as SAUserInteraction,
 )
+from app.core.database.models.identity import UserIdentityLink as SAUserIdentityLink
 from app.domains.analytics.models.session import (
     UserSession,
     SessionStatus,
     SessionUpdate,
 )
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
-from app.domains.analytics.services.customer_identity_resolution_service import (
-    CustomerIdentityResolutionService,
-)
+
+# Removed deprecated CustomerIdentityResolutionService import
 from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
 
 logger = get_logger(__name__)
 
@@ -51,7 +53,6 @@ class CrossSessionLinkingService:
 
     def __init__(self):
         self.session_service = UnifiedSessionService()
-        self.identity_resolution_service = CustomerIdentityResolutionService()
 
         # Industry-standard linking parameters
         self.max_journey_days = 30  # Maximum journey span to consider
@@ -126,7 +127,12 @@ class CrossSessionLinkingService:
                 existing_sessions, linked_sessions, customer_id
             )
 
-            # Step 6: Generate journey summary
+            # Step 6: Store identity links in database
+            await self._store_customer_identity_links(
+                customer_id, shop_id, existing_sessions + linked_sessions
+            )
+
+            # Step 7: Generate journey summary
             journey_summary = await self._generate_journey_summary(
                 customer_id, existing_sessions + linked_sessions
             )
@@ -571,3 +577,174 @@ class CrossSessionLinkingService:
                 else 0.0
             ),
         }
+
+    async def _store_customer_identity_links(
+        self,
+        customer_id: str,
+        shop_id: str,
+        sessions: List[UserSession],
+    ) -> None:
+        """
+        Store customer identity links in UserIdentityLink table
+        Uses the actual database schema with identifier and identifier_type fields
+        Falls back to browser_session_id if client_id is not available
+        """
+        try:
+            links_created = 0
+            for session in sessions:
+                # Link client_id (primary identifier)
+                if session.client_id:
+                    created = await self._create_identity_link(
+                        shop_id,
+                        session.client_id,
+                        "client_id",  # identifier_type
+                        customer_id,
+                    )
+                    if created:
+                        links_created += 1
+                else:
+                    # Fallback: Use browser_session_id if client_id is not available
+                    logger.warning(
+                        f"Session {session.id} has no client_id, using browser_session_id as fallback"
+                    )
+                    created = await self._create_identity_link(
+                        shop_id,
+                        session.browser_session_id,
+                        "browser_session_id",  # identifier_type
+                        customer_id,
+                    )
+                    if created:
+                        links_created += 1
+
+            logger.info(
+                f"Created {links_created} identity links for {len(sessions)} sessions "
+                f"(customer: {customer_id})"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to store identity links: {str(e)}")
+            raise
+
+    async def _create_identity_link(
+        self,
+        shop_id: str,
+        identifier: str,
+        identifier_type: str,
+        customer_id: str,
+    ) -> bool:
+        """
+        Create a single identity link if it doesn't exist
+        Uses the actual database schema with identifier and identifier_type fields
+
+        Returns:
+            bool: True if link was created, False if it already existed
+        """
+        try:
+            async with get_session_context() as session:
+                # Check if link already exists using the actual database schema
+                result = await session.execute(
+                    select(SAUserIdentityLink).where(
+                        SAUserIdentityLink.shop_id == shop_id,
+                        SAUserIdentityLink.identifier == identifier,
+                        SAUserIdentityLink.customer_id == customer_id,
+                    )
+                )
+                existing_link = result.scalar_one_or_none()
+
+                if not existing_link:
+                    link = SAUserIdentityLink(
+                        shop_id=shop_id,
+                        identifier=identifier,
+                        identifier_type=identifier_type,
+                        customer_id=customer_id,
+                        linked_at=utcnow(),
+                    )
+                    session.add(link)
+                    await session.commit()
+                    logger.debug(
+                        f"Created identity link: "
+                        f"{identifier[:16]}... -> {customer_id} ({identifier_type})"
+                    )
+                    return True
+                else:
+                    logger.debug(
+                        f"Identity link exists: "
+                        f"{identifier[:16]}... -> {customer_id} ({identifier_type})"
+                    )
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to create identity link: {str(e)}")
+            raise
+
+    async def fire_feature_computation_event(
+        self,
+        shop_id: str,
+        trigger_source: str,
+        interaction_id: Optional[str] = None,
+        batch_size: int = 50,
+        incremental: bool = True,
+    ) -> Optional[str]:
+        """
+        Fire a feature computation event to trigger incremental ML pipeline
+
+        Args:
+            shop_id: The shop ID to compute features for
+            trigger_source: Source that triggered the computation (e.g., "customer_linking")
+            interaction_id: Optional interaction ID that triggered the computation
+            batch_size: Batch size for feature processing
+            incremental: Whether to run incremental processing
+
+        Returns:
+            Event ID if successful, None if failed
+        """
+        try:
+            # Generate a unique job ID
+            job_id = f"customer_linking_triggered_{shop_id}_{int(utcnow().timestamp())}"
+
+            # Prepare event metadata
+            metadata = {
+                "batch_size": batch_size,
+                "incremental": incremental,
+                "trigger_source": trigger_source,
+                "interaction_id": interaction_id,
+                "timestamp": utcnow().isoformat(),
+                "processed_count": 0,
+            }
+
+            # Create feature computation event for Kafka
+            feature_event = {
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "features_ready": False,  # Need to be computed
+                "metadata": metadata,
+                "event_type": "feature_computation",
+                "data_type": "interactions",
+                "timestamp": utcnow().isoformat(),
+                "source": "cross_session_linking",
+            }
+
+            # Publish the feature computation event to Kafka
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+
+            try:
+                event_id = await publisher.publish_feature_computation_event(
+                    feature_event
+                )
+
+                logger.info(
+                    f"Fired feature computation event from {trigger_source} via Kafka",
+                    job_id=job_id,
+                    shop_id=shop_id,
+                    interaction_id=interaction_id,
+                    event_id=event_id,
+                )
+
+                return event_id
+            finally:
+                await publisher.close()
+
+        except Exception as e:
+            logger.error(f"Failed to fire feature computation event: {str(e)}")
+            return None
