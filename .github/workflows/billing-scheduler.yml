@@ -1,0 +1,178 @@
+name: Billing Scheduler
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run"
+        required: false
+        default: true
+        type: boolean
+      shop_ids:
+        description: "Comma-separated list of shop IDs to process (leave empty for all shops)"
+        required: false
+        default: ""
+        type: string
+      period_start:
+        description: "Billing period start date (YYYY-MM-DD)"
+        required: false
+        default: ""
+        type: string
+      period_end:
+        description: "Billing period end date (YYYY-MM-DD)"
+        required: false
+        default: ""
+        type: string
+
+  # Scheduled trigger (monthly on the 1st at 2 AM UTC)
+  # schedule:
+  #   - cron: "0 2 1 * *"
+
+  # Webhook trigger for billing-related events
+  repository_dispatch:
+    types: [billing-trigger]
+
+  # Trigger on push to main branch (for testing)
+  push:
+    branches: [main]
+    paths:
+      - "python-worker/app/services/billing_scheduler_service.py"
+      - "python-worker/app/api/billing_scheduler_api.py"
+      - "python-worker/app/domains/billing/**"
+
+env:
+  PYTHON_VERSION: "3.11"
+  WORKING_DIRECTORY: "python-worker"
+
+jobs:
+  billing-scheduler:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up environment variables
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
+          echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> $GITHUB_ENV
+          echo "KAFKA_BOOTSTRAP_SERVERS=${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}" >> $GITHUB_ENV
+          echo "BILLING_SCHEDULER_API_URL=${{ secrets.BILLING_SCHEDULER_API_URL }}" >> $GITHUB_ENV
+          echo "GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }}" >> $GITHUB_ENV
+
+      - name: Run billing scheduler
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -c "
+          import asyncio
+          import sys
+          import os
+          from datetime import datetime
+
+          # Add the app directory to Python path
+          sys.path.insert(0, os.path.join(os.getcwd(), 'app'))
+
+          async def run_billing_scheduler():
+              try:
+                  from app.services.billing_scheduler_service import BillingSchedulerService
+                  
+                  # Initialize scheduler service
+                  scheduler = BillingSchedulerService()
+                  await scheduler.initialize()
+                  
+                  # Parse inputs
+                  dry_run = '${{ github.event.inputs.dry_run || 'true' }}'.lower() == 'true'
+                  shop_ids = None
+                  if '${{ github.event.inputs.shop_ids }}':
+                      shop_ids = [s.strip() for s in '${{ github.event.inputs.shop_ids }}'.split(',') if s.strip()]
+                  
+                  period = None
+                  if '${{ github.event.inputs.period_start }}' and '${{ github.event.inputs.period_end }}':
+                      from app.domains.billing.repositories.billing_repository import BillingPeriod
+                      from datetime import datetime
+                      period_start = datetime.fromisoformat('${{ github.event.inputs.period_start }}')
+                      period_end = datetime.fromisoformat('${{ github.event.inputs.period_end }}')
+                      period = BillingPeriod(start_date=period_start, end_date=period_end, cycle='monthly')
+                  
+                  print(f'Starting billing scheduler - dry_run={dry_run}, shop_ids={shop_ids}')
+                  
+                  # Process billing
+                  result = await scheduler.process_monthly_billing(
+                      shop_ids=shop_ids,
+                      period=period,
+                      dry_run=dry_run
+                  )
+                  
+                  print(f'Billing scheduler completed:')
+                  print(f'  Status: {result.get(\"status\", \"unknown\")}')
+                  print(f'  Processed shops: {result.get(\"processed_shops\", 0)}')
+                  print(f'  Successful: {result.get(\"successful_shops\", 0)}')
+                  print(f'  Failed: {result.get(\"failed_shops\", 0)}')
+                  print(f'  Total revenue: ${result.get(\"total_revenue\", 0.0):.2f}')
+                  print(f'  Total fees: ${result.get(\"total_fees\", 0.0):.2f}')
+                  
+                  if result.get('errors'):
+                      print(f'  Errors: {len(result[\"errors\"])}')
+                      for error in result['errors'][:5]:  # Show first 5 errors
+                          print(f'    - {error}')
+                  
+                  # Exit with error code if there were failures
+                  if result.get('failed_shops', 0) > 0:
+                      print(f'Warning: {result.get(\"failed_shops\", 0)} shops failed billing processing')
+                      sys.exit(1)
+                  
+              except Exception as e:
+                  print(f'Error running billing scheduler: {e}')
+                  sys.exit(1)
+
+          # Run the async function
+          asyncio.run(run_billing_scheduler())
+          "
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Billing scheduler failed. Check the logs above for details."
+          # You can add notification logic here (Slack, email, etc.)
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "Billing scheduler completed successfully."
+
+  # Optional: Trigger webhook to notify external systems
+  notify-completion:
+    needs: billing-scheduler
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Notify completion
+        run: |
+          if [ "${{ needs.billing-scheduler.result }}" == "success" ]; then
+            echo "Billing scheduler completed successfully"
+            # Add notification logic here (webhook, Slack, email, etc.)
+          else
+            echo "Billing scheduler failed"
+            # Add failure notification logic here
+          fi
