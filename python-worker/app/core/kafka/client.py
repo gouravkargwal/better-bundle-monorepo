@@ -28,7 +28,6 @@ class KafkaClientManager:
             # Mark as connected; defer actual client startup to get_producer/get_consumer
             self._connected = True
             self._connection_retries = 0
-            logger.info("Kafka client manager initialized successfully")
 
         except Exception as e:
             self._connection_retries += 1
@@ -75,7 +74,6 @@ class KafkaClientManager:
                 await self._consumer.stop()
                 self._consumer = None
             self._connected = False
-            logger.info("Kafka connections closed")
         except Exception as e:
             logger.error(f"Error closing Kafka connections: {e}")
 

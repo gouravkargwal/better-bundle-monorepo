@@ -98,7 +98,6 @@ class NormalizationKafkaConsumer:
                     error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
                 )
                 await self.consumer.commit(message)
-                logger.info(f"✅ Shop {shop_id} is suspended")
                 return
 
             if event_type == "normalize_data":

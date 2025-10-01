@@ -142,58 +142,94 @@ class BaseFeatureGenerator(ABC):
 
         # JSON fields that should preserve None values
         json_fields = {
-            "searchTerms",
-            "topProducts",
-            "topVendors",
-            "topCategories",
-            "productPairs",
-            "interactionPatterns",
-            "sessionData",
+            "search_terms",
+            "top_products",
+            "top_vendors",
+            "top_categories",
+            "product_pairs",
+            "interaction_patterns",
+            "session_data",
         }
 
         # DateTime fields that should preserve None values (not convert to 0)
         datetime_fields = {
-            "lastOccurrence",
-            "lastViewedAt",
-            "lastPurchasedAt",
-            "firstPurchasedAt",
-            "lastCoOccurrence",
-            "lastActivityAt",
-            "startedAt",
-            "completedAt",
-            "paidAt",
-            "expires",
-            "lastAnalysisAt",
-            "firstViewDate",
-            "lastViewDate",
-            "firstPurchaseDate",
-            "lastPurchaseDate",
-            "shopifyCreatedAt",
-            "shopifyUpdatedAt",
-            "productCreatedAt",
-            "productUpdatedAt",
-            "lastOrderDate",
-            "createdAtShopify",
-            "processedAt",
-            "cancelledAt",
+            "last_occurrence",
+            "last_viewed_at",
+            "last_purchased_at",
+            "first_purchased_at",
+            "last_co_occurrence",
+            "last_activity_at",
+            "started_at",
+            "completed_at",
+            "paid_at",
+            "expires_at",
+            "last_analysis_at",
+            "first_view_date",
+            "last_view_date",
+            "first_purchase_date",
+            "last_purchase_date",
+            "shopify_created_at",
+            "shopify_updated_at",
+            "product_created_at",
+            "product_updated_at",
+            "last_order_date",
+            "created_at_shopify",
+            "processed_at",
+            "cancelled_at",
         }
 
         # String fields that should preserve None values (not convert to 0)
         string_fields = {
-            "deviceType",
-            "primaryReferrer",
-            "referrerDomain",
-            "landingPage",
-            "exitPage",
-            "preferredCategory",
-            "preferredVendor",
-            "pricePointPreference",
-            "customerState",
-            "geographicRegion",
-            "currencyPreference",
+            # Snake_case fields (database model fields)
+            "device_type",
+            "primary_referrer",
+            "referrer_domain",
+            "landing_page",
+            "exit_page",
+            "preferred_category",
+            "preferred_vendor",
+            "price_point_preference",
+            "customer_state",
+            "geographic_region",
+            "currency_preference",
+            "browser_type",
+            "os_type",
+            "screen_resolution",
+            "country",
+            "region",
+            "city",
+            "timezone",
+            "language",
+            "referrer_type",
+            "traffic_source",
+            "customer_email",
+            "customer_first_name",
+            "customer_last_name",
+            "customer_last_order_id",
+            "customer_currency_code",
+            "customer_locale",
+            "price_tier",
+            "product_type",
+            "lifecycle_stage",
+            "handle",
+            "template_suffix",
         }
 
         for key, value in features.items():
+            # Debug: Check for SQLAlchemy objects that shouldn't be in the data
+            if hasattr(value, "__class__") and "sqlalchemy" in str(
+                value.__class__.__module__
+            ):
+                logger.warning(
+                    f"Found SQLAlchemy object in field {key}: {type(value)} - {value}"
+                )
+                # Convert SQLAlchemy objects to None for string fields, 0 for others
+                if key in string_fields:
+                    validated_features[key] = None
+                else:
+                    validated_features[key] = 0
+                continue
+
             if value is None:
                 # Convert None to appropriate defaults
                 if key in json_fields:

@@ -96,9 +96,7 @@ class UnifiedGorseService:
                 stmt = select(func.count()).select_from(model).where(*where_clauses)
                 count = (await session.execute(stmt)).scalar_one()
                 has_data = (count or 0) > 0
-                logger.info(
-                    f"Table {table_name} has {count or 0} records for shop {shop_id}"
-                )
+
                 return has_data
 
         except Exception as e:
@@ -124,10 +122,8 @@ class UnifiedGorseService:
                 if last_sync:
                     # Normalize to timezone-aware UTC to prevent comparison errors
                     last_sync = self._ensure_aware_utc(last_sync)
-                    logger.info(f"Found last Gorse sync timestamp: {last_sync}")
                     return last_sync
                 else:
-                    logger.info("No previous Gorse sync found, using 24 hours ago")
                     return now_utc() - timedelta(hours=24)
 
         except Exception as e:
@@ -163,7 +159,6 @@ class UnifiedGorseService:
                     session.add(watermark)
 
                 await session.commit()
-                logger.info(f"Updated Gorse sync watermark: {sync_timestamp}")
 
         except Exception as e:
             logger.error(f"Failed to update Gorse sync watermark: {str(e)}")
@@ -188,8 +183,6 @@ class UnifiedGorseService:
         """
         start_time = now_utc()
         job_id = f"unified_sync_{shop_id}_{int(time.time())}"
-
-        logger.info(f"🚀 Starting full sync for shop {shop_id}")
 
         try:
             results = {
@@ -220,7 +213,6 @@ class UnifiedGorseService:
                     results["errors"].append(f"{task_name}_sync_failed: {str(result)}")
                 else:
                     results[f"{task_name}_synced"] = result
-                    logger.info(f"Synced {result} {task_name} to Gorse")
 
             # Training is automatically triggered by Gorse API calls
             results["training_triggered"] = True
@@ -229,7 +221,6 @@ class UnifiedGorseService:
                 results["end_time"] - start_time
             ).total_seconds()
 
-            logger.info(f"Unified sync completed for shop {shop_id}: {results}")
             return results
 
         except Exception as e:
@@ -278,9 +269,6 @@ class UnifiedGorseService:
                     if gorse_users:
                         await self.gorse_client.insert_users_batch(gorse_users)
                         total_synced += len(gorse_users)
-                        logger.info(
-                            f"Synced {len(gorse_users)} users (total: {total_synced})"
-                        )
 
                     if len(users) < self.batch_size:
                         break
@@ -337,9 +325,6 @@ class UnifiedGorseService:
                     if gorse_items:
                         await self.gorse_client.insert_items_batch(gorse_items)
                         total_synced += len(gorse_items)
-                        logger.info(
-                            f"Synced {len(gorse_items)} items (total: {total_synced})"
-                        )
 
                     if len(products) < self.batch_size:
                         break
@@ -445,10 +430,6 @@ class UnifiedGorseService:
                     )
                     result = await session.execute(stmt)
                     interactions = result.scalars().all()
-
-                    logger.info(
-                        f"🔍 GORSE SYNC: Found {len(interactions)} interaction features for shop {shop_id}"
-                    )
 
                     if not interactions:
                         break
@@ -560,9 +541,6 @@ class UnifiedGorseService:
 
                     # Push feedback to Gorse API
                     if feedback_batch:
-                        logger.info(
-                            f"📊 Creating {len(feedback_batch)} feedback records from {len(interactions)} interactions"
-                        )
                         await self.gorse_client.insert_feedback_batch(feedback_batch)
                         total_synced += len(feedback_batch)
 
@@ -571,9 +549,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} feedback records from interaction features"
-            )
             return total_synced
 
         except Exception as e:
@@ -722,9 +697,6 @@ class UnifiedGorseService:
                                 session_batch.append(session_data)
 
                     if session_batch:
-                        logger.info(
-                            f"Found {len(session_batch)} sessions to sync (session sync not implemented in Gorse yet)"
-                        )
                         total_synced += len(session_batch)
 
                     if len(sessions) < self.batch_size:
@@ -732,9 +704,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Processed {total_synced} session features (session sync not implemented in Gorse yet)"
-            )
             return total_synced
 
         except Exception as e:
@@ -780,7 +749,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} product pair relationships to Gorse")
             return total_synced
 
         except Exception as e:
@@ -826,7 +794,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} search-product correlations to Gorse")
             return total_synced
 
         except Exception as e:
@@ -874,7 +841,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} collection features to Gorse")
             return total_synced
 
         except Exception as e:
@@ -920,7 +886,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} customer behavior features to Gorse")
             return total_synced
 
         except Exception as e:

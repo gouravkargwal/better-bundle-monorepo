@@ -133,10 +133,6 @@ class ProductEnrichment:
                             f"🚫 Skipping empty clean product ID: {actual_item_id}"
                         )
 
-            logger.info(
-                f"🧹 Cleaned item IDs | original={item_ids[:3]} | cleaned={clean_item_ids[:3]}"
-            )
-
             # Fetch products from database using cleaned IDs
             products_result = await session.execute(
                 select(ProductData).where(
@@ -288,9 +284,6 @@ class ProductEnrichment:
                     f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
                 )
 
-            logger.info(
-                f"✅ Enrichment complete | enriched={len(enriched_items)} | missing={len(missing_items)} | success_rate={len(enriched_items)/len(item_ids)*100:.1f}%"
-            )
             return enriched_items
 
         except Exception as e:

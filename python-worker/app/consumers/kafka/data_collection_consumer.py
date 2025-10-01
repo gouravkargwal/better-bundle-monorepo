@@ -88,7 +88,6 @@ class DataCollectionKafkaConsumer:
                     error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
                 )
                 await self.consumer.commit(message)
-                logger.info(f"✅ Shop {shop_data.get('id')} is suspended")
                 return
             # Route to appropriate handler
             if event_type == "data_collection":
@@ -317,17 +316,6 @@ class DataCollectionKafkaConsumer:
                 collection_payload=collection_payload,
             )
 
-            logger.info(
-                "✅ Data collection completed successfully",
-                job_id=job_id,
-                collection_payload=collection_payload,
-                result_keys=(
-                    list(result.keys())
-                    if isinstance(result, dict)
-                    else "non-dict result"
-                ),
-            )
-
         except Exception as e:
             logger.exception(f"Data collection job failed: {e}")
             raise
@@ -368,10 +356,6 @@ class DataCollectionKafkaConsumer:
             # Handle the deletion using the existing deletion service
             await normalization_service.deletion_service.handle_entity_deletion(
                 deletion_job, None  # db parameter not needed for SQLAlchemy
-            )
-
-            logger.info(
-                f"✅ Successfully processed {data_type} deletion for {shopify_id}"
             )
 
         except Exception as e:

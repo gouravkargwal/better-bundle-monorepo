@@ -117,14 +117,10 @@ class UnifiedSessionService:
                         existing_session.client_id = client_id
                         await session.commit()
                         await session.refresh(existing_session)
-                        logger.info(
-                            f"Updated session {existing_session.id} with client_id: {client_id}"
-                        )
 
                     asyncio.create_task(
                         self._update_session_activity_background(existing_session.id)
                     )
-                    logger.info(f"Resumed existing session: {existing_session.id}")
                     return self._convert_to_user_session(existing_session)
 
                 # Step 2: Create new session with race condition handling
@@ -252,7 +248,6 @@ class UnifiedSessionService:
                 await session.execute(stmt)
                 await session.commit()
 
-                logger.info(f"Terminated session: {session_id}")
                 return True
 
         except Exception as e:
@@ -283,8 +278,6 @@ class UnifiedSessionService:
                 await self.update_session(
                     session_id, SessionUpdate(extensions_used=session.extensions_used)
                 )
-
-                logger.info(f"Added extension {extension_type} to session {session_id}")
 
             return True
 
@@ -435,9 +428,7 @@ class UnifiedSessionService:
                 if session_data:
                     # ✅ Update customer_id if session was anonymous and now identified
                     if customer_id and not session_data.customer_id:
-                        logger.info(
-                            f"🔗 Linking anonymous session {session_data.id} to customer {customer_id}"
-                        )
+
                         session_data.customer_id = customer_id
                         session_data.expires_at = (
                             current_time + self.identified_session_duration
@@ -555,7 +546,6 @@ class UnifiedSessionService:
                 await session.commit()
                 await session.refresh(new_session_model)
 
-                logger.info(f"Created new session: {new_session_model.id}")
                 return self._convert_to_user_session(new_session_model)
 
             except Exception as e:
@@ -573,9 +563,7 @@ class UnifiedSessionService:
                         session, session_id
                     )
                     if existing_session:
-                        logger.info(
-                            f"Found existing session created by concurrent request: {existing_session.id}"
-                        )
+
                         return existing_session
 
                     # Try fallback to any active session for this user
@@ -583,9 +571,7 @@ class UnifiedSessionService:
                         shop_id, customer_id, browser_session_id
                     )
                     if fallback_session:
-                        logger.info(
-                            f"Found fallback active session: {fallback_session.id}"
-                        )
+
                         return fallback_session
 
                     # If this is the last attempt, re-raise the error
@@ -768,8 +754,6 @@ class UnifiedSessionService:
                 await session.commit()
 
             self._last_cleanup = utcnow()
-
-            logger.info("Cleaned up expired sessions")
 
         except Exception as e:
             logger.error(f"Error cleaning up expired sessions: {str(e)}")

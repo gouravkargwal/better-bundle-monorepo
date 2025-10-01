@@ -131,9 +131,7 @@ class BaseShopifyAPIClient:
         """
 
         try:
-            logger.info(f"Attempting to get app installation scopes for {shop_domain}")
             result = await self.execute_query(query, {}, shop_domain)
-            logger.info(f"GraphQL query result: {result}")
 
             # Check for GraphQL errors first
             if "errors" in result:
@@ -152,11 +150,6 @@ class BaseShopifyAPIClient:
                 app_title = app_info.get("title", "Unknown")
                 app_handle = app_info.get("handle", "unknown")
                 app_id = app_info.get("id", "unknown")
-
-                logger.info(f"🔍 App verification for {shop_domain}:")
-                logger.info(f"  - App ID: {app_id}")
-                logger.info(f"  - App Title: {app_title}")
-                logger.info(f"  - App Handle: {app_handle}")
 
                 # Verify this is our app using configured app ID
                 expected_app_id = settings.shopify.SHOPIFY_APP_ID
@@ -180,19 +173,11 @@ class BaseShopifyAPIClient:
                     )
                     return []
 
-                logger.info(
-                    f"✅ Confirmed: This is our {expected_app_title} app (ID: {app_id})"
-                )
-
                 scopes = installation.get("accessScopes", [])
-                logger.info(f"Found installation scopes: {scopes}")
 
                 if scopes:
                     # Extract scope handles
                     scope_handles = [scope["handle"] for scope in scopes]
-                    logger.info(
-                        f"✅ Extracted scope handles for BetterBundle: {scope_handles}"
-                    )
                     return scope_handles
                 else:
                     logger.warning(
@@ -300,7 +285,6 @@ class BaseShopifyAPIClient:
             wait_time = max(0, reset_time - current_time)
 
             if wait_time > 0:
-                logger.info(f"Rate limited, waiting {wait_time:.2f} seconds")
                 await asyncio.sleep(wait_time)
 
     async def _update_rate_limit_tracking(

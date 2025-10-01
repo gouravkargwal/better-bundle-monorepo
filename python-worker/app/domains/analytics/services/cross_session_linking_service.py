@@ -66,31 +66,20 @@ class CrossSessionLinkingService:
         Link all sessions for a customer using industry-standard methods
         """
         try:
-            logger.info(f"Starting cross-session linking for customer {customer_id}")
 
             # ✅ FIX: If trigger_session_id provided, update that session FIRST
             if trigger_session_id:
-                logger.info(
-                    f"🔗 Updating trigger session {trigger_session_id} with customer_id {customer_id}"
-                )
-
                 # Update the trigger session with customer_id
                 await self.session_service.update_session(
                     trigger_session_id, SessionUpdate(customer_id=customer_id)
                 )
-
                 # Backfill interactions in trigger session
                 await self._update_session_interactions(trigger_session_id, customer_id)
-
-                logger.info(
-                    f"✅ Trigger session {trigger_session_id} linked to customer {customer_id}"
-                )
 
             # Step 1: Get all existing sessions for this customer
             existing_sessions = await self._get_customer_sessions(customer_id, shop_id)
 
             if not existing_sessions:
-                logger.warning(f"No existing sessions found for customer {customer_id}")
                 # If we updated trigger session, return that as success
                 if trigger_session_id:
                     return {
@@ -106,21 +95,16 @@ class CrossSessionLinkingService:
             potential_sessions = await self._find_potential_sessions(
                 existing_sessions, shop_id
             )
-            logger.info(f"Found {len(potential_sessions)} potential sessions to link")
 
             # Step 3: Calculate confidence scores
             scored_sessions = await self._score_potential_sessions(
                 existing_sessions, potential_sessions
-            )
-            logger.info(
-                f"Found {len(scored_sessions)} high-confidence sessions to link"
             )
 
             # Step 4: Link high-confidence matches
             linked_sessions = await self._link_high_confidence_sessions(
                 scored_sessions, customer_id
             )
-            logger.info(f"Successfully linked {len(linked_sessions)} sessions")
 
             # Step 5: Create session links
             session_links = await self._create_session_links(
@@ -150,9 +134,6 @@ class CrossSessionLinkingService:
                 "linking_methods": self._get_linking_methods_summary(scored_sessions),
             }
 
-            logger.info(
-                f"Cross-session linking completed: {len(linked_sessions)} sessions linked"
-            )
             return result
 
         except Exception as e:
@@ -195,9 +176,6 @@ class CrossSessionLinkingService:
                 for row in rows
             ]
 
-            logger.info(
-                f"Returning {len(sessions)} UserSession objects for customer {customer_id}"
-            )
             return sessions
 
         except Exception as e:
@@ -222,7 +200,6 @@ class CrossSessionLinkingService:
 
             # If no identifiers, return empty
             if not (ip_addresses or user_agents or browser_session_ids):
-                logger.info("No identifiers found for potential session matching")
                 return []
 
             # ✅ FIX: Build OR conditions properly
@@ -281,7 +258,6 @@ class CrossSessionLinkingService:
                 if row.id not in existing_session_ids
             ]
 
-            logger.info(f"Found {len(potential_sessions)} potential sessions to link")
             return potential_sessions
 
         except Exception as e:
@@ -448,11 +424,6 @@ class CrossSessionLinkingService:
 
                 linked_sessions.append(session)
 
-                logger.info(
-                    f"Linked session {session.id} to customer {customer_id} "
-                    f"(confidence: {confidence:.2f}, method: {match_type})"
-                )
-
             except Exception as e:
                 logger.error(f"Error linking session {session.id}: {str(e)}")
 
@@ -616,11 +587,6 @@ class CrossSessionLinkingService:
                     if created:
                         links_created += 1
 
-            logger.info(
-                f"Created {links_created} identity links for {len(sessions)} sessions "
-                f"(customer: {customer_id})"
-            )
-
         except Exception as e:
             logger.error(f"Failed to store identity links: {str(e)}")
             raise
@@ -661,16 +627,8 @@ class CrossSessionLinkingService:
                     )
                     session.add(link)
                     await session.commit()
-                    logger.debug(
-                        f"Created identity link: "
-                        f"{identifier[:16]}... -> {customer_id} ({identifier_type})"
-                    )
                     return True
                 else:
-                    logger.debug(
-                        f"Identity link exists: "
-                        f"{identifier[:16]}... -> {customer_id} ({identifier_type})"
-                    )
                     return False
 
         except Exception as e:
@@ -731,14 +689,6 @@ class CrossSessionLinkingService:
             try:
                 event_id = await publisher.publish_feature_computation_event(
                     feature_event
-                )
-
-                logger.info(
-                    f"Fired feature computation event from {trigger_source} via Kafka",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    interaction_id=interaction_id,
-                    event_id=event_id,
                 )
 
                 return event_id

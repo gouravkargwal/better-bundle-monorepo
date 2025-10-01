@@ -120,7 +120,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, data_type: str, shop_domain: str, specific_ids: List[str]
     ) -> List[Dict[str, Any]]:
         """Execute webhook collection for specific IDs."""
-        logger.info(f"🎯 Collecting specific {data_type} IDs: {specific_ids}")
         return await self._collect_specific_items_by_ids(
             data_type, shop_domain, specific_ids
         )
@@ -134,7 +133,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         since_id: Optional[str],
     ) -> List[Dict[str, Any]]:
         """Execute full collection for a data type."""
-        logger.info(f"🔄 Full collection for {data_type}")
 
         return await self._collect_data_generic(
             shop_domain=shop_domain,
@@ -150,7 +148,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         """Check if we have any raw data for this data type using repository."""
         try:
             count = await self.raw_data_repository.get_raw_count(shop_id, data_type)
-            logger.info(f"🔍 Raw {data_type} count for shop {shop_id}: {count}")
             return count > 0
         except Exception as e:
             logger.warning(f"⚠️ Error checking raw data count for {data_type}: {e}")
@@ -227,8 +224,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         collection_start_time = now_utc()
         session_id = f"collection_{shop_id}_{int(collection_start_time.timestamp())}"
 
-        logger.info(f"🚀 Starting collection session: {session_id}")
-
         return {
             "session_id": session_id,
             "start_time": collection_start_time,
@@ -242,9 +237,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             collection_payload = {
                 "data_types": ["products", "orders", "customers", "collections"]
             }
-            logger.info("📋 Using default collection payload for all data types")
-        else:
-            logger.info(f"📋 Using provided collection payload: {collection_payload}")
 
         return collection_payload
 
@@ -257,9 +249,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         )
 
         if collectable_data:
-            logger.info(f"✅ Can collect data types: {collectable_data}")
-        else:
-            logger.warning("❌ No data types can be collected due to permissions")
+            logger.warning("No data types can be collected due to permissions")
 
         return collectable_data
 
@@ -291,10 +281,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if data
         )
 
-        logger.info(
-            f"✅ Collection session {session_info['session_id']} completed: {total_items} items"
-        )
-
         return {
             "success": True,
             "message": f"Collected {total_items} items",
@@ -311,23 +297,15 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, shop_domain: str, access_token: str
     ) -> Dict[str, Any]:
         """Check permissions - simplified"""
-        logger.info(
-            f"🔍 _check_permissions called for {shop_domain} with access_token: {'Yes' if access_token else 'No'}"
-        )
-
         await self.api_client.connect()
         if access_token:
             await self.api_client.set_access_token(shop_domain, access_token)
-            logger.info(
-                f"✅ Access token set for {shop_domain}, calling permission service"
-            )
             permissions = await self.permission_service.check_shop_permissions(
                 shop_domain, access_token
             )
-            logger.info(f"✅ Permission service returned: {permissions}")
             return permissions
         else:
-            logger.warning(f"⚠️ No access token provided for {shop_domain}")
+            logger.warning(f"No access token provided for {shop_domain}")
         return {}
 
     def _get_collectable_data_types(
@@ -374,7 +352,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if data_type not in collectable:
                 collectable.append(data_type)
 
-        logger.info(f"Collectable data types from payload: {collectable}")
         return collectable
 
     async def _collect_and_store_data(
@@ -391,10 +368,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         This method handles both webhook events (specific IDs) and bulk collection
         by processing all data types concurrently for better performance.
         """
-        logger.info(
-            f"🔄 Starting parallel collection for {len(data_types)} data types: {data_types}"
-        )
-
         # Step 1: Prepare collection tasks for each data type
         collection_tasks = self._prepare_collection_tasks(
             data_types, shop_domain, shop_id, access_token, collection_payload
@@ -439,11 +412,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             )
             tasks.append(task)
 
-            if specific_ids:
-                logger.info(f"🎯 Will collect specific {data_type} IDs: {specific_ids}")
-            else:
-                logger.info(f"📦 Will collect all {data_type} data")
-
         return tasks
 
     def _get_specific_ids_for_data_type(
@@ -459,7 +427,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, tasks: List, data_types: List[str]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Execute all collection tasks in parallel and handle results."""
-        logger.info(f"⚡ Executing {len(tasks)} collection tasks in parallel")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -472,7 +439,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 collected_data[data_type] = []
             else:
                 collected_data[data_type] = result
-                logger.info(f"✅ Collected {len(result)} {data_type} items")
 
         return collected_data
 
@@ -487,11 +453,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 try:
                     await self._store_data(data_type, data, shop_id)
                     processed_types.append(data_type)
-                    logger.info(f"💾 Stored {len(data)} {data_type} items in database")
                 except Exception as e:
                     logger.error(f"❌ Failed to store {data_type} data: {e}")
-            else:
-                logger.info(f"📭 No {data_type} data to store")
 
         return processed_types
 
@@ -504,7 +467,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         if collection_payload and collection_payload.get("specific_ids"):
             # The specific_ids is already a dict with data types as keys
             specific_ids = collection_payload.get("specific_ids", {})
-            logger.info(f"🎯 Extracted specific IDs: {specific_ids}")
 
         return specific_ids
 
@@ -527,14 +489,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         Just process data chunks like a proper Kafka system
         """
         if not data_types:
-            logger.info("No data types to normalize")
             return
-
-        logger.info(
-            f"🔄 Triggering normalization for shop {shop_id}",
-            data_types=data_types,
-            has_specific_ids=bool(specific_ids),
-        )
 
         try:
             # Small delay to ensure database transaction is committed
@@ -590,9 +545,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         shopify_ids: List[str],
     ):
         """Execute webhook normalization for specific IDs."""
-        logger.info(
-            f"🎯 Processing webhook normalization for {data_type} IDs: {shopify_ids}"
-        )
 
         for shopify_id in shopify_ids:
             normalization_event = self._create_webhook_normalization_event(
@@ -601,14 +553,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
             message_id = await publisher.publish_normalization_event(
                 normalization_event
-            )
-
-            logger.info(
-                f"✅ Webhook normalization event published for {data_type} {shopify_id}",
-                shop_id=shop_id,
-                data_type=data_type,
-                shopify_id=shopify_id,
-                message_id=message_id,
             )
 
     def _create_webhook_normalization_event(
@@ -632,19 +576,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         data_type: str,
     ):
         """Execute batch normalization for time-based processing."""
-        logger.info(f"📦 Processing batch normalization for {data_type}")
 
         # Create and publish batch normalization event
         normalization_event = self._create_batch_normalization_event(shop_id, data_type)
 
         message_id = await publisher.publish_normalization_event(normalization_event)
-
-        logger.info(
-            f"✅ Batch normalization event published for {data_type}",
-            shop_id=shop_id,
-            data_type=data_type,
-            message_id=message_id,
-        )
 
     async def _update_collection_watermark(self, shop_id: str, data_type: str):
         """Update the collection watermark for batch processing."""
@@ -666,15 +602,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
             await self._upsert_processing_watermark(
                 shop_id=shop_id, data_type=data_type, iso_time=end_iso
-            )
-
-            logger.info(
-                "💾 Collection watermark updated",
-                extra={
-                    "shop_id": shop_id,
-                    "data_type": data_type,
-                    "lastCollectedAt": end_iso,
-                },
             )
 
         except Exception as e:
@@ -723,7 +650,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """Generic data collection method - Industry Standard Simplified"""
-        logger.info(f"Collecting {data_type} for {shop_domain}")
 
         raw_items = []
         cursor = since_id
@@ -775,7 +701,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             # Rate limiting
             await asyncio.sleep(self.RATE_LIMIT_DELAY)
 
-        logger.info(f"Collected {len(raw_items)} {data_type} items")
         return raw_items
 
     async def _collect_specific_items_by_ids(
@@ -794,7 +719,6 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             except Exception as e:
                 logger.error(f"Failed to collect {data_type} {item_id}: {e}")
 
-        logger.info(f"Collected {len(collected_items)} specific {data_type} items")
         return collected_items
 
     async def _collect_single_item_by_id(

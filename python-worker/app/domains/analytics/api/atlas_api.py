@@ -76,7 +76,6 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
     across the store (homepage, product pages, collection pages, etc.).
     """
     try:
-        logger.info(f"Atlas interaction tracking: {request.interaction_type} in")
 
         # Resolve shop_id from domain
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
@@ -96,9 +95,22 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             },
         )
 
-        # Feature computation is now automatically triggered in track_interaction method
+        if not interaction:
+            logger.warning(
+                f"Atlas interaction tracking failed for session {request.session_id}"
+            )
+            # Return success but with a warning - this is more graceful
+            return AtlasResponse(
+                success=True,
+                message="Atlas interaction tracked (session may have expired)",
+                data={
+                    "interaction_id": None,
+                    "session_id": request.session_id,
+                    "warning": "Session not found or expired",
+                },
+            )
 
-        logger.info(f"Atlas interaction tracked successfully: {interaction.id}")
+        # Feature computation is now automatically triggered in track_interaction method
 
         return AtlasResponse(
             success=True,
@@ -133,7 +145,6 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
     a session for behavioral tracking.
     """
     try:
-        logger.info(f"Atlas session request for shop: {request.shop_domain}")
 
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
 
@@ -156,8 +167,6 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
 
         # Add Atlas to extensions used
         await session_service.add_extension_to_session(session.id, ExtensionType.ATLAS)
-
-        logger.info(f"Atlas session created/retrieved: {session.id}")
 
         return AtlasResponse(
             success=True,

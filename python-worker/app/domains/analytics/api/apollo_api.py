@@ -566,7 +566,6 @@ async def track_apollo_email_signup(
     This endpoint tracks when customers sign up for newsletters or updates.
     """
     try:
-        logger.info(f"Apollo email signup tracking: {email}")
 
         # Track email signup interaction
         interaction = await analytics_service.track_interaction(
@@ -583,8 +582,6 @@ async def track_apollo_email_signup(
                 "source": "apollo_post_purchase",
             },
         )
-
-        logger.info(f"Apollo email signup tracked: {interaction.id}")
 
         return ApolloResponse(
             success=True,

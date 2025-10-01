@@ -62,14 +62,7 @@ class NormalizationDataStorageService:
 
             # Upsert the record
             if existing:
-                self.logger.info(
-                    "✏️ Updating existing entity",
-                    extra={
-                        "data_type": data_type,
-                        "id": id_value,
-                        "shop_id": shop_id,
-                    },
-                )
+
                 # For updates, preserve created_at and set updated_at to current time
                 update_data = main_data.copy()
                 update_data.pop("created_at", None)  # Preserve existing created_at
@@ -83,14 +76,7 @@ class NormalizationDataStorageService:
                     )
                     await session.commit()
             else:
-                self.logger.info(
-                    "🆕 Creating new entity",
-                    extra={
-                        "data_type": data_type,
-                        "id": id_value,
-                        "shop_id": shop_id,
-                    },
-                )
+
                 async with get_transaction_context() as session:
                     model_instance = model_class(**main_data)
                     session.add(model_instance)
@@ -141,14 +127,7 @@ class NormalizationDataStorageService:
                 existing = result.scalar_one_or_none()
 
                 if existing:
-                    self.logger.info(
-                        "✏️ Updating existing order",
-                        extra={
-                            "orderId": order_id,
-                            "record_id": existing.id,
-                            "shop_id": shop_id,
-                        },
-                    )
+
                     await session.execute(
                         update(OrderData)
                         .where(OrderData.id == existing.id)
@@ -156,13 +135,7 @@ class NormalizationDataStorageService:
                     )
                     order_record_id = existing.id
                 else:
-                    self.logger.info(
-                        "🆕 Creating new order",
-                        extra={
-                            "orderId": order_id,
-                            "shop_id": shop_id,
-                        },
-                    )
+
                     order_instance = OrderData(**order_data)
                     session.add(order_instance)
                     await session.flush()  # Get the ID without committing
@@ -170,13 +143,7 @@ class NormalizationDataStorageService:
 
                 # Create line items
                 if line_items:
-                    self.logger.info(
-                        "🧾 Replacing line items",
-                        extra={
-                            "orderId": order_id,
-                            "line_items_count": len(line_items),
-                        },
-                    )
+
                     await self._create_line_items(session, order_record_id, line_items)
 
                 await session.commit()
@@ -194,9 +161,6 @@ class NormalizationDataStorageService:
         if not canonical_data_list:
             return 0
 
-        self.logger.info(
-            f"🔄 Upserting {len(canonical_data_list)} orders for shop {shop_id}"
-        )
         processed_count = 0
         upsert_errors = 0
 
@@ -273,9 +237,6 @@ class NormalizationDataStorageService:
 
             await session.commit()
 
-        self.logger.info(
-            f"✅ Order batch upsert completed: {processed_count} orders, {upsert_errors} errors"
-        )
         return processed_count
 
     async def upsert_entities_batch(
@@ -289,17 +250,6 @@ class NormalizationDataStorageService:
         id_field = f"{data_type[:-1]}_id"
         processed_count = 0
         error_count = 0
-
-        self.logger.info(
-            f"🔄 Starting batch upsert for {data_type}",
-            extra={
-                "data_type": data_type,
-                "shop_id": shop_id,
-                "record_count": len(canonical_data_list),
-                "model_class": model_class.__name__,
-                "id_field": id_field,
-            },
-        )
 
         async with get_transaction_context() as session:
             for canonical_data in canonical_data_list:
@@ -382,22 +332,6 @@ class NormalizationDataStorageService:
 
             await session.commit()
 
-        self.logger.info(
-            f"✅ Batch upsert completed for {data_type}",
-            extra={
-                "data_type": data_type,
-                "shop_id": shop_id,
-                "total_records": len(canonical_data_list),
-                "successful": processed_count,
-                "errors": error_count,
-                "success_rate": (
-                    f"{(processed_count/len(canonical_data_list)*100):.1f}%"
-                    if canonical_data_list
-                    else "0%"
-                ),
-            },
-        )
-
         return processed_count
 
     async def upsert_watermark(
@@ -435,19 +369,6 @@ class NormalizationDataStorageService:
                         session.add(wm)
                     await session.commit()
 
-            self.logger.info(
-                "💾 Watermark updated",
-                extra={
-                    "shop_id": shop_id,
-                    "data_type": data_type,
-                    "last_normalized_at": iso_time,
-                    "table": (
-                        "PipelineWatermark"
-                        if format_type == "graphql"
-                        else "NormalizationWatermark"
-                    ),
-                },
-            )
         except Exception as e:
             self.logger.error(
                 f"Failed to upsert normalization watermark: {e}",

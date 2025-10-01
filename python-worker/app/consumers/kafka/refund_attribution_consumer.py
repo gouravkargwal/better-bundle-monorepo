@@ -36,7 +36,6 @@ class RefundAttributionKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("Refund attribution Kafka consumer initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize refund attribution consumer: {e}")
@@ -48,7 +47,6 @@ class RefundAttributionKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("Starting refund attribution consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
@@ -64,7 +62,6 @@ class RefundAttributionKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        logger.info("Refund attribution consumer closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the refund attribution consumer"""
@@ -76,7 +73,6 @@ class RefundAttributionKafkaConsumer:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual refund attribution messages"""
         try:
-            logger.info(f"🔄 Processing refund attribution message: {message}")
 
             payload = message.get("value") or message
             if isinstance(payload, str):
@@ -139,10 +135,6 @@ class RefundAttributionKafkaConsumer:
                 await self.consumer.commit(message)
                 return
 
-            logger.info(
-                f"📋 Processing individual refund attribution: shop_id={shop_id}, refund_id={refund_id}, order_id={order_id}"
-            )
-
             # Use shared processing logic with SQLAlchemy session
             async with get_transaction_context() as session:
                 await self._process_single_refund_attribution(
@@ -167,10 +159,6 @@ class RefundAttributionKafkaConsumer:
             )
             return
 
-        logger.info(
-            f"🔄 Processing batch refund attribution: shop_id={shop_id}, refund_count={len(refund_ids)}"
-        )
-
         successful = 0
         failed = 0
 
@@ -189,10 +177,6 @@ class RefundAttributionKafkaConsumer:
                         )
                         failed += 1
                         continue
-
-            logger.info(
-                f"✅ Batch refund attribution completed: successful={successful}, failed={failed}"
-            )
 
         except Exception as e:
             logger.error(f"Failed to process batch refund attribution: {e}")
@@ -213,11 +197,7 @@ class RefundAttributionKafkaConsumer:
         existing_attribution = existing_attribution_result.scalar_one_or_none()
 
         if existing_attribution:
-            logger.info(
-                f"✅ Refund attribution already exists - skipping",
-                shop_id=shop_id,
-                refund_id=refund_id,
-            )
+
             return
 
         # Load refund data from RawOrder (single source of truth)
@@ -297,14 +277,6 @@ class RefundAttributionKafkaConsumer:
 
         session.add(refund_attribution)
         await session.flush()  # Flush to get the ID if needed
-
-        logger.info(
-            f"✅ Refund attribution created successfully",
-            shop_id=shop_id,
-            order_id=order_id,
-            refund_id=refund_id,
-            attributed_refund=attribution_data["attributed_refund"],
-        )
 
     def _compute_simplified_refund_attribution(
         self, refund_obj: Dict[str, Any], order: Any, payload_data: Dict[str, Any]

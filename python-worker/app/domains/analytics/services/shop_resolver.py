@@ -143,9 +143,7 @@ class ShopResolverService:
                 customer = result.scalar_one_or_none()
 
                 if customer and customer.shop_id:
-                    logger.info(
-                        f"Found shop_id from customer_id via customerdata: {customer_id} -> {customer.shop_id}"
-                    )
+
                     return customer.shop_id
                 else:
                     logger.warning(
@@ -166,7 +164,6 @@ class ShopResolverService:
             ]
             for key in keys_to_remove:
                 del self._cache[key]
-        logger.info(f"Cache invalidated for domain: {normalized_domain}")
 
     async def clear_expired_cache(self) -> None:
         """Clear expired cache entries (call periodically)"""
@@ -177,9 +174,6 @@ class ShopResolverService:
             ]
             for key in expired_keys:
                 del self._cache[key]
-
-        if expired_keys:
-            logger.info(f"Cleared {len(expired_keys)} expired cache entries")
 
     def _normalize_domain(self, domain: str) -> str:
         """Normalize domain for consistent caching"""

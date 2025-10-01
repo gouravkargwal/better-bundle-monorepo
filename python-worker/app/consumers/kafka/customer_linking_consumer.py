@@ -38,7 +38,6 @@ class CustomerLinkingKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("Customer linking Kafka consumer initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize customer linking consumer: {e}")
@@ -50,7 +49,6 @@ class CustomerLinkingKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("Starting customer linking consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
@@ -66,12 +64,10 @@ class CustomerLinkingKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        logger.info("Customer linking consumer closed")
 
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual customer linking messages"""
         try:
-            logger.info(f"🔄 Processing customer linking message: {message}")
 
             payload = message.get("value") or message
             if isinstance(payload, str):
@@ -90,17 +86,9 @@ class CustomerLinkingKafkaConsumer:
             linked_sessions = payload.get("linked_sessions", [])
             event_type = payload.get("event_type", "customer_linking")
 
-            logger.info(
-                f"📨 Received customer linking message - job_id: {job_id}, shop_id: {shop_id}, customer_id: {customer_id}, event_type: {event_type}"
-            )
-
             if not job_id or not shop_id or not customer_id:
                 logger.error("❌ Invalid message: missing required fields")
                 return
-
-            logger.info(
-                f"🔄 Processing customer linking job - job_id: {job_id}, shop_id: {shop_id}, customer_id: {customer_id}, event_type: {event_type}"
-            )
 
             if not await self.shop_repo.is_shop_active(shop_id):
                 logger.warning(
@@ -114,7 +102,6 @@ class CustomerLinkingKafkaConsumer:
                     error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
                 )
                 await self.consumer.commit(message)
-                logger.info(f"✅ Shop {shop_id} is suspended")
                 return
 
             # Process based on event type
@@ -131,10 +118,6 @@ class CustomerLinkingKafkaConsumer:
             else:
                 logger.warning(f"Unknown event type: {event_type}")
 
-            logger.info(
-                f"Customer linking job completed", job_id=job_id, shop_id=shop_id
-            )
-
         except Exception as e:
             logger.error(f"Error processing customer linking message: {str(e)}")
             raise
@@ -149,14 +132,8 @@ class CustomerLinkingKafkaConsumer:
     ):
         """Process customer identity resolution and linking"""
         try:
-            logger.info(
-                f"🔍 Processing customer identity resolution for customer {customer_id} with trigger_session_id: {trigger_session_id}"
-            )
 
             # Run cross-session linking to find more sessions
-            logger.info(
-                f"🔗 Starting cross-session linking for customer {customer_id}..."
-            )
             linking_result = (
                 await self.cross_session_linking_service.link_customer_sessions(
                     customer_id=customer_id,
@@ -165,13 +142,8 @@ class CustomerLinkingKafkaConsumer:
                 )
             )
 
-            logger.info(f"📊 Cross-session linking result: {linking_result}")
-
             if linking_result.get("success"):
                 linked_sessions = linking_result.get("linked_sessions", [])
-                logger.info(
-                    f"✅ Cross-session linking completed: {len(linked_sessions)} sessions linked - {linked_sessions}"
-                )
 
                 # Always include trigger_session_id in backfill
                 sessions_to_backfill = []
@@ -188,9 +160,6 @@ class CustomerLinkingKafkaConsumer:
 
                 # Trigger backfill
                 if sessions_to_backfill:
-                    logger.info(
-                        f"🔄 Starting backfill for {len(sessions_to_backfill)} sessions: {sessions_to_backfill}"
-                    )
                     await self._process_interaction_backfill(
                         job_id, shop_id, customer_id, sessions_to_backfill
                     )
@@ -212,21 +181,11 @@ class CustomerLinkingKafkaConsumer:
     ):
         """Process cross-session linking for a customer"""
         try:
-            logger.info(f"Processing cross-session linking for customer {customer_id}")
 
             # Run cross-session linking
             result = await self.cross_session_linking_service.link_customer_sessions(
                 customer_id=customer_id, shop_id=shop_id
             )
-
-            if result.get("success"):
-                logger.info(
-                    f"Cross-session linking completed: {result.get('linked_sessions', 0)} sessions linked"
-                )
-            else:
-                logger.warning(
-                    f"Cross-session linking failed: {result.get('error', 'Unknown error')}"
-                )
 
         except Exception as e:
             logger.error(f"Error in cross-session linking: {str(e)}")
@@ -243,19 +202,12 @@ class CustomerLinkingKafkaConsumer:
                 UserInteraction as SAUserInteraction,
             )
 
-            logger.info(
-                f"🔄 Processing interaction backfill for customer {customer_id} with {len(linked_sessions)} sessions: {linked_sessions}"
-            )
-
             # Get all session IDs that need backfill
             all_session_ids = linked_sessions
             total_backfilled = 0
 
             # Update all interactions in these sessions with missing customer_id
             for session_id in all_session_ids:
-                logger.info(
-                    f"🔍 Backfilling session {session_id} for customer {customer_id}..."
-                )
 
                 async with get_session_context() as session:
                     stmt = select(SAUserInteraction).where(
@@ -271,18 +223,10 @@ class CustomerLinkingKafkaConsumer:
 
                     backfilled_count = len(interactions)
 
-                logger.info(
-                    f"✅ Backfilled {backfilled_count} interactions for session {session_id}"
-                )
                 total_backfilled += backfilled_count
-
-            logger.info(f"📊 Total interactions backfilled: {total_backfilled}")
 
             # Fire feature computation event for updated interactions
             try:
-                logger.info(
-                    f"🚀 Firing feature computation event for shop {shop_id}..."
-                )
                 await self.cross_session_linking_service.fire_feature_computation_event(
                     shop_id=shop_id,
                     trigger_source="customer_linking_backfill",
@@ -290,13 +234,8 @@ class CustomerLinkingKafkaConsumer:
                     batch_size=100,
                     incremental=True,
                 )
-                logger.info(f"✅ Feature computation event fired successfully")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to fire feature computation event: {str(e)}")
-
-            logger.info(
-                f"✅ Interaction backfill completed for customer {customer_id} - {total_backfilled} interactions updated"
-            )
 
         except Exception as e:
             logger.error(f"❌ Error in interaction backfill: {str(e)}")

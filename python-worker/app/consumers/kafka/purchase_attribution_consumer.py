@@ -44,7 +44,6 @@ class PurchaseAttributionKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("Purchase attribution Kafka consumer initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize purchase attribution consumer: {e}")
@@ -56,7 +55,6 @@ class PurchaseAttributionKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("Starting purchase attribution consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
@@ -72,7 +70,6 @@ class PurchaseAttributionKafkaConsumer:
         """Close consumer"""
         if self.consumer:
             await self.consumer.close()
-        logger.info("Purchase attribution consumer closed")
 
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the purchase attribution consumer"""
@@ -84,7 +81,6 @@ class PurchaseAttributionKafkaConsumer:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle individual purchase attribution messages"""
         try:
-            logger.info(f"🔄 Processing purchase attribution message: {message}")
 
             payload = message.get("value") or message
             if isinstance(payload, str):
@@ -166,10 +162,6 @@ class PurchaseAttributionKafkaConsumer:
                 currency = getattr(order, "currency_code", None) or "USD"
                 customer_id = getattr(order, "customer_id", None)
 
-                logger.info(
-                    f"🔍 Created {len(products)} products for order {order_id}: {products}"
-                )
-
                 # Try to find a recent session for this customer (optional)
                 user_session = None
                 if customer_id:
@@ -190,11 +182,6 @@ class PurchaseAttributionKafkaConsumer:
                 if not await self._has_extension_interactions(
                     session, shop_id, customer_id, user_session
                 ):
-                    logger.info(
-                        f"⏭️ Skipping attribution for order {order_id} - no extension interactions found",
-                        shop_id=shop_id,
-                        customer_id=customer_id,
-                    )
                     return
 
                 purchase_event = PurchaseEvent(
@@ -215,13 +202,6 @@ class PurchaseAttributionKafkaConsumer:
                 # Process attribution
                 billing = BillingService(session)
                 await billing.process_purchase_attribution(purchase_event)
-
-            logger.info(
-                "Purchase attribution stored",
-                shop_id=shop_id,
-                order_id=order_id,
-                line_items=len(products),
-            )
 
         except Exception as e:
             logger.error("Failed to process purchase attribution", error=str(e))
@@ -266,19 +246,6 @@ class PurchaseAttributionKafkaConsumer:
             interactions = interactions_result.scalars().all()
 
             has_interactions = len(interactions) > 0
-
-            if has_interactions:
-                logger.info(
-                    f"✅ Found {len(interactions)} extension interactions for customer {customer_id}",
-                    shop_id=shop_id,
-                    customer_id=customer_id,
-                )
-            else:
-                logger.info(
-                    f"❌ No extension interactions found for customer {customer_id}",
-                    shop_id=shop_id,
-                    customer_id=customer_id,
-                )
 
             return has_interactions
 

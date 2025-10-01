@@ -125,10 +125,6 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
         if not session:
             raise HTTPException(status_code=500, detail="Failed to create session")
 
-        logger.info(
-            f"Phoenix session started: {session.id} for customer {request.customer_id}"
-        )
-
         return PhoenixResponse(
             success=True,
             message="Phoenix session started successfully",
@@ -159,7 +155,6 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
     in the cart flow (recommendations, clicks, etc.).
     """
     try:
-        logger.info(f"Phoenix interaction tracking: {request.interaction_type}")
 
         # Resolve shop domain to shop ID if needed
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
@@ -189,8 +184,6 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
             raise HTTPException(status_code=500, detail="Failed to track interaction")
 
         # Feature computation is now automatically triggered in track_interaction method
-
-        logger.info(f"Phoenix interaction tracked successfully: {interaction.id}")
 
         return PhoenixResponse(
             success=True,

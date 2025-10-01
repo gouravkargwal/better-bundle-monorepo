@@ -220,11 +220,22 @@ class FeatureRepository(IFeatureRepository):
                 for record in batch_data:
                     # Only keep keys that exist on the model table to avoid accidental Column refs
                     model_columns = {c.name for c in model_class.__table__.columns}
-                    sanitized = {
-                        k: _coerce_plain(v)
-                        for k, v in record.items()
-                        if k in model_columns
-                    }
+                    sanitized = {}
+                    for k, v in record.items():
+                        if k in model_columns:
+                            coerced_value = _coerce_plain(v)
+                            # Additional debug check for SQLAlchemy objects
+                            if hasattr(
+                                coerced_value, "__class__"
+                            ) and "sqlalchemy" in str(
+                                coerced_value.__class__.__module__
+                            ):
+                                logger.warning(
+                                    f"SQLAlchemy object found in repository for field {k}: {type(coerced_value)} - {coerced_value}"
+                                )
+                                sanitized[k] = None
+                            else:
+                                sanitized[k] = coerced_value
                     sanitized["last_computed_at"] = datetime.utcnow()
                     prepared_data.append(sanitized)
 

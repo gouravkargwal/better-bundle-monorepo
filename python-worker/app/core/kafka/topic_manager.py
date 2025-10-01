@@ -43,7 +43,6 @@ class KafkaTopicManager:
 
             # Get existing topics
             existing_topics = await self.admin_client.list_topics()
-            logger.info(f"Existing topics: {list(existing_topics)}")
 
             # Create new topics
             new_topics = []
@@ -68,23 +67,12 @@ class KafkaTopicManager:
                 # Create topics
                 try:
                     result = await self.admin_client.create_topics(new_topics)
-                    logger.info(f"✅ Successfully created {len(new_topics)} topics")
 
                     # List topics to verify creation
                     created_topics = await self.admin_client.list_topics()
-                    for topic in new_topics:
-                        if topic.name in created_topics:
-                            logger.info(f"✅ Verified topic creation: {topic.name}")
-                        else:
-                            logger.warning(
-                                f"⚠️ Topic not found after creation: {topic.name}"
-                            )
-
                 except Exception as e:
                     logger.error(f"Failed to create topics: {e}")
                     # Continue anyway - topics might already exist
-            else:
-                logger.info("All required topics already exist")
 
             self.topics_created = True
 
@@ -96,7 +84,6 @@ class KafkaTopicManager:
         """Close the admin client"""
         if self.admin_client:
             await self.admin_client.close()
-            logger.info("Kafka admin client closed")
 
     async def get_topic_info(self, topic_name: str) -> Dict[str, Any]:
         """Get information about a specific topic"""

@@ -114,14 +114,6 @@ class EntityNormalizationService:
             # Convert to canonical format
             canonical = adapter.to_canonical(payload, shop_id)
 
-            self.logger.info(
-                "📦 Entity converted to canonical format",
-                extra={
-                    "data_type": data_type,
-                    "entity_id": canonical.get(f"{data_type[:-1]}Id"),
-                    "format": data_format,
-                },
-            )
             return canonical
 
         except Exception as e:
@@ -132,7 +124,6 @@ class EntityNormalizationService:
         """Check if this update should be skipped based on idempotency rules."""
         if self._should_skip_update_by_canonical(canonical_data, data_type):
             entity_id = canonical_data.get(f"{data_type[:-1]}Id")
-            self.logger.info(f"Skipping {data_type} {entity_id} - no updates needed")
             return True
         return False
 
@@ -258,12 +249,7 @@ class EntityNormalizationService:
             int: Number of successfully processed entities
         """
         if not raw_records:
-            self.logger.info(f"No {data_type} records to process")
             return 0
-
-        self.logger.info(
-            f"🔄 Processing {len(raw_records)} {data_type} records in batch"
-        )
 
         # Step 1: Convert all raw records to canonical format
         canonical_data_list = self._convert_batch_to_canonical(
@@ -302,9 +288,6 @@ class EntityNormalizationService:
                 self._log_conversion_error(e, raw_record, data_type, shop_id, i)
                 conversion_errors += 1
 
-        self.logger.info(
-            f"📊 Batch conversion results: {len(canonical_data_list)} successful, {conversion_errors} failed"
-        )
         return canonical_data_list
 
     def _convert_single_record_to_canonical(
@@ -368,9 +351,6 @@ class EntityNormalizationService:
             processed_count = await self.data_storage.upsert_entities_batch(
                 data_type, canonical_data_list, shop_id
             )
-            self.logger.info(
-                f"✅ Stored {processed_count} {data_type} entities in batch"
-            )
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to store {data_type} batch: {e}")
@@ -390,20 +370,6 @@ class EntityNormalizationService:
         storage_failed = len(canonical_data_list) - processed_count
         success_rate = (
             (processed_count / total_records * 100) if total_records > 0 else 0
-        )
-
-        self.logger.info(
-            f"📊 Batch normalization summary for {data_type}",
-            extra={
-                "data_type": data_type,
-                "shop_id": shop_id,
-                "total_records": total_records,
-                "conversion_successful": len(canonical_data_list),
-                "conversion_failed": conversion_failed,
-                "storage_successful": processed_count,
-                "storage_failed": storage_failed,
-                "overall_success_rate": f"{success_rate:.1f}%",
-            },
         )
 
 
@@ -446,25 +412,12 @@ class OrderNormalizationService:
             if is_webhook:
                 order_id = canonical.get("order_id")
 
-                # Log what we're about to do
-                self.logger.info(
-                    f"📤 Publishing attribution events for order {order_id}",
-                    extra={
-                        "shop_id": shop_id,
-                        "order_id": order_id,
-                        "is_webhook": is_webhook,
-                    },
-                )
-
                 # 1️⃣ ALWAYS publish purchase attribution event
                 await self._publish_order_events(shop_id, order_id)
 
                 # 2️⃣ Check if order has refunds and publish refund attribution events
                 refunds = canonical.get("refunds", [])
                 if refunds:
-                    self.logger.info(
-                        f"💸 Order {order_id} has {len(refunds)} refunds, publishing refund attribution events"
-                    )
                     await self._publish_refund_events(shop_id, order_id, refunds)
                 else:
                     self.logger.debug(f"📦 Order {order_id} has no refunds")
@@ -499,10 +452,6 @@ class OrderNormalizationService:
         """
         if not raw_records:
             return 0
-
-        self.logger.info(
-            f"🔄 Processing {len(raw_records)} order records for shop {shop_id}"
-        )
 
         # Convert raw records to canonical data
         canonical_data_list = []
@@ -548,10 +497,6 @@ class OrderNormalizationService:
                 conversion_errors += 1
                 continue
 
-        self.logger.info(
-            f"📊 Order conversion results: {len(canonical_data_list)} successful, {conversion_errors} failed"
-        )
-
         if not canonical_data_list:
             self.logger.warning("No valid canonical order data to process")
             return 0
@@ -561,9 +506,7 @@ class OrderNormalizationService:
             processed_count = await self.data_storage.upsert_orders_batch(
                 canonical_data_list, shop_id
             )
-            self.logger.info(
-                f"✅ Order batch upsert completed: {processed_count} orders saved"
-            )
+
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
@@ -671,20 +614,6 @@ class OrderNormalizationService:
 
                     published_count += 1
 
-                    self.logger.info(
-                        f"✅ Refund attribution event published",
-                        extra={
-                            "shop_id": shop_id,
-                            "order_id": order_id,
-                            "refund_id": refund_id,
-                            "refund_amount": refund.get("total_refund_amount", 0),
-                        },
-                    )
-
-                self.logger.info(
-                    f"📤 Published {published_count} refund attribution events for order {order_id}"
-                )
-
             finally:
                 await publisher.close()
 
@@ -705,9 +634,6 @@ class FeatureComputationService:
     async def trigger_feature_computation(self, shop_id: str, data_type: str):
         """Trigger feature computation after successful normalization."""
         try:
-            self.logger.info(
-                f"🎯 FeatureComputationService.trigger_feature_computation called for {data_type}"
-            )
 
             if data_type in ["products", "orders", "customers", "collections", "all"]:
                 job_id = (
@@ -720,10 +646,6 @@ class FeatureComputationService:
                     "entity_type": data_type,
                     "timestamp": now_utc().isoformat(),
                 }
-
-                self.logger.info(
-                    f"📤 Publishing feature computation event via Kafka: job_id={job_id}, shop_id={shop_id}, data_type={data_type}"
-                )
 
                 # Use Kafka instead of Redis streams
                 from app.core.messaging.event_publisher import EventPublisher
@@ -746,10 +668,6 @@ class FeatureComputationService:
 
                     message_id = await publisher.publish_feature_computation_event(
                         feature_event
-                    )
-                    self.logger.info(
-                        f"✅ Feature computation event published successfully via Kafka",
-                        message_id=message_id,
                     )
 
                 finally:
@@ -827,15 +745,6 @@ class EntityDeletionService:
                     )
                     .values(is_active=False, updated_at=now_utc())
                 )
-
-                if result.rowcount > 0:
-                    self.logger.info(
-                        f"{config['entity_name']} {shopify_id} marked as inactive"
-                    )
-                else:
-                    self.logger.warning(
-                        f"No normalized {config['entity_name'].lower()} found for deletion"
-                    )
 
         except Exception as e:
             self.logger.error(f"Failed to handle entity deletion: {e}")
@@ -962,15 +871,6 @@ class NormalizationService:
                         format_type="graphql",  # we store in PipelineWatermark to unify tracking
                     )
 
-                self.logger.info(
-                    f"✅ Entity normalized",
-                    extra={
-                        "shop_id": shop_id,
-                        "data_type": data_type,
-                        "shopify_id": shopify_id,
-                    },
-                )
-
             return success
 
         except Exception as e:
@@ -1001,11 +901,6 @@ class NormalizationService:
         """Execute batch normalization for time-based processing."""
         format_type = params.get("format", "graphql")
 
-        self.logger.info(
-            f"📚 Starting batch processing for {data_type}",
-            extra={"shop_id": shop_id, "data_type": data_type},
-        )
-
         # Process all data for the shop - no complex mode switching
         return await self.process_normalization_window(
             shop_id=shop_id,
@@ -1024,7 +919,6 @@ class NormalizationService:
         Just process data chunks like a proper Kafka system
         """
         try:
-            self.logger.info(f"🔄 Processing {data_type} for shop {shop_id}")
 
             # Step 1: Determine what data types to process
             data_types_to_process = self._get_data_types_to_process(data_type)
@@ -1055,7 +949,6 @@ class NormalizationService:
     ):
         """Trigger feature computation for the processed data types."""
         await self.feature_service.trigger_feature_computation(shop_id, data_type)
-        self.logger.info(f"✅ Feature computation triggered for {data_type}")
 
     async def _process_single_data_type(
         self,
@@ -1090,7 +983,6 @@ class NormalizationService:
             query, model_class, shop_id, data_type, format_type
         )
 
-        self.logger.info(f"✅ Normalization completed for {data_type}")
         return None
 
     def _get_model_class_for_data_type(self, data_type: str):
@@ -1143,32 +1035,17 @@ class NormalizationService:
             # Update tracking variables
             total_processed += successful
 
-            # Log batch results
-            self._log_batch_results(
-                data_type, successful, len(raw_records), total_processed, offset
-            )
-
             # Check if we should continue
             if len(raw_records) < page_size:
                 break
 
             offset += page_size
 
-        self._log_processing_complete(data_type, total_processed)
-
     async def _fetch_batch_of_records(
         self, query, model_class, offset: int, page_size: int
     ):
         """Fetch a batch of records from the database."""
         from app.core.database.session import get_session_context
-
-        self.logger.info(
-            "📥 Fetching raw batch",
-            extra={
-                "offset": offset,
-                "page_size": page_size,
-            },
-        )
 
         async with get_session_context() as session:
             result = await session.execute(
@@ -1182,13 +1059,6 @@ class NormalizationService:
         self, raw_records, shop_id: str, data_type: str, format_type: str
     ) -> int:
         """Process a batch of records using the appropriate service."""
-        self.logger.info(
-            "📄 Processing batch",
-            extra={
-                "data_type": data_type,
-                "batch_count": len(raw_records),
-            },
-        )
 
         if format_type == "graphql":
             # Use batch processing for efficiency
@@ -1231,44 +1101,3 @@ class NormalizationService:
                 successful += 1
 
         return successful
-
-    def _log_batch_results(
-        self,
-        data_type: str,
-        successful: int,
-        batch_size: int,
-        total_processed: int,
-        offset: int,
-    ):
-        """Log the results of processing a batch."""
-        failures = batch_size - successful
-        if failures:
-            self.logger.warning(
-                "⚠️ Some records failed during normalization",
-                extra={
-                    "data_type": data_type,
-                    "successful": successful,
-                    "failed": failures,
-                    "offset": offset,
-                },
-            )
-
-        self.logger.info(
-            "✅ Batch processed",
-            extra={
-                "data_type": data_type,
-                "successful": successful,
-                "batch_size": batch_size,
-                "cumulative_processed": total_processed,
-            },
-        )
-
-    def _log_processing_complete(self, data_type: str, total_processed: int):
-        """Log the completion of processing."""
-        self.logger.info(
-            "🎉 Normalization complete",
-            extra={
-                "data_type": data_type,
-                "total_processed": total_processed,
-            },
-        )

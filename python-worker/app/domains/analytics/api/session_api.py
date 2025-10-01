@@ -63,7 +63,6 @@ async def update_client_id(request: UpdateClientIdRequest):
             await session_service.update_session(
                 request.session_id, SessionUpdate(client_id=request.client_id)
             )
-            logger.info(f"Updated client_id for session {request.session_id}")
 
         return SessionResponse(success=True, message="Client ID updated successfully")
 

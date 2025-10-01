@@ -95,10 +95,6 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
         if not session:
             raise HTTPException(status_code=500, detail="Failed to create session")
 
-        logger.info(
-            f"Venus session started: {session.id} for customer {request.customer_id}"
-        )
-
         return VenusResponse(
             success=True,
             message="Venus session started successfully",
@@ -160,8 +156,6 @@ async def track_venus_interaction(request: VenusInteractionRequest):
             raise HTTPException(status_code=500, detail="Failed to track interaction")
 
         # Feature computation is now automatically triggered in track_interaction method
-
-        logger.info(f"Venus interaction tracked: {request.interaction_type}")
 
         return VenusResponse(
             success=True,

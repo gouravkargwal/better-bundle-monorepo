@@ -78,7 +78,6 @@ class AnalyticsTrackingService:
                 logger.warning(f"Extension {extension_type} cannot run in context")
                 return None
 
-            logger.info(f"Metadata: {metadata}")
             # Create interaction record
             interaction_data = InteractionCreate(
                 session_id=session_id,
@@ -101,9 +100,6 @@ class AnalyticsTrackingService:
 
                 # Handle customer linking for CUSTOMER_LINKED interactions
                 if interaction_type == InteractionType.CUSTOMER_LINKED and customer_id:
-                    logger.info(
-                        f"🔗 CUSTOMER_LINKED detected - shop_id: {shop_id}, session_id: {session_id}, customer_id: {customer_id}"
-                    )
                     await self._trigger_customer_linking(
                         shop_id, session_id, customer_id
                     )
@@ -116,17 +112,10 @@ class AnalyticsTrackingService:
                         interaction_id=interaction.id,
                         incremental=True,
                     )
-                    logger.debug(
-                        f"Feature computation event fired for interaction {interaction.id}"
-                    )
                 except Exception as e:
                     logger.warning(
                         f"Failed to fire feature computation event: {str(e)}"
                     )
-
-                logger.info(
-                    f"Tracked interaction: {interaction_type} from {extension_type} in"
-                )
 
             return interaction
 
@@ -441,11 +430,6 @@ class AnalyticsTrackingService:
                 # Generate unique interaction ID
                 interaction_id = f"interaction_{uuid.uuid4().hex[:16]}"
 
-                logger.info(f"Interaction data: {interaction_data}")
-                logger.info(
-                    f"Interaction data metadata: {interaction_data.model_dump()}"
-                )
-
                 # Create interaction record using SQLAlchemy
                 interaction_model = UserInteractionModel(
                     id=interaction_id,
@@ -457,8 +441,6 @@ class AnalyticsTrackingService:
                     interaction_metadata=interaction_data.metadata,
                     created_at=utcnow(),
                 )
-
-                logger.info(f"Interaction model: {interaction_model}")
 
                 session.add(interaction_model)
                 await session.commit()
@@ -541,14 +523,6 @@ class AnalyticsTrackingService:
                     feature_event
                 )
 
-                logger.info(
-                    f"Fired feature computation event from {trigger_source} via Kafka",
-                    job_id=job_id,
-                    shop_id=shop_id,
-                    interaction_id=interaction_id,
-                    event_id=event_id,
-                )
-
                 return event_id
             finally:
                 await publisher.close()
@@ -567,16 +541,11 @@ class AnalyticsTrackingService:
         which will handle cross-session linking and UserInteraction backfilling.
         """
         try:
-            logger.info(
-                f"🚀 Starting customer linking trigger - shop_id: {shop_id}, session_id: {session_id}, customer_id: {customer_id}"
-            )
 
             # Generate job ID for the customer linking event
             job_id = f"customer_linking_{shop_id}_{customer_id}_{session_id}"
-            logger.info(f"📝 Generated job_id: {job_id}")
 
             # Publish the customer linking event to Kafka
-            logger.info(f"📤 Publishing customer linking event to Kafka...")
 
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
@@ -598,10 +567,6 @@ class AnalyticsTrackingService:
                 event_id = await publisher.publish_customer_linking_event(linking_event)
             finally:
                 await publisher.close()
-
-            logger.info(
-                f"✅ Published customer linking event - event_id: {event_id}, customer: {customer_id}, session: {session_id}"
-            )
 
         except Exception as e:
             logger.error(f"❌ Failed to trigger customer linking: {e}")
