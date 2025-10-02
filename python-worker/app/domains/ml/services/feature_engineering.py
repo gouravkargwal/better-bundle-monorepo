@@ -1269,15 +1269,14 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Initialize unified Gorse service
             gorse_service = UnifiedGorseService()
 
-            # Run unified sync and training - no complex mode switching
-            await gorse_service.sync_and_train(shop_id=shop_id)
+            # Use the comprehensive sync method directly
+            await gorse_service.comprehensive_sync_and_train(shop_id=shop_id)
 
         except Exception as e:
             logger.error(
                 f"Failed to trigger unified Gorse sync after feature computation: {str(e)}",
                 shop_id=shop_id,
             )
-            # Don't raise the exception - feature computation succeeded, Gorse sync failure shouldn't fail the whole job
 
     async def generate_session_features_from_interactions(
         self,

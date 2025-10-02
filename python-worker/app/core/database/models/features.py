@@ -515,18 +515,6 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     churn_risk_score = Column(Float, default=1.0, nullable=False)
     total_interactions = Column(Integer, default=0, nullable=False)
     days_since_last_purchase = Column(Integer, nullable=True)
-    engagement_score = Column(Float, default=0, nullable=False)
-    total_interaction_count = Column(Integer, default=0, nullable=False)
-    interaction_type_count = Column(Integer, default=0, nullable=False)
-    days_since_last_interaction = Column(Integer, nullable=True)
-    browse_to_cart_rate = Column(Float, default=0, nullable=False)
-    cart_to_purchase_rate = Column(Float, default=0, nullable=False)
-    conversion_propensity_score = Column(Float, default=0, nullable=False)
-    browsing_style = Column(String(100), nullable=True)
-    exploration_ratio = Column(Float, default=0, nullable=False)
-    unique_products_viewed = Column(Integer, default=0, nullable=False)
-    primary_device = Column(String(100), nullable=True)
-    device_consistency_score = Column(Float, default=0, nullable=False)
     last_computed_at = Column(
         TIMESTAMP(timezone=True), nullable=False, default=func.now()
     )
@@ -573,48 +561,6 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
             "ix_cb_features_shop_days_since_last_purchase",
             "shop_id",
             "days_since_last_purchase",
-        ),
-        Index("ix_cb_features_shop_engagement_score", "shop_id", "engagement_score"),
-        Index(
-            "ix_cb_features_shop_total_interaction_count",
-            "shop_id",
-            "total_interaction_count",
-        ),
-        Index(
-            "ix_cb_features_shop_interaction_type_count",
-            "shop_id",
-            "interaction_type_count",
-        ),
-        Index(
-            "ix_cb_features_shop_days_since_last_interaction",
-            "shop_id",
-            "days_since_last_interaction",
-        ),
-        Index(
-            "ix_cb_features_shop_browse_to_cart_rate", "shop_id", "browse_to_cart_rate"
-        ),
-        Index(
-            "ix_cb_features_shop_cart_to_purchase_rate",
-            "shop_id",
-            "cart_to_purchase_rate",
-        ),
-        Index(
-            "ix_cb_features_shop_conversion_propensity_score",
-            "shop_id",
-            "conversion_propensity_score",
-        ),
-        Index("ix_cb_features_shop_browsing_style", "shop_id", "browsing_style"),
-        Index("ix_cb_features_shop_exploration_ratio", "shop_id", "exploration_ratio"),
-        Index(
-            "ix_cb_features_shop_unique_products_viewed",
-            "shop_id",
-            "unique_products_viewed",
-        ),
-        Index("ix_cb_features_shop_primary_device", "shop_id", "primary_device"),
-        Index(
-            "ix_cb_features_shop_device_consistency_score",
-            "shop_id",
-            "device_consistency_score",
         ),
     )
 
