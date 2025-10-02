@@ -95,7 +95,7 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                     id
                                     title
                                     quantity
-                                    original_unit_price: originalUnitPrice
+                                    original_unit_original_unit_price: originalUnitPrice
                                     sku
                                     variant {
                                         id
@@ -252,10 +252,14 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price: originalUnitPrice
+                            original_unit_price: originalUnitPrice
                             sku
-                            variant_id: variant { id }
-                            product_id: product { id }
+                            variant {
+                                id
+                            }
+                            product {
+                                id
+                            }
                         }
                     }
                     page_info: pageInfo {
@@ -325,10 +329,14 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price: originalUnitPrice
+                            original_unit_price: originalUnitPrice
                             sku
-                            variant_id: variant { id }
-                            product_id: product { id }
+                            variant {
+                                id
+                            }
+                            product {
+                                id
+                            }
                         }
                     }
                     page_info: pageInfo {

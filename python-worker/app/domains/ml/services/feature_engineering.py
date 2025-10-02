@@ -1303,7 +1303,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         if interaction.get("session_id") == session_id
                     ]
 
-                    # Build session context
+                    # Build session context with events in session_data
+                    session_with_events = {
+                        **session,
+                        "events": session_interactions,  # Add events to session_data
+                    }
+
                     context = {
                         "shop": shop or {},
                         "session": session,
@@ -1314,7 +1319,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     # Generate features for this session
                     session_features = await self._compute_feature_safely(
                         self.session_generator,
-                        session,
+                        session_with_events,
                         context,
                         entity_id=session_id,
                         feature_type="session",
@@ -1354,6 +1359,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if session_interactions
                             else None
                         ),
+                        "events": session_interactions,  # Add events to session_data
                     }
 
                     # Build session context

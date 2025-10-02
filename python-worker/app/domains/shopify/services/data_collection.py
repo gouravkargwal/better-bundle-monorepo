@@ -248,7 +248,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             permissions, collection_payload
         )
 
-        if collectable_data:
+        if not collectable_data:
             logger.warning("No data types can be collected due to permissions")
 
         return collectable_data

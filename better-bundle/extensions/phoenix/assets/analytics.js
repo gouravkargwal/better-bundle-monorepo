@@ -216,9 +216,17 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          product_ids: productIds,
-          recommendation_count: productIds?.length || 0,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            recommendations: productIds?.map((productId, index) => ({
+              id: productId,
+              position: index + 1
+            })) || [],
+            type: "recommendation",
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm"
+          }
         },
       };
 
@@ -247,8 +255,17 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          recommendation_position: position,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            product: {
+              id: productId
+            },
+            type: "recommendation",
+            position: position,
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm"
+          }
         },
       };
 
@@ -276,9 +293,23 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          variant_id: variantId,
-          recommendation_position: position,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            cartLine: {
+              merchandise: {
+                id: variantId,
+                product: {
+                  id: productId  // Use productId instead of variantId for product_id
+                }
+              },
+              quantity: metadata?.quantity || 1
+            },
+            type: "recommendation",
+            position: position,
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm"
+          }
         },
       };
 

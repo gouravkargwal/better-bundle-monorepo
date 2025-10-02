@@ -13,7 +13,6 @@ from app.core.database.session import get_transaction_context
 from app.core.database.models.user_interaction import (
     UserInteraction as UserInteractionModel,
 )
-from app.core.database.models.user_session import UserSession as UserSessionModel
 from app.core.database.models.shop import Shop
 from sqlalchemy import select, and_, or_, desc, func
 from app.domains.analytics.models.interaction import (
@@ -194,7 +193,7 @@ class AnalyticsTrackingService:
                         ),
                         customer_id=interaction_data.customer_id,
                         shop_id=interaction_data.shop_id,
-                        interaction_metadata=interaction_data.metadata,
+                        interaction_metadata=interaction_data.interaction_metadata,
                         created_at=interaction_data.created_at,
                     )
                     interactions.append(interaction)
@@ -275,7 +274,7 @@ class AnalyticsTrackingService:
                         ),
                         customer_id=interaction_data.customer_id,
                         shop_id=interaction_data.shop_id,
-                        interaction_metadata=interaction_data.metadata,
+                        interaction_metadata=interaction_data.interaction_metadata,
                         created_at=interaction_data.created_at,
                     )
                     interactions.append(interaction)
@@ -438,7 +437,7 @@ class AnalyticsTrackingService:
                     interaction_type=interaction_data.interaction_type.value,
                     customer_id=interaction_data.customer_id,
                     shop_id=interaction_data.shop_id,
-                    interaction_metadata=interaction_data.metadata,
+                    interaction_metadata=interaction_data.interaction_metadata,
                     created_at=utcnow(),
                 )
 

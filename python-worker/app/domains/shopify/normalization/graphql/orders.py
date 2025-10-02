@@ -198,8 +198,12 @@ class GraphQLOrderAdapter(BaseAdapter):
             note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
             line_items=line_items,
-            billing_address=payload.get("billing_address"),  # Updated to snake_case
-            shipping_address=payload.get("shipping_address"),  # Updated to snake_case
+            billing_address=self._convert_address_ids(
+                payload.get("billing_address")
+            ),  # Updated to snake_case
+            shipping_address=self._convert_address_ids(
+                payload.get("shipping_address")
+            ),  # Updated to snake_case
             discount_applications=(
                 payload.get("discount_applications", {}) or {}
             ).get(  # Updated to snake_case
@@ -213,6 +217,22 @@ class GraphQLOrderAdapter(BaseAdapter):
 
         result = model.dict()
         return result
+
+    def _convert_address_ids(
+        self, address: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Convert GraphQL IDs in address to numeric IDs"""
+        if not address:
+            return address
+
+        # Create a copy to avoid modifying the original
+        converted_address = address.copy()
+
+        # Convert the main address ID
+        if "id" in converted_address:
+            converted_address["id"] = _extract_numeric_gid(converted_address["id"])
+
+        return converted_address
 
     def _extract_refunds(
         self, payload: Dict[str, Any], shop_id: str

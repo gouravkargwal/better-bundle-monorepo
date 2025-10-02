@@ -68,7 +68,9 @@ class GraphQLCustomerAdapter(BaseAdapter):
             state=(payload.get("default_address") or {}).get(
                 "province"
             ),  # Updated to snake_case
-            default_address=payload.get("default_address"),  # Updated to snake_case
+            default_address=self._convert_address_ids(
+                payload.get("default_address")
+            ),  # Updated to snake_case
             # Add required internal timestamps
             created_at=created_at,
             updated_at=updated_at,
@@ -77,3 +79,19 @@ class GraphQLCustomerAdapter(BaseAdapter):
         )
 
         return model.dict()
+
+    def _convert_address_ids(
+        self, address: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Convert GraphQL IDs in address to numeric IDs"""
+        if not address:
+            return address
+
+        # Create a copy to avoid modifying the original
+        converted_address = address.copy()
+
+        # Convert the main address ID
+        if "id" in converted_address:
+            converted_address["id"] = _extract_numeric_gid(converted_address["id"])
+
+        return converted_address

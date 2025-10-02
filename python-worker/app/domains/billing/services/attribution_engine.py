@@ -93,14 +93,6 @@ class AttributionEngine:
                 logger.warning(f"⚠️ No interactions found for order {context.order_id}")
                 return self._create_empty_attribution(context)
 
-            # 2. Skip fraud detection - order is already paid and verified
-            # fraud_result = self._detect_fraud(context, interactions)
-            # if fraud_result.is_fraud:
-            #     logger.warning(
-            #         f"Fraud detected for order {context.order_id}: {fraud_result.fraud_reasons}"
-            #     )
-            #     return self._create_fraud_attribution(context, fraud_result)
-
             # 3. Calculate attribution breakdown
             logger.info(
                 f"🧮 Calculating attribution breakdown for {len(interactions)} interactions"
@@ -226,9 +218,8 @@ class AttributionEngine:
                 "session_id": i.session_id,
                 "interaction_type": i.interaction_type,
                 "extension_type": i.extension_type,
-                "product_id": i.product_id,
                 "created_at": i.created_at,
-                "metadata": i.metadata or {},
+                "metadata": i.interaction_metadata or {},
             }
             for i in interactions
         ]
@@ -313,10 +304,13 @@ class AttributionEngine:
             ExtensionType.APOLLO.value,  # Post-purchase extensions
         }
 
+        # Filter for interaction types that can track attribution
+        attribution_eligible_interactions = {
+            "recommendation_add_to_cart",  # Only add_to_cart events get attribution
+            "recommendation_clicked",  # Click events can also get attribution
+        }
+
         for interaction in interactions:
-            logger.info(
-                f"🔍 Processing interaction {interaction['id']}: {interaction['extension_type']} - {interaction['interaction_type']}"
-            )
 
             # Skip ATLAS interactions (web pixel) - they don't drive conversions
             if interaction["extension_type"] == ExtensionType.ATLAS.value:
@@ -324,6 +318,10 @@ class AttributionEngine:
 
             # Only process interactions from attribution-eligible extensions
             if interaction["extension_type"] not in attribution_eligible_extensions:
+                continue
+
+            # Only process interaction types that can track attribution
+            if interaction["interaction_type"] not in attribution_eligible_interactions:
                 continue
 
             # Extract product_id using adapter factory
@@ -339,21 +337,26 @@ class AttributionEngine:
                     "createdAt": interaction["created_at"],
                 }
 
-                # Extract product ID based on extension type
-                product_id = None
-                if interaction["extension_type"] == ExtensionType.PHOENIX.value:
-                    # PHOENIX stores product IDs in metadata['product_ids'] as a list
-                    product_ids = interaction["metadata"].get("product_ids", [])
-                    if product_ids:
-                        # For now, use the first product ID (we can enhance this later)
-                        product_id = product_ids[0]
-                        logger.info(
-                            f"🔍 PHOENIX: Found product_ids {product_ids}, using {product_id}"
-                        )
-                else:
-                    # Use adapter factory for other extensions
-                    product_id = self.adapter_factory.extract_product_id(
-                        interaction_dict
+                # Extract product ID using adapter factory for all extensions
+                product_id = self.adapter_factory.extract_product_id(interaction_dict)
+
+                # Debug: Log Phoenix interaction structure if no product_id found
+                if (
+                    interaction["extension_type"] == ExtensionType.PHOENIX.value
+                    and not product_id
+                ):
+                    logger.info(f"🔍 PHOENIX DEBUG - Interaction {interaction['id']}:")
+                    logger.info(
+                        f"🔍 PHOENIX DEBUG - interaction_type: {interaction['interaction_type']}"
+                    )
+                    logger.info(
+                        f"🔍 PHOENIX DEBUG - metadata keys: {list(interaction['metadata'].keys())}"
+                    )
+                    logger.info(
+                        f"🔍 PHOENIX DEBUG - metadata: {interaction['metadata']}"
+                    )
+                    logger.info(
+                        f"🔍 PHOENIX DEBUG - interaction_dict: {interaction_dict}"
                     )
 
                 logger.info(
@@ -628,7 +631,7 @@ class AttributionEngine:
             interactions_by_extension=interactions_by_extension,
             purchase_at=result.calculated_at,
             attribution_algorithm=result.attribution_type.value,
-            metadata=result.metadata,
+            attribution_metadata=result.metadata,
         )
 
         session.add(attribution)
