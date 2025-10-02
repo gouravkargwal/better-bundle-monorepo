@@ -8,11 +8,15 @@ with recommendations across different extensions.
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+import json
 
-from prisma import Prisma, Json
-from prisma.models import UserInteraction, UserSession, PurchaseAttribution
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database.models import UserInteraction, UserSession, PurchaseAttribution
+from app.core.database.session import get_session_context
 
 from ..models.attribution_models import (
     AttributionResult,
@@ -51,8 +55,8 @@ class AttributionEngine:
     for driving purchases.
     """
 
-    def __init__(self, prisma: Prisma):
-        self.prisma = prisma
+    def __init__(self, session: AsyncSession = None):
+        self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
         self.default_rules = self._get_default_attribution_rules()
 
@@ -162,51 +166,75 @@ class AttributionEngine:
 
     async def _get_relevant_interactions(
         self, context: AttributionContext
-    ) -> List[UserInteraction]:
-        """
-        Get all relevant interactions for attribution calculation.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            List of relevant UserInteraction records
-        """
-        # Time window for attribution (30 days by default)
-        time_window = timedelta(hours=720)  # 30 days
+    ) -> List[Dict[str, Any]]:
+        """Get all relevant interactions for attribution calculation."""
+        # Time window for attribution (30 days)
+        time_window = timedelta(hours=720)
         start_time = context.purchase_time - time_window
 
         logger.info(
-            f"🔍 Searching interactions from {start_time} to {context.purchase_time}"
+            f"Searching interactions from {start_time} to {context.purchase_time}"
         )
 
-        # Build query conditions
-        where_conditions = {
-            "shopId": context.shop_id,
-            "createdAt": {"gte": start_time, "lte": context.purchase_time},
-        }
+        try:
+            # Use provided session or create new context
+            if self.session:
+                return await self._fetch_interactions(self.session, context, start_time)
+            else:
+                async with get_session_context() as session:
+                    return await self._fetch_interactions(session, context, start_time)
+
+        except Exception as e:
+            logger.error(f"Error fetching interactions: {str(e)}")
+            return []
+
+    async def _fetch_interactions(
+        self, session: AsyncSession, context: AttributionContext, start_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """Fetch interactions from database using provided session."""
+        # Build query
+        query = select(UserInteraction).where(
+            and_(
+                UserInteraction.shop_id == context.shop_id,
+                UserInteraction.created_at >= start_time,
+                UserInteraction.created_at <= context.purchase_time,
+            )
+        )
 
         # Add customer or session filter
         if context.customer_id:
-            where_conditions["customerId"] = context.customer_id
-            logger.info(f"🔍 Filtering by customer_id: {context.customer_id}")
+            query = query.where(UserInteraction.customer_id == context.customer_id)
+            logger.info(f"Filtering by customer_id: {context.customer_id}")
         elif context.session_id:
-            where_conditions["sessionId"] = context.session_id
-            logger.info(f"🔍 Filtering by session_id: {context.session_id}")
+            query = query.where(UserInteraction.session_id == context.session_id)
+            logger.info(f"Filtering by session_id: {context.session_id}")
 
-        logger.info(f"🔍 Query conditions: {where_conditions}")
-
-        # Get interactions
-        interactions = await self.prisma.userinteraction.find_many(
-            where=where_conditions, order={"createdAt": "desc"}
+        # Execute query
+        result = await session.execute(
+            query.order_by(UserInteraction.created_at.desc())
         )
+        interactions = result.scalars().all()
 
-        logger.info(f"📊 Retrieved {len(interactions)} interactions from database")
+        logger.info(f"Retrieved {len(interactions)} interactions from database")
 
-        return interactions
+        # Convert SQLAlchemy models to dicts for compatibility
+        return [
+            {
+                "id": i.id,
+                "shop_id": i.shop_id,
+                "customer_id": i.customer_id,
+                "session_id": i.session_id,
+                "interaction_type": i.interaction_type,
+                "extension_type": i.extension_type,
+                "product_id": i.product_id,
+                "created_at": i.created_at,
+                "metadata": i.metadata or {},
+            }
+            for i in interactions
+        ]
 
     def _calculate_attribution_breakdown(
-        self, context: AttributionContext, interactions: List[UserInteraction]
+        self, context: AttributionContext, interactions: List[Dict[str, Any]]
     ) -> List[AttributionBreakdown]:
         """
         Calculate attribution breakdown based on interactions.
@@ -265,8 +293,8 @@ class AttributionEngine:
         return breakdowns
 
     def _group_interactions_by_product(
-        self, interactions: List[UserInteraction]
-    ) -> Dict[str, List[UserInteraction]]:
+        self, interactions: List[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Group interactions by product ID, filtering for attribution-eligible extensions.
 
@@ -280,45 +308,42 @@ class AttributionEngine:
 
         # Filter for extensions that can track attribution
         attribution_eligible_extensions = {
-            ExtensionType.PHOENIX,  # Recommendation engine
-            ExtensionType.VENUS,  # Customer account extensions
-            ExtensionType.APOLLO,  # Post-purchase extensions
+            ExtensionType.PHOENIX.value,  # Recommendation engine
+            ExtensionType.VENUS.value,  # Customer account extensions
+            ExtensionType.APOLLO.value,  # Post-purchase extensions
         }
 
         for interaction in interactions:
             logger.info(
-                f"🔍 Processing interaction {interaction.id}: {interaction.extensionType} - {interaction.interactionType}"
+                f"🔍 Processing interaction {interaction['id']}: {interaction['extension_type']} - {interaction['interaction_type']}"
             )
 
             # Skip ATLAS interactions (web pixel) - they don't drive conversions
-            if interaction.extensionType == ExtensionType.ATLAS.value:
+            if interaction["extension_type"] == ExtensionType.ATLAS.value:
                 continue
 
             # Only process interactions from attribution-eligible extensions
-            if (
-                ExtensionType(interaction.extensionType)
-                not in attribution_eligible_extensions
-            ):
+            if interaction["extension_type"] not in attribution_eligible_extensions:
                 continue
 
             # Extract product_id using adapter factory
             product_id = None
             try:
-                # Convert interaction to dict format for adapter
+                # Convert interaction dict format for adapter
                 interaction_dict = {
-                    "interactionType": interaction.interactionType,
-                    "metadata": interaction.metadata,
-                    "customerId": interaction.customerId,
-                    "sessionId": interaction.sessionId,
-                    "shopId": interaction.shopId,
-                    "createdAt": interaction.createdAt,
+                    "interactionType": interaction["interaction_type"],
+                    "metadata": interaction["metadata"],
+                    "customerId": interaction["customer_id"],
+                    "sessionId": interaction["session_id"],
+                    "shopId": interaction["shop_id"],
+                    "createdAt": interaction["created_at"],
                 }
 
                 # Extract product ID based on extension type
                 product_id = None
-                if interaction.extensionType == ExtensionType.PHOENIX.value:
+                if interaction["extension_type"] == ExtensionType.PHOENIX.value:
                     # PHOENIX stores product IDs in metadata['product_ids'] as a list
-                    product_ids = interaction.metadata.get("product_ids", [])
+                    product_ids = interaction["metadata"].get("product_ids", [])
                     if product_ids:
                         # For now, use the first product ID (we can enhance this later)
                         product_id = product_ids[0]
@@ -332,7 +357,7 @@ class AttributionEngine:
                     )
 
                 logger.info(
-                    f"🔍 Extracted product_id: {product_id} for {interaction.extensionType} interaction {interaction.id}"
+                    f"🔍 Extracted product_id: {product_id} for {interaction['extension_type']} interaction {interaction['id']}"
                 )
 
                 if product_id:
@@ -340,16 +365,16 @@ class AttributionEngine:
                         product_interactions[product_id] = []
                     product_interactions[product_id].append(interaction)
                     logger.info(
-                        f"✅ Added {interaction.extensionType} interaction for product {product_id}"
+                        f"✅ Added {interaction['extension_type']} interaction for product {product_id}"
                     )
                 else:
                     logger.info(
-                        f"❌ No product_id extracted for {interaction.extensionType} interaction {interaction.id}"
+                        f"❌ No product_id extracted for {interaction['extension_type']} interaction {interaction['id']}"
                     )
 
             except Exception as e:
                 logger.warning(
-                    f"Error extracting product_id from interaction {interaction.id}: {e}"
+                    f"Error extracting product_id from interaction {interaction['id']}: {e}"
                 )
                 continue
 
@@ -359,7 +384,7 @@ class AttributionEngine:
         self,
         product_id: str,
         product_amount: Decimal,
-        interactions: List[UserInteraction],
+        interactions: List[Dict[str, Any]],
     ) -> List[AttributionBreakdown]:
         """
         Calculate attribution for a specific product.
@@ -376,7 +401,7 @@ class AttributionEngine:
             return []
 
         # Sort interactions by time (most recent first)
-        interactions.sort(key=lambda x: x.createdAt, reverse=True)
+        interactions.sort(key=lambda x: x["created_at"], reverse=True)
 
         # Apply attribution rules
         if len(interactions) == 1:
@@ -391,7 +416,7 @@ class AttributionEngine:
             )
 
     def _create_direct_attribution(
-        self, product_id: str, product_amount: Decimal, interaction: UserInteraction
+        self, product_id: str, product_amount: Decimal, interaction: Dict[str, Any]
     ) -> List[AttributionBreakdown]:
         """
         Create direct attribution for a single interaction.
@@ -406,18 +431,18 @@ class AttributionEngine:
         """
         return [
             AttributionBreakdown(
-                extension_type=ExtensionType(interaction.extensionType),
+                extension_type=ExtensionType(interaction["extension_type"]),
                 product_id=product_id,
                 attributed_amount=product_amount,
                 attribution_weight=1.0,
                 attribution_type=AttributionType.DIRECT_CLICK,
-                interaction_id=interaction.id,
+                interaction_id=interaction["id"],
                 metadata={
-                    "interaction_type": interaction.interactionType,
-                    "recommendation_position": getattr(
-                        interaction, "recommendationPosition", None
+                    "interaction_type": interaction["interaction_type"],
+                    "recommendation_position": interaction["metadata"].get(
+                        "recommendation_position"
                     ),
-                    "created_at": interaction.createdAt.isoformat(),
+                    "created_at": interaction["created_at"].isoformat(),
                 },
             )
         ]
@@ -426,7 +451,7 @@ class AttributionEngine:
         self,
         product_id: str,
         product_amount: Decimal,
-        interactions: List[UserInteraction],
+        interactions: List[Dict[str, Any]],
     ) -> List[AttributionBreakdown]:
         """
         Create cross-extension attribution for multiple interactions.
@@ -447,18 +472,18 @@ class AttributionEngine:
 
         breakdowns.append(
             AttributionBreakdown(
-                extension_type=ExtensionType(primary_interaction.extensionType),
+                extension_type=ExtensionType(primary_interaction["extension_type"]),
                 product_id=product_id,
                 attributed_amount=primary_amount,
                 attribution_weight=0.7,
                 attribution_type=AttributionType.CROSS_EXTENSION,
-                interaction_id=primary_interaction.id,
+                interaction_id=primary_interaction["id"],
                 metadata={
-                    "interaction_type": primary_interaction.interactionType,
-                    "recommendation_position": getattr(
-                        primary_interaction, "recommendationPosition", None
+                    "interaction_type": primary_interaction["interaction_type"],
+                    "recommendation_position": primary_interaction["metadata"].get(
+                        "recommendation_position"
                     ),
-                    "created_at": primary_interaction.createdAt.isoformat(),
+                    "created_at": primary_interaction["created_at"].isoformat(),
                     "attribution_role": "primary",
                 },
             )
@@ -473,18 +498,18 @@ class AttributionEngine:
             for interaction in secondary_interactions:
                 breakdowns.append(
                     AttributionBreakdown(
-                        extension_type=ExtensionType(interaction.extensionType),
+                        extension_type=ExtensionType(interaction["extension_type"]),
                         product_id=product_id,
                         attributed_amount=amount_per_interaction,
                         attribution_weight=0.3 / len(secondary_interactions),
                         attribution_type=AttributionType.CROSS_EXTENSION,
-                        interaction_id=interaction.id,
+                        interaction_id=interaction["id"],
                         metadata={
-                            "interaction_type": interaction.interactionType,
-                            "recommendation_position": getattr(
-                                interaction, "recommendationPosition", None
+                            "interaction_type": interaction["interaction_type"],
+                            "recommendation_position": interaction["metadata"].get(
+                                "recommendation_position"
                             ),
-                            "created_at": interaction.createdAt.isoformat(),
+                            "created_at": interaction["created_at"].isoformat(),
                             "attribution_role": "secondary",
                         },
                     )
@@ -500,77 +525,60 @@ class AttributionEngine:
             result: Attribution result to store
         """
         try:
-            # Prepare session connection data
-            session_connect = None
-            if result.session_id:
-                session_connect = {"connect": {"id": result.session_id}}
+            # Prepare attribution data
+            contributing_extensions = [
+                {
+                    "extension_type": breakdown.extension_type.value,
+                    "product_id": breakdown.product_id,
+                    "attributed_amount": float(breakdown.attributed_amount),
+                    "attribution_weight": breakdown.attribution_weight,
+                }
+                for breakdown in result.attribution_breakdown
+            ]
 
-            # Store in PurchaseAttribution table
-            attribution_data = {
-                "sessionId": result.session_id or "",
-                "orderId": str(result.order_id),
-                "customerId": result.customer_id,
-                "shopId": result.shop_id,
-                "contributingExtensions": Json(
-                    [
-                        {
-                            "extension_type": breakdown.extension_type.value,
-                            "product_id": breakdown.product_id,
-                            "attributed_amount": float(breakdown.attributed_amount),
-                            "attribution_weight": breakdown.attribution_weight,
-                        }
-                        for breakdown in result.attribution_breakdown
-                    ]
-                ),
-                "attributionWeights": Json(
-                    {
-                        breakdown.extension_type.value: breakdown.attribution_weight
-                        for breakdown in result.attribution_breakdown
-                    }
-                ),
-                "totalRevenue": float(result.total_attributed_revenue),
-                "attributedRevenue": Json(
-                    {
-                        breakdown.extension_type.value: float(
-                            breakdown.attributed_amount
-                        )
-                        for breakdown in result.attribution_breakdown
-                    }
-                ),
-                "totalInteractions": len(result.attribution_breakdown),
-                "interactionsByExtension": Json(
-                    {
-                        breakdown.extension_type.value: 1
-                        for breakdown in result.attribution_breakdown
-                    }
-                ),
-                "purchaseAt": result.calculated_at,
-                "attributionAlgorithm": result.attribution_type.value,
-                "metadata": Json(result.metadata),
+            attribution_weights = {
+                breakdown.extension_type.value: breakdown.attribution_weight
+                for breakdown in result.attribution_breakdown
             }
 
-            # Add connections - use direct foreign key values instead of connect syntax
-            # attribution_data["shop"] = {"connect": {"id": result.shop_id}}
-            # if session_connect:
-            #     attribution_data["session"] = session_connect
+            attributed_revenue = {
+                breakdown.extension_type.value: float(breakdown.attributed_amount)
+                for breakdown in result.attribution_breakdown
+            }
 
-            # Check if attribution already exists
-            existing_attribution = await self.prisma.purchaseattribution.find_first(
-                where={"shopId": result.shop_id, "orderId": str(result.order_id)}
-            )
+            interactions_by_extension = {
+                breakdown.extension_type.value: 1
+                for breakdown in result.attribution_breakdown
+            }
 
-            if existing_attribution:
-                logger.info(
-                    f"Attribution already exists for order {result.order_id}, skipping storage"
+            # Use provided session or create new context
+            if self.session:
+                await self._save_attribution(
+                    self.session,
+                    result,
+                    contributing_extensions,
+                    attribution_weights,
+                    attributed_revenue,
+                    interactions_by_extension,
                 )
-                return
-
-            await self.prisma.purchaseattribution.create(attribution_data)
+            else:
+                async with get_session_context() as session:
+                    await self._save_attribution(
+                        session,
+                        result,
+                        contributing_extensions,
+                        attribution_weights,
+                        attributed_revenue,
+                        interactions_by_extension,
+                    )
 
             logger.info(f"Stored attribution result for order {result.order_id}")
 
         except Exception as e:
-            if "Unique constraint failed" in str(e):
+            if (
+                "Unique constraint failed" in str(e)
+                or "duplicate key" in str(e).lower()
+            ):
                 logger.info(
                     f"Attribution already exists for order {result.order_id}, skipping storage"
                 )
@@ -579,6 +587,52 @@ class AttributionEngine:
                 f"Error storing attribution result for order {result.order_id}: {e}"
             )
             raise
+
+    async def _save_attribution(
+        self,
+        session: AsyncSession,
+        result: AttributionResult,
+        contributing_extensions: List[Dict],
+        attribution_weights: Dict,
+        attributed_revenue: Dict,
+        interactions_by_extension: Dict,
+    ) -> None:
+        """Save attribution to database using provided session."""
+        # Check if attribution already exists
+        stmt = select(PurchaseAttribution).where(
+            and_(
+                PurchaseAttribution.shop_id == result.shop_id,
+                PurchaseAttribution.order_id == str(result.order_id),
+            )
+        )
+        result_check = await session.execute(stmt)
+        existing_attribution = result_check.scalar_one_or_none()
+
+        if existing_attribution:
+            logger.info(
+                f"Attribution already exists for order {result.order_id}, skipping storage"
+            )
+            return
+
+        # Create new attribution record
+        attribution = PurchaseAttribution(
+            session_id=result.session_id or "",
+            order_id=str(result.order_id),
+            customer_id=result.customer_id,
+            shop_id=result.shop_id,
+            contributing_extensions=contributing_extensions,
+            attribution_weights=attribution_weights,
+            total_revenue=float(result.total_attributed_revenue),
+            attributed_revenue=attributed_revenue,
+            total_interactions=len(result.attribution_breakdown),
+            interactions_by_extension=interactions_by_extension,
+            purchase_at=result.calculated_at,
+            attribution_algorithm=result.attribution_type.value,
+            metadata=result.metadata,
+        )
+
+        session.add(attribution)
+        await session.commit()
 
     def _create_empty_attribution(
         self, context: AttributionContext

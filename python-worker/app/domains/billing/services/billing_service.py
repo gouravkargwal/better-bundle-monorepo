@@ -1,5 +1,5 @@
 """
-Main Billing Service
+Main Billing Service - SQLAlchemy Version
 
 This service orchestrates the entire billing process including attribution,
 calculation, and invoice generation.
@@ -10,15 +10,20 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 
-from prisma import Prisma, Json
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .attribution_engine import AttributionEngine, AttributionContext
 from .billing_calculator import BillingCalculator
 from .shopify_usage_billing_service import ShopifyUsageBillingService
-from .fraud_detection_service import FraudDetectionService
 from .notification_service import BillingNotificationService
 from ..repositories.billing_repository import BillingRepository, BillingPeriod
 from ..models.attribution_models import AttributionResult, PurchaseEvent
+from app.core.database.models import (
+    Shop,
+    BillingPlan,
+    BillingEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +33,15 @@ class BillingService:
     Main billing service that orchestrates the entire billing process.
     """
 
-    def __init__(self, prisma: Prisma):
-        self.prisma = prisma
-        self.billing_repository = BillingRepository(prisma)
-        self.attribution_engine = AttributionEngine(prisma)
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.billing_repository = BillingRepository(session)
+        self.attribution_engine = AttributionEngine(session)
         self.billing_calculator = BillingCalculator(self.billing_repository)
         self.shopify_usage_billing_service = ShopifyUsageBillingService(
-            prisma, self.billing_repository
+            session, self.billing_repository
         )
-        self.fraud_detection_service = FraudDetectionService(prisma)
-        self.notification_service = BillingNotificationService(prisma)
+        self.notification_service = BillingNotificationService(session)
 
     # ============= ATTRIBUTION PROCESSING =============
 
@@ -95,74 +99,39 @@ class BillingService:
 
     # ============= TRIAL REVENUE UPDATES =============
 
-    async def _update_trial_revenue(
-        self, shop_id: str, attributed_revenue: Decimal
-    ) -> None:
-        """
-        Update trial revenue in real-time when purchase attribution occurs.
-
-        Args:
-            shop_id: Shop ID
-            attributed_revenue: Amount of attributed revenue to add
-        """
+    async def update_trial_revenue(self, shop_id: str, revenue_amount: Decimal):
+        """Update trial revenue tracking"""
         try:
-            # Get current billing plan
-            billing_plan = await self.prisma.billingplan.find_first(
-                where={"shopId": shop_id, "status": "active", "isTrialActive": True}
-            )
+            # Find the billing plan
+            stmt = select(BillingPlan).where(BillingPlan.shop_id == shop_id)
+            result = await self.session.execute(stmt)
+            billing_plan = result.scalar_one_or_none()
 
-            if not billing_plan:
-                logger.debug(f"No active trial billing plan found for shop {shop_id}")
-                return
+            if billing_plan:
+                # Update revenue
+                billing_plan.trial_revenue = (
+                    billing_plan.trial_revenue or Decimal("0")
+                ) + revenue_amount
+                billing_plan.updated_at = datetime.utcnow()
 
-            # Update trial revenue
-            current_trial_revenue = float(billing_plan.trialRevenue or 0)
-            new_trial_revenue = current_trial_revenue + float(attributed_revenue)
-
-            # Handle configuration field properly
-            current_config = billing_plan.configuration or {}
-            updated_config = {
-                **current_config,
-                "trial_revenue": new_trial_revenue,
-                "last_updated": datetime.utcnow().isoformat(),
-            }
-
-            await self.prisma.billingplan.update(
-                where={"id": billing_plan.id},
-                data={
-                    "trialRevenue": new_trial_revenue,
-                    "configuration": Json(updated_config),
-                },
-            )
-
-            # Get shop currency for proper formatting
-            shop = await self.prisma.shop.find_unique(where={"id": shop_id})
-            currency = shop.currencyCode if shop and shop.currencyCode else "USD"
-            currency_symbol = "₹" if currency == "INR" else "$"
-
-            logger.info(
-                f"💰 Updated trial revenue for shop {shop_id}: "
-                f"{currency_symbol}{current_trial_revenue} → {currency_symbol}{new_trial_revenue} (+{currency_symbol}{attributed_revenue})"
-            )
-
-            # Check if trial threshold reached
-            trial_threshold = float(billing_plan.trialThreshold or 200)
-            if new_trial_revenue >= trial_threshold:
+                await self.session.commit()
                 logger.info(
-                    f"🎉 Trial threshold reached for shop {shop_id}! "
-                    f"Revenue: {currency_symbol}{new_trial_revenue}, Threshold: {currency_symbol}{trial_threshold}"
+                    f"Updated trial revenue for shop {shop_id}: +${revenue_amount}"
                 )
-
-                # Handle trial completion
-                await self._handle_trial_completion(
-                    shop_id, billing_plan, new_trial_revenue
-                )
+            else:
+                logger.warning(f"No billing plan found for shop {shop_id}")
 
         except Exception as e:
-            logger.error(f"Error updating trial revenue for shop {shop_id}: {e}")
+            await self.session.rollback()
+            logger.error(f"Error updating trial revenue for shop {shop_id}: {str(e)}")
+            raise
+
+    async def _update_trial_revenue(self, shop_id: str, revenue_amount: Decimal):
+        """Internal method to update trial revenue"""
+        await self.update_trial_revenue(shop_id, revenue_amount)
 
     async def _handle_trial_completion(
-        self, shop_id: str, billing_plan, final_revenue: float
+        self, shop_id: str, billing_plan: BillingPlan, final_revenue: float
     ) -> None:
         """
         Handle trial completion when threshold is reached.
@@ -174,19 +143,21 @@ class BillingService:
             final_revenue: Final trial revenue amount
         """
         try:
-            # 1. STOP ALL SERVICES - Mark shop as inactive to stop all functionality
-            await self.prisma.shop.update_many(
-                where={"id": shop_id},
-                data={
-                    "isActive": False,
-                    "suspendedAt": datetime.utcnow(),
-                    "suspensionReason": "trial_completed_consent_required",
-                    "serviceImpact": "suspended",
-                    "updatedAt": datetime.utcnow(),
-                },
+            # 1. STOP ALL SERVICES - Mark shop as inactive
+            stmt = (
+                update(Shop)
+                .where(Shop.id == shop_id)
+                .values(
+                    is_active=False,
+                    suspended_at=datetime.utcnow(),
+                    suspension_reason="trial_completed_consent_required",
+                    service_impact="suspended",
+                    updated_at=datetime.utcnow(),
+                )
             )
+            await self.session.execute(stmt)
 
-            # 2. Update billing plan to mark trial as completed but services stopped
+            # 2. Update billing plan to mark trial as completed
             current_config = billing_plan.configuration or {}
             updated_config = {
                 **current_config,
@@ -199,58 +170,57 @@ class BillingService:
                 "billing_suspended": True,
             }
 
-            await self.prisma.billingplan.update(
-                where={"id": billing_plan.id},
-                data={
-                    "isTrialActive": False,
-                    "trialRevenue": final_revenue,
-                    "status": "suspended",  # Change status to suspended
-                    "configuration": Json(updated_config),
-                },
-            )
+            billing_plan.is_trial_active = False
+            billing_plan.trial_revenue = Decimal(str(final_revenue))
+            billing_plan.status = "suspended"
+            billing_plan.configuration = updated_config
+            billing_plan.updated_at = datetime.utcnow()
 
             # 3. Create billing event for trial completion
-            await self.prisma.billingevent.create(
+            trial_event = BillingEvent(
+                shop_id=shop_id,
+                type="trial_completed",
+                occurred_at=datetime.utcnow(),
                 data={
-                    "shopId": shop_id,
-                    "type": "trial_completed",
-                    "occurredAt": datetime.utcnow(),
-                    "data": {
-                        "final_revenue": final_revenue,
-                        "completed_at": datetime.utcnow().isoformat(),
-                        "services_stopped": True,
-                        "consent_required": True,
-                    },
-                    "metadata": {
-                        "trial_completion": True,
-                        "final_revenue": final_revenue,
-                        "services_stopped": True,
-                        "consent_required": True,
-                    },
-                }
+                    "final_revenue": final_revenue,
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "services_stopped": True,
+                    "consent_required": True,
+                },
+                metadata={
+                    "trial_completion": True,
+                    "final_revenue": final_revenue,
+                    "services_stopped": True,
+                    "consent_required": True,
+                },
             )
+            self.session.add(trial_event)
 
             # 4. Create service suspension event
-            await self.prisma.billingevent.create(
+            suspension_event = BillingEvent(
+                shop_id=shop_id,
+                type="service_suspended",
+                occurred_at=datetime.utcnow(),
                 data={
-                    "shopId": shop_id,
-                    "type": "service_suspended",
-                    "occurredAt": datetime.utcnow(),
-                    "data": {
-                        "reason": "trial_completed_consent_required",
-                        "suspended_at": datetime.utcnow().isoformat(),
-                        "requires_consent": True,
-                    },
-                    "metadata": {
-                        "suspension_type": "trial_completion",
-                        "consent_required": True,
-                    },
-                }
+                    "reason": "trial_completed_consent_required",
+                    "suspended_at": datetime.utcnow().isoformat(),
+                    "requires_consent": True,
+                },
+                metadata={
+                    "suspension_type": "trial_completion",
+                    "consent_required": True,
+                },
             )
+            self.session.add(suspension_event)
+
+            await self.session.commit()
 
             # Get shop currency for proper formatting
-            shop = await self.prisma.shop.find_unique(where={"id": shop_id})
-            currency = shop.currencyCode if shop and shop.currencyCode else "USD"
+            shop_stmt = select(Shop).where(Shop.id == shop_id)
+            shop_result = await self.session.execute(shop_stmt)
+            shop = shop_result.scalar_one_or_none()
+
+            currency = shop.currency_code if shop and shop.currency_code else "USD"
             currency_symbol = "₹" if currency == "INR" else "$"
 
             logger.info(
@@ -261,7 +231,9 @@ class BillingService:
             )
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
+            raise
 
     async def handle_trial_completion_with_consent(
         self, shop_id: str, capped_amount: float, billing_rate: float
@@ -283,24 +255,29 @@ class BillingService:
             logger.info(f"   Billing rate: {billing_rate * 100}%")
 
             # 1. Reactivate shop services
-            await self.prisma.shop.update_many(
-                where={"id": shop_id},
-                data={
-                    "isActive": True,
-                    "suspendedAt": None,
-                    "suspensionReason": None,
-                    "serviceImpact": None,
-                    "updatedAt": datetime.utcnow(),
-                },
+            stmt = (
+                update(Shop)
+                .where(Shop.id == shop_id)
+                .values(
+                    is_active=True,
+                    suspended_at=None,
+                    suspension_reason=None,
+                    service_impact=None,
+                    updated_at=datetime.utcnow(),
+                )
             )
+            await self.session.execute(stmt)
 
             # 2. Update billing plan with consent and capped amount
-            billing_plan = await self.prisma.billingplan.find_first(
-                where={"shopId": shop_id, "status": "suspended"}
+            billing_plan_stmt = select(BillingPlan).where(
+                BillingPlan.shop_id == shop_id, BillingPlan.status == "suspended"
             )
+            result = await self.session.execute(billing_plan_stmt)
+            billing_plan = result.scalar_one_or_none()
 
             if not billing_plan:
                 logger.error(f"No suspended billing plan found for shop {shop_id}")
+                await self.session.rollback()
                 return False
 
             current_config = billing_plan.configuration or {}
@@ -316,51 +293,47 @@ class BillingService:
                 "consent_given_at": datetime.utcnow().isoformat(),
             }
 
-            await self.prisma.billingplan.update(
-                where={"id": billing_plan.id},
-                data={
-                    "status": "active",
-                    "configuration": Json(updated_config),
-                },
-            )
+            billing_plan.status = "active"
+            billing_plan.configuration = updated_config
+            billing_plan.updated_at = datetime.utcnow()
 
             # 3. Create consent event
-            await self.prisma.billingevent.create(
+            consent_event = BillingEvent(
+                shop_id=shop_id,
+                type="trial_completed_with_consent",
+                occurred_at=datetime.utcnow(),
                 data={
-                    "shopId": shop_id,
-                    "type": "trial_completed_with_consent",
-                    "occurredAt": datetime.utcnow(),
-                    "data": {
-                        "consent_given": True,
-                        "capped_amount": capped_amount,
-                        "billing_rate": billing_rate,
-                        "consent_given_at": datetime.utcnow().isoformat(),
-                    },
-                    "metadata": {
-                        "trial_completion": True,
-                        "consent_given": True,
-                        "capped_amount": capped_amount,
-                    },
-                }
+                    "consent_given": True,
+                    "capped_amount": capped_amount,
+                    "billing_rate": billing_rate,
+                    "consent_given_at": datetime.utcnow().isoformat(),
+                },
+                metadata={
+                    "trial_completion": True,
+                    "consent_given": True,
+                    "capped_amount": capped_amount,
+                },
             )
+            self.session.add(consent_event)
 
             # 4. Create service reactivation event
-            await self.prisma.billingevent.create(
+            reactivation_event = BillingEvent(
+                shop_id=shop_id,
+                type="service_reactivated",
+                occurred_at=datetime.utcnow(),
                 data={
-                    "shopId": shop_id,
-                    "type": "service_reactivated",
-                    "occurredAt": datetime.utcnow(),
-                    "data": {
-                        "reason": "trial_completion_consent_given",
-                        "reactivated_at": datetime.utcnow().isoformat(),
-                        "capped_amount": capped_amount,
-                    },
-                    "metadata": {
-                        "reactivation_type": "trial_completion_consent",
-                        "capped_amount": capped_amount,
-                    },
-                }
+                    "reason": "trial_completion_consent_given",
+                    "reactivated_at": datetime.utcnow().isoformat(),
+                    "capped_amount": capped_amount,
+                },
+                metadata={
+                    "reactivation_type": "trial_completion_consent",
+                    "capped_amount": capped_amount,
+                },
             )
+            self.session.add(reactivation_event)
+
+            await self.session.commit()
 
             logger.info(
                 f"✅ Services reactivated for shop {shop_id} with capped billing"
@@ -371,6 +344,7 @@ class BillingService:
             return True
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(
                 f"Error handling trial completion consent for shop {shop_id}: {e}"
             )
@@ -410,24 +384,6 @@ class BillingService:
                     f"No attributed revenue found for shop {shop_id} in period {period.start_date} to {period.end_date}"
                 )
                 return self._create_empty_billing_result(shop_id, period)
-
-            # Run fraud detection
-            fraud_result = await self.fraud_detection_service.analyze_shop_fraud_risk(
-                shop_id, period.start_date, period.end_date
-            )
-
-            # Adjust billing based on fraud detection
-            if fraud_result.risk_level.value in ["high", "critical"]:
-                logger.warning(
-                    f"High fraud risk detected for shop {shop_id}: {fraud_result.risk_level.value}"
-                )
-                # Reduce or suspend billing for high-risk shops
-                metrics_data["fraud_adjustment"] = 0.5  # 50% reduction
-                metrics_data["fraud_risk_level"] = fraud_result.risk_level.value
-                metrics_data["fraud_confidence"] = fraud_result.confidence_score
-
-                # Send fraud alert notification
-                await self._send_fraud_alert_notification(shop_id, fraud_result)
 
             # Calculate billing fee
             billing_result = await self.billing_calculator.calculate_billing_fee(
@@ -692,7 +648,7 @@ class BillingService:
                 "plan_name": billing_plan.name,
                 "plan_type": billing_plan.type,
                 "configuration": billing_plan.configuration,
-                "created_at": billing_plan.createdAt.isoformat(),
+                "created_at": billing_plan.created_at.isoformat(),
             }
 
         except Exception as e:
@@ -749,13 +705,13 @@ class BillingService:
                 "recent_invoices": [
                     {
                         "id": invoice.id,
-                        "invoice_number": invoice.invoiceNumber,
+                        "invoice_number": invoice.invoice_number,
                         "status": invoice.status,
                         "total": float(invoice.total),
                         "currency": invoice.currency,
-                        "period_start": invoice.periodStart.isoformat(),
-                        "period_end": invoice.periodEnd.isoformat(),
-                        "created_at": invoice.createdAt.isoformat(),
+                        "period_start": invoice.period_start.isoformat(),
+                        "period_end": invoice.period_end.isoformat(),
+                        "created_at": invoice.created_at.isoformat(),
                     }
                     for invoice in recent_invoices
                 ],
@@ -764,7 +720,7 @@ class BillingService:
                         "id": event.id,
                         "type": event.type,
                         "data": event.data,
-                        "occurred_at": event.occurredAt.isoformat(),
+                        "occurred_at": event.occurred_at.isoformat(),
                     }
                     for event in recent_events
                 ],
@@ -776,55 +732,23 @@ class BillingService:
 
     # ============= NOTIFICATION HELPERS =============
 
-    async def _send_fraud_alert_notification(self, shop_id: str, fraud_result) -> None:
-        """Send fraud alert notification."""
-        try:
-            # Get shop contact email
-            shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id}, select={"email": True, "domain": True}
-            )
-
-            if not shop or not shop.email:
-                logger.warning(f"No contact email found for shop {shop_id}")
-                return
-
-            # Prepare fraud data
-            fraud_data = {
-                "shop_id": shop_id,
-                "risk_level": fraud_result.risk_level.value,
-                "fraud_types": [ft.value for ft in fraud_result.fraud_types],
-                "confidence_score": fraud_result.confidence_score,
-                "recommendations": fraud_result.recommendations,
-                "suspicious_metrics": fraud_result.suspicious_metrics,
-            }
-
-            # Send notification
-            await self.notification_service.send_fraud_alert(
-                shop_id, fraud_data, shop.email
-            )
-
-        except Exception as e:
-            logger.error(
-                f"Error sending fraud alert notification for shop {shop_id}: {e}"
-            )
-
     async def _send_invoice_notification(
         self, shop_id: str, invoice_data: Dict[str, Any]
     ) -> None:
         """Send invoice notification."""
         try:
             # Get shop contact email
-            shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id}, select={"email": True}
-            )
+            stmt = select(Shop.email).where(Shop.id == shop_id)
+            result = await self.session.execute(stmt)
+            shop = result.scalar_one_or_none()
 
-            if not shop or not shop.email:
+            if not shop:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
 
             # Send notification
             await self.notification_service.send_invoice_notification(
-                shop_id, invoice_data, shop.email
+                shop_id, invoice_data, shop
             )
 
         except Exception as e:
@@ -836,17 +760,17 @@ class BillingService:
         """Send payment notification."""
         try:
             # Get shop contact email
-            shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id}, select={"email": True}
-            )
+            stmt = select(Shop.email).where(Shop.id == shop_id)
+            result = await self.session.execute(stmt)
+            shop = result.scalar_one_or_none()
 
-            if not shop or not shop.email:
+            if not shop:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
 
             # Send notification
             await self.notification_service.send_payment_notification(
-                shop_id, payment_data, shop.email, payment_status
+                shop_id, payment_data, shop, payment_status
             )
 
         except Exception as e:
@@ -858,17 +782,17 @@ class BillingService:
         """Send billing summary notification."""
         try:
             # Get shop contact email
-            shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id}, select={"email": True}
-            )
+            stmt = select(Shop.email).where(Shop.id == shop_id)
+            result = await self.session.execute(stmt)
+            shop = result.scalar_one_or_none()
 
-            if not shop or not shop.email:
+            if not shop:
                 logger.warning(f"No contact email found for shop {shop_id}")
                 return
 
             # Send notification
             await self.notification_service.send_billing_summary(
-                shop_id, summary_data, shop.email
+                shop_id, summary_data, shop
             )
 
         except Exception as e:
