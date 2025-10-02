@@ -538,7 +538,10 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
 
         return {
             "recency_score": recency_result["recency_score"],
-            "days_since_last_interaction": days_since_last,
+            # Ensure an integer (not None / SQL expression)
+            "days_since_last_interaction": (
+                int(days_since_last) if days_since_last is not None else 0
+            ),
         }
 
     def _compute_conversion_metrics(
@@ -648,7 +651,8 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             "engagement_score": 0.0,
             "total_interaction_count": 0,
             "interaction_type_count": 0,
-            "days_since_last_interaction": None,
+            # Guarantee integer default for DB insert
+            "days_since_last_interaction": 0,
             "browse_to_cart_rate": 0.0,
             "cart_to_purchase_rate": 0.0,
             "conversion_propensity_score": 0.0,

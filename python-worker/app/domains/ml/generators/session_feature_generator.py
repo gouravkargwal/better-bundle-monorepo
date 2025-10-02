@@ -65,8 +65,10 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
                     events
                 ),
                 "purchase_intent_score": self._compute_purchase_intent_score(events),
-                "session_value": self._compute_session_value(
-                    events, context.get("order_data", [])
+                # Ensure NOT NULL: default 0.0 when no purchase value is found
+                "session_value": (
+                    self._compute_session_value(events, context.get("order_data", []))
+                    or 0.0
                 ),
                 # === BEHAVIORAL PATTERN ===
                 # Session-level behavior patterns for clustering
@@ -351,7 +353,8 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
             "browse_depth_score": 0.0,
             "conversion_funnel_stage": "no_engagement",
             "purchase_intent_score": 0.0,
-            "session_value": None,
+            # Guarantee NOT NULL default
+            "session_value": 0.0,
             "session_type": "empty",
             "bounce_session": True,
             "traffic_source": "direct",
