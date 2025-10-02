@@ -9,6 +9,8 @@ from .gorse_user_transformer import GorseUserTransformer
 from .gorse_item_transformer import GorseItemTransformer
 from .gorse_feedback_transformer import GorseFeedbackTransformer
 from .gorse_collection_transformer import GorseCollectionTransformer
+from .gorse_interaction_transformer import GorseInteractionTransformer
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +27,7 @@ class GorseTransformerFactory:
     _item_transformer: Optional[GorseItemTransformer] = None
     _feedback_transformer: Optional[GorseFeedbackTransformer] = None
     _collection_transformer: Optional[GorseCollectionTransformer] = None
+    _interaction_transformer: Optional[GorseInteractionTransformer] = None
 
     @classmethod
     def get_user_transformer(cls) -> GorseUserTransformer:
@@ -79,6 +82,19 @@ class GorseTransformerFactory:
         return cls._collection_transformer
 
     @classmethod
+    def get_interaction_transformer(cls) -> GorseInteractionTransformer:
+        """
+        Get or create interaction transformer (singleton)
+
+        Returns:
+            GorseInteractionTransformer instance
+        """
+        if cls._interaction_transformer is None:
+            cls._interaction_transformer = GorseInteractionTransformer()
+            logger.debug("Created new GorseInteractionTransformer instance")
+        return cls._interaction_transformer
+
+    @classmethod
     def reset_transformers(cls):
         """
         Reset all transformer instances
@@ -88,4 +104,5 @@ class GorseTransformerFactory:
         cls._item_transformer = None
         cls._feedback_transformer = None
         cls._collection_transformer = None
+        cls._interaction_transformer = None
         logger.info("Reset all transformer instances")

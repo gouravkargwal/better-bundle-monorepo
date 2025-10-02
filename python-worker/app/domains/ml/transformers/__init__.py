@@ -20,6 +20,7 @@ from .gorse_user_transformer import GorseUserTransformer
 from .gorse_item_transformer import GorseItemTransformer
 from .gorse_feedback_transformer import GorseFeedbackTransformer
 from .gorse_collection_transformer import GorseCollectionTransformer
+from .gorse_interaction_transformer import GorseInteractionTransformer
 from .gorse_transformer_factory import GorseTransformerFactory
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "GorseItemTransformer",
     "GorseFeedbackTransformer",
     "GorseCollectionTransformer",
+    "GorseInteractionTransformer",
     "GorseTransformerFactory",
 ]
 

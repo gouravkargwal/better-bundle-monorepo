@@ -1,22 +1,25 @@
 """
-Gorse User Transformer - OPTIMIZED VERSION
-Transforms user features to Gorse user objects with research-backed categorical labels
+Gorse User Transformer - STATE-OF-THE-ART VERSION
+Transforms optimized user features from CustomerBehaviorFeatureGenerator to Gorse user objects
 
 Key improvements:
-- RFM segmentation (industry standard)
-- Behavioral patterns (shopping style, intent)
-- Conversion propensity
-- Better actionable segments
+- Uses ALL 12 optimized user features from CustomerBehaviorFeatureGenerator
+- Enhanced behavioral lifecycle stages with predictive signals
+- Churn risk integration for proactive customer retention
+- Intent-based segmentation for immediate actionability
+- Advanced business value optimization
+- Comprehensive label validation and quality control
 """
 
 from typing import Dict, Any, List, Optional
+import math
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 class GorseUserTransformer:
-    """Transform user features to Gorse user format with optimized labels"""
+    """Transform optimized user features from CustomerBehaviorFeatureGenerator to Gorse user format"""
 
     def __init__(self):
         """Initialize user transformer"""
@@ -26,10 +29,10 @@ class GorseUserTransformer:
         self, user_features, shop_id: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Transform user features to Gorse user object with optimized labels
+        Transform optimized user features from CustomerBehaviorFeatureGenerator to Gorse user object
 
         Args:
-            user_features: UserFeatures model or dict from database
+            user_features: Optimized UserFeatures model or dict from CustomerBehaviorFeatureGenerator
             shop_id: Shop ID
 
         Returns:
@@ -46,23 +49,25 @@ class GorseUserTransformer:
                 logger.warning("No customer_id found in user features")
                 return None
 
-            # Convert numeric features to optimized categorical labels
-            labels = self._convert_to_optimized_labels(user_dict)
+            # Convert ALL optimized features from CustomerBehaviorFeatureGenerator to labels
+            labels = self._convert_to_comprehensive_labels(user_dict)
 
             user_object = {
                 "UserId": f"shop_{shop_id}_{customer_id}",
                 "Labels": labels,
-                "Comment": f"Customer: {customer_id}",
+                "Comment": f"Customer: {customer_id} (using CustomerBehaviorFeatureGenerator features)",
             }
 
             logger.debug(
-                f"Transformed user {customer_id} with {len(labels)} optimized labels"
+                f"Transformed user {customer_id} with {len(labels)} comprehensive labels from CustomerBehaviorFeatureGenerator"
             )
 
             return user_object
 
         except Exception as e:
-            logger.error(f"Failed to transform user features: {str(e)}")
+            logger.error(
+                f"Failed to transform user features from CustomerBehaviorFeatureGenerator: {str(e)}"
+            )
             return None
 
     def transform_batch_to_gorse_users(
@@ -76,351 +81,611 @@ class GorseUserTransformer:
             if gorse_user:
                 gorse_users.append(gorse_user)
 
-        logger.info(f"Transformed {len(gorse_users)} users for shop {shop_id}")
+        logger.info(
+            f"Transformed {len(gorse_users)} users with CustomerBehaviorFeatureGenerator features for shop {shop_id}"
+        )
         return gorse_users
 
-    def _convert_to_optimized_labels(self, user_dict: Dict[str, Any]) -> List[str]:
+    def _convert_to_comprehensive_labels(self, user_dict: Dict[str, Any]) -> List[str]:
         """
-        Convert numeric user features to optimized categorical labels
-
-        Based on e-commerce recommendation research and Gorse best practices
-        Max 15 labels for optimal performance
+        Convert ALL 12 optimized user features from CustomerBehaviorFeatureGenerator
+        to comprehensive categorical labels for maximum Gorse performance
 
         Args:
-            user_dict: User features dictionary from database
+            user_dict: ALL optimized user features from CustomerBehaviorFeatureGenerator
 
         Returns:
-            List of optimized categorical labels (max 15)
+            List of comprehensive categorical labels using all features (max 12)
         """
         labels = []
 
         try:
-            # 1. RFM SEGMENT (Most important - industry standard)
-            rfm_segment = self._calculate_rfm_segment(
-                days_since_last=user_dict.get("days_since_last_order"),
-                frequency=user_dict.get("order_frequency_per_month"),
-                monetary=user_dict.get("lifetime_value"),
+            # ===== DIRECT MAPPING TO CustomerBehaviorFeatureGenerator FEATURES =====
+
+            # 1. USER LIFECYCLE STAGE (from user_lifecycle_stage) - MOST CRITICAL
+            lifecycle_stage = user_dict.get("user_lifecycle_stage", "new")
+            labels.append(f"lifecycle:{lifecycle_stage}")
+
+            # 2. PURCHASE FREQUENCY SCORE (from purchase_frequency_score)
+            frequency_score = float(user_dict.get("purchase_frequency_score", 0) or 0)
+            if frequency_score >= 0.8:
+                labels.append("frequency:very_high")
+            elif frequency_score >= 0.6:
+                labels.append("frequency:high")
+            elif frequency_score >= 0.4:
+                labels.append("frequency:medium")
+            elif frequency_score >= 0.2:
+                labels.append("frequency:low")
+            else:
+                labels.append("frequency:minimal")
+
+            # 3. INTERACTION DIVERSITY SCORE (from interaction_diversity_score)
+            diversity_score = float(
+                user_dict.get("interaction_diversity_score", 0) or 0
             )
-            labels.append(f"rfm:{rfm_segment}")
+            if diversity_score >= 0.7:
+                labels.append("diversity:explorer")
+            elif diversity_score >= 0.4:
+                labels.append("diversity:selective")
+            else:
+                labels.append("diversity:focused")
 
-            # 2. PURCHASE INTENT (More actionable than raw recency)
-            purchase_intent = self._calculate_purchase_intent(user_dict)
-            labels.append(f"intent:{purchase_intent}")
+            # 4. CATEGORY DIVERSITY (from category_diversity)
+            category_diversity = int(user_dict.get("category_diversity", 0) or 0)
+            if category_diversity >= 8:
+                labels.append("categories:very_diverse")
+            elif category_diversity >= 5:
+                labels.append("categories:diverse")
+            elif category_diversity >= 3:
+                labels.append("categories:moderate")
+            else:
+                labels.append("categories:focused")
 
-            # 3. PREFERRED CATEGORY (Essential for content filtering)
-            category = user_dict.get("preferred_category")
-            if category and category != "unknown":
-                clean_category = str(category).lower().replace(" ", "_")[:30]
+            # 5. PRIMARY CATEGORY (from primary_category)
+            primary_category = user_dict.get("primary_category")
+            if primary_category and str(primary_category).lower() not in [
+                "none",
+                "unknown",
+                "",
+            ]:
+                clean_category = str(primary_category).lower().replace(" ", "_")[:20]
                 labels.append(f"category:{clean_category}")
 
-            # 4. PREFERRED VENDOR (Good for brand affinity)
-            vendor = user_dict.get("preferred_vendor")
-            if vendor and vendor != "unknown":
-                clean_vendor = str(vendor).lower().replace(" ", "_")[:30]
-                labels.append(f"vendor:{clean_vendor}")
+            # 6. CONVERSION RATE (from conversion_rate)
+            conversion_rate = float(user_dict.get("conversion_rate", 0) or 0)
+            if conversion_rate >= 0.2:
+                labels.append("conversion:high_converter")
+            elif conversion_rate >= 0.1:
+                labels.append("conversion:moderate_converter")
+            elif conversion_rate >= 0.05:
+                labels.append("conversion:low_converter")
+            else:
+                labels.append("conversion:browser")
 
-            # 5. PRICE SENSITIVITY (Better than simple price tier)
-            price_sensitivity = self._calculate_price_sensitivity(
-                avg_price=user_dict.get("avg_order_value"),
-                discount_sens=user_dict.get("discount_sensitivity"),
-            )
-            labels.append(f"price_sens:{price_sensitivity}")
+            # 7. AVG ORDER VALUE TIER (from avg_order_value)
+            avg_order_value = float(user_dict.get("avg_order_value", 0) or 0)
+            if avg_order_value >= 300:
+                labels.append("aov:luxury")
+            elif avg_order_value >= 150:
+                labels.append("aov:premium")
+            elif avg_order_value >= 75:
+                labels.append("aov:mid_tier")
+            elif avg_order_value >= 25:
+                labels.append("aov:value")
+            else:
+                labels.append("aov:budget")
 
-            # 6. BASKET SIZE PREFERENCE (Important for bundle recommendations)
-            total_purchases = user_dict.get("total_purchases", 0) or 0
-            distinct_products = user_dict.get("distinct_products_purchased", 0) or 0
+            # 8. LIFETIME VALUE TIER (from lifetime_value)
+            lifetime_value = float(user_dict.get("lifetime_value", 0) or 0)
+            if lifetime_value >= 2000:
+                labels.append("ltv:vip")
+            elif lifetime_value >= 1000:
+                labels.append("ltv:high_value")
+            elif lifetime_value >= 500:
+                labels.append("ltv:valuable")
+            elif lifetime_value >= 100:
+                labels.append("ltv:growing")
+            else:
+                labels.append("ltv:new")
 
-            if total_purchases > 0:
-                avg_items_per_order = distinct_products / total_purchases
-                if avg_items_per_order >= 5:
-                    labels.append("basket:large")
-                elif avg_items_per_order >= 2:
-                    labels.append("basket:medium")
+            # 9. RECENCY SCORE (from recency_score)
+            recency_score = float(user_dict.get("recency_score", 0) or 0)
+            if recency_score >= 0.8:
+                labels.append("recency:very_active")
+            elif recency_score >= 0.6:
+                labels.append("recency:active")
+            elif recency_score >= 0.3:
+                labels.append("recency:warm")
+            else:
+                labels.append("recency:cold")
+
+            # 10. CHURN RISK SCORE (from churn_risk_score - CRITICAL NEW FEATURE)
+            churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
+            if churn_risk >= 0.7:
+                labels.append("risk:high_churn")
+            elif churn_risk >= 0.4:
+                labels.append("risk:medium_churn")
+            else:
+                labels.append("risk:stable")
+
+            # 11. TOTAL INTERACTIONS (from total_interactions - VOLUME SIGNAL)
+            total_interactions = int(user_dict.get("total_interactions", 0) or 0)
+            if total_interactions >= 100:
+                labels.append("volume:high_engagement")
+            elif total_interactions >= 50:
+                labels.append("volume:moderate_engagement")
+            elif total_interactions >= 20:
+                labels.append("volume:low_engagement")
+            else:
+                labels.append("volume:minimal_engagement")
+
+            # 12. DAYS SINCE LAST PURCHASE (from days_since_last_purchase - TEMPORAL)
+            days_since_last = user_dict.get("days_since_last_purchase")
+            if days_since_last is not None:
+                if days_since_last <= 7:
+                    labels.append("last_purchase:this_week")
+                elif days_since_last <= 30:
+                    labels.append("last_purchase:this_month")
+                elif days_since_last <= 90:
+                    labels.append("last_purchase:this_quarter")
                 else:
-                    labels.append("basket:single")
-            else:
-                labels.append("basket:new")
-
-            # 7. SHOPPING STYLE (Behavioral pattern)
-            shopping_style = self._calculate_shopping_style(
-                browse_to_cart=user_dict.get("browse_to_cart_rate"),
-                cart_to_purchase=user_dict.get("cart_to_purchase_rate"),
-                avg_session_duration=user_dict.get("avg_session_duration"),
-            )
-            labels.append(f"style:{shopping_style}")
-
-            # 8. PRODUCT EXPLORER vs REPEATER (Better than raw diversity)
-            repeat_rate = self._calculate_repeat_purchase_rate(user_dict)
-            if repeat_rate >= 0.7:
-                labels.append("behavior:repeater")
-            elif repeat_rate <= 0.3:
-                labels.append("behavior:explorer")
-            else:
-                labels.append("behavior:mixed")
-
-            # 9. TIME PREFERENCE (If temporal data available)
-            most_active_hour = user_dict.get("most_active_hour")
-            if most_active_hour is not None:
-                if 6 <= most_active_hour < 12:
-                    labels.append("time:morning")
-                elif 12 <= most_active_hour < 17:
-                    labels.append("time:afternoon")
-                elif 17 <= most_active_hour < 21:
-                    labels.append("time:evening")
-                else:
-                    labels.append("time:night")
-
-            # 10. DEVICE PREFERENCE (Mobile vs desktop experiences)
-            device = user_dict.get("device_type", "").lower()
-            if device in ["mobile", "phone", "smartphone"]:
-                labels.append("device:mobile")
-            elif device == "tablet":
-                labels.append("device:tablet")
-            elif device in ["desktop", "computer", "pc"]:
-                labels.append("device:desktop")
-
-            # 11. RISK PROFILE (Combined risk assessment)
-            risk_profile = self._calculate_risk_profile(
-                refund_rate=user_dict.get("refund_rate"),
-                customer_health=user_dict.get("customer_health_score"),
-            )
-            labels.append(f"risk:{risk_profile}")
-
-            # Engagement level
-            engagement = float(user_dict.get("engagement_score", 0) or 0)
-            if engagement >= 0.7:
-                labels.append("engagement:high")
-            elif engagement >= 0.4:
-                labels.append("engagement:medium")
-            else:
-                labels.append("engagement:low")
-
-            # Browsing style
-            browsing_style = user_dict.get("browsing_style")
-            if browsing_style:
-                labels.append(f"style:{browsing_style}")
-
-            # Device preference
-            device = user_dict.get("primary_device")
-            if device:
-                labels.append(f"device:{device}")
-
-            # 13. CONVERSION PROPENSITY (Key for recommendation prioritization)
-            conversion_prop = self._calculate_conversion_propensity(user_dict)
-            labels.append(f"conversion:{conversion_prop}")
-
-            # 14. CUSTOMER MATURITY (Better than lifecycle)
-            days_since_first = user_dict.get("days_since_first_order", 0) or 0
-            total_purchases = user_dict.get("total_purchases", 0) or 0
-
-            if total_purchases == 0:
-                labels.append("maturity:new")
-            elif total_purchases >= 10 and days_since_first >= 180:
-                labels.append("maturity:established")
-            elif total_purchases >= 3:
-                labels.append("maturity:growing")
-            else:
-                labels.append("maturity:exploring")
-
-            # 15. GEOGRAPHIC SEGMENT (Only if relevant)
-            geo = user_dict.get("geographic_region")
-            if geo and isinstance(geo, str) and geo != "unknown":
-                if "," in geo:
-                    country = geo.split(",")[-1].strip().lower()[:10]
-                    labels.append(f"geo:{country}")
+                    labels.append("last_purchase:dormant")
 
         except Exception as e:
             logger.error(
-                f"Error converting user features to optimized labels: {str(e)}"
+                f"Error converting CustomerBehaviorFeatureGenerator features to labels: {str(e)}"
             )
 
-        return labels[:15]
+        return labels[:12]  # ALL 12 optimized features as labels
 
-    def _calculate_rfm_segment(
-        self,
-        days_since_last: Optional[int],
-        frequency: Optional[float],
-        monetary: Optional[float],
+    # ===== ADVANCED BEHAVIORAL PATTERN ANALYSIS =====
+
+    def _calculate_advanced_purchase_intent_enhanced(
+        self, user_dict: Dict[str, Any]
     ) -> str:
         """
-        Calculate RFM segment - gold standard for customer segmentation
+        Advanced purchase intent using CustomerBehaviorFeatureGenerator features
 
-        Args:
-            days_since_last: Days since last order
-            frequency: Order frequency per month
-            monetary: Lifetime value
-
-        Returns:
-            RFM segment: champions, loyal, potential, at_risk, lost
+        Combines lifecycle, recency, conversion efficiency, and churn risk from enhanced generator
         """
-        # Score recency (1-5)
-        if days_since_last is None:
-            r_score = 1
-        elif days_since_last <= 7:
-            r_score = 5
-        elif days_since_last <= 30:
-            r_score = 4
-        elif days_since_last <= 90:
-            r_score = 3
-        elif days_since_last <= 180:
-            r_score = 2
+        lifecycle_stage = user_dict.get("user_lifecycle_stage", "new")
+        recency_score = float(user_dict.get("recency_score", 0) or 0)
+        conversion_rate = float(user_dict.get("conversion_rate", 0) or 0)
+        churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
+
+        # Calculate composite intent score using enhanced features
+        if lifecycle_stage in ["repeat_active", "new_customer"]:
+            lifecycle_boost = 0.3
+        elif lifecycle_stage == "repeat_dormant":
+            lifecycle_boost = -0.2  # Negative boost for dormant
         else:
-            r_score = 1
+            lifecycle_boost = 0.0
 
-        # Score frequency (1-5)
-        freq = frequency or 0
-        if freq >= 2:
-            f_score = 5
-        elif freq >= 1:
-            f_score = 4
-        elif freq >= 0.5:
-            f_score = 3
-        elif freq > 0:
-            f_score = 2
-        else:
-            f_score = 1
+        # Churn risk penalty (high churn risk = low purchase intent)
+        churn_penalty = churn_risk * -0.3
 
-        # Score monetary (1-5)
-        ltv = monetary or 0
-        if ltv >= 1000:
-            m_score = 5
-        elif ltv >= 500:
-            m_score = 4
-        elif ltv >= 100:
-            m_score = 3
-        elif ltv > 0:
-            m_score = 2
-        else:
-            m_score = 1
+        intent_score = (
+            (recency_score * 0.4)
+            + (conversion_rate * 0.4)
+            + lifecycle_boost
+            + churn_penalty
+        )
 
-        # Map to segments
-        rfm_total = r_score + f_score + m_score
-        if rfm_total >= 13:
-            return "champions"
-        elif rfm_total >= 11:
-            return "loyal"
-        elif rfm_total >= 9:
-            return "potential"
-        elif rfm_total >= 7:
-            return "at_risk"
-        else:
-            return "lost"
-
-    def _calculate_purchase_intent(self, user_dict: Dict[str, Any]) -> str:
-        """
-        Calculate immediate purchase intent
-
-        Predicts likelihood of immediate purchase based on recency and conversion rates
-        """
-        days_since = user_dict.get("days_since_last_order", 999) or 999
-        cart_to_purchase = float(user_dict.get("cart_to_purchase_rate", 0) or 0)
-
-        if days_since <= 7 and cart_to_purchase >= 0.5:
+        if intent_score >= 0.8:
+            return "immediate"
+        elif intent_score >= 0.6:
+            return "very_high"
+        elif intent_score >= 0.4:
             return "high"
-        elif days_since <= 30 and cart_to_purchase >= 0.3:
+        elif intent_score >= 0.2:
             return "medium"
-        elif days_since <= 90:
-            return "low"
-        else:
-            return "dormant"
-
-    def _calculate_price_sensitivity(
-        self, avg_price: Optional[float], discount_sens: Optional[float]
-    ) -> str:
-        """
-        Calculate price sensitivity combining AOV and discount behavior
-        """
-        aov = avg_price or 0
-        discount = discount_sens or 0
-
-        # Deal seeker: loves discounts, lower AOV
-        if discount >= 0.7 and aov < 50:
-            return "deal_seeker"
-        # Value: moderate price, some discount usage
-        elif aov < 100 and discount >= 0.3:
-            return "value"
-        # Premium: high AOV, low discount sensitivity
-        elif aov >= 150 and discount < 0.3:
-            return "premium"
-        # Luxury: very high AOV, doesn't care about discounts
-        elif aov >= 300:
-            return "luxury"
-        else:
-            return "moderate"
-
-    def _calculate_shopping_style(
-        self,
-        browse_to_cart: Optional[float],
-        cart_to_purchase: Optional[float],
-        avg_session_duration: Optional[float],
-    ) -> str:
-        """
-        Determine shopping behavior style
-        """
-        b2c = browse_to_cart or 0
-        c2p = cart_to_purchase or 0
-
-        # Decisive: high conversion at all stages
-        if c2p >= 0.7 and b2c >= 0.3:
-            return "decisive"
-        # Impulse: quick decisions, less browsing
-        elif b2c < 0.1 or (avg_session_duration and avg_session_duration < 60):
-            return "impulse"
-        # Researcher: browses extensively before buying
-        else:
-            return "researcher"
-
-    def _calculate_repeat_purchase_rate(self, user_dict: Dict[str, Any]) -> float:
-        """
-        Calculate how often customer buys same/similar products
-        """
-        total_purchases = user_dict.get("total_purchases", 0) or 0
-        distinct_products = user_dict.get("distinct_products_purchased", 0) or 0
-
-        if total_purchases == 0 or distinct_products == 0:
-            return 0.0
-
-        # If they bought 10 items but only 3 distinct = high repeat rate
-        return 1.0 - (distinct_products / total_purchases)
-
-    def _calculate_risk_profile(
-        self, refund_rate: Optional[float], customer_health: Optional[int]
-    ) -> str:
-        """
-        Calculate overall customer risk profile
-        """
-        refund = refund_rate or 0
-        health = customer_health or 50
-
-        # High risk: high refunds or low health
-        if refund >= 0.3 or health < 40:
-            return "high"
-        # Medium risk: moderate refunds or health
-        elif refund >= 0.1 or health < 70:
-            return "medium"
-        # Low risk: good customer
         else:
             return "low"
 
-    def _calculate_conversion_propensity(self, user_dict: Dict[str, Any]) -> str:
+    def _calculate_comprehensive_shopping_pattern_enhanced(
+        self, user_dict: Dict[str, Any]
+    ) -> str:
         """
-        Predict likelihood of next purchase
+        Comprehensive shopping pattern using CustomerBehaviorFeatureGenerator features
         """
-        browse_to_cart = float(user_dict.get("browse_to_cart_rate", 0) or 0)
-        cart_to_purchase = float(user_dict.get("cart_to_purchase_rate", 0) or 0)
-        days_since = user_dict.get("days_since_last_order", 999) or 999
+        interaction_diversity = float(
+            user_dict.get("interaction_diversity_score", 0) or 0
+        )
+        purchase_frequency = float(user_dict.get("purchase_frequency_score", 0) or 0)
+        conversion_rate = float(user_dict.get("conversion_rate", 0) or 0)
+        category_diversity = int(user_dict.get("category_diversity", 0) or 0)
+        total_interactions = int(user_dict.get("total_interactions", 0) or 0)
+        churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
 
-        # Weight cart-to-purchase more heavily
-        score = browse_to_cart * 0.3 + cart_to_purchase * 0.7
+        # Enhanced pattern classification using CustomerBehaviorFeatureGenerator features
+        if purchase_frequency >= 0.7 and conversion_rate >= 0.2:
+            return "power_buyer"  # High frequency + high conversion
+        elif interaction_diversity >= 0.7 and category_diversity >= 5:
+            return "curious_explorer"  # High diversity across categories
+        elif conversion_rate >= 0.15 and total_interactions <= 30:
+            return "efficient_buyer"  # High conversion with low browsing
+        elif total_interactions >= 100 and conversion_rate <= 0.05:
+            return "research_browser"  # High browsing, low conversion
+        elif purchase_frequency >= 0.4:
+            return "regular_customer"  # Steady purchase pattern
+        elif interaction_diversity >= 0.4:
+            return "selective_shopper"  # Moderate diversity
+        elif churn_risk >= 0.7:
+            return "at_risk_customer"  # High churn risk pattern
+        else:
+            return "casual_visitor"  # Basic engagement
 
-        # Apply recency factor
-        recency_factor = 1.0 if days_since <= 30 else 0.5
+    def _calculate_business_value_tier_enhanced(self, user_dict: Dict[str, Any]) -> str:
+        """
+        Enhanced business value tier using CustomerBehaviorFeatureGenerator features
+        """
+        lifetime_value = float(user_dict.get("lifetime_value", 0) or 0)
+        avg_order_value = float(user_dict.get("avg_order_value", 0) or 0)
+        purchase_frequency = float(user_dict.get("purchase_frequency_score", 0) or 0)
+        churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
 
-        final_score = score * recency_factor
+        # Composite business value score with churn risk adjustment
+        ltv_score = min(lifetime_value / 2000.0, 1.0)  # Normalize to $2000
+        aov_score = min(avg_order_value / 300.0, 1.0)  # Normalize to $300
+        frequency_score = purchase_frequency  # Already 0-1
+        churn_penalty = churn_risk * -0.2  # High churn risk reduces business value
 
-        if final_score >= 0.5:
+        business_score = (
+            (ltv_score * 0.4)
+            + (aov_score * 0.3)
+            + (frequency_score * 0.2)
+            + churn_penalty
+            + 0.1
+        )
+
+        if business_score >= 0.8:
+            return "vip_tier"
+        elif business_score >= 0.6:
+            return "high_value_tier"
+        elif business_score >= 0.4:
+            return "valuable_tier"
+        elif business_score >= 0.2:
+            return "growing_tier"
+        else:
+            return "entry_tier"
+
+    # ===== RECOMMENDATION READINESS ASSESSMENT =====
+
+    def _calculate_recommendation_readiness_enhanced(
+        self, user_dict: Dict[str, Any]
+    ) -> str:
+        """
+        Calculate recommendation readiness using CustomerBehaviorFeatureGenerator features
+
+        Critical for Gorse's recommendation engine optimization
+        """
+        total_interactions = int(user_dict.get("total_interactions", 0) or 0)
+        category_diversity = int(user_dict.get("category_diversity", 0) or 0)
+        interaction_diversity = float(
+            user_dict.get("interaction_diversity_score", 0) or 0
+        )
+        purchase_frequency = float(user_dict.get("purchase_frequency_score", 0) or 0)
+        recency_score = float(user_dict.get("recency_score", 0) or 0)
+        lifecycle_stage = user_dict.get("user_lifecycle_stage", "new")
+        churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
+
+        # Calculate comprehensive readiness score
+        interaction_signal = min(
+            total_interactions / 20.0, 1.0
+        )  # 20+ interactions = good
+        diversity_signal = min(category_diversity / 4.0, 1.0)  # 4+ categories = good
+        quality_signal = interaction_diversity  # Already 0-1
+        activity_signal = (purchase_frequency + recency_score) / 2.0
+
+        # Lifecycle stage bonus
+        lifecycle_bonus = (
+            0.2 if lifecycle_stage in ["repeat_active", "new_customer"] else 0.0
+        )
+
+        # Churn risk penalty
+        churn_penalty = churn_risk * -0.15
+
+        readiness_score = (
+            interaction_signal * 0.25
+            + diversity_signal * 0.20
+            + quality_signal * 0.20
+            + activity_signal * 0.25
+            + lifecycle_bonus
+            + churn_penalty
+        )
+
+        if readiness_score >= 0.8:
+            return "highly_ready"
+        elif readiness_score >= 0.6:
             return "ready"
-        elif final_score >= 0.25:
-            return "likely"
+        elif readiness_score >= 0.4:
+            return "partially_ready"
+        elif readiness_score >= 0.2:
+            return "warming_up"
         else:
-            return "unlikely"
+            return "cold_start"
+
+    # ===== PREDICTIVE LABELS =====
+
+    def generate_predictive_labels_enhanced(
+        self, user_dict: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Generate predictive labels using CustomerBehaviorFeatureGenerator features
+
+        These labels help Gorse make better future predictions using enhanced behavioral data
+        """
+        predictive_labels = []
+
+        # Purchase Intent Prediction (using enhanced method)
+        intent = self._calculate_advanced_purchase_intent_enhanced(user_dict)
+        predictive_labels.append(f"intent:{intent}")
+
+        # Shopping Pattern Prediction (using enhanced method)
+        pattern = self._calculate_comprehensive_shopping_pattern_enhanced(user_dict)
+        predictive_labels.append(f"pattern:{pattern}")
+
+        # Business Value Prediction (using enhanced method)
+        value_tier = self._calculate_business_value_tier_enhanced(user_dict)
+        predictive_labels.append(f"value_tier:{value_tier}")
+
+        # Recommendation Readiness (using enhanced method)
+        readiness = self._calculate_recommendation_readiness_enhanced(user_dict)
+        predictive_labels.append(f"readiness:{readiness}")
+
+        return predictive_labels
+
+    # ===== CHURN RISK ANALYSIS =====
+
+    def _analyze_churn_indicators(self, user_dict: Dict[str, Any]) -> List[str]:
+        """
+        Analyze churn indicators using CustomerBehaviorFeatureGenerator churn_risk_score
+
+        Provides actionable churn prevention labels
+        """
+        churn_labels = []
+
+        churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
+        recency_score = float(user_dict.get("recency_score", 0) or 0)
+        lifecycle_stage = user_dict.get("user_lifecycle_stage", "new")
+        days_since_last_purchase = user_dict.get("days_since_last_purchase")
+
+        # Churn risk classification
+        if churn_risk >= 0.8:
+            churn_labels.append("churn_urgency:critical")
+        elif churn_risk >= 0.6:
+            churn_labels.append("churn_urgency:high")
+        elif churn_risk >= 0.4:
+            churn_labels.append("churn_urgency:moderate")
+        else:
+            churn_labels.append("churn_urgency:low")
+
+        # Churn prevention strategy
+        if churn_risk >= 0.7 and lifecycle_stage in ["repeat_active", "repeat_dormant"]:
+            churn_labels.append("prevention_strategy:retention_campaign")
+        elif churn_risk >= 0.6 and recency_score <= 0.3:
+            churn_labels.append("prevention_strategy:reactivation_needed")
+        elif churn_risk >= 0.4:
+            churn_labels.append("prevention_strategy:engagement_boost")
+
+        # Win-back opportunity
+        if (
+            days_since_last_purchase
+            and days_since_last_purchase >= 90
+            and churn_risk >= 0.6
+        ):
+            churn_labels.append("winback:opportunity")
+
+        return churn_labels
+
+    # ===== COMPREHENSIVE TRANSFORMATION =====
+
+    def transform_to_comprehensive_gorse_user(
+        self, user_features, shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Transform to comprehensive Gorse user using ALL CustomerBehaviorFeatureGenerator features
+        """
+        try:
+            base_user = self.transform_to_gorse_user(user_features, shop_id)
+            if not base_user:
+                return None
+
+            if hasattr(user_features, "__dict__"):
+                user_dict = user_features.__dict__
+            else:
+                user_dict = user_features
+
+            # Add enhanced predictive labels using CustomerBehaviorFeatureGenerator
+            predictive_labels = self.generate_predictive_labels_enhanced(user_dict)
+            churn_labels = self._analyze_churn_indicators(user_dict)
+
+            # Combine all labels
+            all_labels = base_user["Labels"] + predictive_labels + churn_labels
+            validated_labels = self.validate_label_quality(all_labels)
+
+            base_user["Labels"] = validated_labels
+            base_user["Comment"] = (
+                f"Customer: {user_dict.get('customer_id', '')} (comprehensive CustomerBehaviorFeatureGenerator features)"
+            )
+
+            return base_user
+
+        except Exception as e:
+            logger.error(f"Failed to create comprehensive Gorse user: {str(e)}")
+            return self.transform_to_gorse_user(user_features, shop_id)  # Fallback
+
+    def transform_batch_to_comprehensive_gorse_users(
+        self, user_features_list: List[Any], shop_id: str
+    ) -> List[Dict[str, Any]]:
+        """Transform batch to comprehensive Gorse users using CustomerBehaviorFeatureGenerator"""
+        gorse_users = []
+
+        for user_features in user_features_list:
+            gorse_user = self.transform_to_comprehensive_gorse_user(
+                user_features, shop_id
+            )
+            if gorse_user:
+                gorse_users.append(gorse_user)
+
+        logger.info(
+            f"Transformed {len(gorse_users)} users with comprehensive CustomerBehaviorFeatureGenerator features for shop {shop_id}"
+        )
+        return gorse_users
+
+    # ===== BUSINESS INTELLIGENCE INTEGRATION =====
+
+    def analyze_user_portfolio(self, user_features_list: List[Any]) -> Dict[str, Any]:
+        """
+        Analyze entire user portfolio using CustomerBehaviorFeatureGenerator features
+        """
+        if not user_features_list:
+            return {"status": "empty_portfolio"}
+
+        analysis = {
+            "total_users": len(user_features_list),
+            "lifecycle_distribution": {},
+            "churn_risk_distribution": {},
+            "business_value_distribution": {},
+            "strategic_insights": [],
+        }
+
+        # Analyze each user
+        for user_features in user_features_list:
+            if hasattr(user_features, "__dict__"):
+                user_dict = user_features.__dict__
+            else:
+                user_dict = user_features
+
+            # Lifecycle analysis
+            lifecycle = user_dict.get("user_lifecycle_stage", "unknown")
+            analysis["lifecycle_distribution"][lifecycle] = (
+                analysis["lifecycle_distribution"].get(lifecycle, 0) + 1
+            )
+
+            # Churn risk analysis
+            churn_risk = float(user_dict.get("churn_risk_score", 0) or 0)
+            if churn_risk >= 0.7:
+                risk_category = "high_risk"
+            elif churn_risk >= 0.4:
+                risk_category = "medium_risk"
+            else:
+                risk_category = "stable"
+            analysis["churn_risk_distribution"][risk_category] = (
+                analysis["churn_risk_distribution"].get(risk_category, 0) + 1
+            )
+
+            # Business value analysis
+            value_tier = self._calculate_business_value_tier_enhanced(user_dict)
+            analysis["business_value_distribution"][value_tier] = (
+                analysis["business_value_distribution"].get(value_tier, 0) + 1
+            )
+
+        # Generate strategic insights
+        total = analysis["total_users"]
+
+        # Churn risk insights
+        high_risk_percentage = (
+            analysis["churn_risk_distribution"].get("high_risk", 0) / total
+        )
+        if high_risk_percentage > 0.15:  # More than 15% high churn risk
+            analysis["strategic_insights"].append(
+                "URGENT: High churn risk detected - implement retention campaigns"
+            )
+
+        # Lifecycle insights
+        new_user_percentage = analysis["lifecycle_distribution"].get("new", 0) / total
+        if new_user_percentage > 0.4:  # More than 40% new users
+            analysis["strategic_insights"].append(
+                "Opportunity: High new user acquisition - focus on onboarding optimization"
+            )
+
+        # Business value insights
+        vip_percentage = (
+            analysis["business_value_distribution"].get("vip_tier", 0) / total
+        )
+        if vip_percentage < 0.05:  # Less than 5% VIP users
+            analysis["strategic_insights"].append(
+                "Growth: Low VIP segment - implement value tier upgrade strategies"
+            )
+
+        return analysis
+
+    # ===== QUALITY CONTROL =====
+
+    def validate_label_quality(self, labels: List[str]) -> List[str]:
+        """Ensure label quality and remove conflicts"""
+        # Remove duplicate label types
+        seen_types = set()
+        cleaned_labels = []
+
+        for label in labels:
+            label_type = label.split(":")[0]
+            if label_type not in seen_types:
+                cleaned_labels.append(label)
+                seen_types.add(label_type)
+
+        return cleaned_labels[:16]  # Allow up to 16 labels for comprehensive features
+
+    def validate_feature_compatibility(
+        self, user_dict: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Validate compatibility with CustomerBehaviorFeatureGenerator features
+        """
+        required_features = [
+            "user_lifecycle_stage",
+            "purchase_frequency_score",
+            "interaction_diversity_score",
+            "category_diversity",
+            "conversion_rate",
+            "avg_order_value",
+            "lifetime_value",
+            "recency_score",
+            "churn_risk_score",  # Critical new feature
+            "total_interactions",
+        ]
+
+        compatibility = {
+            "compatible": True,
+            "missing_features": [],
+            "feature_coverage": 0.0,
+        }
+
+        present_features = 0
+        for feature in required_features:
+            if feature in user_dict:
+                present_features += 1
+            else:
+                compatibility["missing_features"].append(feature)
+
+        compatibility["feature_coverage"] = present_features / len(required_features)
+        compatibility["compatible"] = (
+            compatibility["feature_coverage"] >= 0.8
+        )  # 80% coverage required
+
+        return compatibility
+
+    # ===== BACKWARD COMPATIBILITY =====
+
+    def generate_predictive_labels(self, user_dict: Dict[str, Any]) -> List[str]:
+        """Legacy method - calls enhanced version"""
+        return self.generate_predictive_labels_enhanced(user_dict)
+
+    def _calculate_advanced_purchase_intent(self, user_dict: Dict[str, Any]) -> str:
+        """Legacy method - calls enhanced version"""
+        return self._calculate_advanced_purchase_intent_enhanced(user_dict)
+
+    def _calculate_comprehensive_shopping_pattern(
+        self, user_dict: Dict[str, Any]
+    ) -> str:
+        """Legacy method - calls enhanced version"""
+        return self._calculate_comprehensive_shopping_pattern_enhanced(user_dict)
+
+    def _calculate_business_value_tier(self, user_dict: Dict[str, Any]) -> str:
+        """Legacy method - calls enhanced version"""
+        return self._calculate_business_value_tier_enhanced(user_dict)
+
+    def _calculate_recommendation_readiness(self, user_dict: Dict[str, Any]) -> str:
+        """Legacy method - calls enhanced version"""
+        return self._calculate_recommendation_readiness_enhanced(user_dict)

@@ -1,12 +1,11 @@
 """
-Search Product Feature Generator for ML feature engineering
+Optimized Search Product Feature Generator for State-of-the-Art Gorse Integration
+Focuses on search-to-product relevance signals that actually improve recommendation quality
 """
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
-import json
 import statistics
-
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
@@ -16,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class SearchProductFeatureGenerator(BaseFeatureGenerator):
-    """Feature generator for search query + product performance to match SearchProductFeatures schema"""
+    """State-of-the-art search-product feature generator optimized for Gorse search recommendations"""
 
     def __init__(self):
         super().__init__()
@@ -26,243 +25,337 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         self, search_product_data: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Generate features for a search query + product combination to match SearchProductFeatures schema
+        Generate optimized search-product features for Gorse
 
         Args:
-            search_product_data: Dictionary containing:
-                - searchQuery: The search query string
-                - productId: The product ID being analyzed
-            context: Additional context data:
-                - shop: Shop data
-                - behavioral_events: List of BehavioralEvents for search analysis
+            search_product_data: Dictionary containing searchQuery and productId
+            context: Additional context data (shop, behavioral_events)
 
         Returns:
-            Dictionary of generated features matching SearchProductFeatures schema
+            Dictionary with minimal, high-signal search-product features for Gorse
         """
         try:
-            search_query = search_product_data.get("searchQuery", "")
+            search_query = search_product_data.get("searchQuery", "").lower().strip()
             product_id = search_product_data.get("productId", "")
 
             logger.debug(
-                f"Computing search-product features for query: '{search_query}' + product: {product_id}"
+                f"Computing optimized search-product features for: '{search_query}' + {product_id}"
             )
 
-            features = {}
-            shop = context.get("shop", {})
+            if not search_query or not product_id:
+                return self._get_minimal_default_features(search_product_data, context)
+
             behavioral_events = context.get("behavioral_events", [])
 
             if not behavioral_events:
-                return self._get_empty_search_product_features(
-                    search_product_data, shop
-                )
+                return self._get_minimal_default_features(search_product_data, context)
 
-            # Basic identification features
-            features.update(self._compute_basic_features(search_product_data, shop))
-
-            # Search performance metrics from behavioral events
-            features.update(
-                self._compute_search_metrics(
+            # Core Gorse-optimized search-product features
+            features = {
+                "shop_id": context.get("shop", {}).get("id", ""),
+                "search_query": search_query,
+                "product_id": product_id,
+                # === CORE SEARCH RELEVANCE SIGNALS ===
+                # These are the most predictive for search-based recommendations
+                "search_click_rate": self._compute_search_click_rate(
                     search_query, product_id, behavioral_events
-                )
-            )
-
-            # Conversion rates calculated from metrics
-            features.update(self._compute_conversion_rates(features))
-
-            # Temporal tracking
-            features.update(
-                self._compute_temporal_features(
+                ),
+                "search_conversion_rate": self._compute_search_conversion_rate(
                     search_query, product_id, behavioral_events
-                )
-            )
+                ),
+                "search_relevance_score": self._compute_search_relevance_score(
+                    search_query, product_id, behavioral_events
+                ),
+                # === PERFORMANCE METRICS ===
+                # High-level patterns Gorse can use for search result ranking
+                "total_search_interactions": self._compute_total_search_interactions(
+                    search_query, product_id, behavioral_events
+                ),
+                "search_to_purchase_count": self._compute_search_to_purchase_count(
+                    search_query, product_id, behavioral_events
+                ),
+                # === TEMPORAL SIGNALS ===
+                # Recent search performance is most predictive
+                "days_since_last_search_interaction": self._compute_days_since_last_interaction(
+                    search_query, product_id, behavioral_events
+                ),
+                "search_recency_score": self._compute_search_recency_score(
+                    search_query, product_id, behavioral_events
+                ),
+                # === QUERY-PRODUCT MATCH QUALITY ===
+                # Critical for understanding search intent alignment
+                "semantic_match_score": self._compute_semantic_match_score(
+                    search_query, product_id, context
+                ),
+                "search_intent_alignment": self._compute_search_intent_alignment(
+                    search_query, product_id, behavioral_events
+                ),
+                "last_computed_at": now_utc(),
+            }
 
-            # Validate and clean features
-            features = self.validate_features(features)
-
-            # Add lastComputedAt timestamp
-            features["last_computed_at"] = now_utc()
-
-            logger.debug(
-                f"Computed {len(features)} search-product features for '{search_query}' + {product_id}"
-            )
             return features
 
         except Exception as e:
             logger.error(
-                f"Failed to compute search-product features for {search_product_data.get('searchQuery', 'unknown')} + {search_product_data.get('productId', 'unknown')}: {str(e)}"
+                f"Failed to compute optimized search-product features: {str(e)}"
             )
-            return {}
+            return self._get_minimal_default_features(search_product_data, context)
 
-    def _get_empty_search_product_features(
-        self, search_product_data: Dict[str, Any], shop: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Return empty search-product features when no events exist"""
-        return {
-            "shop_id": shop.get("id", ""),
-            "search_query": search_product_data.get("searchQuery", ""),
-            "product_id": search_product_data.get("productId", ""),
-            "impression_count": 0,
-            "click_count": 0,
-            "purchase_count": 0,
-            "avg_position": None,
-            "click_through_rate": None,
-            "conversion_rate": None,
-            "last_occurrence": None,
-        }
-
-    def _extract_session_id(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract session ID from event record"""
-        # clientId is now stored directly in the event record
-        return event.get("client_id")
-
-    def _compute_basic_features(
-        self, search_product_data: Dict[str, Any], shop: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute basic identification features"""
-        return {
-            "shop_id": shop.get("id", ""),
-            "search_query": search_product_data.get("searchQuery", ""),
-            "product_id": search_product_data.get("productId", ""),
-        }
-
-    def _compute_search_metrics(
+    def _compute_search_click_rate(
         self, search_query: str, product_id: str, events: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute search performance metrics from behavioral events"""
-        impression_count = 0
-        click_count = 0
-        purchase_count = 0
-        positions = []
+    ) -> float:
+        """Compute click rate for this product when searched - core relevance signal"""
+        search_impressions = 0
+        search_clicks = 0
 
-        # Group events by session to track search → view → purchase flows
-        sessions = self._group_events_by_session(events)
+        # Track search sessions that led to product interactions
+        search_sessions = self._get_search_sessions(search_query, events)
 
-        for session in sessions:
-            # Find search events with this query in the session
-            search_events = []
+        for session in search_sessions:
+            # Count search impressions (when query was submitted)
+            search_impressions += 1
+
+            # Check if this session had a click on our product
             for event in session:
-                if (
-                    event.get("event_type") in ["search_submitted", "search"]
-                    and self._extract_search_query(event) == search_query
-                ):
-                    search_events.append(event)
+                if self.adapter_factory.extract_product_id(
+                    event
+                ) == product_id and event.get("interactionType") in [
+                    "product_viewed",
+                    "product_added_to_cart",
+                ]:
+                    search_clicks += 1
+                    break  # Only count once per session
 
-            if not search_events:
-                continue  # No search for this query in this session
+        if search_impressions == 0:
+            return 0.0
 
-            # Find product interactions after any search event in this session
-            for i, event in enumerate(session):
-                event_type = event.get("event_type", "")
-                event_product_id = self._extract_product_id(event)
+        click_rate = search_clicks / search_impressions
+        return round(min(1.0, click_rate), 3)
+
+    def _compute_search_conversion_rate(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> float:
+        """Compute conversion rate for search → product → purchase flow"""
+        search_clicks = 0
+        search_conversions = 0
+
+        search_sessions = self._get_search_sessions(search_query, events)
+
+        for session in search_sessions:
+            has_product_interaction = False
+            has_purchase = False
+
+            for event in session:
+                event_product_id = self.adapter_factory.extract_product_id(event)
 
                 if event_product_id == product_id:
-                    # Check if this event happened after a search in the same session
-                    event_time = self._parse_datetime(event.get("timestamp"))
+                    if event.get("interactionType") in [
+                        "product_viewed",
+                        "product_added_to_cart",
+                    ]:
+                        has_product_interaction = True
+                    elif self.adapter_factory.is_purchase_event(event):
+                        has_purchase = True
 
-                    # Find if there was a search before this event in the session
-                    search_before = False
-                    for search_event in search_events:
-                        search_time = self._parse_datetime(
-                            search_event.get("timestamp")
-                        )
-                        if search_time and event_time and search_time <= event_time:
-                            search_before = True
-                            break
+            if has_product_interaction:
+                search_clicks += 1
+                if has_purchase:
+                    search_conversions += 1
 
-                    if search_before:
-                        if event_type in ["product_viewed", "product_view"]:
-                            # This counts as both impression and click
-                            impression_count += 1
-                            click_count += 1
+        if search_clicks == 0:
+            return 0.0
 
-                            # Extract position if available
-                            position = self._extract_search_position(event)
-                            if position:
-                                positions.append(position)
+        conversion_rate = search_conversions / search_clicks
+        return round(min(1.0, conversion_rate), 3)
 
-                        elif event_type in [
-                            "search_result_shown",
-                            "product_impression",
-                        ]:
-                            # Pure impression (shown but not clicked)
-                            impression_count += 1
-
-                            position = self._extract_search_position(event)
-                            if position:
-                                positions.append(position)
-
-                        elif event_type in [
-                            "purchase",
-                            "checkout_completed",
-                            "order_completed",
-                        ]:
-                            # Purchase after search
-                            purchase_count += 1
-
-        # Calculate average position
-        avg_position = statistics.mean(positions) if positions else None
-
-        return {
-            "impression_count": impression_count,
-            "click_count": click_count,
-            "purchase_count": purchase_count,
-            "avg_position": avg_position,
-        }
-
-    def _compute_conversion_rates(self, features: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute conversion rates from metrics"""
-        impressions = features.get("impression_count", 0)
-        clicks = features.get("click_count", 0)
-        purchases = features.get("purchase_count", 0)
-
-        # Click-through rate (clicks / impressions)
-        click_through_rate = (clicks / impressions) if impressions > 0 else None
-
-        # Conversion rate (purchases / clicks)
-        conversion_rate = (purchases / clicks) if clicks > 0 else None
-
-        return {
-            "click_through_rate": click_through_rate,
-            "conversion_rate": conversion_rate,
-        }
-
-    def _compute_temporal_features(
+    def _compute_search_relevance_score(
         self, search_query: str, product_id: str, events: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute temporal features"""
-        last_occurrence = None
+    ) -> float:
+        """Compute overall relevance score combining multiple signals"""
+        click_rate = self._compute_search_click_rate(search_query, product_id, events)
+        conversion_rate = self._compute_search_conversion_rate(
+            search_query, product_id, events
+        )
 
-        # Find the most recent event related to this search query + product combination
-        for event in reversed(sorted(events, key=lambda e: e.get("timestamp", ""))):
-            event_type = event.get("event_type", "")
+        # Weighted combination: clicks matter more for discovery, conversions for quality
+        relevance_score = (click_rate * 0.4) + (conversion_rate * 0.6)
+        return round(relevance_score, 3)
 
-            # Check if this event is related to our search query + product
-            is_search_event = (
-                event_type in ["search_submitted", "search"]
-                and self._extract_search_query(event) == search_query
-            )
+    def _compute_total_search_interactions(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> int:
+        """Count total interactions for this search-product pair"""
+        interaction_count = 0
 
-            is_product_event = self._extract_product_id(
-                event
-            ) == product_id and event_type in [
-                "product_viewed",
-                "product_view",
-                "purchase",
-                "checkout_completed",
-            ]
+        search_sessions = self._get_search_sessions(search_query, events)
 
-            if is_search_event or is_product_event:
-                last_occurrence = self._parse_datetime(event.get("timestamp"))
-                break
+        for session in search_sessions:
+            for event in session:
+                if self.adapter_factory.extract_product_id(
+                    event
+                ) == product_id and event.get("interactionType") in [
+                    "product_viewed",
+                    "product_added_to_cart",
+                    "checkout_completed",
+                ]:
+                    interaction_count += 1
 
-        return {
-            "last_occurrence": last_occurrence,
-        }
+        return interaction_count
+
+    def _compute_search_to_purchase_count(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> int:
+        """Count direct search → purchase conversions"""
+        purchase_count = 0
+
+        search_sessions = self._get_search_sessions(search_query, events)
+
+        for session in search_sessions:
+            has_purchase = False
+            for event in session:
+                if self.adapter_factory.extract_product_id(
+                    event
+                ) == product_id and self.adapter_factory.is_purchase_event(event):
+                    has_purchase = True
+                    break
+
+            if has_purchase:
+                purchase_count += 1
+
+        return purchase_count
+
+    def _compute_days_since_last_interaction(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> Optional[int]:
+        """Days since last search-product interaction - recency signal"""
+        last_interaction_time = None
+
+        search_sessions = self._get_search_sessions(search_query, events)
+
+        for session in search_sessions:
+            for event in session:
+                if self.adapter_factory.extract_product_id(event) == product_id:
+                    event_time = self._parse_datetime(event.get("timestamp"))
+                    if event_time:
+                        if (
+                            not last_interaction_time
+                            or event_time > last_interaction_time
+                        ):
+                            last_interaction_time = event_time
+
+        if not last_interaction_time:
+            return None
+
+        return (now_utc() - last_interaction_time).days
+
+    def _compute_search_recency_score(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> float:
+        """Compute recency score for search-product pair (0-1)"""
+        days_since_last = self._compute_days_since_last_interaction(
+            search_query, product_id, events
+        )
+
+        if days_since_last is None:
+            return 0.0
+
+        # Exponential decay: 1.0 for today, 0.5 for 7 days ago, 0.1 for 30 days ago
+        recency_score = max(0.0, 1.0 - (days_since_last / 30.0))
+        return round(recency_score, 3)
+
+    def _compute_semantic_match_score(
+        self, search_query: str, product_id: str, context: Dict[str, Any]
+    ) -> float:
+        """Compute semantic match between query and product - simplified approach"""
+        # Get product information from context
+        products = context.get("products", [])
+        product_info = next(
+            (p for p in products if p.get("product_id") == product_id), None
+        )
+
+        if not product_info:
+            return 0.0
+
+        # Simple keyword matching approach (can be enhanced with embeddings later)
+        query_words = set(search_query.lower().split())
+
+        # Check product title
+        title = (product_info.get("title", "") or "").lower()
+        title_words = set(title.split())
+
+        # Check product type/category
+        product_type = (product_info.get("productType", "") or "").lower()
+        type_words = set(product_type.split())
+
+        # Check tags
+        tags = product_info.get("tags", [])
+        tag_words = set()
+        for tag in tags:
+            if isinstance(tag, str):
+                tag_words.update(tag.lower().split())
+
+        # Combine all product text
+        all_product_words = title_words | type_words | tag_words
+
+        # Calculate overlap
+        if not query_words or not all_product_words:
+            return 0.0
+
+        overlap = len(query_words & all_product_words)
+        max_possible_overlap = len(query_words)
+
+        match_score = overlap / max_possible_overlap
+        return round(min(1.0, match_score), 3)
+
+    def _compute_search_intent_alignment(
+        self, search_query: str, product_id: str, events: List[Dict[str, Any]]
+    ) -> str:
+        """Determine how well product aligns with search intent"""
+        click_rate = self._compute_search_click_rate(search_query, product_id, events)
+        conversion_rate = self._compute_search_conversion_rate(
+            search_query, product_id, events
+        )
+
+        # Classify intent alignment
+        if conversion_rate >= 0.3:  # 30%+ conversion rate
+            return "high_intent"
+        elif conversion_rate >= 0.1:  # 10-30% conversion rate
+            return "medium_intent"
+        elif click_rate >= 0.2:  # 20%+ click rate but low conversion
+            return "browsing_intent"
+        elif click_rate > 0:  # Some clicks but very low conversion
+            return "low_intent"
+        else:
+            return "no_intent"
+
+    def _get_search_sessions(
+        self, search_query: str, events: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
+        """Get sessions that contain the specified search query"""
+        # Group events by session
+        sessions = self._group_events_by_session(events)
+
+        # Filter sessions that contain our search query
+        search_sessions = []
+        for session in sessions:
+            has_search_query = False
+            for event in session:
+                if (
+                    event.get("interactionType") in ["search_submitted", "search"]
+                    and self._extract_search_query(event) == search_query
+                ):
+                    has_search_query = True
+                    break
+
+            if has_search_query:
+                search_sessions.append(session)
+
+        return search_sessions
 
     def _group_events_by_session(
         self, events: List[Dict[str, Any]]
     ) -> List[List[Dict[str, Any]]]:
-        """Group events into sessions using session timeout and customer/session ID"""
+        """Group events into sessions with 30-minute timeout"""
         if not events:
             return []
 
@@ -271,28 +364,26 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
         sessions = []
         current_session = [sorted_events[0]]
-        current_customer_id = sorted_events[0].get("customer_id")
 
         for i in range(1, len(sorted_events)):
             current_event = sorted_events[i]
             previous_event = sorted_events[i - 1]
 
-            # Check if same customer/session
-            same_customer = current_event.get("customer_id") == current_customer_id
-
             # Check time gap
             current_time = self._parse_datetime(current_event.get("timestamp"))
             previous_time = self._parse_datetime(previous_event.get("timestamp"))
 
-            time_gap_minutes = 0
             if current_time and previous_time:
                 time_gap_minutes = (current_time - previous_time).total_seconds() / 60
 
-            # New session if different customer or > 30 minutes gap
-            if not same_customer or time_gap_minutes > 30:
-                sessions.append(current_session)
-                current_session = [current_event]
-                current_customer_id = current_event.get("customer_id")
+                # New session if > 30 minutes gap or different customer
+                if time_gap_minutes > 30 or current_event.get(
+                    "customer_id"
+                ) != previous_event.get("customer_id"):
+                    sessions.append(current_session)
+                    current_session = [current_event]
+                else:
+                    current_session.append(current_event)
             else:
                 current_session.append(current_event)
 
@@ -300,53 +391,41 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
         return sessions
 
     def _extract_search_query(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract search query from search event"""
-        event_data = event.get("event_data", {})
-        # Event data is already parsed from database (no JSON parsing needed)
+        """Extract search query from event"""
+        return self.adapter_factory.extract_search_query(event)
 
-        # Try different possible field names for search query
-        query = (
-            event_data.get("query")
-            or event_data.get("search_query")
-            or event_data.get("search_term")
-            or event_data.get("q")
-        )
-
-        return query.lower().strip() if query else None
-
-    def _extract_product_id(self, event: Dict[str, Any]) -> Optional[str]:
-        """Extract product ID from event using adapter pattern"""
-        return self.adapter_factory.extract_product_id(event)
-
-    def _extract_search_position(self, event: Dict[str, Any]) -> Optional[int]:
-        """Extract search result position from event"""
-        event_data = event.get("event_data", {})
-        # Event data is already parsed from database (no JSON parsing needed)
-
-        # Try different field names for position
-        position = (
-            event_data.get("position")
-            or event_data.get("search_position")
-            or event_data.get("rank")
-            or event_data.get("index")
-        )
-
-        try:
-            return int(position) if position is not None else None
-        except (ValueError, TypeError):
-            return None
-
-    def _parse_datetime(self, datetime_str: str) -> Optional[datetime]:
-        """Parse datetime string to datetime object"""
+    def _parse_datetime(self, datetime_str: Any) -> Optional[datetime]:
+        """Parse datetime from various formats"""
         if not datetime_str:
             return None
 
-        try:
-            if isinstance(datetime_str, str):
+        if isinstance(datetime_str, datetime):
+            return datetime_str
+
+        if isinstance(datetime_str, str):
+            try:
                 return datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
-            elif isinstance(datetime_str, datetime):
-                return datetime_str
-            else:
+            except:
                 return None
-        except:
-            return None
+
+        return None
+
+    def _get_minimal_default_features(
+        self, search_product_data: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Return minimal default features when computation fails"""
+        return {
+            "shop_id": context.get("shop", {}).get("id", ""),
+            "search_query": search_product_data.get("searchQuery", "").lower().strip(),
+            "product_id": search_product_data.get("productId", ""),
+            "search_click_rate": 0.0,
+            "search_conversion_rate": 0.0,
+            "search_relevance_score": 0.0,
+            "total_search_interactions": 0,
+            "search_to_purchase_count": 0,
+            "days_since_last_search_interaction": None,
+            "search_recency_score": 0.0,
+            "semantic_match_score": 0.0,
+            "search_intent_alignment": "no_intent",
+            "last_computed_at": now_utc(),
+        }
