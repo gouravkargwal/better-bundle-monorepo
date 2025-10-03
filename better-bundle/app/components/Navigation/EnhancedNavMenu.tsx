@@ -5,8 +5,6 @@ import NavItem from "./NavItem";
 export function EnhancedNavMenu() {
   const location = useLocation();
 
-  console.log("🔍 EnhancedNavMenu - rendering with path:", location.pathname);
-
   return (
     <div style={{ padding: "16px 0" }}>
       <NavMenu>

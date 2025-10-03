@@ -20,8 +20,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No product ID found" }, { status: 400 });
     }
 
-    console.log(product, "product ------------------->");
-
     // Publish Kafka event with shop_domain - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {

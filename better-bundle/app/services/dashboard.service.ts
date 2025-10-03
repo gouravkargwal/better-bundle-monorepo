@@ -5,7 +5,6 @@ import { getCacheService, CacheKeys, CacheTTL } from "./redis.service";
 const DEFAULT_CURRENCY = "USD";
 const DEFAULT_MONEY_FORMAT = "${{amount}}";
 const DEFAULT_TOP_PRODUCTS_LIMIT = 10;
-const PERCENTAGE_PRECISION = 100; // For rounding to 2 decimal places
 
 // Enhanced interfaces with better type safety
 export interface DashboardOverview {
@@ -462,7 +461,7 @@ async function getTopProducts(
 
     // Get product titles in a single query
     const productIds = Array.from(productStats.keys());
-    const productTitles = await prisma.productData.findMany({
+    const productTitles = await prisma.product_data.findMany({
       where: { shop_id: shopId, product_id: { in: productIds } },
       select: { product_id: true, title: true },
     });

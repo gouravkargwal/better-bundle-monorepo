@@ -31,17 +31,11 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, redirect } = await authenticate.admin(request);
-  console.log("session", session, "In onboarding route");
   const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
-  console.log(
-    "🔍 Onboarding route - onboarding completed:",
-    onboardingCompleted,
-  );
+
   if (onboardingCompleted) {
-    console.log("✅ Onboarding already completed, redirecting to app");
     throw redirect("/app");
   }
-  console.log("📝 Onboarding not completed, staying on onboarding page");
   return null;
 };
 
@@ -49,30 +43,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin, redirect } = await authenticate.admin(request);
   try {
     const shopData = await getShopInfoFromShopify(admin);
-    // Use atomic transaction to ensure all database operations succeed or fail together
     await prisma.$transaction(async (tx) => {
-      // Step 1: Create/update shop record (idempotent)
       const shop = await createShopAndSetOnboardingCompleted(
         session,
         shopData,
         tx,
       );
 
-      // Step 2: Create/update billing plan (idempotent) - using shop.id from the transaction
-      console.log("💳 Activating trial billing plan...");
       await activateTrialBillingPlan(session.shop, shop, tx);
 
-      // Step 3: Mark onboarding as completed (atomic with other operations)
-      console.log("✅ Marking onboarding as completed...");
       await markOnboardingCompleted(session.shop, tx);
     });
-    console.log("✅ Database transaction completed");
 
     // Step 4: Activate web pixel (critical for tracking)
     try {
-      console.log("🎯 Activating web pixel...");
       await activateAtlasWebPixel(admin, session.shop);
-      console.log("✅ Web pixel activated successfully");
     } catch (error) {
       console.error("❌ Web pixel activation failed:", error);
       throw new Error("Failed to activate web pixel. Please try again.");
@@ -80,15 +65,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Step 5: Trigger analysis (critical for functionality)
     try {
-      console.log("🔍 Triggering full analysis...");
       await triggerFullAnalysis(session.shop);
-      console.log("✅ Analysis triggered successfully");
     } catch (error) {
       console.error("❌ Analysis trigger failed:", error);
       throw new Error("Failed to start analysis. Please try again.");
     }
 
-    console.log("🎉 Onboarding completed successfully, redirecting to app");
     return redirect("/app");
   } catch (error) {
     console.error("Failed to complete onboarding:", error);

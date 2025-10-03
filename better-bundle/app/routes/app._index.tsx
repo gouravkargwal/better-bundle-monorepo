@@ -56,14 +56,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     try {
       dashboardData = await getDashboardOverview(session.shop, "last_30_days");
     } catch (error) {
-      console.log("Could not load dashboard data:", error);
+      console.error("Could not load dashboard data:", error);
       // Continue with null data - overview page will handle this gracefully
     }
 
     // Get overview metrics
     const overviewData = {
       totalRevenue: dashboardData?.overview?.total_revenue || 0,
-      currency: shop.currencyCode || "USD",
+      currency: shop.currency_code || "USD",
       conversionRate: dashboardData?.overview?.conversion_rate || 0,
       totalRecommendations: dashboardData?.overview?.total_recommendations || 0,
       revenueChange: dashboardData?.overview?.revenue_change || null,

@@ -37,8 +37,8 @@ export async function action({ request }: ActionFunctionArgs) {
       where: {
         shop_id: shop,
         status: "pending",
-        // Match by amount and currency
-        amount: parseFloat(chargeData.price),
+        subtotal: parseFloat(chargeData.price),
+
         currency: chargeData.currency,
       },
       orderBy: {
@@ -54,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
           status: "cancelled",
           payment_reference: chargeData.id.toString(),
           billing_metadata: {
-            ...invoice.metadata,
+            ...invoice,
             shopify_charge_id: chargeData.id,
             shopify_charge_status: chargeData.status,
             cancellation_reason: "Charge cancelled",

@@ -24,7 +24,7 @@
     "node": "^18.20 || ^20.10 || >=21.0.0"
   },
   "dependencies": {
-    "@prisma/client": "^6.2.1",
+    "@prisma/client": "^6.16.3",
     "@remix-run/dev": "^2.16.1",
     "@remix-run/fs-routes": "^2.16.1",
     "@remix-run/node": "^2.16.1",
@@ -37,11 +37,10 @@
     "@types/redis": "^4.0.10",
     "currency-symbol-map": "^5.1.0",
     "isbot": "^5.1.0",
-    "prisma": "^6.2.1",
+    "kafkajs": "^2.2.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "redis": "^5.8.2",
-    "kafkajs": "^2.2.4",
     "vite-tsconfig-paths": "^5.0.1"
   },
   "devDependencies": {
@@ -55,6 +54,7 @@
     "eslint": "^8.42.0",
     "eslint-config-prettier": "^10.0.1",
     "prettier": "^3.2.4",
+    "prisma": "^6.16.3",
     "typescript": "^5.2.2",
     "vite": "^6.2.2"
   },

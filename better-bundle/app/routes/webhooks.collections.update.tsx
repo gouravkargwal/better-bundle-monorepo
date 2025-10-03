@@ -14,7 +14,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Extract collection data from payload
     const collection = payload;
     const collectionId = collection.id?.toString();
-    console.log(collection, "collection ------------------->");
 
     if (!collectionId) {
       console.error("❌ No collection ID found in payload");

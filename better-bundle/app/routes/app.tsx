@@ -16,7 +16,6 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  console.log("session", session, "In app layout");
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     session, // Pass session to child routes
@@ -30,10 +29,6 @@ export default function App() {
   // Hide navigation on onboarding page
   const isOnboardingPage = location.pathname === "/app/onboarding";
   const showNavigation = !isOnboardingPage;
-
-  console.log("🔍 App layout - current path:", location.pathname);
-  console.log("🔍 App layout - isOnboardingPage:", isOnboardingPage);
-  console.log("🔍 App layout - showNavigation:", showNavigation);
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
