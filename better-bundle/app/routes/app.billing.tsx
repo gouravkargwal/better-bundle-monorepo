@@ -42,6 +42,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         effective_until: true,
         created_at: true,
         updated_at: true,
+        trial_revenue: true,
+        trial_threshold: true,
+        is_trial_active: true,
       },
     });
 
@@ -84,21 +87,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         effective_from: billingPlan.effective_from.toISOString(),
         currency: shopRecord.currency_code,
         trial_status: {
-          is_trial_active:
-            (billingPlan.configuration as any)?.trial_active || false,
-          trial_threshold:
-            (billingPlan.configuration as any)?.trial_threshold || 200,
-          trial_revenue: (billingPlan.configuration as any)?.trial_revenue || 0,
+          is_trial_active: billingPlan.is_trial_active || false,
+          trial_threshold: Number(billingPlan.trial_threshold) || 200,
+          trial_revenue: Number(billingPlan.trial_revenue) || 0,
           remaining_revenue: Math.max(
             0,
-            ((billingPlan.configuration as any)?.trial_threshold || 200) -
-              ((billingPlan.configuration as any)?.trial_revenue || 0),
+            (Number(billingPlan.trial_threshold) || 200) -
+              (Number(billingPlan.trial_revenue) || 0),
           ),
           trial_progress:
-            ((billingPlan.configuration as any)?.trial_threshold || 200) > 0
-              ? (((billingPlan.configuration as any)?.trial_revenue || 0) /
-                  ((billingPlan.configuration as any)?.trial_threshold ||
-                    200)) *
+            (Number(billingPlan.trial_threshold) || 200) > 0
+              ? ((Number(billingPlan.trial_revenue) || 0) /
+                  (Number(billingPlan.trial_threshold) || 200)) *
                 100
               : 0,
         },
