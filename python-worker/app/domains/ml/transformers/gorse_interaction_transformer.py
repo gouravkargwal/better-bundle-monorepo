@@ -471,7 +471,6 @@ class GorseInteractionTransformer:
                 )
                 all_feedback.extend(pair_feedback)
 
-            logger.info(f"Generated {len(all_feedback)} contextual feedback items")
             return all_feedback
 
         except Exception as e:
@@ -698,7 +697,6 @@ class GorseInteractionTransformer:
                 logger.error(f"Failed to transform session features: {str(e)}")
                 continue
 
-        logger.info(f"Transformed {len(all_labels)} session features to labels")
         return all_labels
 
     def transform_search_product_features_batch_to_labels(
@@ -729,7 +727,6 @@ class GorseInteractionTransformer:
                 logger.error(f"Failed to transform search-product features: {str(e)}")
                 continue
 
-        logger.info(f"Transformed {len(all_labels)} search-product features to labels")
         return all_labels
 
     def transform_product_pair_features_batch_to_labels(
@@ -758,7 +755,6 @@ class GorseInteractionTransformer:
                 logger.error(f"Failed to transform product-pair features: {str(e)}")
                 continue
 
-        logger.info(f"Transformed {len(all_labels)} product-pair features to labels")
         return all_labels
 
     # ===== QUALITY CONTROL =====

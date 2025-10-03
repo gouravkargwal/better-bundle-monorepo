@@ -83,9 +83,6 @@ class GorseItemTransformer:
             if gorse_item:
                 gorse_items.append(gorse_item)
 
-        logger.info(
-            f"Transformed {len(gorse_items)} products with comprehensive features for shop {shop_id}"
-        )
         return gorse_items
 
     def _convert_to_comprehensive_labels(
@@ -548,7 +545,4 @@ class GorseItemTransformer:
             if gorse_item:
                 gorse_items.append(gorse_item)
 
-        logger.info(
-            f"Transformed {len(gorse_items)} products with comprehensive features + predictive labels for shop {shop_id}"
-        )
         return gorse_items

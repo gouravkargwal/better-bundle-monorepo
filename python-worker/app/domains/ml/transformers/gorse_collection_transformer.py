@@ -1,15 +1,3 @@
-"""
-Gorse Collection Transformer - STATE-OF-THE-ART VERSION
-Transforms optimized collection features to Gorse item objects with advanced labeling
-
-Key improvements:
-- Uses ALL optimized collection features from CollectionFeatureGenerator
-- Engagement-quality focused labeling with predictive signals
-- Business value optimization for revenue-driven recommendations
-- Lifecycle-aware collection segmentation
-- Curation quality assessment for strategic positioning
-"""
-
 from typing import Dict, Any, List, Optional
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -69,10 +57,6 @@ class GorseCollectionTransformer:
                 "Comment": f"Collection: {collection_id} (using ALL optimized features)",
             }
 
-            logger.debug(
-                f"Transformed collection {collection_id} with {len(labels)} comprehensive labels"
-            )
-
             return collection_item
 
         except Exception as e:
@@ -90,9 +74,6 @@ class GorseCollectionTransformer:
             if gorse_item:
                 gorse_items.append(gorse_item)
 
-        logger.info(
-            f"Transformed {len(gorse_items)} collections with comprehensive features for shop {shop_id}"
-        )
         return gorse_items
 
     def _convert_to_comprehensive_labels(
@@ -667,9 +648,6 @@ class GorseCollectionTransformer:
             if gorse_item:
                 gorse_items.append(gorse_item)
 
-        logger.info(
-            f"Transformed {len(gorse_items)} collections with comprehensive features + predictive + BI labels for shop {shop_id}"
-        )
         return gorse_items
 
     # ===== COLLECTION PERFORMANCE ANALYSIS =====

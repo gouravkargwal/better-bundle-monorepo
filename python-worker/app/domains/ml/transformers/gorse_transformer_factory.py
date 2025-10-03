@@ -105,4 +105,4 @@ class GorseTransformerFactory:
         cls._feedback_transformer = None
         cls._collection_transformer = None
         cls._interaction_transformer = None
-        logger.info("Reset all transformer instances")
+        logger.debug("Reset all transformer instances")

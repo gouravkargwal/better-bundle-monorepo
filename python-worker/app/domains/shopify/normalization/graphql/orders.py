@@ -102,8 +102,8 @@ class GraphQLOrderAdapter(BaseAdapter):
                 if not currency_code:
                     currency_code = shop_money.get("currency_code")
 
-            # Map customAttributes (array of {key, value}) into a dict for properties
-            custom_attrs = node.get("customAttributes") or []
+            # Map custom_attributes (array of {key, value}) into a dict for properties
+            custom_attrs = node.get("custom_attributes") or []
             props_dict: Dict[str, Any] = {}
             try:
                 for attr in custom_attrs:

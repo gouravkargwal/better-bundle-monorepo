@@ -1,16 +1,3 @@
-"""
-Gorse Feedback Transformer - STATE-OF-THE-ART VERSION
-Transforms interactions/orders to Gorse feedback objects with advanced weighting strategies
-
-Key improvements:
-- Research-backed feedback weighting (Hu et al. ICDM paper)
-- Confidence-based implicit feedback modeling
-- Temporal decay for relevance
-- Quality-aware feedback signals using ALL optimized interaction features
-- Business value optimization
-- Session and search-product feedback integration
-"""
-
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from app.core.logging import get_logger
@@ -642,9 +629,6 @@ class GorseFeedbackTransformer:
         # Sort by timestamp for better Gorse ingestion
         all_feedback.sort(key=lambda x: x.get("Timestamp", ""))
 
-        logger.info(
-            f"Transformed {len(orders_list)} orders to {len(all_feedback)} weighted feedback items"
-        )
         return all_feedback
 
     def transform_optimized_features_batch_to_feedback(
@@ -663,9 +647,6 @@ class GorseFeedbackTransformer:
         # Sort by feedback value (highest quality first)
         feedback_list.sort(key=lambda x: x.get("Value", 0), reverse=True)
 
-        logger.info(
-            f"Transformed {len(interaction_features_list)} optimized features to {len(feedback_list)} ultra-high-quality feedback items"
-        )
         return feedback_list
 
     def transform_session_features_batch_to_feedback(
@@ -680,9 +661,6 @@ class GorseFeedbackTransformer:
             )
             all_feedback.extend(feedback_list)
 
-        logger.info(
-            f"Transformed {len(session_features_list)} session features to {len(all_feedback)} session feedback items"
-        )
         return all_feedback
 
     def transform_search_features_batch_to_feedback(
@@ -698,9 +676,6 @@ class GorseFeedbackTransformer:
             if feedback:
                 feedback_list.append(feedback)
 
-        logger.info(
-            f"Transformed {len(search_features_list)} search features to {len(feedback_list)} search feedback items"
-        )
         return feedback_list
 
     def transform_product_pair_batch_to_similarity_feedback(
@@ -719,9 +694,6 @@ class GorseFeedbackTransformer:
                 else:
                     all_feedback.append(feedback)
 
-        logger.info(
-            f"Transformed {len(pair_features_list)} product pairs to {len(all_feedback)} similarity feedback items"
-        )
         return all_feedback
 
     # ===== COMPREHENSIVE FEEDBACK GENERATION =====
@@ -789,10 +761,6 @@ class GorseFeedbackTransformer:
             # Filter high quality feedback
             high_quality_feedback = self.filter_high_quality_feedback(
                 all_feedback, min_confidence=0.1
-            )
-
-            logger.info(
-                f"Generated comprehensive feedback: {len(high_quality_feedback)} high-quality items from {len(all_feedback)} total items"
             )
 
             return high_quality_feedback

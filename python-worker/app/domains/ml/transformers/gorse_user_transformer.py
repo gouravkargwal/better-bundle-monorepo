@@ -1,16 +1,3 @@
-"""
-Gorse User Transformer - STATE-OF-THE-ART VERSION
-Transforms optimized user features from CustomerBehaviorFeatureGenerator to Gorse user objects
-
-Key improvements:
-- Uses ALL 12 optimized user features from CustomerBehaviorFeatureGenerator
-- Enhanced behavioral lifecycle stages with predictive signals
-- Churn risk integration for proactive customer retention
-- Intent-based segmentation for immediate actionability
-- Advanced business value optimization
-- Comprehensive label validation and quality control
-"""
-
 from typing import Dict, Any, List, Optional
 import math
 from app.core.logging import get_logger
@@ -58,10 +45,6 @@ class GorseUserTransformer:
                 "Comment": f"Customer: {customer_id} (using CustomerBehaviorFeatureGenerator features)",
             }
 
-            logger.debug(
-                f"Transformed user {customer_id} with {len(labels)} comprehensive labels from CustomerBehaviorFeatureGenerator"
-            )
-
             return user_object
 
         except Exception as e:
@@ -81,7 +64,7 @@ class GorseUserTransformer:
             if gorse_user:
                 gorse_users.append(gorse_user)
 
-        logger.info(
+        logger.debug(
             f"Transformed {len(gorse_users)} users with CustomerBehaviorFeatureGenerator features for shop {shop_id}"
         )
         return gorse_users
