@@ -168,7 +168,7 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
             interaction_type=request.interaction_type,
             shop_id=request.shop_id,
             customer_id=request.customer_id,
-            metadata=enhanced_metadata,
+            interaction_metadata=enhanced_metadata,
         )
 
         if not interaction:
@@ -223,7 +223,7 @@ async def track_apollo_post_purchase_view(
             customer_id=customer_id,
             shop_id=shop_id,
             order_id=order_id,
-            metadata={
+            interaction_metadata={
                 "order_total": order_total,
                 "order_currency": order_currency,
                 "page_type": page_type,
@@ -282,7 +282,7 @@ async def track_apollo_recommendation_view(
             recommendation_id=recommendation_id,
             recommendation_position=recommendation_position,
             recommendation_algorithm=recommendation_algorithm,
-            metadata={
+            interaction_metadata={
                 "recommendation_type": recommendation_type,
                 "source": "apollo_post_purchase",
             },
@@ -343,7 +343,7 @@ async def track_apollo_recommendation_click(
             recommendation_id=recommendation_id,
             recommendation_position=recommendation_position,
             recommendation_algorithm=recommendation_algorithm,
-            metadata={
+            interaction_metadata={
                 "recommendation_type": recommendation_type,
                 "source": "apollo_post_purchase",
             },
@@ -407,7 +407,10 @@ async def track_apollo_upsell_purchase(
             recommendation_id=recommendation_id,
             recommendation_position=recommendation_position,
             recommendation_algorithm=recommendation_algorithm,
-            metadata={"upsell_type": upsell_type, "source": "apollo_post_purchase"},
+            interaction_metadata={
+                "upsell_type": upsell_type,
+                "source": "apollo_post_purchase",
+            },
         )
 
         logger.info(f"Apollo upsell purchase tracked: {interaction.id}")
@@ -522,7 +525,7 @@ async def track_apollo_customer_feedback(
             shop_id=shop_id,
             product_id=product_id,
             order_id=order_id,
-            metadata={
+            interaction_metadata={
                 "feedback_type": feedback_type,
                 "feedback_value": feedback_value,
                 "rating": rating,
@@ -576,7 +579,7 @@ async def track_apollo_email_signup(
             customer_id=customer_id,
             shop_id=shop_id,
             order_id=order_id,
-            metadata={
+            interaction_metadata={
                 "email": email,
                 "signup_type": signup_type,
                 "source": "apollo_post_purchase",

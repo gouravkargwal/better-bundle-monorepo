@@ -177,14 +177,6 @@ class UnifiedGorseService:
             ).total_seconds()
             results["total_items_synced"] = total_synced
 
-            # Log comprehensive summary
-            logger.info(
-                f"Comprehensive Gorse sync completed for shop {shop_id}: "
-                f"Total items: {total_synced}, "
-                f"Feature utilization: {results['feature_utilization'].get('overall_utilization', 0):.1%}, "
-                f"Duration: {results['duration_seconds']:.2f}s"
-            )
-
             return results
 
         except Exception as e:
@@ -250,9 +242,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} users with ALL 12 optimized features to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -301,9 +290,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} products with ALL 12 optimized features to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -348,9 +334,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} collections with ALL optimized features to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -400,9 +383,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} interaction features (using ALL 10 features) to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -449,7 +429,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} session-based feedback items to Gorse")
             return total_synced
 
         except Exception as e:
@@ -496,9 +475,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} search-product relevance feedback items to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -547,9 +523,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(
-                f"Synced {total_synced} product similarity feedback items to Gorse"
-            )
             return total_synced
 
         except Exception as e:
@@ -598,7 +571,6 @@ class UnifiedGorseService:
 
                     offset += self.batch_size
 
-            logger.info(f"Synced {total_synced} order feedback items to Gorse")
             return total_synced
 
         except Exception as e:
@@ -689,7 +661,6 @@ class UnifiedGorseService:
                         )
                     )
 
-            logger.info(f"Generated all feedback types for shop {shop_id}")
             return all_feedback_types
 
         except Exception as e:
@@ -789,12 +760,6 @@ class UnifiedGorseService:
                         label_distribution.get(label_type, 0) + 1
                     )
 
-            logger.info(
-                f"User labels: avg {avg_labels:.1f} per user, "
-                f"types: {len(label_distribution)}, "
-                f"distribution: {dict(sorted(label_distribution.items(), key=lambda x: x[1], reverse=True)[:5])}"
-            )
-
         except Exception as e:
             logger.error(f"Failed to track user label stats: {str(e)}")
 
@@ -813,12 +778,6 @@ class UnifiedGorseService:
                         label_distribution.get(label_type, 0) + 1
                     )
 
-            logger.info(
-                f"Product labels: avg {avg_labels:.1f} per product, "
-                f"types: {len(label_distribution)}, "
-                f"distribution: {dict(sorted(label_distribution.items(), key=lambda x: x[1], reverse=True)[:5])}"
-            )
-
         except Exception as e:
             logger.error(f"Failed to track product label stats: {str(e)}")
 
@@ -827,13 +786,6 @@ class UnifiedGorseService:
     async def trigger_comprehensive_training(self, shop_id: str) -> Dict[str, Any]:
         """Trigger comprehensive training with optimized parameters"""
         try:
-            # In Gorse, training is automatically triggered when data is inserted
-            # We don't need to manually trigger training or update config
-            # The comprehensive sync process already triggers training automatically
-
-            logger.info(
-                f"Training will be automatically triggered by data sync for shop {shop_id}"
-            )
 
             return {
                 "shop_id": shop_id,
@@ -1008,19 +960,16 @@ class UnifiedGorseService:
         """
         Legacy method that now calls comprehensive sync for backward compatibility
         """
-        logger.info(f"Using comprehensive sync for legacy sync_and_train call")
         return await self.comprehensive_sync_and_train(shop_id)
 
     async def get_training_status(self, shop_id: str) -> Dict[str, Any]:
         """
         Legacy method that now calls comprehensive training status
         """
-        logger.info(f"Using comprehensive training status for legacy call")
         return await self.get_comprehensive_training_status(shop_id)
 
     async def trigger_manual_training(self, shop_id: str) -> Dict[str, Any]:
         """
         Legacy method that now calls comprehensive training
         """
-        logger.info(f"Using comprehensive training for legacy manual training call")
         return await self.trigger_comprehensive_training(shop_id)

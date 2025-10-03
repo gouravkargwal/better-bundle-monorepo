@@ -71,7 +71,6 @@ class GorseApiClient:
                 return {"success": False, "error": "No valid users", "count": 0}
 
             url = f"{self.base_url}/api/users"
-            logger.info(f"Inserting {len(valid_users)} users to Gorse")
 
             # Retry loop
             attempt = 0
@@ -100,10 +99,6 @@ class GorseApiClient:
             if response and response.status_code == 200:
                 result = response.json()
                 row_affected = result.get("RowAffected", 0)
-
-                logger.info(
-                    f"Successfully inserted {row_affected} users to Gorse (sent {len(valid_users)})"
-                )
 
                 return {
                     "success": True,
@@ -158,7 +153,6 @@ class GorseApiClient:
                 return {"success": False, "error": "No valid items", "count": 0}
 
             url = f"{self.base_url}/api/items"
-            logger.info(f"Inserting {len(valid_items)} items to Gorse")
 
             # Retry loop
             attempt = 0
@@ -187,10 +181,6 @@ class GorseApiClient:
             if response and response.status_code == 200:
                 result = response.json()
                 row_affected = result.get("RowAffected", 0)
-
-                logger.info(
-                    f"Successfully inserted {row_affected} items to Gorse (sent {len(valid_items)})"
-                )
 
                 return {
                     "success": True,
@@ -251,7 +241,6 @@ class GorseApiClient:
                 return {"success": False, "error": "No valid feedback", "count": 0}
 
             url = f"{self.base_url}/api/feedback"
-            logger.info(f"Inserting {len(valid_feedback)} feedback records to Gorse")
 
             # Retry loop
             attempt = 0
@@ -280,10 +269,6 @@ class GorseApiClient:
             if response and response.status_code == 200:
                 result = response.json()
                 row_affected = result.get("RowAffected", 0)
-
-                logger.info(
-                    f"Successfully inserted {row_affected} feedback records to Gorse (sent {len(valid_feedback)})"
-                )
 
                 return {
                     "success": True,
@@ -663,7 +648,6 @@ class GorseApiClient:
 
             # Gorse returns a list of user IDs with scores
             if isinstance(result, list):
-                logger.info(f"Found {len(result)} user neighbors for user {user_id}")
                 return {
                     "success": True,
                     "neighbors": result,

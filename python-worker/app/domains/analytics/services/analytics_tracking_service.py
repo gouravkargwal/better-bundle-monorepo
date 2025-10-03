@@ -49,7 +49,7 @@ class AnalyticsTrackingService:
         interaction_type: InteractionType,
         shop_id: str,
         customer_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        interaction_metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[UserInteraction]:
         """
         Track a user interaction across any extension
@@ -60,7 +60,7 @@ class AnalyticsTrackingService:
             interaction_type: Type of interaction
             shop_id: Shop identifier
             customer_id: Customer identifier (optional)
-            metadata: Additional metadata (optional)
+            interaction_metadata: Additional metadata (optional)
 
         Returns:
             UserInteraction: Created interaction record
@@ -84,7 +84,7 @@ class AnalyticsTrackingService:
                 interaction_type=interaction_type,
                 customer_id=customer_id,
                 shop_id=shop_id,
-                metadata=metadata or {},
+                interaction_metadata=interaction_metadata or {},
             )
 
             # Save interaction to database
@@ -492,7 +492,7 @@ class AnalyticsTrackingService:
             job_id = f"analytics_triggered_{shop_id}_{int(utcnow().timestamp())}"
 
             # Prepare event metadata
-            metadata = {
+            interaction_metadata = {
                 "batch_size": batch_size,
                 "incremental": incremental,
                 "trigger_source": trigger_source,
@@ -506,7 +506,7 @@ class AnalyticsTrackingService:
                 "job_id": job_id,
                 "shop_id": shop_id,
                 "features_ready": False,  # Need to be computed
-                "metadata": metadata,
+                "interaction_metadata": interaction_metadata,
                 "event_type": "feature_computation",
                 "data_type": "interactions",
                 "timestamp": utcnow().isoformat(),
@@ -557,7 +557,7 @@ class AnalyticsTrackingService:
                     "event_type": "customer_linking",
                     "trigger_session_id": session_id,
                     "linked_sessions": None,
-                    "metadata": {
+                    "interaction_metadata": {
                         "session_id": session_id,
                         "source": "analytics_tracking_service",
                     },

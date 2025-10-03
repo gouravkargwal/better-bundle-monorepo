@@ -46,7 +46,7 @@ class UserInteraction(BaseModel):
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     shop_id: str = Field(..., description="Shop identifier")
 
-    metadata: Dict[str, Any] = Field(
+    interaction_metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional interaction metadata"
     )
 
@@ -67,7 +67,7 @@ class InteractionCreate(BaseModel):
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     shop_id: str = Field(..., description="Shop identifier")
 
-    metadata: Dict[str, Any] = Field(
+    interaction_metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional interaction metadata"
     )
 

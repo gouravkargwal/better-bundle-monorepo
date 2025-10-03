@@ -149,7 +149,7 @@ async def track_venus_interaction(request: VenusInteractionRequest):
             interaction_type=request.interaction_type,
             shop_id=shop_id,
             customer_id=request.customer_id,
-            metadata=enhanced_metadata,
+            interaction_metadata=enhanced_metadata,
         )
 
         if not interaction:

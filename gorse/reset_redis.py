@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 
 # Redis connection details
-REDIS_CONFIG = {"host": "10.80.138.89", "port": 6379, "db": 0, "decode_responses": True}
+REDIS_CONFIG = {"host": "127.0.0.1", "port": 6379, "db": 0, "decode_responses": True}
 
 
 def reset_redis_database():
