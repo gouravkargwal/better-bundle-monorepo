@@ -97,6 +97,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                     quantity
                                     original_unit_original_unit_price: originalUnitPrice
                                     sku
+                                    customAttributes {
+                                        key
+                                        value
+                                    }
                                     variant {
                                         id
                                     }
@@ -254,6 +258,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             quantity
                             original_unit_price: originalUnitPrice
                             sku
+                            custom_attributes: customAttributes {
+                                key
+                                value
+                            }
                             variant {
                                 id
                             }
@@ -331,6 +339,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             quantity
                             original_unit_price: originalUnitPrice
                             sku
+                            custom_attributes: customAttributes {
+                                key
+                                value
+                            }
                             variant {
                                 id
                             }
