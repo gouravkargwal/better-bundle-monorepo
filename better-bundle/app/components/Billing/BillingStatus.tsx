@@ -1,4 +1,18 @@
-import { Banner, BlockStack, ProgressBar, Text } from "@shopify/polaris";
+import {
+  Banner,
+  BlockStack,
+  ProgressBar,
+  Text,
+  InlineStack,
+  Icon,
+  Card,
+} from "@shopify/polaris";
+import {
+  CashDollarIcon,
+  StarFilledIcon,
+  AlertTriangleIcon,
+  CheckCircleIcon,
+} from "@shopify/polaris-icons";
 
 export function BillingStatus({
   billingData,
@@ -36,8 +50,8 @@ export function BillingStatus({
   };
 
   return (
-    <BlockStack gap="300">
-      {/* Billing Plan Overview */}
+    <BlockStack gap="400">
+      {/* Billing Plan Hero Section */}
       <div
         style={{
           padding: "24px 20px",
@@ -67,7 +81,7 @@ export function BillingStatus({
                 fontSize: "12px",
               }}
             >
-              💳 Billing Dashboard
+              💳 Billing Plan
             </div>
           </div>
 
@@ -201,445 +215,480 @@ export function BillingStatus({
               zIndex: 1,
             }}
           />
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "-50px",
-              width: "100px",
-              height: "100px",
-              background: "rgba(255,255,255,0.03)",
-              borderRadius: "50%",
-              zIndex: 1,
-            }}
-          />
         </div>
       </div>
 
       {/* Trial Status */}
       {safeTrialStatus.is_trial_active ? (
-        <div
-          style={{
-            padding: "24px 20px",
-            background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
-            borderRadius: "16px",
-            color: "white",
-            textAlign: "center",
-            position: "relative",
-            overflow: "hidden",
-            boxShadow:
-              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
-          }}
-        >
-          <div style={{ position: "relative", zIndex: 2 }}>
-            <div style={{ marginBottom: "12px" }}>
-              <div
-                style={{
-                  display: "inline-block",
-                  padding: "6px 12px",
-                  backgroundColor: "rgba(255, 255, 255, 0.2)",
-                  border: "1px solid rgba(255, 255, 255, 0.3)",
-                  color: "white",
-                  fontWeight: "600",
-                  borderRadius: "6px",
-                  fontSize: "12px",
-                }}
-              >
-                🎉 Free Trial Active
-              </div>
+        <BlockStack gap="400">
+          <div
+            style={{
+              padding: "24px",
+              backgroundColor: "#F8FAFC",
+              borderRadius: "12px",
+              border: "1px solid #E2E8F0",
+            }}
+          >
+            <div style={{ color: "#1E293B" }}>
+              <Text as="h2" variant="headingLg" fontWeight="bold">
+                Free Trial Active
+              </Text>
             </div>
-
-            <div
-              style={{
-                fontSize: "2rem",
-                lineHeight: "1.2",
-                marginBottom: "8px",
-                background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                fontWeight: "bold",
-              }}
-            >
-              Trial Progress
+            <div style={{ marginTop: "8px" }}>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Track your trial progress and remaining revenue needed
+              </Text>
             </div>
+          </div>
 
-            <div
-              style={{
-                marginBottom: "12px",
-                maxWidth: "500px",
-                margin: "0 auto 12px",
-              }}
-            >
-              <div
-                style={{
-                  color: "rgba(255,255,255,0.95)",
-                  lineHeight: "1.4",
-                  fontWeight: "500",
-                  fontSize: "1rem",
-                }}
-              >
-                Generate{" "}
-                {formatCurrency(
-                  safeTrialStatus.remaining_revenue,
-                  plan.currency,
-                )}{" "}
-                more in attributed revenue to start billing
-              </div>
-            </div>
-
-            <div
-              style={{
-                marginBottom: "16px",
-                padding: "16px",
-                backgroundColor: "rgba(255,255,255,0.12)",
-                borderRadius: "12px",
-                border: "1px solid rgba(255,255,255,0.2)",
-                backdropFilter: "blur(10px)",
-                maxWidth: "400px",
-                margin: "0 auto 16px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                  marginBottom: "12px",
-                }}
-              >
-                <div
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    backgroundColor: "rgba(255, 255, 255, 0.2)",
-                    borderRadius: "8px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    📊
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: "1.25rem",
-                    fontWeight: "bold",
-                    color: "white",
-                  }}
-                >
-                  Progress: {Math.round(safeTrialStatus.trial_progress)}%
-                  Complete
-                </div>
-              </div>
+          <div
+            style={{
+              padding: "24px",
+              backgroundColor: "#F8FAFC",
+              borderRadius: "12px",
+              border: "1px solid #E2E8F0",
+            }}
+          >
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingMd">
+                  Trial Progress
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  {Math.round(safeTrialStatus.trial_progress)}% Complete
+                </Text>
+              </InlineStack>
 
               <ProgressBar
                 progress={safeTrialStatus.trial_progress}
                 size="large"
               />
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "16px",
-                  marginTop: "20px",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Current Revenue
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatCurrency(
-                      safeTrialStatus.trial_revenue,
-                      plan.currency,
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Trial Threshold
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatCurrency(
-                      safeTrialStatus.trial_threshold,
-                      plan.currency,
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.7)",
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    (Equivalent to $200 USD)
-                  </div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Remaining
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatCurrency(
-                      safeTrialStatus.remaining_revenue,
-                      plan.currency,
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Enhanced Decorative elements */}
-            <div
-              style={{
-                position: "absolute",
-                top: "-100px",
-                right: "-100px",
-                width: "300px",
-                height: "300px",
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)",
-                borderRadius: "50%",
-                zIndex: 1,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                bottom: "-80px",
-                left: "-80px",
-                width: "250px",
-                height: "250px",
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)",
-                borderRadius: "50%",
-                zIndex: 1,
-              }}
-            />
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Generate{" "}
+                {formatCurrency(
+                  safeTrialStatus.remaining_revenue,
+                  plan.currency,
+                )}{" "}
+                more in attributed revenue to start billing
+              </Text>
+            </BlockStack>
           </div>
-        </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            <div
+              style={{
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Current Revenue
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#10B98115",
+                          borderRadius: "16px",
+                          border: "2px solid #10B98130",
+                        }}
+                      >
+                        <Icon source={CashDollarIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#10B981" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          {formatCurrency(
+                            safeTrialStatus.trial_revenue,
+                            plan.currency,
+                          )}
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </Card>
+            </div>
+
+            <div
+              style={{
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Trial Threshold
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          (Equivalent to $200 USD)
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#3B82F615",
+                          borderRadius: "16px",
+                          border: "2px solid #3B82F630",
+                        }}
+                      >
+                        <Icon source={StarFilledIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#3B82F6" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          {formatCurrency(
+                            safeTrialStatus.trial_threshold,
+                            plan.currency,
+                          )}
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </Card>
+            </div>
+
+            <div
+              style={{
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Remaining
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#F59E0B15",
+                          borderRadius: "16px",
+                          border: "2px solid #F59E0B30",
+                        }}
+                      >
+                        <Icon source={AlertTriangleIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#F59E0B" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          {formatCurrency(
+                            safeTrialStatus.remaining_revenue,
+                            plan.currency,
+                          )}
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </Card>
+            </div>
+          </div>
+        </BlockStack>
       ) : (
-        <div
-          style={{
-            padding: "24px 20px",
-            background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
-            borderRadius: "16px",
-            color: "white",
-            textAlign: "center",
-            position: "relative",
-            overflow: "hidden",
-            boxShadow:
-              "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
-          }}
-        >
-          <div style={{ position: "relative", zIndex: 2 }}>
-            <div style={{ marginBottom: "16px" }}>
-              <div
-                style={{
-                  display: "inline-block",
-                  padding: "8px 16px",
-                  backgroundColor: "rgba(255, 255, 255, 0.2)",
-                  border: "1px solid rgba(255, 255, 255, 0.3)",
-                  color: "white",
-                  fontWeight: "600",
-                  borderRadius: "8px",
-                  fontSize: "14px",
-                }}
-              >
-                💰 Trial Completed - Billing Active
-              </div>
+        <BlockStack gap="400">
+          <div
+            style={{
+              padding: "24px",
+              backgroundColor: "#F8FAFC",
+              borderRadius: "12px",
+              border: "1px solid #E2E8F0",
+            }}
+          >
+            <div style={{ color: "#1E293B" }}>
+              <Text as="h2" variant="headingLg" fontWeight="bold">
+                Trial Completed - Billing Active
+              </Text>
             </div>
-
-            <div
-              style={{
-                fontSize: "2.5rem",
-                lineHeight: "1.1",
-                marginBottom: "16px",
-                background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                fontWeight: "bold",
-              }}
-            >
-              Billing Active
-            </div>
-
-            <div
-              style={{
-                marginBottom: "20px",
-                maxWidth: "600px",
-                margin: "0 auto 20px",
-              }}
-            >
-              <div
-                style={{
-                  color: "rgba(255,255,255,0.95)",
-                  lineHeight: "1.6",
-                  fontWeight: "500",
-                  fontSize: "1.25rem",
-                }}
-              >
+            <div style={{ marginTop: "8px" }}>
+              <Text as="p" variant="bodyMd" tone="subdued">
                 Your trial has ended. You're now being charged 3% of attributed
                 revenue.
-              </div>
+              </Text>
             </div>
+          </div>
 
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "16px",
+            }}
+          >
             <div
               style={{
-                marginBottom: "24px",
-                padding: "20px",
-                backgroundColor: "rgba(255,255,255,0.12)",
-                borderRadius: "16px",
-                border: "1px solid rgba(255,255,255,0.2)",
-                backdropFilter: "blur(10px)",
-                maxWidth: "500px",
-                margin: "0 auto 24px",
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
               }}
             >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "16px",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Trial Revenue
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatCurrency(
-                      safeTrialStatus.trial_revenue,
-                      plan.currency,
-                    )}
-                  </div>
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Trial Revenue
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#10B98115",
+                          borderRadius: "16px",
+                          border: "2px solid #10B98130",
+                        }}
+                      >
+                        <Icon source={CashDollarIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#10B981" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          {formatCurrency(
+                            safeTrialStatus.trial_revenue,
+                            plan.currency,
+                          )}
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
                 </div>
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Billing Rate
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    3%
-                  </div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.8)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Status
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "1.125rem",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    Active
-                  </div>
-                </div>
-              </div>
+              </Card>
             </div>
 
-            {/* Enhanced Decorative elements */}
             <div
               style={{
-                position: "absolute",
-                top: "-100px",
-                right: "-100px",
-                width: "300px",
-                height: "300px",
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)",
-                borderRadius: "50%",
-                zIndex: 1,
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
               }}
-            />
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Billing Rate
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#3B82F615",
+                          borderRadius: "16px",
+                          border: "2px solid #3B82F630",
+                        }}
+                      >
+                        <Icon source={StarFilledIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#3B82F6" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          3%
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </Card>
+            </div>
+
             <div
               style={{
-                position: "absolute",
-                bottom: "-80px",
-                left: "-80px",
-                width: "250px",
-                height: "250px",
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)",
-                borderRadius: "50%",
-                zIndex: 1,
+                transition: "all 0.2s ease-in-out",
+                cursor: "pointer",
+                borderRadius: "8px",
+                overflow: "hidden",
               }}
-            />
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 30px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            >
+              <Card>
+                <div style={{ minHeight: "120px", padding: "4px" }}>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="100">
+                        <Text
+                          as="h3"
+                          variant="headingSm"
+                          tone="subdued"
+                          fontWeight="medium"
+                        >
+                          Status
+                        </Text>
+                      </BlockStack>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          padding: "12px",
+                          backgroundColor: "#10B98115",
+                          borderRadius: "16px",
+                          border: "2px solid #10B98130",
+                        }}
+                      >
+                        <Icon source={CheckCircleIcon} tone="base" />
+                      </div>
+                    </InlineStack>
+
+                    <InlineStack align="space-between" blockAlign="center">
+                      <div style={{ color: "#10B981" }}>
+                        <Text as="p" variant="headingLg" fontWeight="bold">
+                          Active
+                        </Text>
+                      </div>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </Card>
+            </div>
           </div>
-        </div>
+        </BlockStack>
       )}
     </BlockStack>
   );
