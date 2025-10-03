@@ -46,11 +46,19 @@ export async function action({ request }: ActionFunctionArgs) {
       await prisma.billing_plans.update({
         where: { id: billingPlan.id },
         data: {
-          billing_metadata: {
-            ...billingPlan.configuration,
+          subscription_id: subscriptionData.id,
+          subscription_status: subscriptionData.status,
+          subscription_activated_at:
+            subscriptionData.status === "ACTIVE" ? new Date() : null,
+          configuration: {
+            ...(billingPlan.configuration as any),
             subscription_id: subscriptionData.id,
             subscription_status: subscriptionData.status,
             subscription_updated_at: new Date().toISOString(),
+            subscription_activated_at:
+              subscriptionData.status === "ACTIVE"
+                ? new Date().toISOString()
+                : null,
           },
         },
       });
