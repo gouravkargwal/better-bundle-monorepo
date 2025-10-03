@@ -29,6 +29,13 @@ class Shop(BaseModel):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     onboarding_completed = Column(Boolean, default=False, nullable=False)
 
+    # ✅ PATTERN 1: Service Suspension Fields
+    suspended_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    suspension_reason = Column(String(255), nullable=True)
+    service_impact = Column(
+        String(50), nullable=True
+    )  # 'suspended', 'active', 'limited'
+
     # Contact information
     email = Column(String(255), nullable=True)
 
@@ -83,6 +90,15 @@ class Shop(BaseModel):
     )
     user_sessions = relationship(
         "UserSession", back_populates="shop", cascade="all, delete-orphan"
+    )
+    billing_plans = relationship(
+        "BillingPlan", back_populates="shop", cascade="all, delete-orphan"
+    )
+    billing_events = relationship(
+        "BillingEvent", back_populates="shop", cascade="all, delete-orphan"
+    )
+    billing_invoices = relationship(
+        "BillingInvoice", back_populates="shop", cascade="all, delete-orphan"
     )
 
     # Table constraints

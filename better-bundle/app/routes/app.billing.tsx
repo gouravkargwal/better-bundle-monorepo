@@ -1,334 +1,536 @@
-import {
-  json,
-  type LoaderFunctionArgs,
-  type ActionFunctionArgs,
-} from "@remix-run/node";
-import {
-  useLoaderData,
-  useActionData,
-  useNavigation,
-  useSubmit,
-} from "@remix-run/react";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData, useSubmit } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import {
   Page,
   Layout,
+  Card,
   BlockStack,
-  Banner,
-  Button,
-  InlineStack,
-  Icon,
   Text,
+  Button,
+  Banner,
+  ProgressBar,
+  InlineStack,
+  Badge,
+  Icon,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
-import { BillingDashboard } from "../components/Billing/BillingDashboard";
-import { BillingSetup } from "../components/Billing/BillingSetup";
-import { TrialCompletionNotification } from "../components/Notifications/TrialCompletionNotification";
-import { handleTrialCompletion } from "../services/shop.service";
-import prisma from "../db.server";
-import { CreditCardIcon, CheckCircleIcon } from "@shopify/polaris-icons";
+import {
+  AlertTriangleIcon,
+  CheckCircleIcon,
+  StarFilledIcon,
+} from "@shopify/polaris-icons";
+import { useState } from "react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    // Get shop record first to get the correct shop ID
+    // Get shop record
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
-      select: { id: true, currency_code: true },
+      select: {
+        id: true,
+        is_active: true,
+        suspended_at: true,
+        suspension_reason: true,
+        currency_code: true,
+      },
     });
 
     if (!shopRecord) {
-      throw new Error("Shop not found. Please complete onboarding first.");
+      throw new Error("Shop not found");
     }
 
-    // Get billing plan using the correct shop ID
+    // Get billing plan
     const billingPlan = await prisma.billing_plans.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: "active",
+        status: { in: ["active", "suspended"] },
       },
-      orderBy: {
-        effective_from: "desc",
-      },
-      select: {
-        id: true,
-        shop_id: true,
-        shop_domain: true,
-        name: true,
-        type: true,
-        status: true,
-        configuration: true,
-        effective_from: true,
-        effective_until: true,
-        created_at: true,
-        updated_at: true,
-        trial_revenue: true,
-        trial_threshold: true,
-        is_trial_active: true,
-      },
+      orderBy: { created_at: "desc" },
     });
 
     if (!billingPlan) {
-      throw new Error(
-        "No billing plan found. Please complete onboarding first.",
-      );
+      throw new Error("No billing plan found");
     }
 
-    // Get recent invoices
-    const recentInvoices = await prisma.billing_invoices.findMany({
-      where: {
-        shop_id: shopRecord.id,
-      },
-      orderBy: {
-        created_at: "desc",
-      },
-      take: 5,
-    });
+    const config = (billingPlan.configuration as any) || {};
 
-    // Get recent billing events
-    const recentEvents = await prisma.billing_events.findMany({
-      where: {
-        shop_id: shopRecord.id,
-      },
-      orderBy: {
-        occurred_at: "desc",
-      },
-      take: 10,
-    });
-
-    // Format the data to match the expected structure
-    const billingData = {
-      billing_plan: {
-        id: billingPlan.id,
-        name: billingPlan.name,
-        type: billingPlan.type,
-        status: billingPlan.status,
-        configuration: billingPlan.configuration,
-        effective_from: billingPlan.effective_from.toISOString(),
-        currency: shopRecord.currency_code,
-        trial_status: {
-          is_trial_active: billingPlan.is_trial_active || false,
-          trial_threshold: Number(billingPlan.trial_threshold) || 200,
-          trial_revenue: Number(billingPlan.trial_revenue) || 0,
-          remaining_revenue: Math.max(
-            0,
-            (Number(billingPlan.trial_threshold) || 200) -
-              (Number(billingPlan.trial_revenue) || 0),
-          ),
-          trial_progress:
-            (Number(billingPlan.trial_threshold) || 200) > 0
-              ? ((Number(billingPlan.trial_revenue) || 0) /
-                  (Number(billingPlan.trial_threshold) || 200)) *
-                100
-              : 0,
-        },
-      },
-      recent_invoices: recentInvoices.map((invoice) => ({
-        id: invoice.id,
-        invoice_number: invoice.invoice_number,
-        status: invoice.status,
-        total: invoice.total,
-        currency: invoice.currency,
-        period_start: invoice.period_start.toISOString(),
-        period_end: invoice.period_end.toISOString(),
-        due_date: invoice.due_date.toISOString(),
-        created_at: invoice.created_at.toISOString(),
-      })),
-      recent_events: recentEvents.map((event) => ({
-        id: event.id,
-        type: event.type,
-        data: event.data,
-        occurred_at: event.occurred_at.toISOString(),
-      })),
-    };
+    // Calculate trial status
+    const trialRevenue = Number(billingPlan.trial_revenue) || 0;
+    const trialThreshold = Number(billingPlan.trial_threshold) || 200;
+    const remainingRevenue = Math.max(0, trialThreshold - trialRevenue);
+    const trialProgress = Math.min(100, (trialRevenue / trialThreshold) * 100);
 
     return json({
-      shop,
-      billingData,
+      shop: shopRecord,
+      billingPlan: {
+        id: billingPlan.id,
+        is_trial_active: billingPlan.is_trial_active,
+        trial_revenue: trialRevenue,
+        trial_threshold: trialThreshold,
+        remaining_revenue: remainingRevenue,
+        trial_progress: trialProgress,
+        trial_completed_at: billingPlan.trial_completed_at,
+        subscription_id: billingPlan.subscription_id,
+        subscription_status: billingPlan.subscription_status,
+        subscription_confirmation_url:
+          billingPlan.subscription_confirmation_url,
+        requires_subscription_approval:
+          billingPlan.requires_subscription_approval,
+        currency: shopRecord.currency_code || "USD",
+        usage_count: billingPlan.trial_usage_records_count || 0,
+      },
     });
   } catch (error) {
     console.error("Error loading billing data:", error);
-    throw new Error(
-      error instanceof Error ? error.message : "Failed to load billing data",
-    );
-  }
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, admin } = await authenticate.admin(request);
-  const { shop } = session;
-
-  try {
-    const formData = await request.formData();
-    const action = formData.get("action");
-
-    if (action === "setup_billing") {
-      // Get shop record
-      const shopRecord = await prisma.shops.findUnique({
-        where: { shop_domain: shop },
-        select: { id: true, currency_code: true },
-      });
-
-      if (!shopRecord) {
-        return json(
-          { success: false, error: "Shop not found" },
-          { status: 400 },
-        );
-      }
-
-      // Get current billing plan
-      const billingPlan = await prisma.billing_plans.findFirst({
-        where: {
-          shop_id: shopRecord.id,
-          status: "active",
-        },
-      });
-
-      if (!billingPlan) {
-        return json(
-          { success: false, error: "No billing plan found" },
-          { status: 400 },
-        );
-      }
-
-      // Check if trial is completed and billing setup is needed
-      const config = billingPlan.configuration as any;
-      const isTrialCompleted =
-        !billingPlan.is_trial_active && config?.trial_completed_at;
-      const needsBillingSetup =
-        config?.subscription_required && !config?.subscription_id;
-
-      if (isTrialCompleted && needsBillingSetup) {
-        // Handle trial completion with subscription creation
-        const result = await handleTrialCompletion(
-          session,
-          admin,
-          shopRecord.id,
-          shop,
-          Number(billingPlan.trial_revenue) || 0,
-          shopRecord.currency_code || "USD",
-        );
-
-        if (result.success && result.subscription_created) {
-          return json({
-            success: true,
-            message: "Billing setup completed successfully!",
-            subscription_id: result.subscription_id,
-          });
-        } else {
-          return json(
-            {
-              success: false,
-              error: result.error || "Failed to create subscription",
-            },
-            { status: 500 },
-          );
-        }
-      } else {
-        return json(
-          {
-            success: false,
-            error: "Billing setup not required or already completed",
-          },
-          { status: 400 },
-        );
-      }
-    }
-
-    return json({ success: false, error: "Invalid action" }, { status: 400 });
-  } catch (error) {
-    console.error("Error in billing action:", error);
-    return json(
-      {
-        success: false,
-        error:
-          error instanceof Error ? error.message : "Unknown error occurred",
-      },
-      { status: 500 },
-    );
+    throw new Response("Failed to load billing data", { status: 500 });
   }
 };
 
 export default function BillingPage() {
-  const { billingData } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
-  const navigation = useNavigation();
+  const { shop, billingPlan } = useLoaderData<typeof loader>();
   const submit = useSubmit();
+  const [isLoading, setIsLoading] = useState(false);
 
-  const isLoading = navigation.state === "submitting";
-  const isSuccess = actionData?.success;
-  const hasError = actionData?.error;
+  const handleSetupBilling = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/billing/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
 
-  const handleSetupBilling = () => {
-    const formData = new FormData();
-    formData.append("action", "setup_billing");
-    submit(formData, { method: "post" });
+      const result = await response.json();
+
+      if (result.success && result.confirmation_url) {
+        // Redirect to Shopify confirmation page
+        window.open(result.confirmation_url, "_top");
+      } else {
+        shopify.toast.show(result.error || "Failed to setup billing", {
+          isError: true,
+        });
+      }
+    } catch (error) {
+      console.error("Error setting up billing:", error);
+      shopify.toast.show("Failed to setup billing", { isError: true });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDismissNotification = () => {
-    // In a real app, you might want to store dismissal state in localStorage or database
-    console.log("Notification dismissed");
+  const formatCurrency = (amount: number, currency: string = "USD") => {
+    const symbol = currency === "USD" ? "$" : currency;
+    return `${symbol}${amount.toFixed(2)}`;
   };
 
-  return (
-    <Page>
-      <TitleBar title="Billing" />
-      <BlockStack gap="500">
-        {hasError && (
-          <Banner tone="critical">
-            <Text as="p">{hasError}</Text>
-          </Banner>
-        )}
-
-        {isSuccess && (
-          <Banner tone="success">
-            <InlineStack gap="200" align="start">
-              <Icon source={CheckCircleIcon} tone="success" />
-              <BlockStack gap="100">
-                <Text as="p" variant="bodyMd" fontWeight="medium">
-                  🎉 Billing setup completed successfully!
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Your usage-based billing is now active. You can continue using
-                  Better Bundle.
-                </Text>
-              </BlockStack>
-            </InlineStack>
-          </Banner>
-        )}
-
+  // ============= TRIAL ACTIVE =============
+  if (billingPlan.is_trial_active) {
+    return (
+      <Page title="Billing">
         <Layout>
           <Layout.Section>
-            {/* Show trial completion notification if needed */}
-            <TrialCompletionNotification
-              trialStatus={billingData.billing_plan.trial_status}
-              billingConfig={billingData.billing_plan.configuration}
-              onSetupBilling={handleSetupBilling}
-              onDismiss={handleDismissNotification}
-              isLoading={isLoading}
-            />
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between">
+                  <Text as="h2" variant="headingMd" fontWeight="bold">
+                    🚀 Free Trial Active
+                  </Text>
+                  <Badge tone="success">Trial Active</Badge>
+                </InlineStack>
 
-            {/* Show billing setup component if trial completed and billing needed */}
-            {!billingData.billing_plan.trial_status.is_trial_active &&
-              billingData.billing_plan.configuration?.subscription_required &&
-              !billingData.billing_plan.configuration?.subscription_id && (
-                <BillingSetup
-                  billingData={billingData}
-                  onSetupBilling={handleSetupBilling}
-                  isLoading={isLoading}
-                />
-              )}
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#F0FDF4",
+                    borderRadius: "8px",
+                    border: "1px solid #22C55E",
+                  }}
+                >
+                  <BlockStack gap="300">
+                    <InlineStack gap="200" align="start">
+                      <Icon source={StarFilledIcon} tone="success" />
+                      <Text as="p" variant="bodyMd">
+                        You're currently enjoying your free trial! Use Better
+                        Bundle to drive sales.
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
 
-            {/* Show regular billing dashboard if subscription is active or trial is still active */}
-            {(billingData.billing_plan.trial_status.is_trial_active ||
-              billingData.billing_plan.configuration?.subscription_id) && (
-              <BillingDashboard billingData={billingData} />
-            )}
+                <BlockStack gap="300">
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodyMd" fontWeight="medium">
+                      Trial Progress
+                    </Text>
+                    <Text as="p" variant="bodyMd">
+                      {formatCurrency(
+                        billingPlan.trial_revenue,
+                        billingPlan.currency,
+                      )}{" "}
+                      /{" "}
+                      {formatCurrency(
+                        billingPlan.trial_threshold,
+                        billingPlan.currency,
+                      )}
+                    </Text>
+                  </InlineStack>
+
+                  <ProgressBar
+                    progress={billingPlan.trial_progress}
+                    size="medium"
+                  />
+
+                  <Text
+                    as="p"
+                    variant="bodySm"
+                    tone="subdued"
+                    alignment="center"
+                  >
+                    {billingPlan.remaining_revenue > 0
+                      ? `${formatCurrency(billingPlan.remaining_revenue, billingPlan.currency)} remaining until trial completion`
+                      : "Trial threshold reached - setup billing to continue"}
+                  </Text>
+
+                  <Text
+                    as="p"
+                    variant="bodySm"
+                    tone="subdued"
+                    alignment="center"
+                  >
+                    📊 {billingPlan.usage_count} orders tracked
+                  </Text>
+                </BlockStack>
+
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#F8FAFC",
+                    borderRadius: "8px",
+                    border: "1px solid #E2E8F0",
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      What happens next?
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      When you reach{" "}
+                      {formatCurrency(
+                        billingPlan.trial_threshold,
+                        billingPlan.currency,
+                      )}{" "}
+                      in attributed revenue, we'll prompt you to set up billing.
+                      You'll then pay 3% of attributed revenue, capped at $1,000
+                      per month.
+                    </Text>
+                  </BlockStack>
+                </div>
+              </BlockStack>
+            </Card>
           </Layout.Section>
         </Layout>
-      </BlockStack>
+      </Page>
+    );
+  }
+
+  // ============= TRIAL COMPLETED - NEEDS SUBSCRIPTION =============
+  if (
+    !billingPlan.is_trial_active &&
+    !billingPlan.subscription_id &&
+    billingPlan.trial_completed_at
+  ) {
+    return (
+      <Page title="Billing">
+        <Layout>
+          <Layout.Section>
+            <Banner tone="critical">
+              <BlockStack gap="300">
+                <InlineStack gap="200" align="start">
+                  <Icon source={AlertTriangleIcon} tone="critical" />
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      🛑 Trial Completed - Billing Setup Required
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Your trial has ended. Services are suspended until you set
+                      up billing.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd" fontWeight="bold">
+                  📊 Trial Summary
+                </Text>
+
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#FEF3C7",
+                    borderRadius: "8px",
+                    border: "1px solid #F59E0B",
+                  }}
+                >
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Trial Revenue:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        {formatCurrency(
+                          billingPlan.trial_revenue,
+                          billingPlan.currency,
+                        )}
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Orders Tracked:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        {billingPlan.usage_count}
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Completed:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        {new Date(
+                          billingPlan.trial_completed_at,
+                        ).toLocaleDateString()}
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#F0F9FF",
+                    borderRadius: "8px",
+                    border: "1px solid #0EA5E9",
+                  }}
+                >
+                  <BlockStack gap="300">
+                    <Text as="p" variant="headingMd" fontWeight="bold">
+                      Continue with Usage-Based Billing
+                    </Text>
+
+                    <Text as="p" variant="bodyMd">
+                      • Pay only 3% of attributed revenue
+                    </Text>
+                    <Text as="p" variant="bodyMd">
+                      • Capped at $1,000 per month (no surprise charges)
+                    </Text>
+                    <Text as="p" variant="bodyMd">
+                      • Cancel anytime
+                    </Text>
+                    <Text as="p" variant="bodyMd">
+                      • Only pay for the value we deliver
+                    </Text>
+                  </BlockStack>
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="large"
+                  onClick={handleSetupBilling}
+                  loading={isLoading}
+                  fullWidth
+                >
+                  Setup Billing & Resume Services
+                </Button>
+
+                <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+                  You'll be redirected to Shopify to approve the billing plan
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  // ============= SUBSCRIPTION PENDING =============
+  if (billingPlan.subscription_status === "PENDING") {
+    return (
+      <Page title="Billing">
+        <Layout>
+          <Layout.Section>
+            <Banner tone="info">
+              <BlockStack gap="300">
+                <InlineStack gap="200" align="start">
+                  <Icon source={StarFilledIcon} tone="info" />
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      ⏳ Subscription Pending Approval
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Your billing subscription is awaiting approval. Services
+                      will resume once approved.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd" fontWeight="bold">
+                  Waiting for Approval
+                </Text>
+
+                <Text as="p" variant="bodyMd">
+                  If you haven't approved the subscription yet, please click the
+                  button below:
+                </Text>
+
+                {billingPlan.subscription_confirmation_url && (
+                  <Button
+                    variant="primary"
+                    size="large"
+                    onClick={() =>
+                      window.open(
+                        billingPlan.subscription_confirmation_url,
+                        "_top",
+                      )
+                    }
+                    fullWidth
+                  >
+                    Approve Subscription in Shopify
+                  </Button>
+                )}
+
+                <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+                  Services will automatically resume after approval
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  // ============= SUBSCRIPTION ACTIVE =============
+  if (billingPlan.subscription_status === "ACTIVE") {
+    return (
+      <Page title="Billing">
+        <Layout>
+          <Layout.Section>
+            <Banner tone="success">
+              <BlockStack gap="200">
+                <InlineStack gap="200" align="start">
+                  <Icon source={CheckCircleIcon} tone="success" />
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="medium">
+                      🎉 Billing Active
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Your usage-based billing is active. You'll be charged 3%
+                      of attributed revenue (capped at $1,000/month).
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd" fontWeight="bold">
+                  Current Billing Plan
+                </Text>
+
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#F0FDF4",
+                    borderRadius: "8px",
+                    border: "1px solid #22C55E",
+                  }}
+                >
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Plan Type:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Usage-Based
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Rate:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        3% of attributed revenue
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Monthly Cap:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        $1,000
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodyMd">
+                        Status:
+                      </Text>
+                      <Badge tone="success">Active</Badge>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+
+                <Text as="p" variant="bodySm" tone="subdued">
+                  You can view detailed usage and charges in your Shopify admin
+                  under Settings → Billing.
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  // ============= FALLBACK =============
+  return (
+    <Page title="Billing">
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">
+                Billing Information
+              </Text>
+              <Text as="p" variant="bodyMd">
+                Loading billing information...
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

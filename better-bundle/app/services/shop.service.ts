@@ -141,73 +141,6 @@ const getBillingPlan = async (shopDomain: string) => {
   return billingPlan;
 };
 
-const activateTrialBillingPlan = async (
-  shopDomain: string,
-  shopRecord: any,
-  tx?: any,
-) => {
-  const db = tx || prisma;
-
-  // Fixed $200 USD trial threshold (industry standard)
-  const TRIAL_THRESHOLD_USD = 200.0;
-
-  // Convert to shop currency for display and storage
-  const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
-    shopRecord.currency_code,
-  );
-
-  const billingPlan = await db.billing_plans.upsert({
-    where: { shop_id: shopRecord.id },
-    update: {
-      status: "active",
-      configuration: {
-        usage_based: true,
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        subscription_pending: true,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-      },
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-    },
-    create: {
-      shop_id: shopRecord.id,
-      shop_domain: shopDomain,
-      name: "Trial Plan",
-      type: "usage_based",
-      status: "active",
-      configuration: {
-        usage_based: true,
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        subscription_pending: true,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-      },
-      effective_from: new Date(),
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-    },
-  });
-
-  console.log(`✅ Trial billing plan activated for ${shopDomain}:`);
-  console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
-  console.log(
-    `   - Trial threshold in shop currency: ${trialThresholdInShopCurrency} ${shopRecord.currency_code}`,
-  );
-  console.log(`   - Shop currency: ${shopRecord.currency_code}`);
-  console.log(`   - Revenue share rate: 3%`);
-
-  return billingPlan;
-};
-
 const markOnboardingCompleted = async (shopDomain: string, tx?: any) => {
   const db = tx || prisma;
   await db.shops.update({
@@ -526,6 +459,76 @@ const handleTrialCompletion = async (
       `Failed to handle trial completion: ${error instanceof Error ? error.message : "Unknown error"}`,
     );
   }
+};
+
+// In activateTrialBillingPlan function:
+
+const activateTrialBillingPlan = async (
+  shopDomain: string,
+  shopRecord: any,
+  tx?: any,
+) => {
+  const db = tx || prisma;
+
+  // Pattern 1: Create trial WITHOUT Shopify subscription
+  const TRIAL_THRESHOLD_USD = 200.0;
+
+  const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
+    shopRecord.currency_code,
+  );
+
+  const billingPlan = await db.billing_plans.upsert({
+    where: { shop_id: shopRecord.id },
+    update: {
+      status: "active",
+      is_trial_active: true,
+      trial_threshold: trialThresholdInShopCurrency,
+      trial_revenue: 0.0,
+      trial_usage_records_count: 0,
+      configuration: {
+        pattern: "trial_without_consent", // ✅ Pattern 1
+        trial_active: true,
+        trial_threshold: trialThresholdInShopCurrency,
+        trial_threshold_usd: TRIAL_THRESHOLD_USD,
+        trial_revenue: 0.0,
+        revenue_share_rate: 0.03,
+        currency: shopRecord.currency_code,
+        post_trial_capped_amount: 1000.0,
+        subscription_required_after_trial: true, // ✅ Key flag
+      },
+    },
+    create: {
+      shop_id: shopRecord.id,
+      shop_domain: shopDomain,
+      name: "Free Trial (Usage-Based)",
+      type: "trial",
+      status: "active",
+      is_trial_active: true,
+      trial_threshold: trialThresholdInShopCurrency,
+      trial_revenue: 0.0,
+      trial_usage_records_count: 0,
+      effective_from: new Date(),
+      configuration: {
+        pattern: "trial_without_consent",
+        trial_active: true,
+        trial_threshold: trialThresholdInShopCurrency,
+        trial_threshold_usd: TRIAL_THRESHOLD_USD,
+        trial_revenue: 0.0,
+        revenue_share_rate: 0.03,
+        currency: shopRecord.currency_code,
+        post_trial_capped_amount: 1000.0,
+        subscription_required_after_trial: true,
+      },
+    },
+  });
+
+  console.log(`✅ Pattern 1 trial activated for ${shopDomain}:`);
+  console.log(`   - NO upfront subscription required`);
+  console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
+  console.log(`   - Services active immediately`);
+  console.log(`   - Subscription required after trial`);
+
+  return billingPlan;
 };
 
 export {

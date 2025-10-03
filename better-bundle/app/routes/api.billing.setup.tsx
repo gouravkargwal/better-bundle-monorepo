@@ -1,0 +1,211 @@
+import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { session, admin } = await authenticate.admin(request);
+  const { shop } = session;
+
+  try {
+    console.log(`🔄 Starting billing setup for shop ${shop}`);
+
+    // Get shop record
+    const shopRecord = await prisma.shops.findUnique({
+      where: { shop_domain: shop },
+      select: { id: true, currency_code: true },
+    });
+
+    if (!shopRecord) {
+      return json({ success: false, error: "Shop not found" }, { status: 404 });
+    }
+
+    // Get billing plan
+    const billingPlan = await prisma.billing_plans.findFirst({
+      where: {
+        shop_id: shopRecord.id,
+        status: { in: ["active", "suspended"] },
+      },
+    });
+
+    if (!billingPlan) {
+      return json(
+        { success: false, error: "No billing plan found" },
+        { status: 404 },
+      );
+    }
+
+    // Check if trial is completed
+    if (billingPlan.is_trial_active) {
+      return json(
+        { success: false, error: "Trial still active" },
+        { status: 400 },
+      );
+    }
+
+    // Check if subscription already exists
+    if (billingPlan.subscription_id) {
+      // Already has subscription, check status
+      if (billingPlan.subscription_status === "ACTIVE") {
+        return json({
+          success: true,
+          message: "Subscription already active",
+          subscription_id: billingPlan.subscription_id,
+        });
+      } else if (billingPlan.subscription_status === "PENDING") {
+        return json({
+          success: true,
+          message: "Subscription pending approval",
+          subscription_id: billingPlan.subscription_id,
+          confirmation_url: billingPlan.subscription_confirmation_url,
+        });
+      }
+    }
+
+    // Create Shopify subscription using GraphQL
+    const currency = shopRecord.currency_code || "USD";
+    const cappedAmount = 1000.0; // $1000 monthly cap
+
+    const mutation = `
+      mutation appSubscriptionCreate($name: String!, $returnUrl: String!, $lineItems: [AppSubscriptionLineItemInput!]!) {
+        appSubscriptionCreate(
+          name: $name
+          returnUrl: $returnUrl
+          lineItems: $lineItems
+          test: ${process.env.NODE_ENV === "development" ? "true" : "false"}
+        ) {
+          userErrors {
+            field
+            message
+          }
+          confirmationUrl
+          appSubscription {
+            id
+            name
+            status
+            lineItems {
+              id
+              plan {
+                pricingDetails {
+                  __typename
+                  ... on AppUsagePricing {
+                    terms
+                    cappedAmount {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      name: "Better Bundle - Usage Based",
+      returnUrl: `https://${shop}/admin/apps/${process.env.SHOPIFY_APP_HANDLE}/app/billing`,
+      lineItems: [
+        {
+          plan: {
+            appUsagePricingDetails: {
+              terms: "3% of attributed revenue (capped at $1,000/month)",
+              cappedAmount: {
+                amount: cappedAmount,
+                currencyCode: currency,
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    console.log("📤 Creating Shopify subscription...");
+
+    const response = await admin.graphql(mutation, { variables });
+    const result = await response.json();
+
+    console.log("📥 Shopify response:", JSON.stringify(result, null, 2));
+
+    if (result.data?.appSubscriptionCreate?.userErrors?.length > 0) {
+      const errors = result.data.appSubscriptionCreate.userErrors;
+      console.error("❌ Shopify errors:", errors);
+      return json(
+        {
+          success: false,
+          error: errors.map((e: any) => e.message).join(", "),
+        },
+        { status: 400 },
+      );
+    }
+
+    const subscription = result.data?.appSubscriptionCreate?.appSubscription;
+    const confirmationUrl = result.data?.appSubscriptionCreate?.confirmationUrl;
+
+    if (!subscription) {
+      return json(
+        { success: false, error: "Failed to create subscription" },
+        { status: 500 },
+      );
+    }
+
+    console.log(`✅ Subscription created: ${subscription.id}`);
+
+    // Update billing plan
+    await prisma.billing_plans.updateMany({
+      where: { id: billingPlan.id },
+      data: {
+        subscription_id: subscription.id,
+        subscription_status: "PENDING",
+        subscription_line_item_id: subscription.lineItems[0].id,
+        subscription_confirmation_url: confirmationUrl,
+        requires_subscription_approval: true,
+        configuration: {
+          ...(billingPlan.configuration as any),
+          subscription_id: subscription.id,
+          subscription_status: "PENDING",
+          subscription_created_at: new Date().toISOString(),
+          capped_amount: cappedAmount,
+          currency: currency,
+        },
+      },
+    });
+
+    // Create billing event
+    await prisma.billing_events.create({
+      data: {
+        shop_id: shopRecord.id,
+        type: "subscription_created",
+        data: {
+          subscription_id: subscription.id,
+          status: "PENDING",
+          capped_amount: cappedAmount,
+          currency: currency,
+          created_at: new Date().toISOString(),
+        },
+        billing_metadata: {
+          phase: "subscription_creation",
+        },
+        occurred_at: new Date(),
+      },
+    });
+
+    console.log(`✅ Billing setup complete for shop ${shop}`);
+
+    return json({
+      success: true,
+      subscription_id: subscription.id,
+      confirmation_url: confirmationUrl,
+      message: "Please approve the subscription in Shopify",
+    });
+  } catch (error) {
+    console.error("❌ Error in billing setup:", error);
+    return json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    );
+  }
+}

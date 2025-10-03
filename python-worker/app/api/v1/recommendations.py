@@ -26,6 +26,8 @@ from app.recommandations.hybrid import HybridRecommendationService
 from app.recommandations.analytics import RecommendationAnalytics
 from app.recommandations.user_neighbors import UserNeighborsService
 from app.recommandations.enrichment import ProductEnrichment
+from app.recommandations.purchase_history import PurchaseHistoryService
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, desc
 
 logger = get_logger(__name__)
@@ -36,6 +38,91 @@ router = APIRouter(prefix="/api/v1/recommendations", tags=["recommendations"])
 gorse_client = GorseApiClient(
     base_url=settings.ml.GORSE_BASE_URL, api_key=settings.ml.GORSE_API_KEY
 )
+
+
+async def _get_purchase_exclusions(
+    session: AsyncSession,
+    shop_id: str,
+    user_id: Optional[str],
+    context: str,
+) -> List[str]:
+    """
+    Get product IDs to exclude based on purchase history.
+
+    Args:
+        session: Database session
+        shop_id: Shop ID
+        user_id: User/Customer ID
+        context: Recommendation context
+
+    Returns:
+        List of product IDs to exclude from recommendations
+    """
+    if not user_id:
+        return []
+
+    try:
+        # Different exclusion strategies based on context
+        if context in ["order_history", "order_status"]:
+            # For order-related contexts, be less aggressive with exclusions
+            # Only exclude very recent purchases (last 30 days)
+            exclude_ids = (
+                await PurchaseHistoryService.get_recently_purchased_product_ids(
+                    session=session,
+                    shop_id=shop_id,
+                    customer_id=user_id,
+                    days=30,
+                )
+            )
+            logger.debug(
+                f"📦 Excluding {len(exclude_ids)} recent purchases (30 days) for context '{context}'"
+            )
+
+        elif context in ["product_page", "homepage", "profile"]:
+            # For main browsing contexts, exclude all-time purchases
+            # This prevents showing already-owned products
+            exclude_ids = await PurchaseHistoryService.get_purchased_product_ids(
+                session=session,
+                shop_id=shop_id,
+                customer_id=user_id,
+                exclude_refunded=True,
+                exclude_cancelled=True,
+            )
+            logger.debug(
+                f"📦 Excluding {len(exclude_ids)} all-time purchases for context '{context}'"
+            )
+
+        elif context == "cart":
+            # For cart, only exclude very recent purchases (last 14 days)
+            # Customer might want to buy again for someone else
+            exclude_ids = (
+                await PurchaseHistoryService.get_recently_purchased_product_ids(
+                    session=session,
+                    shop_id=shop_id,
+                    customer_id=user_id,
+                    days=14,
+                )
+            )
+            logger.debug(
+                f"📦 Excluding {len(exclude_ids)} recent purchases (14 days) for cart context"
+            )
+
+        else:
+            # Default: exclude all-time purchases
+            exclude_ids = await PurchaseHistoryService.get_purchased_product_ids(
+                session=session,
+                shop_id=shop_id,
+                customer_id=user_id,
+            )
+            logger.debug(
+                f"📦 Excluding {len(exclude_ids)} all-time purchases for context '{context}'"
+            )
+
+        return exclude_ids
+
+    except Exception as e:
+        logger.error(f"⚠️ Failed to get purchase exclusions for user {user_id}: {e}")
+        return []
 
 
 async def get_shop_domain_from_customer_id(customer_id: str) -> Optional[str]:
@@ -404,89 +491,6 @@ cache_service = RecommendationCacheService()
 hybrid_service = HybridRecommendationService()
 analytics_service = RecommendationAnalytics()
 user_neighbors_service = UserNeighborsService()
-
-
-@router.get("/debug/check-products/{shop_id}")
-async def debug_check_products(shop_id: str, limit: int = 10):
-    """Debug endpoint to check what products exist in database"""
-    try:
-        async with get_transaction_context() as session:
-            # Get sample products from database
-            products_result = await session.execute(
-                select(ProductData).where(ProductData.shop_id == shop_id).limit(limit)
-            )
-            products = products_result.scalars().all()
-
-            # Get total count
-            count_result = await session.execute(
-                select(ProductData).where(ProductData.shop_id == shop_id)
-            )
-            total_count = len(count_result.scalars().all())
-
-            # Get sample product IDs
-            product_ids = [p.product_id for p in products]
-
-        return {
-            "shop_id": shop_id,
-            "total_products": total_count,
-            "sample_products": [
-                {
-                    "id": p.id,
-                    "productId": p.productId,
-                    "title": p.title,
-                    "handle": p.handle,
-                    "price": p.price,
-                    "status": p.status,
-                }
-                for p in products
-            ],
-            "sample_product_ids": product_ids,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to check products: {e}")
-        return {"error": str(e), "shop_id": shop_id}
-
-
-@router.get("/debug/check-missing-products/{shop_id}")
-async def debug_check_missing_products(shop_id: str, product_ids: str):
-    """Debug endpoint to check if specific product IDs exist in database"""
-    try:
-        # Parse comma-separated product IDs
-        missing_ids = [pid.strip() for pid in product_ids.split(",")]
-
-        async with get_transaction_context() as session:
-            # Check which ones exist
-            existing_products_result = await session.execute(
-                select(ProductData).where(
-                    and_(
-                        ProductData.shop_id == shop_id,
-                        ProductData.product_id.in_(missing_ids),
-                    )
-                )
-            )
-            existing_products = existing_products_result.scalars().all()
-
-            existing_ids = {p.product_id for p in existing_products}
-        actually_missing = [pid for pid in missing_ids if pid not in existing_ids]
-
-        return {
-            "shop_id": shop_id,
-            "requested_ids": missing_ids,
-            "existing_count": len(existing_products),
-            "missing_count": len(actually_missing),
-            "existing_products": [
-                {"productId": p.productId, "title": p.title, "handle": p.handle}
-                for p in existing_products
-            ],
-            "actually_missing": actually_missing,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to check missing products: {e}")
-        return {"error": str(e), "shop_id": shop_id}
 
 
 # Context-based routing logic
@@ -923,6 +927,28 @@ async def get_recommendations(request: RecommendationRequest):
                 f"🚫 Excluding context products from recommendations | context={request.context} | exclude_ids={request.product_ids}"
             )
 
+        if request.user_id:
+            try:
+                async with get_transaction_context() as session:
+                    # Get purchase history exclusions
+                    purchase_exclusions = await _get_smart_purchase_exclusions(
+                        session=session,
+                        shop_id=shop.id,
+                        user_id=request.user_id,
+                        context=request.context,
+                    )
+
+                    if purchase_exclusions:
+                        exclude_items.extend(purchase_exclusions)
+                        logger.info(
+                            f"✅ Added {len(purchase_exclusions)} purchased products to exclusion list | "
+                            f"user_id={request.user_id} | context={request.context}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ Failed to get purchase exclusions for user {request.user_id}: {e}"
+                )
+
         # Also exclude products that are already in the user's cart (with time decay)
         if request.user_id:
             try:
@@ -1221,62 +1247,67 @@ async def get_recommendations(request: RecommendationRequest):
         )
 
 
-# Analytics endpoints moved to separate service: /api/v1/analytics.py
-
-
-@router.get("/health")
-async def recommendations_health_check():
+async def _get_smart_purchase_exclusions(
+    session: AsyncSession,
+    shop_id: str,
+    user_id: Optional[str],
+    context: str,
+    product_ids_to_check: Optional[List[str]] = None,
+) -> List[str]:
     """
-    Health check for the recommendations system including cache and category services
+    Smart purchase exclusions that consider product type.
+
+    - Durable goods: Always exclude if purchased
+    - Consumables: Only exclude recent purchases (last 60 days)
     """
+    if not user_id:
+        return []
+
     try:
+        # Get all purchased products
+        all_purchases = await PurchaseHistoryService.get_purchased_product_ids(
+            session=session,
+            shop_id=shop_id,
+            customer_id=user_id,
+        )
 
-        # Check Gorse health
-        logger.debug("🔍 Checking Gorse health")
-        gorse_health = await gorse_client.health_check()
+        # If we need to check specific products, fetch their types
+        if product_ids_to_check:
+            from app.core.database.models.product_data import ProductData
 
-        # Check database connection
-        logger.debug("🔍 Checking database connection")
-        async with get_transaction_context() as session:
-            await session.execute(
-                select(Shop).limit(1)
-            )  # Simple query to test connection
+            result = await session.execute(
+                select(ProductData.product_id, ProductData.product_type).where(
+                    and_(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id.in_(product_ids_to_check),
+                    )
+                )
+            )
+            product_types = {row.product_id: row.product_type for row in result}
 
-        # Check Redis cache connection
-        logger.debug("🔍 Checking Redis cache connection")
-        redis_client = await get_redis_client()
-        await redis_client.ping()  # Test Redis connection
+            # Smart filtering
+            exclude_ids = []
+            for product_id in all_purchases:
+                product_type = product_types.get(product_id, "")
+                should_exclude = await PurchaseHistoryService.should_exclude_product(
+                    session=session,
+                    shop_id=shop_id,
+                    customer_id=user_id,
+                    product_id=product_id,
+                    product_type=product_type,
+                )
+                if should_exclude:
+                    exclude_ids.append(product_id)
 
-        # Check cache TTL configuration
-        cache_ttl_status = {
-            context: f"{ttl}s" if ttl > 0 else "disabled"
-            for context, ttl in cache_service.CACHE_TTL.items()
-        }
+            logger.debug(
+                f"🧠 Smart exclusions: {len(exclude_ids)}/{len(all_purchases)} products excluded"
+            )
+            return exclude_ids
 
-        return {
-            "success": True,
-            "status": "healthy",
-            "gorse": gorse_health,
-            "database": "connected",
-            "redis_cache": "connected",
-            "cache_ttl_config": cache_ttl_status,
-            "services": {
-                "category_detection": "available",
-                "recommendation_caching": "available",
-                "product_enrichment": "available",
-                "hybrid_recommendations": "available",
-                "user_neighbors": "available",
-                "analytics": "available",
-            },
-            "blending_ratios": hybrid_service.BLENDING_RATIOS,
-            "timestamp": datetime.now(),
-        }
+        # Default: exclude all purchases
+        return all_purchases
 
     except Exception as e:
-        logger.error(f"💥 Recommendations health check failed: {str(e)}")
-        return {
-            "success": False,
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now(),
-        }
+        logger.error(f"⚠️ Smart exclusions failed: {e}")
+        # Fallback to basic exclusion
+        return await _get_purchase_exclusions(session, shop_id, user_id, context)
