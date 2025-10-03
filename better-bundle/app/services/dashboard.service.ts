@@ -3,8 +3,7 @@ import { getCacheService, CacheKeys, CacheTTL } from "./redis.service";
 
 // Constants
 const DEFAULT_CURRENCY = "USD";
-// eslint-disable-next-line no-template-curly-in-string
-const DEFAULT_MONEY_FORMAT = "${{amount}}";
+const DEFAULT_MONEY_FORMAT = "${{amount}}"; // eslint-disable-line no-template-curly-in-string
 const DEFAULT_TOP_PRODUCTS_LIMIT = 10;
 
 // Enhanced interfaces with better type safety
@@ -161,7 +160,7 @@ async function getShopInfo(shopDomain: string): Promise<{
   }
 }
 
-// Enhanced date utility with validation
+// Enhanced date utility with validation - supports both presets and custom dates
 function getDatesForPeriod(
   period: "last_30_days" | "last_7_days" | "today" = "last_30_days",
 ): { startDate: Date; endDate: Date } {
@@ -184,112 +183,178 @@ function getDatesForPeriod(
   return { startDate, endDate };
 }
 
-// Main dashboard function with enhanced error handling
+/**
+ * Main dashboard function with custom date range support
+ * @param shopDomain - Shop domain
+ * @param startDate - Start date (ISO string format YYYY-MM-DD) or preset ("last_30_days", "last_7_days", "today")
+ * @param endDate - End date (ISO string format YYYY-MM-DD) - optional, required for custom ranges
+ */
 export async function getDashboardOverview(
   shopDomain: string,
-  period: "last_30_days" | "last_7_days" | "today" = "last_30_days",
+  startDate: string = "last_30_days",
+  endDate?: string,
 ): Promise<DashboardData> {
   try {
     const shopInfo = await getShopInfo(shopDomain);
-    const { startDate, endDate } = getDatesForPeriod(period);
 
-    const cache = await getCacheService();
-    const cacheKey = CacheKeys.dashboard(
-      shopInfo.id,
-      period,
-      startDate.toISOString(),
-      endDate.toISOString(),
-    );
+    // Parse dates - support both custom ranges and presets
+    let start: Date;
+    let end: Date;
+    let period: string;
 
-    return await cache.getOrSet(
-      cacheKey,
-      async () => {
-        const [
-          overview,
-          topProducts,
-          recentActivity,
-          attributedMetrics,
-          performance,
-        ] = await Promise.allSettled([
-          getOverviewMetrics(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-            shopInfo.money_format,
-          ),
-          getTopProducts(
-            shopInfo.id,
-            startDate,
-            endDate,
-            DEFAULT_TOP_PRODUCTS_LIMIT,
-            shopInfo.currency_code,
-          ),
-          getRecentActivity(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-          ),
-          getAttributedMetrics(
-            shopInfo.id,
-            startDate,
-            endDate,
-            shopInfo.currency_code,
-          ),
-          getPerformanceMetrics(shopInfo.id, startDate, endDate),
-        ]);
+    if (endDate) {
+      // Custom date range - ensure UTC parsing
+      start = new Date(startDate + "T00:00:00.000Z");
+      end = new Date(endDate + "T23:59:59.999Z");
+      period = "custom";
 
-        // Handle partial failures gracefully
-        const results = {
-          overview:
-            overview.status === "fulfilled"
-              ? overview.value
-              : getEmptyOverview(shopInfo, period),
-          topProducts:
-            topProducts.status === "fulfilled" ? topProducts.value : [],
-          recentActivity:
-            recentActivity.status === "fulfilled"
-              ? recentActivity.value
-              : getEmptyRecentActivity(shopInfo.currency_code),
-          attributedMetrics:
-            attributedMetrics.status === "fulfilled"
-              ? attributedMetrics.value
-              : getEmptyAttributedMetrics(shopInfo.currency_code),
-          performance:
-            performance.status === "fulfilled"
-              ? performance.value
-              : getEmptyPerformance(),
-        };
+      // Validate date range
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new DashboardError(
+          "Invalid date format. Use YYYY-MM-DD format",
+          "INVALID_DATE_FORMAT",
+        );
+      }
 
-        // Log any failures
-        [
-          overview,
-          topProducts,
-          recentActivity,
-          attributedMetrics,
-          performance,
-        ].forEach((result, index) => {
-          if (result.status === "rejected") {
-            const sections = [
-              "overview",
-              "topProducts",
-              "recentActivity",
-              "attributedMetrics",
-              "performance",
-            ];
-            console.error(
-              `Dashboard ${sections[index]} failed for shop ${shopDomain}:`,
-              result.reason,
-            );
-          }
-        });
+      if (start > end) {
+        throw new DashboardError(
+          "Start date cannot be after end date",
+          "INVALID_DATE_RANGE",
+        );
+      }
 
-        return results;
-      },
-      CacheTTL.DASHBOARD,
-    );
+      // Limit to max 1 year of data for performance
+      const maxDaysBack = 365;
+      const daysDiff = Math.floor(
+        (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      if (daysDiff > maxDaysBack) {
+        throw new DashboardError(
+          `Date range cannot exceed ${maxDaysBack} days`,
+          "DATE_RANGE_TOO_LARGE",
+        );
+      }
+
+      // Ensure end date is not in the future
+      const now = new Date();
+      if (end > now) {
+        end = now;
+      }
+    } else {
+      // Legacy preset support
+      const dates = getDatesForPeriod(startDate as any);
+      start = dates.startDate;
+      end = dates.endDate;
+      period = startDate;
+    }
+
+    const [
+      overview,
+      topProducts,
+      recentActivity,
+      attributedMetrics,
+      performance,
+    ] = await Promise.allSettled([
+      getOverviewMetrics(
+        shopInfo.id,
+        start,
+        end,
+        shopInfo.currency_code,
+        shopInfo.money_format,
+        period,
+      ),
+      getTopProducts(
+        shopInfo.id,
+        start,
+        end,
+        DEFAULT_TOP_PRODUCTS_LIMIT,
+        shopInfo.currency_code,
+      ),
+      getRecentActivity(shopInfo.id, start, end, shopInfo.currency_code),
+      getAttributedMetrics(shopInfo.id, start, end, shopInfo.currency_code),
+      getPerformanceMetrics(shopInfo.id, start, end),
+    ]);
+
+    console.log("=== PROMISE RESULTS ===");
+    console.log("Overview status:", overview.status);
+    if (overview.status === "rejected") {
+      console.error("Overview FAILED:", overview.reason);
+    } else {
+      console.log("Overview SUCCESS:", overview.value);
+    }
+    console.log("TopProducts status:", topProducts.status);
+    if (topProducts.status === "rejected") {
+      console.error("TopProducts FAILED:", topProducts.reason);
+    } else {
+      console.log("TopProducts SUCCESS:", topProducts.value);
+    }
+    console.log("RecentActivity status:", recentActivity.status);
+    if (recentActivity.status === "rejected") {
+      console.error("RecentActivity FAILED:", recentActivity.reason);
+    } else {
+      console.log("RecentActivity SUCCESS:", recentActivity.value);
+    }
+    console.log("AttributedMetrics status:", attributedMetrics.status);
+    if (attributedMetrics.status === "rejected") {
+      console.error("AttributedMetrics FAILED:", attributedMetrics.reason);
+    } else {
+      console.log("AttributedMetrics SUCCESS:", attributedMetrics.value);
+    }
+    console.log("Performance status:", performance.status);
+    if (performance.status === "rejected") {
+      console.error("Performance FAILED:", performance.reason);
+    } else {
+      console.log("Performance SUCCESS:", performance.value);
+    }
+
+    // Handle partial failures gracefully
+    const results = {
+      overview:
+        overview.status === "fulfilled"
+          ? overview.value
+          : getEmptyOverview(shopInfo, period),
+      topProducts: topProducts.status === "fulfilled" ? topProducts.value : [],
+      recentActivity:
+        recentActivity.status === "fulfilled"
+          ? recentActivity.value
+          : getEmptyRecentActivity(shopInfo.currency_code),
+      attributedMetrics:
+        attributedMetrics.status === "fulfilled"
+          ? attributedMetrics.value
+          : getEmptyAttributedMetrics(shopInfo.currency_code),
+      performance:
+        performance.status === "fulfilled"
+          ? performance.value
+          : getEmptyPerformance(),
+    };
+
+    // Log any failures
+    [
+      overview,
+      topProducts,
+      recentActivity,
+      attributedMetrics,
+      performance,
+    ].forEach((result, index) => {
+      if (result.status === "rejected") {
+        const sections = [
+          "overview",
+          "topProducts",
+          "recentActivity",
+          "attributedMetrics",
+          "performance",
+        ];
+        console.error(
+          `Dashboard ${sections[index]} failed for shop ${shopDomain}:`,
+          result.reason,
+        );
+      }
+    });
+
+    return results;
   } catch (error) {
+    if (error instanceof DashboardError) throw error;
     throw new DashboardError(
       `Failed to get dashboard overview for ${shopDomain}`,
       "DASHBOARD_ERROR",
@@ -305,73 +370,94 @@ async function getOverviewMetrics(
   endDate: Date,
   currencyCode: string,
   moneyFormat: string,
+  period: string,
 ): Promise<DashboardOverview> {
   try {
-    const cache = await getCacheService();
-    const cacheKey = CacheKeys.overview(
-      shopId,
+    const periodDuration = endDate.getTime() - startDate.getTime();
+    const previousEndDate = new Date(startDate.getTime() - 1);
+    const previousStartDate = new Date(
+      previousEndDate.getTime() - periodDuration,
+    );
+
+    console.log("=== DATE RANGES ===");
+    console.log(
+      "Current period:",
       startDate.toISOString(),
+      "to",
       endDate.toISOString(),
     );
-
-    return await cache.getOrSet(
-      cacheKey,
-      async () => {
-        const periodDuration = endDate.getTime() - startDate.getTime();
-        const previousEndDate = new Date(startDate.getTime() - 1);
-        const previousStartDate = new Date(
-          previousEndDate.getTime() - periodDuration,
-        );
-
-        // Optimized: Use fewer, more efficient queries
-        const [currentMetrics, previousMetrics] = await Promise.all([
-          getMetricsForPeriod(shopId, startDate, endDate),
-          getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
-        ]);
-
-        const conversionRate =
-          safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
-        const previousConversionRate =
-          safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
-
-        return {
-          total_revenue: currentMetrics.revenue,
-          conversion_rate: roundToDecimalPlaces(conversionRate),
-          total_recommendations: currentMetrics.views,
-          total_clicks: currentMetrics.clicks,
-          average_order_value: currentMetrics.averageOrderValue,
-          period: "last_30_days",
-          currency_code: currencyCode,
-          money_format: moneyFormat,
-          revenue_change: calculatePercentageChange(
-            currentMetrics.revenue,
-            previousMetrics.revenue,
-          ),
-          conversion_rate_change: calculatePercentageChange(
-            conversionRate,
-            previousConversionRate,
-          ),
-          recommendations_change: calculatePercentageChange(
-            currentMetrics.views,
-            previousMetrics.views,
-          ),
-          clicks_change: calculatePercentageChange(
-            currentMetrics.clicks,
-            previousMetrics.clicks,
-          ),
-          aov_change: calculatePercentageChange(
-            currentMetrics.averageOrderValue,
-            previousMetrics.averageOrderValue,
-          ),
-          total_customers: currentMetrics.customers,
-          customers_change: calculatePercentageChange(
-            currentMetrics.customers,
-            previousMetrics.customers,
-          ),
-        };
-      },
-      CacheTTL.OVERVIEW,
+    console.log(
+      "Previous period:",
+      previousStartDate.toISOString(),
+      "to",
+      previousEndDate.toISOString(),
     );
+
+    // Optimized: Use fewer, more efficient queries
+    const [currentMetrics, previousMetrics] = await Promise.all([
+      getMetricsForPeriod(shopId, startDate, endDate),
+      getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
+    ]);
+    console.log("=== OVERVIEW METRICS ===");
+    console.log("currentMetrics:", currentMetrics);
+    console.log("previousMetrics:", previousMetrics);
+    console.log("=== CHANGE PERCENTAGES ===");
+    console.log(
+      "revenue_change:",
+      calculatePercentageChange(
+        currentMetrics.revenue,
+        previousMetrics.revenue,
+      ),
+    );
+    console.log(
+      "recommendations_change:",
+      calculatePercentageChange(currentMetrics.views, previousMetrics.views),
+    );
+    console.log(
+      "clicks_change:",
+      calculatePercentageChange(currentMetrics.clicks, previousMetrics.clicks),
+    );
+
+    const conversionRate =
+      safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
+    const previousConversionRate =
+      safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
+
+    return {
+      total_revenue: currentMetrics.revenue,
+      conversion_rate: roundToDecimalPlaces(conversionRate),
+      total_recommendations: currentMetrics.views,
+      total_clicks: currentMetrics.clicks,
+      average_order_value: currentMetrics.averageOrderValue,
+      period: period,
+      currency_code: currencyCode,
+      money_format: moneyFormat,
+      revenue_change: calculatePercentageChange(
+        currentMetrics.revenue,
+        previousMetrics.revenue,
+      ),
+      conversion_rate_change: calculatePercentageChange(
+        conversionRate,
+        previousConversionRate,
+      ),
+      recommendations_change: calculatePercentageChange(
+        currentMetrics.views,
+        previousMetrics.views,
+      ),
+      clicks_change: calculatePercentageChange(
+        currentMetrics.clicks,
+        previousMetrics.clicks,
+      ),
+      aov_change: calculatePercentageChange(
+        currentMetrics.averageOrderValue,
+        previousMetrics.averageOrderValue,
+      ),
+      total_customers: currentMetrics.customers,
+      customers_change: calculatePercentageChange(
+        currentMetrics.customers,
+        previousMetrics.customers,
+      ),
+    };
   } catch (error) {
     throw new DashboardError(
       "Failed to get overview metrics",
@@ -381,26 +467,85 @@ async function getOverviewMetrics(
   }
 }
 
-// Consolidated metrics query to reduce database calls
+// FIXED: Consolidated metrics query with correct interaction types
 async function getMetricsForPeriod(
   shopId: string,
   startDate: Date,
   endDate: Date,
 ) {
+  console.log("getMetricsForPeriod called with:");
+  console.log("  shopId:", shopId);
+  console.log("  startDate:", startDate);
+  console.log("  endDate:", endDate);
+
+  // First, let's check if there's any data at all for this shop
+  const totalInteractions = await prisma.user_interactions.count({
+    where: { shop_id: shopId },
+  });
+  console.log("Total interactions for shop:", totalInteractions);
+
+  const interactionsInRange = await prisma.user_interactions.count({
+    where: {
+      shop_id: shopId,
+      created_at: { gte: startDate, lte: endDate },
+    },
+  });
+  console.log("Interactions in date range:", interactionsInRange);
+
+  // Check what interaction types exist
+  const interactionTypes = await prisma.user_interactions.findMany({
+    where: { shop_id: shopId },
+    select: { interaction_type: true },
+    distinct: ["interaction_type"],
+  });
+  console.log(
+    "Available interaction types:",
+    interactionTypes.map((i) => i.interaction_type),
+  );
+
+  // Check the actual date range of the data
+  const dateRange = await prisma.user_interactions.aggregate({
+    where: { shop_id: shopId },
+    _min: { created_at: true },
+    _max: { created_at: true },
+  });
+  console.log("Data date range:", {
+    earliest: dateRange._min.created_at,
+    latest: dateRange._max.created_at,
+  });
+
+  // Check if our query dates overlap with the data
+  console.log("Query date range:", {
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString(),
+  });
+
+  const hasOverlap =
+    dateRange._min.created_at &&
+    dateRange._max.created_at &&
+    startDate <= dateRange._max.created_at &&
+    endDate >= dateRange._min.created_at;
+  console.log("Date range overlap with data:", hasOverlap);
   const [viewCount, clickCount, revenueStats, customerCount] =
     await Promise.all([
+      // Count views from recommendation_viewed and product_viewed events
       prisma.user_interactions.count({
         where: {
           shop_id: shopId,
           created_at: { gte: startDate, lte: endDate },
-          interaction_type: "view",
+          interaction_type: {
+            in: ["recommendation_viewed", "product_viewed", "page_viewed"],
+          },
         },
       }),
+      // Count clicks from recommendation_add_to_cart and product_added_to_cart events
       prisma.user_interactions.count({
         where: {
           shop_id: shopId,
           created_at: { gte: startDate, lte: endDate },
-          interaction_type: { in: ["click", "add_to_cart"] },
+          interaction_type: {
+            in: ["recommendation_add_to_cart", "product_added_to_cart"],
+          },
         },
       }),
       prisma.purchase_attributions.aggregate({
@@ -422,6 +567,11 @@ async function getMetricsForPeriod(
         })
         .then((result) => result.length),
     ]);
+  console.log("Final metrics:", {
+    viewCount,
+    clickCount,
+    revenue: revenueStats._sum.total_revenue,
+  });
 
   return {
     views: viewCount,
@@ -439,57 +589,44 @@ async function getPerformanceMetrics(
   endDate: Date,
 ): Promise<PerformanceMetrics> {
   try {
-    const cache = await getCacheService();
-    const cacheKey = CacheKeys.performance(
-      shopId,
-      startDate.toISOString(),
-      endDate.toISOString(),
+    const periodDuration = endDate.getTime() - startDate.getTime();
+    const previousEndDate = new Date(startDate.getTime() - 1);
+    const previousStartDate = new Date(
+      previousEndDate.getTime() - periodDuration,
     );
 
-    return await cache.getOrSet(
-      cacheKey,
-      async () => {
-        const periodDuration = endDate.getTime() - startDate.getTime();
-        const previousEndDate = new Date(startDate.getTime() - 1);
-        const previousStartDate = new Date(
-          previousEndDate.getTime() - periodDuration,
-        );
+    const [currentMetrics, previousMetrics] = await Promise.all([
+      getMetricsForPeriod(shopId, startDate, endDate),
+      getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
+    ]);
 
-        const [currentMetrics, previousMetrics] = await Promise.all([
-          getMetricsForPeriod(shopId, startDate, endDate),
-          getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
-        ]);
+    const currentConversionRate =
+      safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
+    const previousConversionRate =
+      safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
 
-        const currentConversionRate =
-          safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
-        const previousConversionRate =
-          safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
-
-        return {
-          total_recommendations: currentMetrics.views,
-          total_clicks: currentMetrics.clicks,
-          conversion_rate: roundToDecimalPlaces(currentConversionRate, 1),
-          total_customers: currentMetrics.customers,
-          recommendations_change: calculatePercentageChange(
-            currentMetrics.views,
-            previousMetrics.views,
-          ),
-          clicks_change: calculatePercentageChange(
-            currentMetrics.clicks,
-            previousMetrics.clicks,
-          ),
-          conversion_rate_change: calculatePercentageChange(
-            currentConversionRate,
-            previousConversionRate,
-          ),
-          customers_change: calculatePercentageChange(
-            currentMetrics.customers,
-            previousMetrics.customers,
-          ),
-        };
-      },
-      CacheTTL.PERFORMANCE,
-    );
+    return {
+      total_recommendations: currentMetrics.views,
+      total_clicks: currentMetrics.clicks,
+      conversion_rate: roundToDecimalPlaces(currentConversionRate, 1),
+      total_customers: currentMetrics.customers,
+      recommendations_change: calculatePercentageChange(
+        currentMetrics.views,
+        previousMetrics.views,
+      ),
+      clicks_change: calculatePercentageChange(
+        currentMetrics.clicks,
+        previousMetrics.clicks,
+      ),
+      conversion_rate_change: calculatePercentageChange(
+        currentConversionRate,
+        previousConversionRate,
+      ),
+      customers_change: calculatePercentageChange(
+        currentMetrics.customers,
+        previousMetrics.customers,
+      ),
+    };
   } catch (error) {
     throw new DashboardError(
       "Failed to get performance metrics",
@@ -499,52 +636,80 @@ async function getPerformanceMetrics(
   }
 }
 
-// Optimized top products with single query approach
+// FIXED: Enhanced top products with correct interaction types and metadata extraction
 async function getTopProducts(
   shopId: string,
   startDate: Date,
   endDate: Date,
-  limit: number = DEFAULT_TOP_PRODUCTS_LIMIT,
+  limit: number,
   currencyCode: string,
 ): Promise<TopProductData[]> {
   try {
-    // Get all interactions and process them in memory since we can't group by JSON
+    // Get product interactions with correct interaction types
     const interactions = await prisma.user_interactions.findMany({
       where: {
         shop_id: shopId,
         created_at: { gte: startDate, lte: endDate },
-        interaction_type: { in: ["click", "add_to_cart", "view"] },
+        interaction_type: {
+          in: [
+            "recommendation_viewed",
+            "product_viewed",
+            "recommendation_add_to_cart",
+            "product_added_to_cart",
+          ],
+        },
       },
       select: {
-        interaction_metadata: true,
         interaction_type: true,
+        interaction_metadata: true,
         customer_id: true,
       },
     });
 
-    // Process and aggregate data
-    const productStats = new Map();
+    // Aggregate product stats by extracting product_id from metadata
+    const productStats = new Map<
+      string,
+      { views: number; clicks: number; customers: Set<string> }
+    >();
 
-    for (const interaction of interactions) {
+    interactions.forEach((interaction) => {
+      // Extract product ID from interaction metadata
+      let productId: string | null = null;
+
+      // Handle different metadata structures based on extension type
       const metadata = interaction.interaction_metadata as any;
-      const productId = metadata?.product_id;
 
-      if (!productId || typeof productId !== "string") continue;
+      if (metadata?.data?.recommendations) {
+        // Phoenix extension format
+        productId = metadata.data.recommendations[0]?.id;
+      } else if (metadata?.data?.productVariant?.product?.id) {
+        // Atlas product_viewed format
+        productId = metadata.data.productVariant.product.id;
+      } else if (metadata?.data?.cartLine?.merchandise?.product?.id) {
+        // Atlas product_added_to_cart format
+        productId = metadata.data.cartLine.merchandise.product.id;
+      }
+
+      if (!productId) return;
 
       if (!productStats.has(productId)) {
         productStats.set(productId, {
-          clicks: 0,
           views: 0,
+          clicks: 0,
           customers: new Set(),
         });
       }
 
-      const stats = productStats.get(productId);
-      if (interaction.interaction_type === "view") {
+      const stats = productStats.get(productId)!;
+
+      if (
+        interaction.interaction_type === "recommendation_viewed" ||
+        interaction.interaction_type === "product_viewed"
+      ) {
         stats.views++;
       } else if (
-        interaction.interaction_type === "click" ||
-        interaction.interaction_type === "add_to_cart"
+        interaction.interaction_type === "recommendation_add_to_cart" ||
+        interaction.interaction_type === "product_added_to_cart"
       ) {
         stats.clicks++;
       }
@@ -552,18 +717,16 @@ async function getTopProducts(
       if (interaction.customer_id) {
         stats.customers.add(interaction.customer_id);
       }
-    }
+    });
 
-    // Get product titles in a single query
+    // Get product titles
     const productIds = Array.from(productStats.keys());
-    const productTitles = await prisma.product_data.findMany({
-      where: { shop_id: shopId, product_id: { in: productIds } },
+    const products = await prisma.product_data.findMany({
+      where: { product_id: { in: productIds }, shop_id: shopId },
       select: { product_id: true, title: true },
     });
 
-    const titleMap = new Map(
-      productTitles.map((product: any) => [product.product_id, product.title]),
-    );
+    const titleMap = new Map(products.map((p) => [p.product_id, p.title]));
 
     // Calculate total revenue for distribution
     const revenueData = await prisma.purchase_attributions.aggregate({
@@ -593,7 +756,7 @@ async function getTopProducts(
       .slice(0, limit);
   } catch (error) {
     console.error("Error in getTopProducts:", error);
-    return []; // Return empty array instead of throwing
+    return [];
   }
 }
 
@@ -647,24 +810,31 @@ function getActivityDateRanges() {
   return { todayStart, yesterdayStart, thisWeekStart };
 }
 
+// FIXED: Activity metrics with correct interaction types
 async function getActivityMetrics(
   shopId: string,
   startDate: Date,
   endDate: Date,
 ): Promise<ActivityMetrics> {
   const [recommendations, clicks, revenue, customers] = await Promise.all([
+    // Count recommendations viewed (phoenix and atlas)
     prisma.user_interactions.count({
       where: {
         shop_id: shopId,
         created_at: { gte: startDate, lte: endDate },
-        interaction_type: "view",
+        interaction_type: {
+          in: ["recommendation_viewed", "product_viewed"],
+        },
       },
     }),
+    // Count clicks and add to cart events
     prisma.user_interactions.count({
       where: {
         shop_id: shopId,
         created_at: { gte: startDate, lte: endDate },
-        interaction_type: { in: ["click", "add_to_cart"] },
+        interaction_type: {
+          in: ["recommendation_add_to_cart", "product_added_to_cart"],
+        },
       },
     }),
     prisma.purchase_attributions.aggregate({
@@ -694,7 +864,7 @@ async function getActivityMetrics(
   };
 }
 
-// Enhanced attributed metrics with prepared statement
+// FIXED: Enhanced attributed metrics - CORRECTLY using refund_attributions table
 async function getAttributedMetrics(
   shopId: string,
   startDate: Date,
@@ -702,62 +872,59 @@ async function getAttributedMetrics(
   currencyCode: string,
 ): Promise<AttributedMetrics> {
   try {
-    const cache = await getCacheService();
-    const cacheKey = `${CacheKeys.context(shopId, startDate.toISOString(), endDate.toISOString())}:attributed`;
-
-    return await cache.getOrSet(
-      cacheKey,
-      async () => {
-        const [attributedRevenueData, totalRevenueData, refundsResult] =
-          await Promise.all([
-            prisma.purchase_attributions.aggregate({
-              where: {
-                shop_id: shopId,
-                purchase_at: { gte: startDate, lte: endDate },
-              },
-              _sum: { total_revenue: true },
-            }),
-            prisma.order_data.aggregate({
-              where: {
-                shop_id: shopId,
-                order_date: { gte: startDate, lte: endDate },
-              },
-              _sum: { total_amount: true },
-            }),
-            prisma.refund_attributions.aggregate({
-              where: {
-                shop_id: shopId,
-                refunded_at: { gte: startDate, lte: endDate },
-              },
-              _sum: { total_refund_amount: true },
-            }),
-          ]);
-
-        const attributedRevenue = safeNumber(
-          attributedRevenueData._sum?.total_revenue,
-        );
-        const totalRevenue = safeNumber(totalRevenueData._sum?.total_amount);
-        const attributedRefunds = safeNumber(
-          refundsResult._sum?.total_refund_amount,
-        );
-
-        const netAttributedRevenue = attributedRevenue - attributedRefunds;
-        const attributionRate =
-          safeDivision(attributedRevenue, totalRevenue) * 100;
-        const refundRate =
-          safeDivision(attributedRefunds, attributedRevenue) * 100;
-
-        return {
-          attributed_revenue: attributedRevenue,
-          attributed_refunds: attributedRefunds,
-          net_attributed_revenue: netAttributedRevenue,
-          attribution_rate: roundToDecimalPlaces(attributionRate),
-          refund_rate: roundToDecimalPlaces(refundRate),
-          currency_code: currencyCode,
-        };
+    // Get attributed revenue from purchase_attributions table
+    const attributedRevenueData = await prisma.purchase_attributions.aggregate({
+      where: {
+        shop_id: shopId,
+        purchase_at: { gte: startDate, lte: endDate },
       },
-      CacheTTL.CONTEXT,
+      _sum: { total_revenue: true },
+    });
+
+    // FIXED: Get attributed refunds from refund_attributions table (NOT purchase_attributions)
+    const attributedRefundsData = await prisma.refund_attributions.aggregate({
+      where: {
+        shop_id: shopId,
+        refunded_at: { gte: startDate, lte: endDate },
+      },
+      _sum: {
+        total_refund_amount: true,
+        total_refunded_revenue: true,
+      },
+    });
+
+    // Get total revenue for attribution rate from order_data table
+    const totalRevenueData = await prisma.order_data.aggregate({
+      where: {
+        shop_id: shopId,
+        order_date: { gte: startDate, lte: endDate },
+      },
+      _sum: { total_amount: true },
+    });
+
+    const attributedRevenue = safeNumber(
+      attributedRevenueData._sum.total_revenue,
     );
+
+    // Use total_refunded_revenue which is the attributed portion of refunds
+    const attributedRefunds = safeNumber(
+      attributedRefundsData._sum.total_refunded_revenue,
+    );
+
+    const totalRevenue = safeNumber(totalRevenueData._sum.total_amount);
+    const netAttributedRevenue = attributedRevenue - attributedRefunds;
+
+    const attributionRate = safeDivision(attributedRevenue, totalRevenue) * 100;
+    const refundRate = safeDivision(attributedRefunds, attributedRevenue) * 100;
+
+    return {
+      attributed_revenue: attributedRevenue,
+      attributed_refunds: attributedRefunds,
+      net_attributed_revenue: netAttributedRevenue,
+      attribution_rate: roundToDecimalPlaces(attributionRate),
+      refund_rate: roundToDecimalPlaces(refundRate),
+      currency_code: currencyCode,
+    };
   } catch (error) {
     throw new DashboardError(
       "Failed to get attributed metrics",
@@ -845,7 +1012,6 @@ export async function invalidateDashboardCache(
       `Failed to invalidate dashboard cache for ${shopDomain}:`,
       error,
     );
-    // Don't throw - cache invalidation failure shouldn't break the app
   }
 }
 

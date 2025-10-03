@@ -1,13 +1,7 @@
-import {
-  Card,
-  Text,
-  BlockStack,
-  InlineStack,
-  Icon,
-  Badge,
-} from "@shopify/polaris";
+import { Card, Text, BlockStack, InlineStack, Icon } from "@shopify/polaris";
 import {
   ArrowDownIcon,
+  ArrowUpIcon,
   StarFilledIcon,
   EyeCheckMarkIcon,
   CashDollarIcon,
@@ -44,6 +38,7 @@ function KPICard({
   color = "#3B82F6",
   description,
 }: KPICardProps) {
+  console.log(`KPICard ${title}:`, { value, change, trend });
   const getTrendColor = () => {
     if (trend === "up") return "success";
     if (trend === "down") return "critical";
@@ -112,10 +107,52 @@ function KPICard({
               </div>
 
               {change !== undefined && change !== null && (
-                <div style={{ fontWeight: "600", fontSize: "12px" }}>
-                  <Badge tone={getTrendColor()} size="small">
-                    {`${change > 0 ? "+" : ""}${change.toString()}%`}
-                  </Badge>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontWeight: "600",
+                    fontSize: "12px",
+                    padding: "4px 8px",
+                    backgroundColor:
+                      trend === "up"
+                        ? "#10B98115"
+                        : trend === "down"
+                          ? "#EF444415"
+                          : change === null
+                            ? "#3B82F615"
+                            : "#6B728015",
+                    borderRadius: "6px",
+                    border: `1px solid ${trend === "up" ? "#10B98130" : trend === "down" ? "#EF444430" : change === null ? "#3B82F630" : "#6B728030"}`,
+                    transition: "all 0.2s ease-in-out",
+                  }}
+                >
+                  <Icon
+                    source={
+                      trend === "up"
+                        ? ArrowUpIcon
+                        : trend === "down"
+                          ? ArrowDownIcon
+                          : ArrowUpIcon
+                    }
+                    tone={getTrendColor()}
+                  />
+                  <span
+                    style={{
+                      color:
+                        trend === "up"
+                          ? "#10B981"
+                          : trend === "down"
+                            ? "#EF4444"
+                            : change === null
+                              ? "#3B82F6"
+                              : "#6B7280",
+                      fontWeight: "700",
+                    }}
+                  >
+                    {`${change > 0 ? "+" : ""}${change.toFixed(1)}%`}
+                  </span>
                 </div>
               )}
             </InlineStack>
@@ -162,6 +199,14 @@ export function KPICards({ data, attributedMetrics }: KPICardsProps) {
           <KPICard
             title="Attributed Revenue"
             value={formatCurrencyAmount(attributedMetrics.attributed_revenue)}
+            change={data.revenue_change}
+            trend={
+              data.revenue_change !== null
+                ? data.revenue_change >= 0
+                  ? "up"
+                  : "down"
+                : "neutral"
+            }
             icon={<Icon source={CashDollarIcon} tone="base" />}
             color="#10B981"
             description="Revenue from extensions"
@@ -178,6 +223,14 @@ export function KPICards({ data, attributedMetrics }: KPICardsProps) {
             value={formatCurrencyAmount(
               attributedMetrics.net_attributed_revenue,
             )}
+            change={data.revenue_change}
+            trend={
+              data.revenue_change !== null
+                ? data.revenue_change >= 0
+                  ? "up"
+                  : "down"
+                : "neutral"
+            }
             icon={<Icon source={StarFilledIcon} tone="base" />}
             color="#059669"
             description="After refunds"

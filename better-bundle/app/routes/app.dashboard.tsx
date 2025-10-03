@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { useLoaderData, useSearchParams, useNavigate } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -9,10 +10,11 @@ import {
   Banner,
   Tabs,
   Icon,
+  InlineStack,
 } from "@shopify/polaris";
 import { ChartCohortIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import { getDashboardOverview } from "../services/dashboard.service";
 import {
@@ -21,36 +23,120 @@ import {
 } from "../components/Dashboard/KPICards";
 import { TopProductsTable } from "../components/Dashboard/TopProductsTable";
 import { RecentActivity } from "../components/Dashboard/RecentActivity";
+import { DateRangePicker } from "app/components/UI/DateRangePicker";
+
+// Helper to parse and validate dates with proper timezone handling
+function getDateRange(url: URL) {
+  const startDateParam = url.searchParams.get("startDate");
+  const endDateParam = url.searchParams.get("endDate");
+
+  const today = new Date();
+  // Use a wider default range to ensure we capture data
+  const defaultStart = new Date();
+  defaultStart.setDate(today.getDate() - 90); // 90 days back instead of 30
+
+  let startDate: Date;
+  let endDate: Date;
+
+  if (startDateParam) {
+    // Parse date string and ensure it's treated as UTC
+    startDate = new Date(startDateParam + "T00:00:00.000Z");
+  } else {
+    startDate = new Date(defaultStart);
+    startDate.setUTCHours(0, 0, 0, 0); // UTC start of day
+  }
+
+  if (endDateParam) {
+    // Parse date string and ensure it's treated as UTC - include the full day
+    endDate = new Date(endDateParam + "T23:59:59.999Z");
+  } else {
+    endDate = new Date(today);
+    endDate.setUTCHours(23, 59, 59, 999); // UTC end of day
+  }
+
+  // Validate dates
+  if (startDate > endDate) {
+    const fallbackStart = new Date(defaultStart);
+    fallbackStart.setUTCHours(0, 0, 0, 0);
+    const fallbackEnd = new Date(today);
+    fallbackEnd.setUTCHours(23, 59, 59, 999);
+
+    return {
+      startDate: fallbackStart.toISOString().split("T")[0],
+      endDate: fallbackEnd.toISOString().split("T")[0],
+    };
+  }
+
+  return {
+    startDate: startDate.toISOString().split("T")[0],
+    endDate: endDate.toISOString().split("T")[0],
+  };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const { startDate, endDate } = getDateRange(url);
 
   try {
-    const dashboardData = await getDashboardOverview(session.shop);
+    // Pass custom date range to the service
+    const dashboardData = await getDashboardOverview(
+      session.shop,
+      startDate,
+      endDate,
+    );
 
-    return {
+    return json({
       dashboardData,
       shop: session.shop,
-    };
+      startDate,
+      endDate,
+    });
   } catch (error) {
     console.error("Dashboard loader error:", error);
-    return {
+    return json({
       dashboardData: null,
       shop: session.shop,
+      startDate,
+      endDate,
       error: "Failed to load dashboard data",
-    };
+    });
   }
 };
 
 export default function Dashboard() {
   const loaderData = useLoaderData<typeof loader>();
-  const { dashboardData } = loaderData;
+  const { dashboardData, startDate, endDate } = loaderData;
   const error = "error" in loaderData ? loaderData.error : undefined;
+  console.log("Component received data:", {
+    dashboardData,
+    overview: dashboardData?.overview,
+    hasData: !!dashboardData,
+  });
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [selectedTab, setSelectedTab] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleTabChange = useCallback((selectedTabIndex: number) => {
     setSelectedTab(selectedTabIndex);
   }, []);
+
+  const handleDateChange = useCallback(
+    (range: { startDate: string; endDate: string }) => {
+      setIsLoading(true);
+      const params = new URLSearchParams(searchParams);
+      params.set("startDate", range.startDate);
+      params.set("endDate", range.endDate);
+      navigate(`?${params.toString()}`, { replace: true });
+    },
+    [navigate, searchParams],
+  );
+
+  // Reset loading state when data changes
+  useEffect(() => {
+    setIsLoading(false);
+  }, [dashboardData]);
 
   if (error) {
     return (
@@ -67,7 +153,7 @@ export default function Dashboard() {
     );
   }
 
-  if (!dashboardData) {
+  if (!dashboardData || isLoading) {
     return (
       <Page>
         <TitleBar title="Analytics Dashboard" />
@@ -272,6 +358,19 @@ export default function Dashboard() {
             />
           </div>
         </div>
+
+        {/* Date Range Picker Section */}
+        <InlineStack align="space-between" blockAlign="center">
+          <Text as="p" variant="bodySm" tone="subdued">
+            Viewing data from {new Date(startDate).toLocaleDateString()} to{" "}
+            {new Date(endDate).toLocaleDateString()}
+          </Text>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onDateChange={handleDateChange}
+          />
+        </InlineStack>
 
         <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange}>
           {renderTabContent()}
