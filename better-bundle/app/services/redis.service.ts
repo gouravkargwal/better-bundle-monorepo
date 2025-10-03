@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from "redis";
+import { createClient, type RedisClientType } from "redis";
 
 // Redis client singleton
 let redisClient: RedisClientType | null = null;
@@ -133,6 +133,7 @@ export class CacheService {
     await Promise.all([
       this.delPattern(`dashboard:${shopId}:*`),
       this.delPattern(`overview:${shopId}:*`),
+      this.delPattern(`performance:${shopId}:*`),
       this.delPattern(`context:${shopId}:*`),
       this.delPattern(`products:${shopId}:*`),
       this.delPattern(`activity:${shopId}:*`),
@@ -166,6 +167,8 @@ export const CacheKeys = {
   ) => `dashboard:${shopId}:${period}:${startDate}:${endDate}`,
   overview: (shopId: string, startDate: string, endDate: string) =>
     `overview:${shopId}:${startDate}:${endDate}`,
+  performance: (shopId: string, startDate: string, endDate: string) =>
+    `performance:${shopId}:${startDate}:${endDate}`,
   context: (shopId: string, startDate: string, endDate: string) =>
     `context:${shopId}:${startDate}:${endDate}`,
   products: (
@@ -185,6 +188,7 @@ export const CacheTTL = {
   SHOP: 3600, // 1 hour
   DASHBOARD: 300, // 5 minutes
   OVERVIEW: 300, // 5 minutes
+  PERFORMANCE: 300, // 5 minutes
   CONTEXT: 300, // 5 minutes
   PRODUCTS: 600, // 10 minutes
   ACTIVITY: 120, // 2 minutes

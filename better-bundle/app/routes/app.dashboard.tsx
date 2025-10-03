@@ -149,7 +149,7 @@ export default function Dashboard() {
       case 1: // Performance
         return (
           <BlockStack gap="300">
-            <PerformanceKPICards data={dashboardData.overview} />
+            <PerformanceKPICards data={dashboardData.performance} />
           </BlockStack>
         );
       case 2: // Top Products

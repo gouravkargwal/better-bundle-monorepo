@@ -3,6 +3,7 @@ import { getCacheService, CacheKeys, CacheTTL } from "./redis.service";
 
 // Constants
 const DEFAULT_CURRENCY = "USD";
+// eslint-disable-next-line no-template-curly-in-string
 const DEFAULT_MONEY_FORMAT = "${{amount}}";
 const DEFAULT_TOP_PRODUCTS_LIMIT = 10;
 
@@ -59,11 +60,23 @@ export interface AttributedMetrics {
   currency_code: string;
 }
 
+export interface PerformanceMetrics {
+  total_recommendations: number;
+  total_clicks: number;
+  conversion_rate: number;
+  total_customers: number;
+  recommendations_change: number | null;
+  clicks_change: number | null;
+  conversion_rate_change: number | null;
+  customers_change: number | null;
+}
+
 export interface DashboardData {
   overview: DashboardOverview;
   topProducts: TopProductData[];
   recentActivity: RecentActivityData;
   attributedMetrics: AttributedMetrics;
+  performance: PerformanceMetrics;
 }
 
 // Enhanced error types
@@ -191,35 +204,41 @@ export async function getDashboardOverview(
     return await cache.getOrSet(
       cacheKey,
       async () => {
-        const [overview, topProducts, recentActivity, attributedMetrics] =
-          await Promise.allSettled([
-            getOverviewMetrics(
-              shopInfo.id,
-              startDate,
-              endDate,
-              shopInfo.currency_code,
-              shopInfo.money_format,
-            ),
-            getTopProducts(
-              shopInfo.id,
-              startDate,
-              endDate,
-              DEFAULT_TOP_PRODUCTS_LIMIT,
-              shopInfo.currency_code,
-            ),
-            getRecentActivity(
-              shopInfo.id,
-              startDate,
-              endDate,
-              shopInfo.currency_code,
-            ),
-            getAttributedMetrics(
-              shopInfo.id,
-              startDate,
-              endDate,
-              shopInfo.currency_code,
-            ),
-          ]);
+        const [
+          overview,
+          topProducts,
+          recentActivity,
+          attributedMetrics,
+          performance,
+        ] = await Promise.allSettled([
+          getOverviewMetrics(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currency_code,
+            shopInfo.money_format,
+          ),
+          getTopProducts(
+            shopInfo.id,
+            startDate,
+            endDate,
+            DEFAULT_TOP_PRODUCTS_LIMIT,
+            shopInfo.currency_code,
+          ),
+          getRecentActivity(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currency_code,
+          ),
+          getAttributedMetrics(
+            shopInfo.id,
+            startDate,
+            endDate,
+            shopInfo.currency_code,
+          ),
+          getPerformanceMetrics(shopInfo.id, startDate, endDate),
+        ]);
 
         // Handle partial failures gracefully
         const results = {
@@ -237,25 +256,34 @@ export async function getDashboardOverview(
             attributedMetrics.status === "fulfilled"
               ? attributedMetrics.value
               : getEmptyAttributedMetrics(shopInfo.currency_code),
+          performance:
+            performance.status === "fulfilled"
+              ? performance.value
+              : getEmptyPerformance(),
         };
 
         // Log any failures
-        [overview, topProducts, recentActivity, attributedMetrics].forEach(
-          (result, index) => {
-            if (result.status === "rejected") {
-              const sections = [
-                "overview",
-                "topProducts",
-                "recentActivity",
-                "attributedMetrics",
-              ];
-              console.error(
-                `Dashboard ${sections[index]} failed for shop ${shopDomain}:`,
-                result.reason,
-              );
-            }
-          },
-        );
+        [
+          overview,
+          topProducts,
+          recentActivity,
+          attributedMetrics,
+          performance,
+        ].forEach((result, index) => {
+          if (result.status === "rejected") {
+            const sections = [
+              "overview",
+              "topProducts",
+              "recentActivity",
+              "attributedMetrics",
+              "performance",
+            ];
+            console.error(
+              `Dashboard ${sections[index]} failed for shop ${shopDomain}:`,
+              result.reason,
+            );
+          }
+        });
 
         return results;
       },
@@ -402,6 +430,73 @@ async function getMetricsForPeriod(
     averageOrderValue: safeNumber(revenueStats._avg.total_revenue),
     customers: customerCount,
   };
+}
+
+// Performance metrics derived from core metrics with caching
+async function getPerformanceMetrics(
+  shopId: string,
+  startDate: Date,
+  endDate: Date,
+): Promise<PerformanceMetrics> {
+  try {
+    const cache = await getCacheService();
+    const cacheKey = CacheKeys.performance(
+      shopId,
+      startDate.toISOString(),
+      endDate.toISOString(),
+    );
+
+    return await cache.getOrSet(
+      cacheKey,
+      async () => {
+        const periodDuration = endDate.getTime() - startDate.getTime();
+        const previousEndDate = new Date(startDate.getTime() - 1);
+        const previousStartDate = new Date(
+          previousEndDate.getTime() - periodDuration,
+        );
+
+        const [currentMetrics, previousMetrics] = await Promise.all([
+          getMetricsForPeriod(shopId, startDate, endDate),
+          getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
+        ]);
+
+        const currentConversionRate =
+          safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
+        const previousConversionRate =
+          safeDivision(previousMetrics.clicks, previousMetrics.views) * 100;
+
+        return {
+          total_recommendations: currentMetrics.views,
+          total_clicks: currentMetrics.clicks,
+          conversion_rate: roundToDecimalPlaces(currentConversionRate, 1),
+          total_customers: currentMetrics.customers,
+          recommendations_change: calculatePercentageChange(
+            currentMetrics.views,
+            previousMetrics.views,
+          ),
+          clicks_change: calculatePercentageChange(
+            currentMetrics.clicks,
+            previousMetrics.clicks,
+          ),
+          conversion_rate_change: calculatePercentageChange(
+            currentConversionRate,
+            previousConversionRate,
+          ),
+          customers_change: calculatePercentageChange(
+            currentMetrics.customers,
+            previousMetrics.customers,
+          ),
+        };
+      },
+      CacheTTL.PERFORMANCE,
+    );
+  } catch (error) {
+    throw new DashboardError(
+      "Failed to get performance metrics",
+      "PERFORMANCE_ERROR",
+      error as Error,
+    );
+  }
 }
 
 // Optimized top products with single query approach
@@ -717,6 +812,19 @@ function getEmptyAttributedMetrics(currencyCode: string): AttributedMetrics {
     attribution_rate: 0,
     refund_rate: 0,
     currency_code: currencyCode,
+  };
+}
+
+function getEmptyPerformance(): PerformanceMetrics {
+  return {
+    total_recommendations: 0,
+    total_clicks: 0,
+    conversion_rate: 0,
+    total_customers: 0,
+    recommendations_change: null,
+    clicks_change: null,
+    conversion_rate_change: null,
+    customers_change: null,
   };
 }
 

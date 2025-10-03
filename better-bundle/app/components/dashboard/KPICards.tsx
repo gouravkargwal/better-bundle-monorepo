@@ -16,6 +16,7 @@ import {
 import type {
   DashboardOverview,
   AttributedMetrics,
+  PerformanceMetrics,
 } from "../../services/dashboard.service";
 import { formatCurrency } from "../../utils/currency";
 
@@ -376,7 +377,7 @@ export function RevenueKPICards({ data, attributedMetrics }: KPICardsProps) {
 }
 
 // Performance-focused component
-export function PerformanceKPICards({ data }: { data: DashboardOverview }) {
+export function PerformanceKPICards({ data }: { data: PerformanceMetrics }) {
   const formatPercentage = (value: number) => {
     return `${value.toFixed(1)}%`;
   };
