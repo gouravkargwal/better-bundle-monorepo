@@ -63,7 +63,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get overview metrics
     const overviewData = {
       totalRevenue: dashboardData?.overview?.total_revenue || 0,
-      currency: shop.currency_code || "USD",
+      currency: shop.currency_code,
       conversionRate: dashboardData?.overview?.conversion_rate || 0,
       totalRecommendations: dashboardData?.overview?.total_recommendations || 0,
       revenueChange: dashboardData?.overview?.revenue_change || null,
