@@ -1,6 +1,7 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
 import { getTrialThresholdInShopCurrency } from "../utils/currency-converter";
+import { createUsageBasedSubscription } from "./subscription.service";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -367,6 +368,166 @@ const deactivateShopBilling = async (
   }
 };
 
+const handleTrialCompletion = async (
+  session: Session,
+  admin: any,
+  shopId: string,
+  shopDomain: string,
+  finalRevenue: number,
+  currencyCode: string = "USD",
+) => {
+  try {
+    console.log(
+      `🎉 Trial completed for shop ${shopDomain} with revenue $${finalRevenue}`,
+    );
+
+    // 1. Update billing plan to mark trial as completed
+    await prisma.billing_plans.updateMany({
+      where: {
+        shop_id: shopId,
+        status: "active",
+        is_trial_active: true,
+      },
+      data: {
+        is_trial_active: false,
+        trial_revenue: finalRevenue,
+        configuration: {
+          trial_active: false,
+          trial_completed_at: new Date().toISOString(),
+          trial_completion_revenue: finalRevenue,
+          services_stopped: true,
+          consent_required: true,
+          subscription_required: true,
+          billing_suspended: true,
+        },
+      },
+    });
+
+    // 2. Create usage-based subscription
+    console.log(`🔄 Creating usage-based subscription for shop ${shopDomain}`);
+    const subscription = await createUsageBasedSubscription(
+      session,
+      admin,
+      shopId,
+      shopDomain,
+      currencyCode,
+    );
+
+    if (subscription) {
+      console.log(`✅ Usage-based subscription created: ${subscription.id}`);
+
+      // Update billing plan with subscription details
+      await prisma.billing_plans.updateMany({
+        where: {
+          shop_id: shopId,
+          status: "active",
+        },
+        data: {
+          configuration: {
+            subscription_id: subscription.id,
+            subscription_status: "PENDING",
+            subscription_created_at: new Date().toISOString(),
+            usage_based: true,
+            capped_amount: "1000",
+            currency: currencyCode,
+            trial_active: false,
+            trial_completed_at: new Date().toISOString(),
+            trial_completion_revenue: finalRevenue,
+            services_stopped: true,
+            consent_required: true,
+            subscription_required: true,
+            billing_suspended: true,
+          },
+        },
+      });
+
+      // Create billing event for trial completion
+      await prisma.billing_events.create({
+        data: {
+          shop_id: shopId,
+          type: "trial_completed",
+          data: {
+            final_revenue: finalRevenue,
+            completed_at: new Date().toISOString(),
+            subscription_id: subscription.id,
+            subscription_created: true,
+          },
+          metadata: {
+            trial_completion: true,
+            final_revenue: finalRevenue,
+            subscription_created: true,
+          },
+          occurred_at: new Date(),
+        },
+      });
+
+      return {
+        success: true,
+        subscription_created: true,
+        subscription_id: subscription.id,
+        final_revenue: finalRevenue,
+      };
+    } else {
+      console.error(`❌ Failed to create subscription for shop ${shopDomain}`);
+
+      // Create billing event for trial completion without subscription
+      await prisma.billing_events.create({
+        data: {
+          shop_id: shopId,
+          type: "trial_completed_no_subscription",
+          data: {
+            final_revenue: finalRevenue,
+            completed_at: new Date().toISOString(),
+            subscription_created: false,
+            error: "Failed to create subscription",
+          },
+          metadata: {
+            trial_completion: true,
+            final_revenue: finalRevenue,
+            subscription_created: false,
+          },
+          occurred_at: new Date(),
+        },
+      });
+
+      return {
+        success: false,
+        subscription_created: false,
+        error: "Failed to create subscription",
+        final_revenue: finalRevenue,
+      };
+    }
+  } catch (error) {
+    console.error(
+      `❌ Error handling trial completion for shop ${shopDomain}:`,
+      error,
+    );
+
+    // Create billing event for error
+    await prisma.billing_events.create({
+      data: {
+        shop_id: shopId,
+        type: "trial_completion_error",
+        data: {
+          final_revenue: finalRevenue,
+          error: error instanceof Error ? error.message : "Unknown error",
+          occurred_at: new Date().toISOString(),
+        },
+        metadata: {
+          trial_completion: true,
+          final_revenue: finalRevenue,
+          error: true,
+        },
+        occurred_at: new Date(),
+      },
+    });
+
+    throw new Error(
+      `Failed to handle trial completion: ${error instanceof Error ? error.message : "Unknown error"}`,
+    );
+  }
+};
+
 export {
   getShop,
   getShopOnboardingCompleted,
@@ -377,4 +538,5 @@ export {
   getShopInfoFromShopify,
   markOnboardingCompleted,
   deactivateShopBilling,
+  handleTrialCompletion,
 };

@@ -17,6 +17,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import { getDashboardOverview } from "../services/dashboard.service";
+import { checkServiceSuspensionMiddleware } from "../middleware/serviceSuspension";
 import {
   RevenueKPICards,
   PerformanceKPICards,
@@ -79,6 +80,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { startDate, endDate } = getDateRange(url);
 
   try {
+    // Check service suspension status
+    const suspensionCheck = await checkServiceSuspensionMiddleware(
+      request,
+      session.shop,
+    );
+
+    if (suspensionCheck.shouldRedirect && suspensionCheck.redirectUrl) {
+      throw new Response(null, {
+        status: 302,
+        headers: {
+          Location: suspensionCheck.redirectUrl,
+        },
+      });
+    }
+
     // Pass custom date range to the service
     const dashboardData = await getDashboardOverview(
       session.shop,
@@ -91,6 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shop: session.shop,
       startDate,
       endDate,
+      suspensionStatus: suspensionCheck.suspensionStatus,
     });
   } catch (error) {
     console.error("Dashboard loader error:", error);
