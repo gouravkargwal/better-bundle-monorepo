@@ -86,6 +86,7 @@ class ProductCardManager {
       window.recommendationApi ||
       (window.RecommendationAPI ? new window.RecommendationAPI() : null);
     this.skeletonState = 'initial'; // 'initial', 'loading', 'loaded'
+    this.isUpdatingDropdowns = false; // Flag to prevent Swiper reinitialization during dropdown updates
   }
 
   // Manage skeleton loading state
@@ -248,9 +249,20 @@ class ProductCardManager {
           swiperWrapper.appendChild(slide);
         });
 
-        // Reinitialize Swiper with new content after a small delay
+        // Only reinitialize Swiper if it doesn't exist or if content structure changed significantly
+        // Skip reinitialization if we're updating dropdowns to prevent card movement
         setTimeout(() => {
-          this.initializeSwiper();
+          if (this.isUpdatingDropdowns) {
+            console.log('🔄 Skipping Swiper reinitialization during dropdown updates');
+            return;
+          }
+
+          if (!window.swiper || window.swiper.destroyed) {
+            this.initializeSwiper();
+          } else {
+            // Just update the existing Swiper without destroying it
+            window.swiper.update();
+          }
           this.preventNavigationClickPropagation();
         }, 100);
 
@@ -693,7 +705,7 @@ class ProductCardManager {
         <label class="variant-label">${option.name}:</label>
         <select class="variant-select" 
                 data-option="${option.name}"
-                onchange="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', this.value)"
+                onchange="event.stopPropagation(); productCardManager.handleDropdownChange('${productId}', '${option.name}', this)"
                 onclick="event.stopPropagation()">
           <option value="">Select ${option.name}</option>
           ${availableValues.map(value => {
@@ -736,7 +748,7 @@ class ProductCardManager {
           <label class="variant-label">${option.name}:</label>
           <select class="variant-select" 
                   data-option="${option.name}"
-                  onchange="event.stopPropagation(); productCardManager.selectVariant('${product.id}', '${option.name}', this.value)"
+                  onchange="event.stopPropagation(); productCardManager.handleDropdownChange('${product.id}', '${option.name}', this)"
                   onclick="event.stopPropagation()">
             <option value="">Select ${option.name}</option>
             ${option.values.map(value =>
@@ -756,6 +768,79 @@ class ProductCardManager {
         ${selectors}
       </div>
     `;
+  }
+
+  // Handle dropdown change with validation
+  handleDropdownChange(productId, optionName, dropdownElement) {
+    const selectedValue = dropdownElement.value;
+    const selectedOption = dropdownElement.querySelector(`option[value="${selectedValue}"]`);
+
+    console.log('🎯 Dropdown change:', { productId, optionName, selectedValue });
+
+    // IMMEDIATE validation - check if the selected option is disabled or unavailable
+    if (selectedOption && (selectedOption.disabled || selectedOption.classList.contains('unavailable'))) {
+      console.warn('⚠️ BLOCKED: Attempted to select disabled/unavailable option:', selectedValue);
+
+      // Store the previous valid value before reverting
+      const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+      const currentSelections = this.getSelectedOptions(productCard);
+      const previousValue = currentSelections[optionName];
+
+      // Force revert immediately
+      if (previousValue && !dropdownElement.querySelector(`option[value="${previousValue}"]`)?.disabled) {
+        dropdownElement.value = previousValue;
+        console.log('🔄 FORCED REVERT to previous selection:', previousValue);
+      } else {
+        // Find first available option
+        const availableOptions = Array.from(dropdownElement.querySelectorAll('option:not([disabled]):not(.unavailable):not([value=""])'));
+        if (availableOptions.length > 0) {
+          dropdownElement.value = availableOptions[0].value;
+          console.log('🔄 FORCED SELECTION of first available option:', availableOptions[0].value);
+        } else {
+          dropdownElement.value = '';
+          console.log('🔄 FORCED CLEAR - no available options');
+        }
+      }
+
+      // Trigger change event with the corrected value to ensure consistency
+      setTimeout(() => {
+        dropdownElement.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 10);
+
+      return; // BLOCK the original selection completely
+    }
+
+    // Additional validation: Check if the option is actually available in the current context
+    const productData = this.productDataStore[productId];
+    if (productData) {
+      const currentSelections = this.getSelectedOptions(dropdownElement.closest('[data-product-id]'));
+      const isActuallyAvailable = this.isVariantAvailable(optionName, selectedValue, productId, currentSelections);
+
+      if (!isActuallyAvailable) {
+        console.warn('⚠️ BLOCKED: Option not available in current context:', selectedValue);
+
+        // Find first available option
+        const availableOptions = Array.from(dropdownElement.querySelectorAll('option:not([disabled]):not(.unavailable):not([value=""])'));
+        if (availableOptions.length > 0) {
+          dropdownElement.value = availableOptions[0].value;
+          console.log('🔄 FORCED SELECTION of first available option:', availableOptions[0].value);
+        } else {
+          dropdownElement.value = '';
+          console.log('🔄 FORCED CLEAR - no available options');
+        }
+
+        // Trigger change event with the corrected value
+        setTimeout(() => {
+          dropdownElement.dispatchEvent(new Event('change', { bubbles: true }));
+        }, 10);
+
+        return; // BLOCK the original selection completely
+      }
+    }
+
+    // If selection is valid, proceed with normal flow
+    console.log('✅ Selection validated, proceeding with:', selectedValue);
+    this.selectVariant(productId, optionName, selectedValue);
   }
 
   // Handle variant selection for any option type
@@ -789,6 +874,9 @@ class ProductCardManager {
     // Update selection state
     this.updateSelectionState(productCard, optionName, selectedValue);
 
+    // Update dependent dropdowns based on current selection
+    this.updateDependentDropdowns(productId, optionName, selectedValue);
+
     // Get all selected options
     const selectedOptions = this.getSelectedOptions(productCard);
     console.log('📋 All selected options:', selectedOptions);
@@ -804,6 +892,11 @@ class ProductCardManager {
       console.warn('⚠️ No matching variant found, showing unavailable');
       this.showVariantUnavailable(productId);
     }
+
+    // Reset the dropdown update flag after a short delay to allow dependent dropdowns to complete
+    setTimeout(() => {
+      this.isUpdatingDropdowns = false;
+    }, 200);
   }
 
   // Update selection state for any option type
@@ -831,6 +924,233 @@ class ProductCardManager {
     selects.forEach(select => {
       select.value = selectedValue;
       console.log('✅ Updated select value:', select.dataset.option, '=', selectedValue);
+    });
+  }
+
+  // Update dependent dropdowns based on current selection
+  updateDependentDropdowns(productId, changedOptionName, selectedValue) {
+    const productData = this.productDataStore[productId];
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+
+    if (!productData || !productCard) return;
+
+    // Set flag to prevent Swiper reinitialization during dropdown updates
+    this.isUpdatingDropdowns = true;
+
+    console.log('🔄 Updating dependent dropdowns for:', changedOptionName, '=', selectedValue);
+
+    // Get all dropdown selects
+    const allDropdowns = productCard.querySelectorAll('select[data-option]');
+
+    allDropdowns.forEach(dropdown => {
+      const optionName = dropdown.dataset.option;
+
+      // Skip the dropdown that was just changed
+      if (optionName === changedOptionName) return;
+
+      console.log('🔄 Updating dropdown:', optionName);
+
+      // Get current selection for this dropdown
+      const currentSelection = dropdown.value;
+
+      // Find available options for this dropdown based on other selections
+      const availableOptions = this.getAvailableOptionsForDropdown(productId, optionName, changedOptionName, selectedValue);
+
+      console.log('📋 Available options for', optionName, ':', availableOptions);
+
+      // Update dropdown options
+      this.updateDropdownOptions(dropdown, availableOptions, currentSelection);
+    });
+
+    // Reset flag after dropdown updates are complete
+    setTimeout(() => {
+      this.isUpdatingDropdowns = false;
+    }, 100);
+  }
+
+  // Get available options for a specific dropdown based on other selections
+  getAvailableOptionsForDropdown(productId, targetOptionName, changedOptionName, changedValue) {
+    const productData = this.productDataStore[productId];
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+
+    if (!productData || !productData.variants) return [];
+
+    // Get current selections (excluding the one being changed)
+    const currentSelections = this.getSelectedOptions(productCard);
+
+    // Add the changed selection
+    currentSelections[changedOptionName] = changedValue;
+
+    console.log('🔍 Finding available options for', targetOptionName, 'with selections:', currentSelections);
+
+    // Find all variants that match the current selections (excluding target option)
+    const matchingVariants = productData.variants.filter(variant => {
+      const variantTitle = variant.title || '';
+      const variantOptions = variantTitle.split(' / ');
+
+      return Object.keys(currentSelections).every(optionName => {
+        if (optionName === targetOptionName) return true; // Skip target option
+
+        const optionPosition = this.getOptionPosition(optionName, productData.options);
+        const variantValue = variantOptions[optionPosition - 1];
+        const selectedValue = currentSelections[optionName];
+
+        return variantValue === selectedValue;
+      });
+    });
+
+    console.log('🔍 Matching variants for', targetOptionName, ':', matchingVariants.length);
+
+    // Extract unique values for the target option
+    const targetOptionPosition = this.getOptionPosition(targetOptionName, productData.options);
+    const availableValues = new Set();
+
+    matchingVariants.forEach(variant => {
+      const variantTitle = variant.title || '';
+      const variantOptions = variantTitle.split(' / ');
+      const optionValue = variantOptions[targetOptionPosition - 1];
+
+      if (optionValue && variant.inventory !== 0) { // Only include in-stock options
+        availableValues.add(optionValue);
+      }
+    });
+
+    return Array.from(availableValues);
+  }
+
+  // Update dropdown options and disable unavailable ones
+  updateDropdownOptions(dropdown, availableOptions, currentSelection) {
+    const optionName = dropdown.dataset.option;
+    console.log('🔄 Updating options for', optionName, ':', availableOptions);
+
+    // Add visual feedback
+    dropdown.classList.add('updating');
+
+    // Get all options in the dropdown
+    const options = dropdown.querySelectorAll('option');
+
+    options.forEach(option => {
+      if (option.value === '') return; // Skip the "Select..." option
+
+      const isAvailable = availableOptions.includes(option.value);
+
+      if (isAvailable) {
+        option.disabled = false;
+        option.style.display = 'block';
+        option.style.color = '';
+        option.style.opacity = '1';
+        option.classList.remove('unavailable');
+        option.removeAttribute('disabled');
+        option.style.pointerEvents = 'auto';
+        option.style.visibility = 'visible';
+        console.log('✅ Enabled option:', option.value);
+      } else {
+        option.disabled = true;
+        option.setAttribute('disabled', 'disabled');
+        option.style.display = 'none'; // Hide unavailable options
+        option.style.visibility = 'hidden';
+        option.style.color = '#ccc';
+        option.style.opacity = '0.5';
+        option.style.pointerEvents = 'none';
+        option.classList.add('unavailable');
+        console.log('❌ Disabled and hidden option:', option.value);
+      }
+    });
+
+    // If current selection is no longer available, reset to first available option
+    if (currentSelection && !availableOptions.includes(currentSelection)) {
+      const firstAvailable = availableOptions[0];
+      if (firstAvailable) {
+        dropdown.value = firstAvailable;
+        console.log('🔄 Reset selection to first available:', firstAvailable);
+
+        // Trigger the selection logic
+        this.selectVariant(dropdown.closest('[data-product-id]').dataset.productId, optionName, firstAvailable);
+      } else {
+        dropdown.value = '';
+        console.log('🔄 No available options, cleared selection');
+      }
+    }
+
+    // Remove visual feedback
+    setTimeout(() => {
+      dropdown.classList.remove('updating');
+    }, 100);
+
+    // Add event listener to prevent selection of disabled options
+    const productId = dropdown.closest('[data-product-id]')?.dataset.productId;
+    if (productId) {
+      this.addDropdownValidation(dropdown, productId);
+    }
+  }
+
+  // Add validation event listener to dropdown
+  addDropdownValidation(dropdown, productId) {
+    // Remove existing listener if any
+    dropdown.removeEventListener('change', dropdown._validationHandler);
+    dropdown.removeEventListener('input', dropdown._validationHandler);
+
+    // Create new validation handler
+    dropdown._validationHandler = (event) => {
+      const selectedValue = event.target.value;
+      const selectedOption = event.target.querySelector(`option[value="${selectedValue}"]`);
+
+      console.log('🔍 Event validation:', { selectedValue, isDisabled: selectedOption?.disabled, isUnavailable: selectedOption?.classList.contains('unavailable') });
+
+      if (selectedOption && (selectedOption.disabled || selectedOption.classList.contains('unavailable'))) {
+        console.warn('⚠️ EVENT BLOCKED: Prevented selection of disabled option:', selectedValue);
+        event.preventDefault();
+        event.stopPropagation();
+
+        // Force revert immediately
+        const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+        const currentSelections = this.getSelectedOptions(productCard);
+        const optionName = dropdown.dataset.option;
+        const previousValue = currentSelections[optionName];
+
+        if (previousValue && !dropdown.querySelector(`option[value="${previousValue}"]`)?.disabled) {
+          dropdown.value = previousValue;
+          console.log('🔄 EVENT: Reverted to previous selection:', previousValue);
+        } else {
+          // Find first available option
+          const availableOptions = Array.from(dropdown.querySelectorAll('option:not([disabled]):not(.unavailable):not([value=""])'));
+          if (availableOptions.length > 0) {
+            dropdown.value = availableOptions[0].value;
+            console.log('🔄 EVENT: Selected first available option:', availableOptions[0].value);
+          } else {
+            dropdown.value = '';
+            console.log('🔄 EVENT: Cleared selection - no available options');
+          }
+        }
+
+        return false;
+      }
+    };
+
+    // Add event listeners for both change and input events
+    dropdown.addEventListener('change', dropdown._validationHandler);
+    dropdown.addEventListener('input', dropdown._validationHandler);
+
+    // Add mousedown prevention for disabled options
+    dropdown.addEventListener('mousedown', (event) => {
+      const target = event.target;
+      if (target.tagName === 'OPTION' && (target.disabled || target.classList.contains('unavailable'))) {
+        console.warn('⚠️ MOUSEDOWN BLOCKED: Prevented click on disabled option:', target.value);
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
+      }
+    });
+
+    // Add click prevention for disabled options
+    dropdown.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target.tagName === 'OPTION' && (target.disabled || target.classList.contains('unavailable'))) {
+        console.warn('⚠️ CLICK BLOCKED: Prevented click on disabled option:', target.value);
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
+      }
     });
   }
 
@@ -944,7 +1264,7 @@ class ProductCardManager {
     return defaultVariant[`option${optionPosition}`] === value;
   }
 
-  isVariantAvailable(optionName, value, productId) {
+  isVariantAvailable(optionName, value, productId, currentSelections = {}) {
     const productData = this.productDataStore[productId];
     if (!productData || !productData.variants) return true;
 
@@ -960,20 +1280,31 @@ class ProductCardManager {
     }
 
     // For multi-variant products, check if any variant with this option value is available
+    // considering current selections
     return productData.variants.some(variant => {
-      // Check if this variant has the selected option value
       const variantTitle = variant.title || '';
-      const optionValues = variantTitle.split(' / ');
+      const variantOptions = variantTitle.split(' / ');
 
-      // Find the option position
-      const optionIndex = productData.options.findIndex(opt => opt.name === optionName);
-      if (optionIndex === -1) return false;
+      // Check if this variant has the selected option value
+      const optionPosition = this.getOptionPosition(optionName, productData.options);
+      const hasOptionValue = variantOptions[optionPosition - 1] === value;
 
-      // Check if the variant has this option value
-      const hasOptionValue = optionValues[optionIndex] === value;
+      if (!hasOptionValue) return false;
+
+      // Check if this variant is compatible with current selections
+      const isCompatibleWithCurrentSelections = Object.keys(currentSelections).every(selectedOptionName => {
+        if (selectedOptionName === optionName) return true; // Skip the option being checked
+
+        const selectedOptionPosition = this.getOptionPosition(selectedOptionName, productData.options);
+        const variantValue = variantOptions[selectedOptionPosition - 1];
+        const selectedValue = currentSelections[selectedOptionName];
+
+        return variantValue === selectedValue;
+      });
+
       const isAvailable = variant.inventory === undefined || variant.inventory > 0;
 
-      return hasOptionValue && isAvailable;
+      return isCompatibleWithCurrentSelections && isAvailable;
     });
   }
 
@@ -1143,6 +1474,12 @@ class ProductCardManager {
   // Initialize Swiper
   initializeSwiper() {
     try {
+      // Skip Swiper initialization if we're updating dropdowns
+      if (this.isUpdatingDropdowns) {
+        console.log('🔄 Skipping Swiper initialization during dropdown updates');
+        return;
+      }
+
       if (typeof Swiper !== "undefined") {
         // Always destroy existing Swiper instance if it exists
         if (window.swiper && typeof window.swiper.destroy === 'function') {
