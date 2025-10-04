@@ -1,0 +1,191 @@
+"""
+Recently Viewed Products Service
+Provides recently viewed products for returning visitors to create continuity
+"""
+
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, desc
+from app.core.logging import get_logger
+from app.core.database.models.user_interaction import UserInteraction
+from app.core.database.models.product_data import ProductData
+from app.core.database.session import get_transaction_context
+
+logger = get_logger(__name__)
+
+
+class RecentlyViewedService:
+    """Service to get recently viewed products for returning visitors"""
+
+    async def get_recently_viewed_products(
+        self,
+        shop_id: str,
+        user_id: str,
+        limit: int = 6,
+        days_back: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Get recently viewed products for a returning visitor
+
+        Args:
+            shop_id: Shop ID
+            user_id: User ID
+            limit: Maximum number of recommendations
+            days_back: How many days back to look for viewed products
+
+        Returns:
+            Dict with recently viewed product recommendations
+        """
+        try:
+            async with get_transaction_context() as session:
+                # Get recently viewed products
+                recently_viewed = await self._get_recent_viewed_products(
+                    session,
+                    shop_id,
+                    user_id,
+                    days_back,
+                    limit * 2,  # Get more to filter
+                )
+
+                if not recently_viewed:
+                    logger.info(f"No recently viewed products found for user {user_id}")
+                    return {
+                        "success": False,
+                        "items": [],
+                        "source": "recently_viewed_empty",
+                        "error": "No recently viewed products found",
+                    }
+
+                # Get product details for recommendations
+                recommendations = await self._get_product_details(
+                    session, shop_id, recently_viewed[:limit]
+                )
+
+                return {
+                    "success": True,
+                    "items": recommendations,
+                    "source": "recently_viewed",
+                    "count": len(recommendations),
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting recently viewed products: {str(e)}")
+            return {
+                "success": False,
+                "items": [],
+                "source": "recently_viewed_error",
+                "error": str(e),
+            }
+
+    async def _get_recent_viewed_products(
+        self,
+        session: AsyncSession,
+        shop_id: str,
+        user_id: str,
+        days_back: int,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Get recently viewed product IDs with timestamps"""
+        try:
+            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+
+            # Get recent product views, ordered by most recent
+            result = await session.execute(
+                select(
+                    UserInteraction.product_id,
+                    UserInteraction.created_at,
+                    UserInteraction.interaction_type,
+                )
+                .where(
+                    and_(
+                        UserInteraction.shop_id == shop_id,
+                        UserInteraction.customer_id == user_id,
+                        UserInteraction.interaction_type == "product_viewed",
+                        UserInteraction.product_id.isnot(None),
+                        UserInteraction.created_at >= cutoff_date,
+                    )
+                )
+                .order_by(desc(UserInteraction.created_at))
+                .limit(limit)
+            )
+
+            viewed_products = []
+            seen_products = set()
+
+            for row in result.fetchall():
+                product_id = row.product_id
+                if product_id and product_id not in seen_products:
+                    viewed_products.append(
+                        {
+                            "product_id": product_id,
+                            "viewed_at": row.created_at,
+                            "interaction_type": row.interaction_type,
+                        }
+                    )
+                    seen_products.add(product_id)
+
+            return viewed_products
+
+        except Exception as e:
+            logger.error(f"Error getting recent viewed products: {str(e)}")
+            return []
+
+    async def _get_product_details(
+        self, session: AsyncSession, shop_id: str, viewed_products: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Get product details for recently viewed items"""
+        try:
+            if not viewed_products:
+                return []
+
+            product_ids = [item["product_id"] for item in viewed_products]
+
+            # Get product data
+            result = await session.execute(
+                select(ProductData).where(
+                    and_(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id.in_(product_ids),
+                    )
+                )
+            )
+
+            products = result.scalars().all()
+
+            # Create a mapping of product_id to product data
+            product_map = {p.product_id: p for p in products}
+
+            # Build recommendations maintaining the viewed order
+            recommendations = []
+            for viewed_item in viewed_products:
+                product_id = viewed_item["product_id"]
+                if product_id in product_map:
+                    product = product_map[product_id]
+                    recommendations.append(
+                        {
+                            "id": product_id,
+                            "title": product.title,
+                            "handle": product.handle,
+                            "price": {
+                                "amount": str(product.price),
+                                "currency_code": product.currency_code or "USD",
+                            },
+                            "image": (
+                                {
+                                    "url": product.image_url,
+                                }
+                                if product.image_url
+                                else None
+                            ),
+                            "available": product.available,
+                            "url": f"/products/{product.handle}",
+                            "viewed_at": viewed_item["viewed_at"].isoformat(),
+                        }
+                    )
+
+            return recommendations
+
+        except Exception as e:
+            logger.error(f"Error getting product details: {str(e)}")
+            return []

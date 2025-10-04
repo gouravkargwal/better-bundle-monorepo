@@ -25,25 +25,25 @@ class BaseGenerator:
             "collection_3_id": f"gid://shopify/Collection/{self.base_id + 3003}",
         }
 
-        # Products (15 total for more variety)
-        for i in range(1, 16):
+        # Products (30 total for more variety)
+        for i in range(1, 31):
             ids[f"product_{i}_id"] = f"gid://shopify/Product/{self.base_id + i}"
             ids[f"variant_{i}_id"] = (
                 f"gid://shopify/ProductVariant/{self.base_id + 1000 + i}"
             )
 
-        # Customers (8 total for more diverse user base)
-        for i in range(1, 9):
+        # Customers (15 total for more diverse user base)
+        for i in range(1, 16):
             ids[f"customer_{i}_id"] = (
                 f"gid://shopify/Customer/{self.base_id + 5000 + i}"
             )
 
-        # Orders (12 total for more purchase patterns)
-        for i in range(1, 13):
+        # Orders (20 total for more purchase patterns)
+        for i in range(1, 21):
             ids[f"order_{i}_id"] = f"gid://shopify/Order/{self.base_id + 7000 + i}"
 
         # Line items (multiple per order)
-        for i in range(1, 25):  # Up to 2-3 per order
+        for i in range(1, 50):  # Up to 2-3 per order
             ids[f"line_item_{i}_id"] = (
                 f"gid://shopify/LineItem/{self.base_id + 8000 + i}"
             )

@@ -54,6 +54,11 @@ class HybridRecommendationService:
             "user_recommendations": 0.3,  # 30% personalized
             "popular_category": 0.2,  # 20% popular in same category
         },
+        "collection_page": {
+            "popular_category": 0.6,  # 60% popular in collection category
+            "user_recommendations": 0.3,  # 30% personalized
+            "popular": 0.1,  # 10% general popular items
+        },
     }
 
     async def blend_recommendations(

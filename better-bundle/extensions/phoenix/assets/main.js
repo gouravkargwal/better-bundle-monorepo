@@ -27,7 +27,7 @@ class RecommendationCarousel {
       showArrows: window.showArrows || true,
       showPagination: window.showPagination || true,
       limit: window.recommendationLimit || 4,
-      context: 'cart' // Phoenix extension context
+      context: window.context || 'cart' // Dynamic context from Liquid template
     };
   }
 
@@ -86,6 +86,13 @@ class RecommendationCarousel {
 
       if (recommendations && recommendations.length > 0) {
         console.log('✅ Phoenix: Received recommendations, updating cards...');
+
+        // Clear global fallback timeout since we successfully loaded recommendations
+        if (window.globalFallbackTimeout) {
+          clearTimeout(window.globalFallbackTimeout);
+          console.log('✅ Phoenix: Cleared global fallback timeout');
+        }
+
         const productIds = recommendations.map((product) => product.id);
 
         if (this.analyticsApi) {
@@ -156,22 +163,26 @@ document.addEventListener('DOMContentLoaded', function () {
       console.warn('⏰ Phoenix: Global fallback timeout - hiding carousel after 15 seconds');
       const carouselContainer = document.querySelector('.shopify-app-block');
       if (carouselContainer) {
-        carouselContainer.style.display = 'none';
+        // Only hide if carousel is still in skeleton loading state
+        const skeletonElements = carouselContainer.querySelectorAll('.loading-skeleton');
+        if (skeletonElements.length > 0) {
+          console.log('⚠️ Phoenix: Hiding carousel due to timeout - skeleton still visible');
+          carouselContainer.style.display = 'none';
+        } else {
+          console.log('✅ Phoenix: Carousel already loaded successfully, not hiding');
+        }
       }
     }, 15000); // 15 second global timeout
 
-    // Clear global timeout when carousel successfully loads
-    const originalHideCarousel = RecommendationCarousel.prototype.hideCarousel;
-    RecommendationCarousel.prototype.hideCarousel = function () {
-      clearTimeout(globalFallbackTimeout);
-      return originalHideCarousel.call(this);
-    };
+    // Store global timeout reference for clearing
+    window.globalFallbackTimeout = globalFallbackTimeout;
 
     // Global variables are now initialized in the Liquid template
     // Initialize Swiper for both design and live mode
     if (window.designMode) {
       console.log('Design mode detected - initializing Swiper with dummy data');
       clearTimeout(globalFallbackTimeout); // Clear timeout in design mode
+      console.log('✅ Phoenix: Cleared global fallback timeout in design mode');
 
       // Initialize Swiper for design mode (dummy data already in HTML)
       window.swiperConfig = {

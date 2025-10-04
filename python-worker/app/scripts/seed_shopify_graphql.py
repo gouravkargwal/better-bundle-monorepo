@@ -198,6 +198,62 @@ class ShopifyGraphQLSeeder:
         )
         return success_count > 0
 
+    def _batch_publish_collections(
+        self, collection_ids: List[str], publication_id: str
+    ) -> bool:
+        """Publish multiple collections to Online Store in a single batch operation."""
+        if not collection_ids:
+            return True
+
+        print(f"  📡 Publishing {len(collection_ids)} collections to Online Store...")
+
+        # Create batch publish mutation for collections
+        mutation = """
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+            publishablePublish(id: $id, input: $input) {
+                publishable {
+                    ... on Collection {
+                        id
+                        title
+                    }
+                }
+                userErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        success_count = 0
+        for collection_id in collection_ids:
+            try:
+                variables = {
+                    "id": collection_id,
+                    "input": [{"publicationId": publication_id}],
+                }
+
+                result = self._graphql_request(mutation, variables)
+
+                if result["data"]["publishablePublish"]["userErrors"]:
+                    errors = [
+                        error["message"]
+                        for error in result["data"]["publishablePublish"]["userErrors"]
+                    ]
+                    print(
+                        f"    ⚠️ Failed to publish collection {collection_id}: {', '.join(errors)}"
+                    )
+                else:
+                    success_count += 1
+
+            except Exception as e:
+                print(f"    ⚠️ Failed to publish collection {collection_id}: {e}")
+
+        print(
+            f"  ✅ Successfully published {success_count}/{len(collection_ids)} collections"
+        )
+        return success_count > 0
+
     async def create_products(self) -> Dict[str, Dict[str, Any]]:
         print("📦 Creating products...")
         products = self.product_generator.generate_products()
@@ -416,7 +472,7 @@ class ShopifyGraphQLSeeder:
         return self.created_customers
 
     def _generate_collections_from_products(self) -> List[Dict[str, Any]]:
-        # Build two simple collections grouping created products
+        # Build two collections with proper product distribution
         product_ids = [p["id"] for p in self.created_products.values()]
         collections = []
 
@@ -425,12 +481,16 @@ class ShopifyGraphQLSeeder:
 
         timestamp = int(time.time())
 
+        # Split products more evenly - first 10 products for Summer Essentials
+        # Remaining products for Tech Gear (should be around 10 as well)
+        mid_point = len(product_ids) // 2
+
         collections.append(
             {
                 "title": "Summer Essentials",
                 "handle": f"summer-essentials-{timestamp}",
                 "descriptionHtml": "Perfect for summer - clothing and accessories",
-                "productIds": product_ids[:10],
+                "productIds": product_ids[:mid_point],
             }
         )
         collections.append(
@@ -438,7 +498,7 @@ class ShopifyGraphQLSeeder:
                 "title": "Tech Gear",
                 "handle": f"tech-gear-{timestamp}",
                 "descriptionHtml": "Latest technology and electronics",
-                "productIds": product_ids[10:],
+                "productIds": product_ids[mid_point:],
             }
         )
         return collections
@@ -450,6 +510,8 @@ class ShopifyGraphQLSeeder:
             return {}
 
         collections = self._generate_collections_from_products()
+        created_collection_ids = []
+
         for i, c in enumerate(collections, 1):
             try:
                 # Create collection mutation
@@ -490,6 +552,7 @@ class ShopifyGraphQLSeeder:
                     "id": collection["id"],
                     "title": collection["title"],
                 }
+                created_collection_ids.append(collection["id"])
                 print(f"  ✅ Collection: {collection['title']} ({collection['id']})")
 
                 # Add products to collection
@@ -535,6 +598,12 @@ class ShopifyGraphQLSeeder:
 
             except Exception as e:
                 print(f"  ❌ Collection '{c['title']}' failed: {e}")
+
+        # Publish all collections to Online Store after creation
+        if created_collection_ids:
+            publication_id = self._get_online_store_publication_id()
+            self._batch_publish_collections(created_collection_ids, publication_id)
+
         return self.created_collections
 
     async def create_orders(self) -> Dict[str, Dict[str, Any]]:
@@ -690,10 +759,17 @@ class ShopifyGraphQLSeeder:
             f"  ✅ Products:   {len(self.created_products)} (published to Online Store)"
         )
         print(f"  ✅ Customers:  {len(self.created_customers)}")
-        print(f"  ✅ Collections:{len(self.created_collections)}")
+        print(
+            f"  ✅ Collections:{len(self.created_collections)} (published to Online Store)"
+        )
         print(f"  ✅ Orders:     {len(self.created_orders)}")
         print(f"  📦 Inventory: Tracked for all product variants")
-        print(f"  🌐 Storefront: Products visible on {self.shop_domain}")
+        print(
+            f"  🏷️  Categories: Clothing, Accessories, Electronics, Home & Garden, Sports & Fitness"
+        )
+        print(
+            f"  🌐 Storefront: Products and collections visible on {self.shop_domain}"
+        )
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
 

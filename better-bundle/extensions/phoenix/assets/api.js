@@ -9,7 +9,7 @@ class RecommendationAPI {
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
-      const context = 'cart';
+      const context = window.context || 'cart';
       const shopDomain = window.shopDomain || '';
 
       // Validate required fields
@@ -24,6 +24,23 @@ class RecommendationAPI {
         context: context,
         limit: limit
       };
+
+      // Add context-specific fields
+      if (context === 'product_page' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_similar' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_frequently_bought' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_customers_viewed' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'collection_page' && window.collectionId) {
+        requestBody.collection_id = String(window.collectionId);
+      }
 
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings

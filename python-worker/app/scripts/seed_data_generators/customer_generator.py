@@ -11,7 +11,7 @@ class CustomerGenerator(BaseGenerator):
     """Generates realistic customer data with diverse profiles."""
 
     def generate_customers(self) -> List[Dict[str, Any]]:
-        """Generate 8 diverse customer profiles."""
+        """Generate 15 diverse customer profiles."""
         customer_profiles = [
             {
                 "name": "Alice Johnson",
@@ -108,6 +108,78 @@ class CustomerGenerator(BaseGenerator):
                 "last_order_days_ago": 8,
                 "preferred_categories": ["Clothing", "Accessories"],
                 "avg_order_value": 31.67,
+            },
+            {
+                "name": "Isabella Martinez",
+                "email": "isabella.martinez@email.com",
+                "profile_type": "wellness_enthusiast",
+                "total_spent": 180.00,
+                "orders_count": 4,
+                "tags": ["wellness", "health-focused", "yoga"],
+                "created_days_ago": 45,
+                "last_order_days_ago": 3,
+                "preferred_categories": ["Sports & Fitness", "Home & Garden"],
+                "avg_order_value": 45.00,
+            },
+            {
+                "name": "James Wilson",
+                "email": "james.wilson@email.com",
+                "profile_type": "home_improver",
+                "total_spent": 320.00,
+                "orders_count": 6,
+                "tags": ["home-improvement", "diy", "gardening"],
+                "created_days_ago": 80,
+                "last_order_days_ago": 2,
+                "preferred_categories": ["Home & Garden", "Electronics"],
+                "avg_order_value": 53.33,
+            },
+            {
+                "name": "Sophia Chen",
+                "email": "sophia.chen@email.com",
+                "profile_type": "luxury_buyer",
+                "total_spent": 850.00,
+                "orders_count": 5,
+                "tags": ["luxury", "high-end", "premium"],
+                "created_days_ago": 100,
+                "last_order_days_ago": 1,
+                "preferred_categories": ["Clothing", "Accessories", "Electronics"],
+                "avg_order_value": 170.00,
+            },
+            {
+                "name": "Michael Rodriguez",
+                "email": "michael.rodriguez@email.com",
+                "profile_type": "gift_buyer",
+                "total_spent": 240.00,
+                "orders_count": 8,
+                "tags": ["gift-buyer", "holiday-shopper", "seasonal"],
+                "created_days_ago": 60,
+                "last_order_days_ago": 4,
+                "preferred_categories": ["Accessories", "Home & Garden"],
+                "avg_order_value": 30.00,
+            },
+            {
+                "name": "Emma Thompson",
+                "email": "emma.thompson@email.com",
+                "profile_type": "student_budget",
+                "total_spent": 75.00,
+                "orders_count": 4,
+                "tags": ["student", "budget-conscious", "young"],
+                "created_days_ago": 25,
+                "last_order_days_ago": 6,
+                "preferred_categories": ["Clothing", "Accessories"],
+                "avg_order_value": 18.75,
+            },
+            {
+                "name": "David Kim",
+                "email": "david.kim@email.com",
+                "profile_type": "professional_worker",
+                "total_spent": 420.00,
+                "orders_count": 7,
+                "tags": ["professional", "business", "work-wear"],
+                "created_days_ago": 90,
+                "last_order_days_ago": 2,
+                "preferred_categories": ["Clothing", "Electronics"],
+                "avg_order_value": 60.00,
             },
         ]
 

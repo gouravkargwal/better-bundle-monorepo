@@ -12,11 +12,19 @@ class RecommendationRequest(BaseModel):
     )
     context: str = Field(
         ...,
-        description="Context: product_page, homepage, cart, profile, checkout, order_history, order_status",
+        description="Context: product_page, homepage, cart, collection_page, profile, checkout, order_history, order_status",
     )
     product_ids: Optional[List[str]] = Field(
         None,
         description="Product IDs for recommendations (single or multiple products)",
+    )
+    product_id: Optional[str] = Field(
+        None,
+        description="Single product ID for product page recommendations",
+    )
+    collection_id: Optional[str] = Field(
+        None,
+        description="Collection ID for collection page recommendations",
     )
     user_id: Optional[str] = Field(
         None, description="User ID for personalized recommendations"

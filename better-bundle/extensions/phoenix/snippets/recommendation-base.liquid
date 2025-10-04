@@ -1,0 +1,64 @@
+{% comment %}
+  Base recommendation snippet with all common functionality
+  Usage: {% render 'recommendation-base', context: 'product_page', product_id: product.id %}
+{% endcomment %}
+
+{{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'swiper-bundle.min.js' | asset_url }}" defer></script>
+
+<script>
+  window.enableAutoplay = {{ block.settings.enable_autoplay | default: true }};
+  window.autoplayDelay = {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }};
+  window.showArrows = {{ block.settings.show_arrows | default: true }};
+  window.showPagination = {{ block.settings.show_pagination | default: true }};
+  window.recommendationLimit = {{ block.settings.limit | default: 6 }};
+  window.designMode = {{ request.design_mode | json }};
+  window.shopDomain = {{ shop.permanent_domain | json }};
+  window.customerId = {{ customer.id | json }};
+  window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
+  window.context = '{{ context }}';
+
+  {% if product_id %}
+    window.productId = {{ product_id | json }};
+  {% endif %}
+
+  {% if collection_id %}
+    window.collectionId = {{ collection_id | json }};
+  {% endif %}
+
+  // Extract session ID from cart attributes
+  {% assign session_id = null %}
+  {% for attribute in cart.attributes %}
+    {% if attribute.first == 'bb_recommendation_session_id' %}
+      {% assign session_id = attribute.last %}
+      {% break %}
+    {% endif %}
+  {% endfor %}
+  window.sessionId = {{ session_id | json }};
+</script>
+
+<!-- Load our custom JavaScript files -->
+<script src="{{ 'analytics.js' | asset_url }}" defer></script>
+<script src="{{ 'api.js' | asset_url }}" defer></script>
+<script src="{{ 'product-cards.js' | asset_url }}" defer></script>
+<script src="{{ 'main.js' | asset_url }}" defer></script>
+
+{% render 'recommendation-styles' %}
+
+<div class="container">
+  {% if block.settings.show_heading and block.settings.heading != blank %}
+    <div class="section-heading">
+      <{{ block.settings.heading_size | default: 'h2' }}>
+        {{- block.settings.heading -}}
+      </{{ block.settings.heading_size | default: 'h2' }}>
+    </div>
+  {% endif %}
+  <div class="swiper">
+    <div class="swiper-wrapper">
+      {% render 'recommendation-products', context: context, dummy_data: dummy_data %}
+    </div>
+    <div class="swiper-button-next"></div>
+    <div class="swiper-button-prev"></div>
+    <div class="swiper-pagination"></div>
+  </div>
+</div>

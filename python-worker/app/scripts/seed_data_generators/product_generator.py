@@ -11,17 +11,23 @@ class ProductGenerator(BaseGenerator):
     """Generates realistic product data with enhanced features."""
 
     def generate_products(self) -> List[Dict[str, Any]]:
-        """Generate 15 diverse products across categories."""
+        """Generate 30 diverse products across multiple categories."""
         products = []
 
-        # Clothing Products (1-5)
+        # Clothing Products (1-8)
         products.extend(self._generate_clothing_products())
 
-        # Accessories Products (6-10)
+        # Accessories Products (9-14)
         products.extend(self._generate_accessories_products())
 
-        # Electronics Products (11-15)
+        # Electronics Products (15-20)
         products.extend(self._generate_electronics_products())
+
+        # Home & Garden Products (21-25)
+        products.extend(self._generate_home_garden_products())
+
+        # Sports & Fitness Products (26-30)
+        products.extend(self._generate_sports_fitness_products())
 
         return products
 
@@ -103,6 +109,48 @@ class ProductGenerator(BaseGenerator):
                 "seo_optimized": True,
                 "on_sale": False,
                 "created_days_ago": 15,
+            },
+            {
+                "title": "Denim Jacket",
+                "handle": "denim-jacket",
+                "description": "Classic denim jacket with vintage wash. Perfect for layering and adding style to any outfit.",
+                "productType": "Clothing",
+                "tags": ["clothing", "jacket", "denim", "vintage", "classic"],
+                "price_range": (65, 95),
+                "inventory_range": (5, 15),
+                "has_video": True,
+                "has_3d": True,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 40,
+            },
+            {
+                "title": "Maxi Dress",
+                "handle": "maxi-dress",
+                "description": "Elegant maxi dress in flowing fabric. Perfect for special occasions or casual elegance.",
+                "productType": "Clothing",
+                "tags": ["clothing", "dress", "maxi", "elegant", "flowing"],
+                "price_range": (45, 75),
+                "inventory_range": (3, 12),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": True,
+                "created_days_ago": 35,
+            },
+            {
+                "title": "Cargo Pants",
+                "handle": "cargo-pants",
+                "description": "Functional cargo pants with multiple pockets. Durable and comfortable for outdoor activities.",
+                "productType": "Clothing",
+                "tags": ["clothing", "pants", "cargo", "functional", "outdoor"],
+                "price_range": (40, 65),
+                "inventory_range": (8, 20),
+                "has_video": False,
+                "has_3d": False,
+                "seo_optimized": False,
+                "on_sale": False,
+                "created_days_ago": 10,
             },
         ]
 
@@ -296,7 +344,173 @@ class ProductGenerator(BaseGenerator):
             },
         ]
 
-        return self._build_product_payloads(electronics_products, 11)
+        return self._build_product_payloads(electronics_products, 15)
+
+    def _generate_home_garden_products(self) -> List[Dict[str, Any]]:
+        """Generate home & garden products with realistic data."""
+        home_garden_products = [
+            {
+                "title": "Ceramic Plant Pot",
+                "handle": "ceramic-plant-pot",
+                "description": "Handcrafted ceramic plant pot with drainage holes. Perfect for indoor plants and succulents.",
+                "productType": "Home & Garden",
+                "tags": ["home", "garden", "pot", "ceramic", "plants"],
+                "price_range": (15, 35),
+                "inventory_range": (10, 25),
+                "has_video": False,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 20,
+            },
+            {
+                "title": "LED String Lights",
+                "handle": "led-string-lights",
+                "description": "Warm white LED string lights for indoor and outdoor use. Weather resistant and energy efficient.",
+                "productType": "Home & Garden",
+                "tags": ["home", "lights", "led", "outdoor", "decorative"],
+                "price_range": (12, 25),
+                "inventory_range": (15, 30),
+                "has_video": False,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": True,
+                "created_days_ago": 30,
+            },
+            {
+                "title": "Bamboo Cutting Board",
+                "handle": "bamboo-cutting-board",
+                "description": "Eco-friendly bamboo cutting board with antimicrobial properties. Easy to clean and maintain.",
+                "productType": "Home & Garden",
+                "tags": ["home", "kitchen", "bamboo", "cutting-board", "eco-friendly"],
+                "price_range": (20, 40),
+                "inventory_range": (8, 20),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 25,
+            },
+            {
+                "title": "Garden Tool Set",
+                "handle": "garden-tool-set",
+                "description": "Complete garden tool set with ergonomic handles. Includes trowel, pruners, and cultivator.",
+                "productType": "Home & Garden",
+                "tags": ["garden", "tools", "set", "ergonomic", "complete"],
+                "price_range": (35, 65),
+                "inventory_range": (5, 15),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 40,
+            },
+            {
+                "title": "Aromatherapy Diffuser",
+                "handle": "aromatherapy-diffuser",
+                "description": "Ultrasonic aromatherapy diffuser with LED color changing lights. Perfect for relaxation and wellness.",
+                "productType": "Home & Garden",
+                "tags": ["home", "wellness", "diffuser", "aromatherapy", "led"],
+                "price_range": (25, 50),
+                "inventory_range": (6, 18),
+                "has_video": True,
+                "has_3d": True,
+                "seo_optimized": True,
+                "on_sale": True,
+                "created_days_ago": 15,
+            },
+        ]
+
+        return self._build_product_payloads(home_garden_products, 21)
+
+    def _generate_sports_fitness_products(self) -> List[Dict[str, Any]]:
+        """Generate sports & fitness products with realistic data."""
+        sports_fitness_products = [
+            {
+                "title": "Yoga Mat",
+                "handle": "yoga-mat",
+                "description": "Premium non-slip yoga mat with excellent grip and cushioning. Perfect for yoga, pilates, and fitness.",
+                "productType": "Sports & Fitness",
+                "tags": ["sports", "fitness", "yoga", "mat", "non-slip"],
+                "price_range": (25, 45),
+                "inventory_range": (12, 25),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 35,
+            },
+            {
+                "title": "Resistance Bands Set",
+                "handle": "resistance-bands-set",
+                "description": "Complete resistance bands set with different resistance levels. Includes handles and door anchor.",
+                "productType": "Sports & Fitness",
+                "tags": ["sports", "fitness", "resistance", "bands", "workout"],
+                "price_range": (20, 40),
+                "inventory_range": (8, 20),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": True,
+                "created_days_ago": 28,
+            },
+            {
+                "title": "Water Bottle",
+                "handle": "water-bottle",
+                "description": "Insulated stainless steel water bottle that keeps drinks cold for 24 hours. BPA-free and leak-proof.",
+                "productType": "Sports & Fitness",
+                "tags": [
+                    "sports",
+                    "fitness",
+                    "water-bottle",
+                    "insulated",
+                    "stainless-steel",
+                ],
+                "price_range": (15, 30),
+                "inventory_range": (20, 40),
+                "has_video": False,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 18,
+            },
+            {
+                "title": "Running Headband",
+                "handle": "running-headband",
+                "description": "Moisture-wicking running headband that stays in place during intense workouts. Multiple colors available.",
+                "productType": "Sports & Fitness",
+                "tags": [
+                    "sports",
+                    "fitness",
+                    "headband",
+                    "running",
+                    "moisture-wicking",
+                ],
+                "price_range": (8, 18),
+                "inventory_range": (25, 50),
+                "has_video": False,
+                "has_3d": False,
+                "seo_optimized": False,
+                "on_sale": False,
+                "created_days_ago": 12,
+            },
+            {
+                "title": "Foam Roller",
+                "handle": "foam-roller",
+                "description": "High-density foam roller for muscle recovery and massage therapy. Helps improve flexibility and reduce soreness.",
+                "productType": "Sports & Fitness",
+                "tags": ["sports", "fitness", "foam-roller", "recovery", "massage"],
+                "price_range": (18, 35),
+                "inventory_range": (6, 15),
+                "has_video": True,
+                "has_3d": False,
+                "seo_optimized": True,
+                "on_sale": False,
+                "created_days_ago": 22,
+            },
+        ]
+
+        return self._build_product_payloads(sports_fitness_products, 26)
 
     def _build_product_payloads(
         self, product_configs: List[Dict], start_index: int
@@ -355,9 +569,7 @@ class ProductGenerator(BaseGenerator):
                                 "price": str(price),
                                 "inventoryQuantity": inventory,
                                 "compareAtPrice": (
-                                    str(compare_at_price)
-                                    if compare_at_price
-                                    else None
+                                    str(compare_at_price) if compare_at_price else None
                                 ),
                                 "taxable": True,
                                 "inventoryPolicy": "DENY",
