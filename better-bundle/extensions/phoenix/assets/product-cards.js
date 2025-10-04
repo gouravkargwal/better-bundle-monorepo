@@ -760,16 +760,30 @@ class ProductCardManager {
 
   // Handle variant selection for any option type
   selectVariant(productId, optionName, selectedValue) {
+    console.log('🎯 selectVariant called:', { productId, optionName, selectedValue });
+
     const productData = this.productDataStore[productId];
     const productCard = document.querySelector(`[data-product-id="${productId}"]`);
 
-    if (!productData || !productCard) return;
+    if (!productData) {
+      console.error('❌ Product data not found for:', productId);
+      return;
+    }
+
+    if (!productCard) {
+      console.error('❌ Product card not found for:', productId);
+      return;
+    }
+
+    console.log('✅ Found product data and card for:', productId);
 
     // Update visual state of the dropdown
     const dropdown = productCard.querySelector(`[data-option="${optionName}"]`);
     if (dropdown) {
       dropdown.classList.add('selected');
       console.log('✅ Updated dropdown visual state for:', optionName, selectedValue);
+    } else {
+      console.warn('⚠️ Dropdown not found for option:', optionName);
     }
 
     // Update selection state
@@ -777,14 +791,17 @@ class ProductCardManager {
 
     // Get all selected options
     const selectedOptions = this.getSelectedOptions(productCard);
+    console.log('📋 All selected options:', selectedOptions);
 
     // Find matching variant
     const matchingVariant = this.findMatchingVariant(productData, selectedOptions);
 
     if (matchingVariant) {
+      console.log('✅ Found matching variant:', matchingVariant);
       this.updateVariantPriceFromSelection(matchingVariant, productId);
       this.updateAvailability(matchingVariant, productCard);
     } else {
+      console.warn('⚠️ No matching variant found, showing unavailable');
       this.showVariantUnavailable(productId);
     }
   }
@@ -813,6 +830,7 @@ class ProductCardManager {
     const selects = productCard.querySelectorAll(`[data-option="${optionName}"].variant-select`);
     selects.forEach(select => {
       select.value = selectedValue;
+      console.log('✅ Updated select value:', select.dataset.option, '=', selectedValue);
     });
   }
 
@@ -820,14 +838,29 @@ class ProductCardManager {
   getSelectedOptions(productCard) {
     const selectedOptions = {};
 
-    // Check all option types
-    const optionElements = productCard.querySelectorAll('[data-option][data-value]');
-    optionElements.forEach(element => {
-      if (element.classList.contains('selected') || element.value) {
-        selectedOptions[element.dataset.option] = element.dataset.value || element.value;
+    console.log('🔍 Getting selected options from card:', productCard);
+
+    // Check dropdown selects first
+    const selects = productCard.querySelectorAll('select[data-option]');
+    console.log('🔍 Found selects:', selects.length);
+    selects.forEach(select => {
+      if (select.value && select.value !== '') {
+        selectedOptions[select.dataset.option] = select.value;
+        console.log('✅ Added select option:', select.dataset.option, '=', select.value);
       }
     });
 
+    // Check other option types (swatches, buttons, etc.)
+    const optionElements = productCard.querySelectorAll('[data-option][data-value]');
+    console.log('🔍 Found option elements:', optionElements.length);
+    optionElements.forEach(element => {
+      if (element.classList.contains('selected') || element.value) {
+        selectedOptions[element.dataset.option] = element.dataset.value || element.value;
+        console.log('✅ Added element option:', element.dataset.option, '=', element.dataset.value || element.value);
+      }
+    });
+
+    console.log('📋 Final selected options:', selectedOptions);
     return selectedOptions;
   }
 
@@ -842,19 +875,72 @@ class ProductCardManager {
       ) || productData.variants[0];
     }
 
+    console.log('🔍 Finding matching variant for:', selectedOptions);
+    console.log('🔍 Available variants:', productData.variants);
+    console.log('🔍 Product options:', productData.options);
+
     return productData.variants.find(variant => {
-      return Object.keys(selectedOptions).every(optionName => {
+      // Try different approaches to match variants
+      const variantTitle = variant.title || '';
+      const variantOptions = variantTitle.split(' / ');
+
+      console.log('🔍 Checking variant:', {
+        variantId: variant.variant_id,
+        title: variantTitle,
+        options: variantOptions,
+        selectedOptions: selectedOptions
+      });
+
+      // Method 1: Match by variant title parts
+      const matchesByTitle = Object.keys(selectedOptions).every(optionName => {
+        const optionPosition = this.getOptionPosition(optionName, productData.options);
+        const variantValue = variantOptions[optionPosition - 1]; // Convert to 0-based index
+        const selectedValue = selectedOptions[optionName];
+        const match = variantValue === selectedValue;
+        console.log(`🔍 Option ${optionName} (position ${optionPosition}): variant="${variantValue}" vs selected="${selectedValue}" = ${match}`);
+        return match;
+      });
+
+      if (matchesByTitle) {
+        console.log('✅ Found matching variant by title:', variant);
+        return true;
+      }
+
+      // Method 2: Try to match by variant properties (option1, option2, etc.)
+      const matchesByProperties = Object.keys(selectedOptions).every(optionName => {
         const optionPosition = this.getOptionPosition(optionName, productData.options);
         const variantValue = variant[`option${optionPosition}`];
-        return variantValue === selectedOptions[optionName];
+        const selectedValue = selectedOptions[optionName];
+        const match = variantValue === selectedValue;
+        console.log(`🔍 Property option${optionPosition}: variant="${variantValue}" vs selected="${selectedValue}" = ${match}`);
+        return match;
       });
+
+      if (matchesByProperties) {
+        console.log('✅ Found matching variant by properties:', variant);
+        return true;
+      }
+
+      console.log('❌ No match found for variant:', variant);
+      return false;
     });
   }
 
   // Helper methods
   isVariantSelected(optionName, value, defaultVariant) {
     if (!defaultVariant) return false;
+
+    // Try to match by variant title first
+    const variantTitle = defaultVariant.title || '';
+    const variantOptions = variantTitle.split(' / ');
     const optionPosition = this.getOptionPosition(optionName, [{ name: optionName }]);
+    const variantValue = variantOptions[optionPosition - 1]; // Convert to 0-based index
+
+    if (variantValue === value) {
+      return true;
+    }
+
+    // Fallback to property matching
     return defaultVariant[`option${optionPosition}`] === value;
   }
 
@@ -934,13 +1020,50 @@ class ProductCardManager {
 
   updateVariantPriceFromSelection(variant, productId) {
     const priceElement = document.querySelector(`[data-product-id="${productId}"] .product-card__price`);
-    if (priceElement && variant.price) {
-      const priceAmount = variant.price || variant.price_amount;
-      // Use currency from product data (now includes currency in API response)
-      const productData = this.productDataStore[productId];
-      const priceCurrency = productData?.price?.currency_code || "INR";
-      priceElement.textContent = formatPrice(priceAmount, priceCurrency);
+    if (!priceElement) {
+      console.error('❌ Price element not found for product:', productId);
+      return;
     }
+
+    console.log('💰 Updating price for variant:', {
+      variantId: variant.variant_id,
+      variantTitle: variant.title,
+      price: variant.price,
+      priceAmount: variant.price_amount,
+      productId: productId
+    });
+
+    // Try different price properties
+    let priceAmount = variant.price || variant.price_amount || variant.price_original;
+
+    if (!priceAmount) {
+      console.error('❌ No price found for variant:', variant);
+      return;
+    }
+
+    // Handle different price formats
+    if (typeof priceAmount === 'object' && priceAmount.amount) {
+      priceAmount = priceAmount.amount;
+    }
+
+    // Use currency from product data or variant
+    const productData = this.productDataStore[productId];
+    let priceCurrency = productData?.price?.currency_code || variant.currency_code || "INR";
+
+    // If price is an object with currency
+    if (typeof variant.price === 'object' && variant.price.currency_code) {
+      priceCurrency = variant.price.currency_code;
+    }
+
+    const formattedPrice = formatPrice(priceAmount, priceCurrency);
+    priceElement.textContent = formattedPrice;
+
+    console.log('✅ Price updated:', {
+      originalPrice: variant.price,
+      priceAmount: priceAmount,
+      priceCurrency: priceCurrency,
+      formattedPrice: formattedPrice
+    });
   }
 
   updateAvailability(variant, productCard) {
