@@ -24,12 +24,14 @@ class TimestampMixin:
         "created_at",
         TIMESTAMP(timezone=True),
         default=func.current_timestamp(),
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at = Column(
         "updated_at",
         TIMESTAMP(timezone=True),
         default=func.current_timestamp(),
+        server_default=func.current_timestamp(),
         onupdate=func.current_timestamp(),
         nullable=False,
     )

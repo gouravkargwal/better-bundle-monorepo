@@ -47,7 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         status: true,
         configuration: true,
         effective_from: true,
-        effective_until: true,
+        effective_to: true,
       },
     });
 

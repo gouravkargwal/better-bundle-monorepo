@@ -14,12 +14,18 @@ import {
   InlineStack,
   Badge,
   Icon,
+  Spinner,
 } from "@shopify/polaris";
 import {
   AlertTriangleIcon,
   CheckCircleIcon,
   StarFilledIcon,
+  BillIcon,
+  CashDollarIcon,
+  ClockIcon,
 } from "@shopify/polaris-icons";
+import { TitleBar } from "@shopify/app-bridge-react";
+import { HeroHeader } from "app/components/UI/HeroHeader";
 import { useState } from "react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -33,8 +39,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: {
         id: true,
         is_active: true,
-        suspended_at: true,
-        suspension_reason: true,
         currency_code: true,
       },
     });
@@ -50,6 +54,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         status: { in: ["active", "suspended"] },
       },
       orderBy: { created_at: "desc" },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        status: true,
+        configuration: true,
+        effective_from: true,
+        effective_to: true,
+        is_trial_active: true,
+        trial_threshold: true,
+        trial_revenue: true,
+        trial_usage_records_count: true,
+        trial_completed_at: true,
+        subscription_id: true,
+        subscription_status: true,
+        subscription_confirmation_url: true,
+        requires_subscription_approval: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
 
     if (!billingPlan) {
@@ -95,6 +119,27 @@ export default function BillingPage() {
   const submit = useSubmit();
   const [isLoading, setIsLoading] = useState(false);
 
+  // Add loading state for initial page load
+  if (!billingPlan) {
+    return (
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="💳 Loading billing information..."
+            title="We're gathering your billing details and subscription status"
+            subtitle="This may take a moment"
+            gradient="gray"
+          >
+            <div style={{ marginTop: "24px" }}>
+              <Spinner size="large" />
+            </div>
+          </HeroHeader>
+        </BlockStack>
+      </Page>
+    );
+  }
+
   const handleSetupBilling = async () => {
     setIsLoading(true);
     try {
@@ -129,109 +174,140 @@ export default function BillingPage() {
   // ============= TRIAL ACTIVE =============
   if (billingPlan.is_trial_active) {
     return (
-      <Page title="Billing">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between">
-                  <Text as="h2" variant="headingMd" fontWeight="bold">
-                    🚀 Free Trial Active
-                  </Text>
-                  <Badge tone="success">Trial Active</Badge>
-                </InlineStack>
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="🚀 Free Trial Active"
+            title="Your Free Trial is Active!"
+            subtitle="Use Better Bundle to drive sales and track your progress"
+            gradient="blue"
+          />
 
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#F0FDF4",
-                    borderRadius: "8px",
-                    border: "1px solid #22C55E",
-                  }}
-                >
-                  <BlockStack gap="300">
-                    <InlineStack gap="200" align="start">
-                      <Icon source={StarFilledIcon} tone="success" />
-                      <Text as="p" variant="bodyMd">
-                        You're currently enjoying your free trial! Use Better
-                        Bundle to drive sales.
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: "20px" }}>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between">
+                      <Text as="h2" variant="headingMd" fontWeight="bold">
+                        Trial Progress
                       </Text>
+                      <Badge tone="success">Active</Badge>
                     </InlineStack>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#F0FDF4",
+                        borderRadius: "12px",
+                        border: "1px solid #22C55E",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <InlineStack gap="200" align="start">
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minWidth: "40px",
+                              minHeight: "40px",
+                              padding: "8px",
+                              backgroundColor: "#10B98115",
+                              borderRadius: "8px",
+                              border: "2px solid #10B98130",
+                            }}
+                          >
+                            <Icon source={StarFilledIcon} tone="success" />
+                          </div>
+                          <Text as="p" variant="bodyMd">
+                            You're currently enjoying your free trial! Use
+                            Better Bundle to drive sales.
+                          </Text>
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
+
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between">
+                        <Text as="p" variant="bodyMd" fontWeight="medium">
+                          Revenue Progress
+                        </Text>
+                        <Text as="p" variant="bodyMd" fontWeight="bold">
+                          {formatCurrency(
+                            billingPlan.trial_revenue,
+                            billingPlan.currency,
+                          )}{" "}
+                          /{" "}
+                          {formatCurrency(
+                            billingPlan.trial_threshold,
+                            billingPlan.currency,
+                          )}
+                        </Text>
+                      </InlineStack>
+
+                      <ProgressBar
+                        progress={billingPlan.trial_progress}
+                        size="medium"
+                      />
+
+                      <Text
+                        as="p"
+                        variant="bodySm"
+                        tone="subdued"
+                        alignment="center"
+                      >
+                        {billingPlan.remaining_revenue > 0
+                          ? `${formatCurrency(billingPlan.remaining_revenue, billingPlan.currency)} remaining until trial completion`
+                          : "Trial threshold reached - setup billing to continue"}
+                      </Text>
+
+                      <div
+                        style={{
+                          padding: "16px",
+                          backgroundColor: "#F8FAFC",
+                          borderRadius: "8px",
+                          border: "1px solid #E2E8F0",
+                          textAlign: "center",
+                        }}
+                      >
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          📊 {billingPlan.usage_count} orders tracked
+                        </Text>
+                      </div>
+                    </BlockStack>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#F0F9FF",
+                        borderRadius: "12px",
+                        border: "1px solid #BAE6FD",
+                      }}
+                    >
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodyMd" fontWeight="bold">
+                          💡 What happens next?
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          When you reach{" "}
+                          {formatCurrency(
+                            billingPlan.trial_threshold,
+                            billingPlan.currency,
+                          )}{" "}
+                          in attributed revenue, we'll prompt you to set up
+                          billing. You'll then pay 3% of attributed revenue,
+                          capped at $1,000 per month.
+                        </Text>
+                      </BlockStack>
+                    </div>
                   </BlockStack>
                 </div>
-
-                <BlockStack gap="300">
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodyMd" fontWeight="medium">
-                      Trial Progress
-                    </Text>
-                    <Text as="p" variant="bodyMd">
-                      {formatCurrency(
-                        billingPlan.trial_revenue,
-                        billingPlan.currency,
-                      )}{" "}
-                      /{" "}
-                      {formatCurrency(
-                        billingPlan.trial_threshold,
-                        billingPlan.currency,
-                      )}
-                    </Text>
-                  </InlineStack>
-
-                  <ProgressBar
-                    progress={billingPlan.trial_progress}
-                    size="medium"
-                  />
-
-                  <Text
-                    as="p"
-                    variant="bodySm"
-                    tone="subdued"
-                    alignment="center"
-                  >
-                    {billingPlan.remaining_revenue > 0
-                      ? `${formatCurrency(billingPlan.remaining_revenue, billingPlan.currency)} remaining until trial completion`
-                      : "Trial threshold reached - setup billing to continue"}
-                  </Text>
-
-                  <Text
-                    as="p"
-                    variant="bodySm"
-                    tone="subdued"
-                    alignment="center"
-                  >
-                    📊 {billingPlan.usage_count} orders tracked
-                  </Text>
-                </BlockStack>
-
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#F8FAFC",
-                    borderRadius: "8px",
-                    border: "1px solid #E2E8F0",
-                  }}
-                >
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      What happens next?
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      When you reach{" "}
-                      {formatCurrency(
-                        billingPlan.trial_threshold,
-                        billingPlan.currency,
-                      )}{" "}
-                      in attributed revenue, we'll prompt you to set up billing.
-                      You'll then pay 3% of attributed revenue, capped at $1,000
-                      per month.
-                    </Text>
-                  </BlockStack>
-                </div>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </BlockStack>
       </Page>
     );
   }
@@ -243,122 +319,140 @@ export default function BillingPage() {
     billingPlan.trial_completed_at
   ) {
     return (
-      <Page title="Billing">
-        <Layout>
-          <Layout.Section>
-            <Banner tone="critical">
-              <BlockStack gap="300">
-                <InlineStack gap="200" align="start">
-                  <Icon source={AlertTriangleIcon} tone="critical" />
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      🛑 Trial Completed - Billing Setup Required
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="🛑 Trial Completed"
+            title="Billing Setup Required"
+            subtitle="Your trial has ended. Set up billing to continue using Better Bundle"
+            gradient="red"
+          />
+
+          <Layout>
+            <Layout.Section>
+              <Banner tone="critical">
+                <BlockStack gap="300">
+                  <InlineStack gap="200" align="start">
+                    <Icon source={AlertTriangleIcon} tone="critical" />
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Services Suspended
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        Your trial has ended. Services are suspended until you
+                        set up billing.
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </BlockStack>
+              </Banner>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: "20px" }}>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd" fontWeight="bold">
+                      📊 Trial Summary
                     </Text>
-                    <Text as="p" variant="bodySm">
-                      Your trial has ended. Services are suspended until you set
-                      up billing.
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#FEF3C7",
+                        borderRadius: "8px",
+                        border: "1px solid #F59E0B",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Trial Revenue:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            {formatCurrency(
+                              billingPlan.trial_revenue,
+                              billingPlan.currency,
+                            )}
+                          </Text>
+                        </InlineStack>
+
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Orders Tracked:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            {billingPlan.usage_count}
+                          </Text>
+                        </InlineStack>
+
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Completed:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            {new Date(
+                              billingPlan.trial_completed_at,
+                            ).toLocaleDateString()}
+                          </Text>
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#F0F9FF",
+                        borderRadius: "8px",
+                        border: "1px solid #0EA5E9",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <Text as="p" variant="headingMd" fontWeight="bold">
+                          Continue with Usage-Based Billing
+                        </Text>
+
+                        <Text as="p" variant="bodyMd">
+                          • Pay only 3% of attributed revenue
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Capped at $1,000 per month (no surprise charges)
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Cancel anytime
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Only pay for the value we deliver
+                        </Text>
+                      </BlockStack>
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="large"
+                      onClick={handleSetupBilling}
+                      loading={isLoading}
+                      fullWidth
+                    >
+                      Setup Billing & Resume Services
+                    </Button>
+
+                    <Text
+                      as="p"
+                      variant="bodySm"
+                      tone="subdued"
+                      alignment="center"
+                    >
+                      You'll be redirected to Shopify to approve the billing
+                      plan
                     </Text>
-                  </BlockStack>
-                </InlineStack>
-              </BlockStack>
-            </Banner>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd" fontWeight="bold">
-                  📊 Trial Summary
-                </Text>
-
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#FEF3C7",
-                    borderRadius: "8px",
-                    border: "1px solid #F59E0B",
-                  }}
-                >
-                  <BlockStack gap="300">
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Trial Revenue:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {formatCurrency(
-                          billingPlan.trial_revenue,
-                          billingPlan.currency,
-                        )}
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Orders Tracked:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {billingPlan.usage_count}
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Completed:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {new Date(
-                          billingPlan.trial_completed_at,
-                        ).toLocaleDateString()}
-                      </Text>
-                    </InlineStack>
                   </BlockStack>
                 </div>
-
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#F0F9FF",
-                    borderRadius: "8px",
-                    border: "1px solid #0EA5E9",
-                  }}
-                >
-                  <BlockStack gap="300">
-                    <Text as="p" variant="headingMd" fontWeight="bold">
-                      Continue with Usage-Based Billing
-                    </Text>
-
-                    <Text as="p" variant="bodyMd">
-                      • Pay only 3% of attributed revenue
-                    </Text>
-                    <Text as="p" variant="bodyMd">
-                      • Capped at $1,000 per month (no surprise charges)
-                    </Text>
-                    <Text as="p" variant="bodyMd">
-                      • Cancel anytime
-                    </Text>
-                    <Text as="p" variant="bodyMd">
-                      • Only pay for the value we deliver
-                    </Text>
-                  </BlockStack>
-                </div>
-
-                <Button
-                  variant="primary"
-                  size="large"
-                  onClick={handleSetupBilling}
-                  loading={isLoading}
-                  fullWidth
-                >
-                  Setup Billing & Resume Services
-                </Button>
-
-                <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-                  You'll be redirected to Shopify to approve the billing plan
-                </Text>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </BlockStack>
       </Page>
     );
   }
@@ -366,62 +460,79 @@ export default function BillingPage() {
   // ============= SUBSCRIPTION PENDING =============
   if (billingPlan.subscription_status === "PENDING") {
     return (
-      <Page title="Billing">
-        <Layout>
-          <Layout.Section>
-            <Banner tone="info">
-              <BlockStack gap="300">
-                <InlineStack gap="200" align="start">
-                  <Icon source={StarFilledIcon} tone="info" />
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      ⏳ Subscription Pending Approval
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="⏳ Pending Approval"
+            title="Subscription Pending"
+            subtitle="Your billing subscription is awaiting approval. Services will resume once approved."
+            gradient="orange"
+          />
+
+          <Layout>
+            <Layout.Section>
+              <Banner tone="info">
+                <BlockStack gap="300">
+                  <InlineStack gap="200" align="start">
+                    <Icon source={ClockIcon} tone="info" />
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Awaiting Approval
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        Your billing subscription is awaiting approval. Services
+                        will resume once approved.
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </BlockStack>
+              </Banner>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: "20px" }}>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd" fontWeight="bold">
+                      Waiting for Approval
                     </Text>
-                    <Text as="p" variant="bodySm">
-                      Your billing subscription is awaiting approval. Services
-                      will resume once approved.
+
+                    <Text as="p" variant="bodyMd">
+                      If you haven't approved the subscription yet, please click
+                      the button below:
+                    </Text>
+
+                    {billingPlan.subscription_confirmation_url && (
+                      <Button
+                        variant="primary"
+                        size="large"
+                        onClick={() =>
+                          window.open(
+                            billingPlan.subscription_confirmation_url,
+                            "_top",
+                          )
+                        }
+                        fullWidth
+                      >
+                        Approve Subscription in Shopify
+                      </Button>
+                    )}
+
+                    <Text
+                      as="p"
+                      variant="bodySm"
+                      tone="subdued"
+                      alignment="center"
+                    >
+                      Services will automatically resume after approval
                     </Text>
                   </BlockStack>
-                </InlineStack>
-              </BlockStack>
-            </Banner>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd" fontWeight="bold">
-                  Waiting for Approval
-                </Text>
-
-                <Text as="p" variant="bodyMd">
-                  If you haven't approved the subscription yet, please click the
-                  button below:
-                </Text>
-
-                {billingPlan.subscription_confirmation_url && (
-                  <Button
-                    variant="primary"
-                    size="large"
-                    onClick={() =>
-                      window.open(
-                        billingPlan.subscription_confirmation_url,
-                        "_top",
-                      )
-                    }
-                    fullWidth
-                  >
-                    Approve Subscription in Shopify
-                  </Button>
-                )}
-
-                <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-                  Services will automatically resume after approval
-                </Text>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+                </div>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </BlockStack>
       </Page>
     );
   }
@@ -429,108 +540,115 @@ export default function BillingPage() {
   // ============= SUBSCRIPTION ACTIVE =============
   if (billingPlan.subscription_status === "ACTIVE") {
     return (
-      <Page title="Billing">
-        <Layout>
-          <Layout.Section>
-            <Banner tone="success">
-              <BlockStack gap="200">
-                <InlineStack gap="200" align="start">
-                  <Icon source={CheckCircleIcon} tone="success" />
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodyMd" fontWeight="medium">
-                      🎉 Billing Active
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="🎉 Billing Active"
+            title="Billing Active"
+            subtitle="Your usage-based billing is active. You'll be charged 3% of attributed revenue (capped at $1,000/month)."
+            gradient="green"
+          />
+
+          <Layout>
+            <Layout.Section>
+              <Banner tone="success">
+                <BlockStack gap="200">
+                  <InlineStack gap="200" align="start">
+                    <Icon source={CheckCircleIcon} tone="success" />
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodyMd" fontWeight="medium">
+                        All Systems Active
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Your usage-based billing is active. You'll be charged 3%
+                        of attributed revenue (capped at $1,000/month).
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </BlockStack>
+              </Banner>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: "20px" }}>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd" fontWeight="bold">
+                      Current Billing Plan
                     </Text>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#F0FDF4",
+                        borderRadius: "8px",
+                        border: "1px solid #22C55E",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Plan Type:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            Usage-Based
+                          </Text>
+                        </InlineStack>
+
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Rate:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            3% of attributed revenue
+                          </Text>
+                        </InlineStack>
+
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Monthly Cap:
+                          </Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            $1,000
+                          </Text>
+                        </InlineStack>
+
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="bodyMd">
+                            Status:
+                          </Text>
+                          <Badge tone="success">Active</Badge>
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
+
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Your usage-based billing is active. You'll be charged 3%
-                      of attributed revenue (capped at $1,000/month).
+                      You can view detailed usage and charges in your Shopify
+                      admin under Settings → Billing.
                     </Text>
-                  </BlockStack>
-                </InlineStack>
-              </BlockStack>
-            </Banner>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd" fontWeight="bold">
-                  Current Billing Plan
-                </Text>
-
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#F0FDF4",
-                    borderRadius: "8px",
-                    border: "1px solid #22C55E",
-                  }}
-                >
-                  <BlockStack gap="300">
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Plan Type:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        Usage-Based
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Rate:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        3% of attributed revenue
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Monthly Cap:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        $1,000
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">
-                        Status:
-                      </Text>
-                      <Badge tone="success">Active</Badge>
-                    </InlineStack>
                   </BlockStack>
                 </div>
-
-                <Text as="p" variant="bodySm" tone="subdued">
-                  You can view detailed usage and charges in your Shopify admin
-                  under Settings → Billing.
-                </Text>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </BlockStack>
       </Page>
     );
   }
 
   // ============= FALLBACK =============
   return (
-    <Page title="Billing">
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Billing Information
-              </Text>
-              <Text as="p" variant="bodyMd">
-                Loading billing information...
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
+    <Page>
+      <TitleBar title="Billing" />
+      <BlockStack gap="300">
+        <HeroHeader
+          badge="💳 Billing Information"
+          title="Unable to load billing information"
+          subtitle="Please try refreshing the page or contact support if the issue persists"
+          gradient="gray"
+        />
+      </BlockStack>
     </Page>
   );
 }

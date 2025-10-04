@@ -15,8 +15,8 @@ model billing_events {
   occurred_at      DateTime      @db.Timestamptz(6)
   processed_at     DateTime      @db.Timestamptz(6)
   id               String        @id @default(cuid()) @db.VarChar
-  created_at       DateTime      @db.Timestamptz(6)
-  updated_at       DateTime      @updatedAt @db.Timestamptz(6)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
   shop_id          String        @db.VarChar
   billing_plans    billing_plans @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shops            shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -34,7 +34,7 @@ model billing_events {
 
 model billing_invoices {
   plan_id           String        @db.VarChar
-  invoice_number    String        @unique @db.VarChar(50)
+  invoice_number    String        @unique @db.VarChar(100)
   status            String        @db.VarChar
   subtotal          Decimal       @db.Decimal(10, 2)
   taxes             Decimal       @db.Decimal(10, 2)
@@ -45,13 +45,14 @@ model billing_invoices {
   period_end        DateTime      @db.Timestamptz(6)
   metrics_id        String        @db.VarChar(255)
   due_date          DateTime      @db.Timestamptz(6)
-  paid_at           DateTime?     @db.Timestamp(6)
+  paid_at           DateTime?     @db.Timestamptz(6)
+  shopify_charge_id String?       @db.VarChar(255)
   payment_method    String?       @db.VarChar(50)
   payment_reference String?       @db.VarChar(255)
   billing_metadata  Json          @db.Json
   id                String        @id @default(cuid()) @db.VarChar
-  created_at        DateTime      @db.Timestamptz(6)
-  updated_at        DateTime      @updatedAt @db.Timestamptz(6)
+  created_at        DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
   shop_id           String        @db.VarChar
   billing_plans     billing_plans @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shops             shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -62,37 +63,50 @@ model billing_invoices {
   @@index([shop_id], map: "ix_billing_invoice_shop_id")
   @@index([status], map: "ix_billing_invoice_status")
   @@index([due_date], map: "ix_billing_invoices_due_date")
-  @@index([paid_at], map: "ix_billing_invoices_paid_at")
   @@index([shop_id], map: "ix_billing_invoices_shop_id")
   @@index([status], map: "ix_billing_invoices_status")
+  @@index([shopify_charge_id], map: "ix_billing_invoices_shopify_charge_id")
 }
 
 model billing_plans {
-  shop_domain      String             @db.VarChar(255)
-  name             String             @db.VarChar(100)
-  type             String             @db.VarChar
-  status           String             @db.VarChar
-  configuration    Json               @db.Json
-  effective_from   DateTime           @db.Timestamptz(6)
-  effective_until  DateTime?          @db.Timestamp(6)
-  is_trial_active  Boolean
-  trial_threshold  Decimal            @db.Decimal(10, 2)
-  trial_revenue    Decimal            @db.Decimal(12, 2)
-  id               String             @id @default(cuid()) @db.VarChar
-  created_at       DateTime           @db.Timestamptz(6)
-  updated_at       DateTime           @updatedAt @db.Timestamptz(6)
-  shop_id          String             @unique(map: "ix_billing_plan_shop_id") @db.VarChar
-  billing_events   billing_events[]
-  billing_invoices billing_invoices[]
-  shops            shops              @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shop_domain                    String             @db.VarChar(255)
+  name                           String             @db.VarChar(100)
+  type                           String             @db.VarChar
+  status                         String             @db.VarChar
+  is_trial_active                Boolean
+  trial_threshold                Decimal            @db.Decimal(10, 2)
+  trial_revenue                  Decimal            @db.Decimal(12, 2)
+  trial_usage_records_count      Int
+  trial_completed_at             DateTime?          @db.Timestamptz(6)
+  subscription_id                String?            @db.VarChar(255)
+  subscription_line_item_id      String?            @db.VarChar(255)
+  subscription_status            String?            @db.VarChar(50)
+  subscription_confirmation_url  String?
+  subscription_created_at        DateTime?          @db.Timestamptz(6)
+  subscription_activated_at      DateTime?          @db.Timestamptz(6)
+  configuration                  Json?              @db.Json
+  billing_metadata               Json?              @db.Json
+  effective_from                 DateTime?          @db.Timestamptz(6)
+  effective_to                   DateTime?          @db.Timestamptz(6)
+  requires_subscription_approval Boolean?
+  id                             String             @id @default(cuid()) @db.VarChar
+  created_at                     DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  shop_id                        String             @unique(map: "ix_billing_plan_shop_id") @db.VarChar
+  billing_events                 billing_events[]
+  billing_invoices               billing_invoices[]
+  shops                          shops              @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([effective_from], map: "ix_billing_plan_effective_from")
   @@index([shop_domain], map: "ix_billing_plan_shop_domain")
   @@index([status], map: "ix_billing_plan_status")
-  @@index([effective_from], map: "ix_billing_plans_effective_from")
   @@index([shop_domain], map: "ix_billing_plans_shop_domain")
   @@index([shop_id], map: "ix_billing_plans_shop_id")
   @@index([status], map: "ix_billing_plans_status")
+  @@index([effective_to], map: "ix_billing_plans_effective_to")
+  @@index([is_trial_active], map: "ix_billing_plans_is_trial_active")
+  @@index([requires_subscription_approval], map: "ix_billing_plans_requires_subscription_approval")
+  @@index([subscription_id], map: "ix_billing_plans_subscription_id")
 }
 
 model collection_features {
@@ -109,8 +123,8 @@ model collection_features {
   is_curated_collection        Boolean
   last_computed_at             DateTime @db.Timestamptz(6)
   id                           String   @id @db.VarChar
-  created_at                   DateTime @db.Timestamptz(6)
-  updated_at                   DateTime @db.Timestamptz(6)
+  created_at                   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime @default(now()) @db.Timestamptz(6)
   shop_id                      String   @db.VarChar
   shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -136,8 +150,8 @@ model customer_behavior_features {
   days_since_last_purchase    Int?
   last_computed_at            DateTime @db.Timestamptz(6)
   id                          String   @id @db.VarChar
-  created_at                  DateTime @db.Timestamptz(6)
-  updated_at                  DateTime @db.Timestamptz(6)
+  created_at                  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime @default(now()) @db.Timestamptz(6)
   shop_id                     String   @db.VarChar
   customer_id                 String?  @db.VarChar
   shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -172,8 +186,8 @@ model interaction_features {
   total_interaction_value      Float
   last_computed_at             DateTime @db.Timestamptz(6)
   id                           String   @id @db.VarChar
-  created_at                   DateTime @db.Timestamptz(6)
-  updated_at                   DateTime @db.Timestamptz(6)
+  created_at                   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime @default(now()) @db.Timestamptz(6)
   shop_id                      String   @db.VarChar
   customer_id                  String?  @db.VarChar
   product_id                   String?  @db.VarChar
@@ -206,8 +220,8 @@ model line_item_data {
   variant_data          Json?      @db.Json
   properties            Json?      @db.Json
   id                    String     @id @db.VarChar
-  created_at            DateTime   @db.Timestamptz(6)
-  updated_at            DateTime   @db.Timestamptz(6)
+  created_at            DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime   @default(now()) @db.Timestamptz(6)
   OrderData             order_data @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
@@ -225,7 +239,7 @@ model pipeline_watermarks {
   updated_at                DateTime  @db.Timestamptz(6)
   id                        String    @id @db.VarChar
   shop_id                   String    @db.VarChar
-  created_at                DateTime  @db.Timestamptz(6)
+  created_at                DateTime  @default(now()) @db.Timestamptz(6)
   shops                     shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([shop_id, data_type], map: "ix_pipeline_watermark_shop_id_data_type")
@@ -247,8 +261,8 @@ model product_features {
   product_category         String?  @db.VarChar(100)
   last_computed_at         DateTime @db.Timestamptz(6)
   id                       String   @id @db.VarChar
-  created_at               DateTime @db.Timestamptz(6)
-  updated_at               DateTime @db.Timestamptz(6)
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @db.Timestamptz(6)
   shop_id                  String   @db.VarChar
   product_id               String?  @db.VarChar
   shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -282,8 +296,8 @@ model product_pair_features {
   cross_sell_potential          Float
   last_computed_at              DateTime @db.Timestamptz(6)
   id                            String   @id @db.VarChar
-  created_at                    DateTime @db.Timestamptz(6)
-  updated_at                    DateTime @db.Timestamptz(6)
+  created_at                    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime @default(now()) @db.Timestamptz(6)
   shop_id                       String   @db.VarChar
   product_id                    String?  @db.VarChar
   shops                         shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -320,8 +334,8 @@ model purchase_attributions {
   attribution_algorithm     String        @db.VarChar(50)
   metadata                  Json          @db.Json
   id                        String        @id @db.VarChar
-  created_at                DateTime      @db.Timestamptz(6)
-  updated_at                DateTime      @db.Timestamptz(6)
+  created_at                DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime      @default(now()) @db.Timestamptz(6)
   shop_id                   String        @db.VarChar
   customer_id               String?       @db.VarChar
   user_sessions             user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -352,8 +366,8 @@ model raw_collections {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @db.Timestamptz(6)
-  updated_at         DateTime  @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_collection_shop_id_format")
@@ -377,8 +391,8 @@ model raw_customers {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @db.Timestamptz(6)
-  updated_at         DateTime  @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_customer_shop_id_format")
@@ -402,8 +416,8 @@ model raw_orders {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @db.Timestamptz(6)
-  updated_at         DateTime  @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_order_shop_id_format")
@@ -427,8 +441,8 @@ model raw_products {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @db.Timestamptz(6)
-  updated_at         DateTime  @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_product_shop_id_format")
@@ -457,8 +471,8 @@ model refund_attributions {
   attribution_algorithm     String         @db.VarChar(50)
   metadata                  Json           @db.Json
   id                        String         @id @db.VarChar
-  created_at                DateTime       @db.Timestamptz(6)
-  updated_at                DateTime       @db.Timestamptz(6)
+  created_at                DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime       @default(now()) @db.Timestamptz(6)
   shop_id                   String         @db.VarChar
   customer_id               String?        @db.VarChar
   user_sessions             user_sessions? @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -493,8 +507,8 @@ model search_product_features {
   search_intent_alignment            String   @db.VarChar(100)
   last_computed_at                   DateTime @db.Timestamptz(6)
   id                                 String   @id @db.VarChar
-  created_at                         DateTime @db.Timestamptz(6)
-  updated_at                         DateTime @db.Timestamptz(6)
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime @default(now()) @db.Timestamptz(6)
   shop_id                            String   @db.VarChar
   product_id                         String?  @db.VarChar
   shops                              shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -525,8 +539,8 @@ model session_features {
   returning_visitor        Boolean
   last_computed_at         DateTime @db.Timestamptz(6)
   id                       String   @id @db.VarChar
-  created_at               DateTime @db.Timestamptz(6)
-  updated_at               DateTime @db.Timestamptz(6)
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @db.Timestamptz(6)
   shop_id                  String   @db.VarChar
   customer_id              String?  @db.VarChar
   shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -553,8 +567,8 @@ model sessions {
   locale        String?   @db.VarChar(10)
   collaborator  Boolean?
   emailVerified Boolean?  @map("email_verified")
-  created_at    DateTime  @db.Timestamptz(6)
-  updated_at    DateTime  @updatedAt @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
   @@index([expires], map: "ix_sessions_expires")
   @@index([shop], map: "ix_sessions_shop")
@@ -569,11 +583,14 @@ model shops {
   money_format               String?                      @db.VarChar(100)
   is_active                  Boolean
   onboarding_completed       Boolean
+  suspended_at               DateTime?                    @db.Timestamptz(6)
+  suspension_reason          String?                      @db.VarChar(255)
+  service_impact             String?                      @db.VarChar(50)
   email                      String?                      @db.VarChar(255)
   last_analysis_at           DateTime?                    @db.Timestamptz(6)
   id                         String                       @id @default(cuid()) @db.VarChar
-  created_at                 DateTime                     @db.Timestamptz(6)
-  updated_at                 DateTime                     @updatedAt @db.Timestamptz(6)
+  created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime                     @default(now()) @updatedAt @db.Timestamptz(6)
   billing_events             billing_events[]
   billing_invoices           billing_invoices[]
   billing_plans              billing_plans?
@@ -622,8 +639,8 @@ model user_features {
   churn_risk_score            Float
   last_computed_at            DateTime @db.Timestamptz(6)
   id                          String   @id @db.VarChar
-  created_at                  DateTime @db.Timestamptz(6)
-  updated_at                  DateTime @db.Timestamptz(6)
+  created_at                  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime @default(now()) @db.Timestamptz(6)
   shop_id                     String   @db.VarChar
   customer_id                 String?  @db.VarChar
   shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -639,8 +656,8 @@ model user_identity_links {
   customer_id     String   @db.VarChar
   linked_at       DateTime @db.Timestamptz(6)
   id              String   @id @db.VarChar
-  created_at      DateTime @db.Timestamptz(6)
-  updated_at      DateTime @db.Timestamptz(6)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
   shop_id         String   @db.VarChar
   shops           shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -662,8 +679,8 @@ model user_interactions {
   interaction_type     String        @db.VarChar(50)
   interaction_metadata Json          @db.Json
   id                   String        @id @db.VarChar
-  created_at           DateTime      @db.Timestamptz(6)
-  updated_at           DateTime      @db.Timestamptz(6)
+  created_at           DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
   shop_id              String        @db.VarChar
   customer_id          String?       @db.VarChar
   user_sessions        user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -696,8 +713,8 @@ model user_sessions {
   extensions_used       Json                    @db.Json
   total_interactions    Int
   id                    String                  @id @db.VarChar
-  created_at            DateTime                @db.Timestamptz(6)
-  updated_at            DateTime                @db.Timestamptz(6)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
   shop_id               String                  @db.VarChar
   customer_id           String?                 @db.VarChar
   purchase_attributions purchase_attributions[]
@@ -888,8 +905,8 @@ model product_data {
   extras           Json?    @db.Json
   is_active        Boolean
   id               String   @id @db.VarChar
-  created_at       DateTime @db.Timestamptz(6)
-  updated_at       DateTime @db.Timestamptz(6)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
   shop_id          String   @db.VarChar
   shops            shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
