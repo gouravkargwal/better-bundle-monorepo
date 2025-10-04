@@ -114,9 +114,15 @@ class UnifiedSessionService:
                     # Update activity in background and return existing session
                     # ✅ NEW: Update client_id if provided and not already set
                     if client_id and not existing_session.client_id:
-                        existing_session.client_id = client_id
-                        await session.commit()
-                        await session.refresh(existing_session)
+                        try:
+                            existing_session.client_id = client_id
+                            await session.commit()
+                            await session.refresh(existing_session)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to update client_id for session {existing_session.id}: {e}"
+                            )
+                            # Continue with existing session even if client_id update fails
 
                     asyncio.create_task(
                         self._update_session_activity_background(existing_session.id)
@@ -187,15 +193,51 @@ class UnifiedSessionService:
         """
         try:
             async with get_transaction_context() as session:
+                # Get current session data first
+                current_session_query = select(UserSessionModel).where(
+                    UserSessionModel.id == session_id
+                )
+                current_session_result = await session.execute(current_session_query)
+                current_session = current_session_result.scalar_one_or_none()
+
+                if not current_session:
+                    logger.warning(f"Session {session_id} not found for update")
+                    return None
+
                 # Prepare update data
                 update_dict = update_data.dict(exclude_unset=True)
                 if "last_active" not in update_dict:
                     update_dict["last_active"] = utcnow()
 
+                # Check for constraint violations if updating customer_id
+                if "customer_id" in update_dict and update_dict["customer_id"]:
+                    new_customer_id = update_dict["customer_id"]
+                    if new_customer_id != current_session.customer_id:
+                        # Check if this would cause a constraint violation
+                        existing_query = select(UserSessionModel).where(
+                            and_(
+                                UserSessionModel.shop_id == current_session.shop_id,
+                                UserSessionModel.customer_id == new_customer_id,
+                                UserSessionModel.browser_session_id
+                                == current_session.browser_session_id,
+                                UserSessionModel.id
+                                != session_id,  # Exclude current session
+                            )
+                        )
+                        existing_result = await session.execute(existing_query)
+                        existing_session = existing_result.scalar_one_or_none()
+
+                        if existing_session:
+                            logger.warning(
+                                f"Cannot update session {session_id} - would cause constraint violation with session {existing_session.id}"
+                            )
+                            return None
+
                 # Map to SQLAlchemy fields
                 sqlalchemy_update = {}
                 field_mapping = {
                     "customer_id": "customer_id",
+                    "client_id": "client_id",  # ✅ NEW: Add client_id mapping
                     "status": "status",
                     "last_active": "last_active",
                     "extensions_used": "extensions_used",
@@ -427,14 +469,46 @@ class UnifiedSessionService:
 
                 if session_data:
                     # ✅ Update customer_id if session was anonymous and now identified
+                    # But only if it won't create a constraint violation
                     if customer_id and not session_data.customer_id:
+                        try:
+                            # Check if there's already a session with this customer_id and browser_session_id
+                            existing_customer_session = await session.execute(
+                                select(UserSessionModel).where(
+                                    and_(
+                                        UserSessionModel.customer_id == customer_id,
+                                        UserSessionModel.browser_session_id
+                                        == browser_session_id,
+                                        UserSessionModel.shop_id == shop_id,
+                                        UserSessionModel.status == SessionStatus.ACTIVE,
+                                        UserSessionModel.expires_at > current_time,
+                                    )
+                                )
+                            )
+                            customer_session = (
+                                existing_customer_session.scalar_one_or_none()
+                            )
 
-                        session_data.customer_id = customer_id
-                        session_data.expires_at = (
-                            current_time + self.identified_session_duration
-                        )
-                        await session.commit()
-                        await session.refresh(session_data)
+                            if not customer_session:
+                                # Safe to update - no constraint violation
+                                session_data.customer_id = customer_id
+                                session_data.expires_at = (
+                                    current_time + self.identified_session_duration
+                                )
+                                await session.commit()
+                                await session.refresh(session_data)
+                            else:
+                                # There's already a session with this customer_id and browser_session_id
+                                # Return the existing customer session instead
+                                logger.debug(
+                                    f"Found existing customer session, using that instead"
+                                )
+                                return customer_session
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to update customer_id for session {session_data.id}: {e}"
+                            )
+                            # Continue with existing session even if customer_id update fails
 
                     return session_data
 
@@ -694,13 +768,28 @@ class UnifiedSessionService:
         """Update session activity in background without blocking the response."""
         try:
             async with get_transaction_context() as session:
-                stmt = (
-                    update(UserSessionModel)
-                    .where(UserSessionModel.id == session_id)
-                    .values(last_active=utcnow())
-                )
-                await session.execute(stmt)
-                await session.commit()
+                # First check if session still exists and is active
+                stmt = select(UserSessionModel).where(UserSessionModel.id == session_id)
+                result = await session.execute(stmt)
+                session_data = result.scalar_one_or_none()
+
+                if not session_data:
+                    logger.debug(f"Session {session_id} not found for activity update")
+                    return
+
+                # Only update if session is still active
+                if session_data.status == SessionStatus.ACTIVE:
+                    update_stmt = (
+                        update(UserSessionModel)
+                        .where(UserSessionModel.id == session_id)
+                        .values(last_active=utcnow())
+                    )
+                    await session.execute(update_stmt)
+                    await session.commit()
+                else:
+                    logger.debug(
+                        f"Session {session_id} is not active, skipping activity update"
+                    )
         except Exception as e:
             logger.warning(f"Failed to update session activity in background: {e}")
 

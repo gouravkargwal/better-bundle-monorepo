@@ -325,6 +325,15 @@ class HybridRecommendationService:
                         "error": "All recommendations were empty",
                     }
             return result
+        elif source == "user_recommendations" and not user_id:
+            # No user_id provided, skip this source
+            logger.debug("⚠️ user_recommendations source skipped: no user_id provided")
+            return {
+                "success": False,
+                "items": [],
+                "source": "gorse_user_recommendations_skipped",
+                "error": "No user_id provided",
+            }
 
         elif source == "session_recommendations":
             logger.info(
@@ -562,6 +571,13 @@ class HybridRecommendationService:
                 minimal_feedback = base_feedback.copy()
                 minimal_feedback["Comment"] = f"session_{session_id}_minimal"
                 minimal_feedback["FeedbackType"] = "view"
+                # Don't add empty ItemId - this causes Gorse to return None
+                # Instead, return empty list to indicate no session data
+                if not minimal_feedback.get("ItemId"):
+                    logger.debug(
+                        "⚠️ No meaningful session data available for recommendations"
+                    )
+                    return []
                 feedback_objects.append(minimal_feedback)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to create minimal session feedback: {e}")

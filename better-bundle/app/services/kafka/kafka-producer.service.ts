@@ -65,12 +65,17 @@ export class KafkaProducerService {
         source: "shopify_webhook",
       };
 
+      console.log("📋 Message metadata:", messageWithMetadata);
+
       // Determine key for partitioning (use shop_id or shop_domain for consistent partitioning)
       const key = eventData.shop_id || eventData.shop_domain || "unknown";
 
       if (!this.producer) {
+        console.error("❌ Producer not initialized");
         throw new Error("Producer not initialized");
       }
+
+      console.log("📤 Sending message to Kafka topic 'shopify-events' with key:", key);
 
       const result: RecordMetadata = await this.producer.send({
         topic: "shopify-events",
@@ -92,10 +97,18 @@ export class KafkaProducerService {
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
       console.log(`✅ Shopify event published: ${messageId}`);
+      console.log("📊 Producer metrics:", this.getMetrics());
       return messageId;
     } catch (error) {
       this.errorCount++;
       console.error(`❌ Failed to publish Shopify event:`, error);
+      console.error("Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        producerInitialized: !!this.producer,
+        messageCount: this.messageCount,
+        errorCount: this.errorCount
+      });
       throw error;
     }
   }

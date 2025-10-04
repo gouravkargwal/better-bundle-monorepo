@@ -413,6 +413,13 @@ class CrossSessionLinkingService:
 
         for session, confidence, match_type in scored_sessions:
             try:
+                # Check if updating customer_id would cause constraint violation
+                if await self._would_cause_constraint_violation(session, customer_id):
+                    logger.warning(
+                        f"Skipping session {session.id} - would cause constraint violation"
+                    )
+                    continue
+
                 # Link session to customer
                 await self.session_service.update_session(
                     session.id,
@@ -428,6 +435,36 @@ class CrossSessionLinkingService:
                 logger.error(f"Error linking session {session.id}: {str(e)}")
 
         return linked_sessions
+
+    async def _would_cause_constraint_violation(
+        self, session: UserSession, customer_id: str
+    ) -> bool:
+        """Check if updating session customer_id would cause constraint violation"""
+        try:
+            async with get_session_context() as db_session:
+                from sqlalchemy import select, and_
+                from app.core.database.models.user_session import (
+                    UserSession as SAUserSession,
+                )
+
+                # Check if there's already a session with the same (shop_id, customer_id, browser_session_id)
+                existing_query = select(SAUserSession).where(
+                    and_(
+                        SAUserSession.shop_id == session.shop_id,
+                        SAUserSession.customer_id == customer_id,
+                        SAUserSession.browser_session_id == session.browser_session_id,
+                        SAUserSession.id != session.id,  # Exclude current session
+                    )
+                )
+                result = await db_session.execute(existing_query)
+                existing_session = result.scalar_one_or_none()
+
+                return existing_session is not None
+
+        except Exception as e:
+            logger.error(f"Error checking constraint violation: {e}")
+            # If we can't check, err on the side of caution
+            return True
 
     async def _update_session_interactions(self, session_id: str, customer_id: str):
         """Update all interactions in a session with customer ID"""
@@ -575,7 +612,8 @@ class CrossSessionLinkingService:
                         links_created += 1
                 else:
                     # Fallback: Use browser_session_id if client_id is not available
-                    logger.warning(
+                    # Only log as debug to reduce noise
+                    logger.debug(
                         f"Session {session.id} has no client_id, using browser_session_id as fallback"
                     )
                     created = await self._create_identity_link(

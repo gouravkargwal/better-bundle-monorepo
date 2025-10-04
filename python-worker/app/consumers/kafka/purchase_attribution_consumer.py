@@ -174,6 +174,7 @@ class PurchaseAttributionKafkaConsumer:
                             )
                         )
                         .order_by(UserSession.created_at.desc())
+                        .limit(1)  # Only get the most recent session
                     )
                     session_result = await session.execute(session_query)
                     user_session = session_result.scalar_one_or_none()

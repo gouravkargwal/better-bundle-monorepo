@@ -255,10 +255,14 @@ class AttributionEngine:
         logger.info(f"🔍 Purchase products data: {context.purchase_products}")
         for product in context.purchase_products:
             product_id = product.get("id")
-            product_amount = Decimal(str(product.get("price", 0)))
+            unit_price = Decimal(str(product.get("price", 0)))
+            quantity = int(product.get("quantity", 1))
+            product_amount = (
+                unit_price * quantity
+            )  # ✅ FIX: Use total amount (unit_price × quantity)
 
             logger.info(
-                f"🔍 Processing product {product_id} with amount ${product_amount}"
+                f"🔍 Processing product {product_id} with unit price ${unit_price}, quantity {quantity}, total amount ${product_amount}"
             )
 
             if not product_id or product_amount <= 0:

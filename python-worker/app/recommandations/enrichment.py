@@ -147,6 +147,17 @@ class ProductEnrichment:
                     logger.debug(f"🚫 Skipping empty item ID: {item_id}")
                     continue
 
+                # Skip non-product IDs (like "collection", "category", etc.)
+                if actual_item_id.lower() in [
+                    "collection",
+                    "category",
+                    "tag",
+                    "vendor",
+                    "type",
+                ]:
+                    logger.debug(f"🚫 Skipping non-product ID: {actual_item_id}")
+                    continue
+
                 if actual_item_id.startswith("shop_"):
                     # Extract shop ID and product ID
                     parts = actual_item_id.split("_")
@@ -156,28 +167,29 @@ class ProductEnrichment:
                         ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
                         product_id = parts[2]  # 7903465537675
 
-                        # Only include if it's from the current shop and product_id is not empty
+                        # Only include if it's from the current shop and product_id is not empty and numeric
                         if (
                             gorse_shop_id == shop_id
                             and product_id
                             and product_id.strip()
+                            and product_id.isdigit()  # Ensure it's a numeric product ID
                         ):
                             clean_item_ids.append(product_id)
                         else:
                             logger.debug(
-                                f"🚫 Skipping product from different shop or empty product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
+                                f"🚫 Skipping product from different shop or invalid product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
                             )
                     else:
                         logger.warning(
                             f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
                         )
                 else:
-                    # Assume it's already a clean product ID, but check it's not empty
-                    if actual_item_id.strip():
+                    # Assume it's already a clean product ID, but check it's not empty and numeric
+                    if actual_item_id.strip() and actual_item_id.isdigit():
                         clean_item_ids.append(actual_item_id)
                     else:
                         logger.debug(
-                            f"🚫 Skipping empty clean product ID: {actual_item_id}"
+                            f"🚫 Skipping non-numeric product ID: {actual_item_id}"
                         )
 
             # Fetch products from database using cleaned IDs

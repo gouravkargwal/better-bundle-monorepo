@@ -299,42 +299,16 @@ class UnifiedGorseService:
     async def _sync_collections_to_gorse(self, shop_id: str) -> int:
         """
         Sync collections using ALL optimized collection features
+        ✅ FIX: Collections should NOT be sent as items to Gorse
+        Collections are used for category-based recommendations, not as items
         """
         try:
-            total_synced = 0
-            offset = 0
-
-            async with get_session_context() as session:
-                while True:
-                    stmt = (
-                        select(CollectionFeatures)
-                        .where(CollectionFeatures.shop_id == shop_id)
-                        .order_by(CollectionFeatures.last_computed_at.asc())
-                        .offset(offset)
-                        .limit(self.batch_size)
-                    )
-                    result = await session.execute(stmt)
-                    collections = result.scalars().all()
-
-                    if not collections:
-                        break
-
-                    # Transform using comprehensive collection transformer
-                    gorse_collections = self.collection_transformer.transform_batch_to_comprehensive_gorse_items(
-                        collections, shop_id
-                    )
-
-                    # Push to Gorse API as items
-                    if gorse_collections:
-                        await self.gorse_client.insert_items_batch(gorse_collections)
-                        total_synced += len(gorse_collections)
-
-                    if len(collections) < self.batch_size:
-                        break
-
-                    offset += self.batch_size
-
-            return total_synced
+            # Collections are not sent as items to Gorse anymore
+            # They are used for category detection and filtering only
+            logger.info(
+                f"✅ Collections sync skipped - collections are not sent as items to Gorse for shop {shop_id}"
+            )
+            return 0
 
         except Exception as e:
             logger.error(f"Failed to sync collections for shop {shop_id}: {str(e)}")

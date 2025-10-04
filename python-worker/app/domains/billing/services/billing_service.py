@@ -172,8 +172,10 @@ class BillingService:
             # Create billing event for tracking
             event = BillingEvent(
                 shop_id=shop_id,
+                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
                 type="trial_usage_recorded",
                 occurred_at=datetime.utcnow(),
+                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
                 data={
                     "order_id": purchase_event.order_id,
                     "attributed_revenue": float(attributed_revenue),
@@ -181,7 +183,7 @@ class BillingService:
                     "threshold": float(trial_threshold),
                     "usage_count": billing_plan.trial_usage_records_count,
                 },
-                metadata={
+                billing_metadata={
                     "phase": "trial",
                     "internal_tracking": True,
                 },
@@ -251,8 +253,10 @@ class BillingService:
             # 3. Create event
             event = BillingEvent(
                 shop_id=shop_id,
+                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
                 type="trial_completed",
                 occurred_at=datetime.utcnow(),
+                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
                 data={
                     "final_revenue": float(final_revenue),
                     "threshold": TRIAL_THRESHOLD_USD,
@@ -260,7 +264,7 @@ class BillingService:
                     "services_suspended": True,
                     "requires_subscription": True,
                 },
-                metadata={
+                billing_metadata={
                     "phase": "trial_completion",
                     "next_action": "create_subscription",
                 },
@@ -349,8 +353,10 @@ class BillingService:
                 # Store event for analytics
                 event = BillingEvent(
                     shop_id=shop_id,
+                    plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
                     type="usage_recorded",
                     occurred_at=datetime.utcnow(),
+                    processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
                     data={
                         "order_id": purchase_event.order_id,
                         "attributed_revenue": float(attributed_revenue),
@@ -447,15 +453,17 @@ class BillingService:
             # Create event
             event = BillingEvent(
                 shop_id=shop_id,
+                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
                 type="subscription_created",
                 occurred_at=datetime.utcnow(),
+                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
                 data={
                     "subscription_id": subscription.id,
                     "status": "PENDING",
                     "capped_amount": PAID_CAPPED_AMOUNT_USD,
                     "currency": currency,
                 },
-                metadata={
+                billing_metadata={
                     "phase": "subscription_creation",
                 },
             )
@@ -536,14 +544,16 @@ class BillingService:
             # Create event
             event = BillingEvent(
                 shop_id=shop_id,
+                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
                 type="subscription_activated",
                 occurred_at=datetime.utcnow(),
+                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
                 data={
                     "subscription_id": subscription_id,
                     "status": "ACTIVE",
                     "services_resumed": True,
                 },
-                metadata={
+                billing_metadata={
                     "phase": "subscription_activation",
                 },
             )
