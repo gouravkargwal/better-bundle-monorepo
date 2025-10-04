@@ -73,6 +73,16 @@ class RecommendationCarousel {
         return;
       }
 
+      // Show skeleton loading before API call (only if not already showing)
+      if (window.productCardManager) {
+        const existingSkeleton = document.querySelector('.loading-placeholder');
+        if (!existingSkeleton) {
+          window.productCardManager.showSkeletonLoading();
+        } else {
+          console.log('✅ Phoenix: Skeleton already exists, skipping creation');
+        }
+      }
+
       // Fetch recommendations with timeout
       console.log('🌐 Phoenix: Fetching recommendations...');
       const recommendations = await this.api.fetchRecommendations(

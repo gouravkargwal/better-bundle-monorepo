@@ -10,11 +10,11 @@
     width: 100%;
     max-width: 1200px;
     margin: 0 auto;
-    padding: 0 16px;
+    padding: 0 8px;
     box-sizing: border-box;
   }
   .section-heading {
-    margin-bottom: 32px;
+    margin-bottom: 20px;
     text-align: {{ block.settings.heading_alignment | default: 'center' }};
   }
   .section-heading h1,
@@ -80,7 +80,7 @@
   /* Ensure pagination is always visible */
   .swiper-pagination {
     position: relative !important;
-    margin-top: 20px !important;
+    margin-top: 12px !important;
     text-align: center !important;
     bottom: auto !important;
   }
@@ -116,6 +116,7 @@
     object-position: center top;
     transition: opacity 0.2s ease;
     border-radius: 4px 4px 0 0;
+    cursor: pointer;
   }
 
   .product-card:hover .product-card__image {
@@ -123,11 +124,11 @@
   }
 
   .product-card__body {
-    padding: 16px;
+    padding: 12px;
     flex-grow: 1;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
   .product-card__title {
     font-size: 16px;
@@ -156,7 +157,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
-    padding: 12px 16px;
+    padding: 10px 14px;
     background: {{ block.settings.button_bg | default: '#0f172a' }};
     color: {{ block.settings.button_text | default: '#ffffff' }};
     border: none;
@@ -166,7 +167,7 @@
     font-size: 14px;
     letter-spacing: 0;
     transition: all 0.2s ease;
-    margin-top: 4px;
+    margin-top: 2px;
   }
   .product-card__btn:hover {
     background: {{ block.settings.button_bg | default: '#0f172a' | color_darken: 10 }};
@@ -194,8 +195,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 8px;
+    margin-bottom: 8px;
   }
 
   .product-card__quantity {
@@ -207,13 +208,13 @@
   .product-card__variants {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
 
   /* Two dropdowns side by side - use a more reliable approach */
   .product-card__variants.two-dropdowns {
     flex-direction: row;
-    gap: 8px;
+    gap: 6px;
   }
 
   /* Make dropdowns take full space */
@@ -287,13 +288,14 @@
 
   /* Centralized Loading Skeleton Styles */
   .loading-skeleton {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-    animation: skeleton-loading 1.5s infinite;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%) !important;
+    background-size: 200% 100% !important;
+    animation: skeleton-loading 1.5s infinite !important;
     border-radius: 4px;
-    border: none;
-    box-shadow: none;
+    border: none !important;
+    box-shadow: none !important;
     transition: opacity 0.3s ease, transform 0.3s ease;
+    display: block !important;
   }
 
   @keyframes skeleton-loading {
@@ -308,14 +310,114 @@
   /* Fade out skeleton when real content loads */
   .loading-skeleton.fade-out {
     opacity: 0;
+    transform: scale(0.98);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  /* Specific skeleton heights for different elements - matching real product cards */
+  .product-card__image.loading-skeleton {
+    height: 200px;
+    width: 100%;
+    display: block !important;
+  }
+
+  .product-card__title.loading-skeleton {
+    height: 20px;
+    width: 85%;
+    margin-bottom: 8px;
+    display: block !important;
+  }
+
+  /* Price-quantity skeleton matching real layout */
+  .product-card__price-quantity .product-card__price.loading-skeleton {
+    height: 18px;
+    width: 80px;
+    margin: 0;
+    display: block !important;
+  }
+
+  .product-card__quantity .qty-btn.loading-skeleton {
+    height: 32px;
+    width: 32px;
+    border-radius: 6px;
+    display: block !important;
+  }
+
+  .product-card__quantity .qty-input.loading-skeleton {
+    height: 32px;
+    width: 50px;
+    border-radius: 6px;
+    display: block !important;
+  }
+
+  /* Variant skeleton matching real layout */
+  .product-card__variants .variant-label.loading-skeleton {
+    height: 14px;
+    width: 60px;
+    margin-bottom: 4px;
+    display: block !important;
+  }
+
+  .product-card__variants .variant-select.loading-skeleton {
+    height: 32px;
+    width: 100%;
+    border-radius: 6px;
+    display: block !important;
+  }
+
+
+  .product-card__btn.loading-skeleton {
+    height: 40px;
+    width: 100%;
+    border-radius: 6px;
+    margin-top: 8px;
+    display: block !important;
+  }
+
+  /* Hide skeleton container when content is loaded */
+  .loading-placeholder {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  .loading-placeholder.fade-out {
+    opacity: 0;
     transform: scale(0.95);
+    pointer-events: none;
+  }
+
+  /* Fade out entire skeleton slides */
+  .swiper-slide.loading-placeholder.fade-out {
+    opacity: 0;
+    transform: scale(0.95);
+    transition: opacity 0.3s ease, transform 0.3s ease;
   }
 
   /* Fade in real content */
   .product-card.real-content {
     opacity: 0;
-    transform: scale(1.05);
-    animation: fadeInUp 0.4s ease forwards;
+    transform: scale(0.98);
+    animation: fadeInUp 0.3s ease forwards;
+  }
+
+  /* Smooth fade-in for new product cards */
+  .swiper-slide:not(.loading-placeholder) .product-card {
+    opacity: 0;
+    transform: scale(0.98);
+    animation: fadeInUp 0.3s ease forwards;
+  }
+
+  /* Staggered animation for multiple cards - reduced delays */
+  .swiper-slide:not(.loading-placeholder):nth-child(1) .product-card {
+    animation-delay: 0.05s;
+  }
+  .swiper-slide:not(.loading-placeholder):nth-child(2) .product-card {
+    animation-delay: 0.1s;
+  }
+  .swiper-slide:not(.loading-placeholder):nth-child(3) .product-card {
+    animation-delay: 0.15s;
+  }
+  .swiper-slide:not(.loading-placeholder):nth-child(4) .product-card {
+    animation-delay: 0.2s;
   }
 
   /* Product Card Skeleton */
@@ -352,8 +454,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 8px;
+    margin-bottom: 8px;
   }
 
   .loading-placeholder .product-card__quantity {
@@ -377,13 +479,13 @@
   }
 
   .loading-placeholder .product-card__variants {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
 
   .loading-placeholder .product-card__variants .variant-select {
-    height: 36px;
+    height: 32px;
     width: 100%;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -419,7 +521,7 @@
 
   /* Simple Variant Selectors */
   .variant-option {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .variant-label {
@@ -433,11 +535,11 @@
 
   .variant-select {
     width: 100%;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     background: #fff;
-    font-size: 14px;
+    font-size: 13px;
     color: #374151;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -446,9 +548,9 @@
     appearance: none;
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 16px;
-    padding-right: 32px;
+    background-position: right 6px center;
+    background-size: 14px;
+    padding-right: 28px;
   }
 
   .variant-select:focus {
@@ -514,7 +616,7 @@
   @keyframes fadeInUp {
     0% {
       opacity: 0;
-      transform: translateY(20px) scale(1.05);
+      transform: translateY(5px) scale(0.98);
     }
     100% {
       opacity: 1;

@@ -85,6 +85,90 @@ class ProductCardManager {
     this.api =
       window.recommendationApi ||
       (window.RecommendationAPI ? new window.RecommendationAPI() : null);
+    this.skeletonState = 'initial'; // 'initial', 'loading', 'loaded'
+  }
+
+  // Manage skeleton loading state
+  setSkeletonState(state) {
+    this.skeletonState = state;
+    console.log(`🔄 ProductCardManager: Skeleton state changed to ${state}`);
+  }
+
+  // Check if skeleton should be shown
+  shouldShowSkeleton() {
+    return this.skeletonState === 'initial' || this.skeletonState === 'loading';
+  }
+
+  // Show skeleton loading during API calls
+  showSkeletonLoading() {
+    const swiperWrapper = document.querySelector(".swiper-wrapper");
+    if (!swiperWrapper) {
+      console.error('❌ ProductCardManager: Swiper wrapper not found');
+      return;
+    }
+
+    console.log('🔄 ProductCardManager: Updating skeleton loading...');
+    this.setSkeletonState('loading');
+
+    // Check if skeleton already exists
+    const existingSkeleton = swiperWrapper.querySelector('.loading-placeholder');
+    if (existingSkeleton) {
+      console.log('✅ ProductCardManager: Skeleton already exists, just updating state');
+      return;
+    }
+
+    // Only create skeleton if none exists
+    console.log('🔄 ProductCardManager: Creating skeleton loading...');
+
+    // Clear existing content
+    swiperWrapper.innerHTML = '';
+
+    // Create skeleton slides matching actual product card structure
+    console.log('🔄 Creating 4 skeleton slides...');
+    for (let i = 0; i < 4; i++) {
+      const slide = document.createElement('div');
+      slide.className = 'swiper-slide loading-placeholder';
+      slide.innerHTML = `
+        <div class="product-card">
+          <div class="product-card__image loading-skeleton">&nbsp;</div>
+          <div class="product-card__body">
+            <h4 class="product-card__title loading-skeleton">&nbsp;</h4>
+            
+            <!-- Line 1: Price and Quantity on same line -->
+            <div class="product-card__price-quantity">
+              <p class="product-card__price loading-skeleton">&nbsp;</p>
+              <div class="product-card__quantity">
+                <button class="qty-btn loading-skeleton">&nbsp;</button>
+                <input type="number" class="qty-input loading-skeleton">
+                <button class="qty-btn loading-skeleton">&nbsp;</button>
+              </div>
+            </div>
+            
+            <!-- Line 2: Variant Dropdowns -->
+            <div class="product-card__variants two-dropdowns">
+              <div class="variant-option">
+                <label class="variant-label loading-skeleton">&nbsp;</label>
+                <select class="variant-select loading-skeleton"></select>
+              </div>
+              <div class="variant-option">
+                <label class="variant-label loading-skeleton">&nbsp;</label>
+                <select class="variant-select loading-skeleton"></select>
+              </div>
+            </div>
+            
+            <!-- Line 3: Add to Cart Button -->
+            <button class="product-card__btn loading-skeleton">&nbsp;</button>
+          </div>
+        </div>
+      `;
+      swiperWrapper.appendChild(slide);
+      console.log(`✅ Created skeleton slide ${i + 1}`);
+    }
+
+    console.log('📊 Total skeleton slides created:', swiperWrapper.children.length);
+
+    // Initialize Swiper for skeleton
+    this.initializeSwiper();
   }
 
   // Update product cards with real recommendations
@@ -102,16 +186,22 @@ class ProductCardManager {
 
     console.log('🔄 ProductCardManager: Updating product cards with', recommendations.length, 'recommendations');
 
-    // Hide skeleton container when real content is loaded
-    const skeletonContainer = document.querySelector('.skeleton-container');
-    if (skeletonContainer) {
-      skeletonContainer.style.display = 'none';
-      console.log('✅ ProductCardManager: Hiding skeleton - real content loaded');
+    // Check if we're already showing real content to prevent duplication
+    if (this.skeletonState === 'loaded') {
+      console.log('⚠️ ProductCardManager: Real content already loaded, skipping skeleton update');
+      return;
     }
+
+    // Set skeleton state to loading
+    this.setSkeletonState('loading');
 
     // Add fade-out transition to existing skeleton slides
     const existingSlides = swiperWrapper.querySelectorAll('.swiper-slide');
     existingSlides.forEach(slide => {
+      // Add fade-out to the entire slide if it's a skeleton
+      if (slide.classList.contains('loading-placeholder')) {
+        slide.classList.add('fade-out');
+      }
       const skeletons = slide.querySelectorAll('.loading-skeleton');
       skeletons.forEach(skeleton => {
         skeleton.classList.add('fade-out');
@@ -150,6 +240,9 @@ class ProductCardManager {
           const productCard = slide.querySelector('.product-card');
           if (productCard) {
             productCard.classList.add('real-content');
+            // Ensure initial state for animation
+            productCard.style.opacity = '0';
+            productCard.style.transform = 'scale(0.95)';
           }
 
           swiperWrapper.appendChild(slide);
@@ -158,7 +251,12 @@ class ProductCardManager {
         // Reinitialize Swiper with new content after a small delay
         setTimeout(() => {
           this.initializeSwiper();
-        }, 200);
+          this.preventNavigationClickPropagation();
+        }, 100);
+
+        // Set skeleton state to loaded
+        this.setSkeletonState('loaded');
+
         console.log('✅ ProductCardManager: Successfully updated product cards');
       } catch (error) {
         console.error('❌ ProductCardManager: Error updating product cards:', error);
@@ -168,7 +266,7 @@ class ProductCardManager {
           carouselContainer.style.display = 'none';
         }
       }
-    }, 300); // Match the CSS transition duration
+    }, 200); // Match the CSS transition duration
   }
 
   // Create product slide from recommendation data
@@ -248,12 +346,13 @@ class ProductCardManager {
     }
 
     slide.innerHTML = `
-      <div class="product-card" data-product-id="${product.id}" onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ''}', '${sessionId || ''}')">
+      <div class="product-card" data-product-id="${product.id}">
         <img
           class="product-card__image"
           src="${product.image?.url || "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=="}"
           alt="${product.image?.alt_text || product.title}"
           loading="lazy"
+          onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ''}', '${sessionId || ''}')"
         >
         <div class="product-card__body">
           <h4 class="product-card__title">${product.title}</h4>
@@ -898,7 +997,25 @@ class ProductCardManager {
     qtyInput.value = String(newValue);
   }
 
+  // Prevent navigation arrows from triggering product card clicks
+  preventNavigationClickPropagation() {
+    const nextButton = document.querySelector('.swiper-button-next');
+    const prevButton = document.querySelector('.swiper-button-prev');
 
+    if (nextButton) {
+      nextButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        console.log('🔄 Next button clicked - preventing product card click');
+      });
+    }
+
+    if (prevButton) {
+      prevButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        console.log('🔄 Prev button clicked - preventing product card click');
+      });
+    }
+  }
 
   // Initialize Swiper
   initializeSwiper() {
@@ -911,16 +1028,38 @@ class ProductCardManager {
           window.swiper = null;
         }
 
-        // Simple loop configuration - always enable loop
-        const shouldLoop = true;
+        // Get slides and viewport info
+        const slides = document.querySelectorAll('.swiper-slide');
+        const slideCount = slides.length;
+        const viewportWidth = window.innerWidth;
+
+        // Determine slides per view based on breakpoints
+        let slidesPerView = 1;
+        if (viewportWidth >= 1280) slidesPerView = 4;
+        else if (viewportWidth >= 1024) slidesPerView = 3;
+        else if (viewportWidth >= 640) slidesPerView = 2;
+        else slidesPerView = 1;
+
+        // Swiper loop requirements: need at least slidesPerView + 2 slides for proper loop
+        // This is the standard requirement for Swiper loop mode
+        const minSlidesForLoop = slidesPerView + 2;
+        const shouldLoop = slideCount >= minSlidesForLoop;
+
+        console.log('🎯 Swiper config:', {
+          slideCount,
+          slidesPerView,
+          shouldLoop,
+          viewportWidth,
+          minSlidesForLoop
+        });
 
         // Swiper is loaded globally from CDN
         window.swiper = new window.Swiper(".swiper", {
           breakpoints: {
-            320: { slidesPerView: 1, spaceBetween: 20 },
-            640: { slidesPerView: 2, spaceBetween: 20 },
-            1024: { slidesPerView: 3, spaceBetween: 25 },
-            1280: { slidesPerView: 4, spaceBetween: 30 },
+            320: { slidesPerView: 1, spaceBetween: 10 },
+            640: { slidesPerView: 2, spaceBetween: 12 },
+            1024: { slidesPerView: 3, spaceBetween: 15 },
+            1280: { slidesPerView: 4, spaceBetween: 18 },
           },
           autoplay: window.swiperConfig?.enable_autoplay
             ? {
@@ -930,6 +1069,7 @@ class ProductCardManager {
             }
             : false,
           loop: shouldLoop,
+          loopAdditionalSlides: 1,
           spaceBetween: 30,
           freeMode: false,
           grabCursor: true,
@@ -950,6 +1090,29 @@ class ProductCardManager {
           on: {
             init: function () {
               console.log("✅ Swiper initialized with recommendations!");
+              // Prevent navigation clicks from triggering product card clicks
+              productCardManager.preventNavigationClickPropagation();
+            },
+            resize: function () {
+              // Recalculate loop when viewport changes
+              const currentSlides = document.querySelectorAll('.swiper-slide');
+              const currentViewportWidth = window.innerWidth;
+
+              let currentSlidesPerView = 1;
+              if (currentViewportWidth >= 1280) currentSlidesPerView = 4;
+              else if (currentViewportWidth >= 1024) currentSlidesPerView = 3;
+              else if (currentViewportWidth >= 640) currentSlidesPerView = 2;
+              else currentSlidesPerView = 1;
+
+              // Use the same proper logic as initialization
+              const minSlidesForLoop = currentSlidesPerView + 2;
+              const shouldLoopNow = currentSlides.length >= minSlidesForLoop;
+
+              if (this.loop !== shouldLoopNow) {
+                console.log('🔄 Updating loop setting:', shouldLoopNow, 'Slides:', currentSlides.length, 'Required:', minSlidesForLoop);
+                this.loop = shouldLoopNow;
+                this.update();
+              }
             },
           },
         });
@@ -1159,3 +1322,4 @@ window.ProductCardManager = ProductCardManager;
 
 // Create global instance for use in HTML onclick handlers
 window.productCardManager = new ProductCardManager();
+
