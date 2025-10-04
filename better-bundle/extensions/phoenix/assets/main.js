@@ -130,18 +130,22 @@ class RecommendationCarousel {
 
   // Show skeleton loading state
   showSkeleton() {
-    const skeletonContainer = document.querySelector('.skeleton-container');
-    if (skeletonContainer) {
-      skeletonContainer.style.display = 'block';
-    }
+    const skeletonElements = document.querySelectorAll('.loading-skeleton');
+    skeletonElements.forEach(element => {
+      element.style.display = 'block';
+      element.classList.remove('fade-out');
+    });
   }
 
   // Hide skeleton loading state
   hideSkeleton() {
-    const skeletonContainer = document.querySelector('.skeleton-container');
-    if (skeletonContainer) {
-      skeletonContainer.style.display = 'none';
-    }
+    const skeletonElements = document.querySelectorAll('.loading-skeleton');
+    skeletonElements.forEach(element => {
+      element.classList.add('fade-out');
+      setTimeout(() => {
+        element.style.display = 'none';
+      }, 300);
+    });
   }
 
   // Hide the entire carousel when API fails or no recommendations

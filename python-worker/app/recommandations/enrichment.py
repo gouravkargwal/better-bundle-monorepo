@@ -16,6 +16,53 @@ class ProductEnrichment:
     def __init__(self):
         pass
 
+    def enhance_recommendations_with_currency(
+        self, recommendations: List[Dict[str, Any]], shop_currency: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Centralized function to enhance all recommendations with consistent currency information
+
+        Args:
+            recommendations: List of recommendation dictionaries
+            shop_currency: Shop's currency code (e.g., "USD", "INR")
+
+        Returns:
+            Enhanced recommendations with consistent currency
+        """
+        enhanced_recommendations = []
+
+        for rec in recommendations:
+            # Create a copy to avoid modifying the original
+            enhanced_rec = rec.copy()
+
+            # Ensure price has currency_code
+            if "price" in enhanced_rec and isinstance(enhanced_rec["price"], dict):
+                enhanced_rec["price"]["currency_code"] = shop_currency
+            else:
+                # If price is not a dict, create proper structure
+                enhanced_rec["price"] = {
+                    "amount": str(enhanced_rec.get("price", "0")),
+                    "currency_code": shop_currency,
+                }
+
+            # Enhance variants with currency information
+            if "variants" in enhanced_rec and isinstance(
+                enhanced_rec["variants"], list
+            ):
+                enhanced_variants = []
+                for variant in enhanced_rec["variants"]:
+                    if isinstance(variant, dict):
+                        enhanced_variant = variant.copy()
+                        enhanced_variant["currency_code"] = shop_currency
+                        enhanced_variants.append(enhanced_variant)
+                    else:
+                        enhanced_variants.append(variant)
+                enhanced_rec["variants"] = enhanced_variants
+
+            enhanced_recommendations.append(enhanced_rec)
+
+        return enhanced_recommendations
+
     def _extract_image_from_media(
         self, media_data: Any, fallback_title: str
     ) -> Dict[str, str] | None:
@@ -252,11 +299,6 @@ class ProductEnrichment:
                             "url": f"https://{product_domain}/products/{product.handle}",
                             "price": {
                                 "amount": str(product.price),
-                                "currency_code": (
-                                    shop.currency_code
-                                    if shop and shop.currency_code
-                                    else "USD"
-                                ),
                             },
                             "image": self._extract_image_from_media(
                                 product.media, product.title

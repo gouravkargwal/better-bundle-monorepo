@@ -169,7 +169,6 @@ class RecentlyViewedService:
                             "handle": product.handle,
                             "price": {
                                 "amount": str(product.price),
-                                "currency_code": product.currency_code or "USD",
                             },
                             "image": (
                                 {

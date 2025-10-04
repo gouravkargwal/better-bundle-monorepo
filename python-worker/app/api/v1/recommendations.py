@@ -423,6 +423,12 @@ async def get_recommendations(request: RecommendationRequest):
         # Use available items for the rest of the processing
         enriched_items = available_items
 
+        # Centralized currency enhancement - apply consistent currency to all recommendations
+        shop_currency = shop.currency_code if shop and shop.currency_code else "USD"
+        enriched_items = enrichment_service.enhance_recommendations_with_currency(
+            enriched_items, shop_currency
+        )
+
         # Prepare response data
         response_data = {
             "recommendations": enriched_items,

@@ -26,13 +26,13 @@ class FrequentlyBoughtTogetherService:
     ) -> Dict[str, Any]:
         """
         Find products frequently bought together with the given product
-        
+
         Args:
             shop_id: Shop ID
             product_id: Product ID to find co-purchased items for
             limit: Maximum number of recommendations
             min_co_occurrences: Minimum number of co-purchases required
-            
+
         Returns:
             Dict with frequently bought together recommendations
         """
@@ -42,7 +42,7 @@ class FrequentlyBoughtTogetherService:
                 orders_with_target = await self._get_orders_with_product(
                     session, shop_id, product_id
                 )
-                
+
                 if not orders_with_target:
                     logger.warning(f"No orders found containing product {product_id}")
                     return {
@@ -144,10 +144,12 @@ class FrequentlyBoughtTogetherService:
 
             co_purchased = []
             for row in result.fetchall():
-                co_purchased.append({
-                    "product_id": row.product_id,
-                    "co_occurrences": row.co_occurrences,
-                })
+                co_purchased.append(
+                    {
+                        "product_id": row.product_id,
+                        "co_occurrences": row.co_occurrences,
+                    }
+                )
 
             return co_purchased
 
@@ -164,11 +166,10 @@ class FrequentlyBoughtTogetherService:
                 return []
 
             product_ids = [item["product_id"] for item in co_purchased]
-            
+
             # Get product data
             result = await session.execute(
-                select(ProductData)
-                .where(
+                select(ProductData).where(
                     and_(
                         ProductData.shop_id == shop_id,
                         ProductData.product_id.in_(product_ids),
@@ -177,31 +178,36 @@ class FrequentlyBoughtTogetherService:
             )
 
             products = result.scalars().all()
-            
+
             # Create a mapping of product_id to product data
             product_map = {p.product_id: p for p in products}
-            
+
             # Build recommendations with co-occurrence data
             recommendations = []
             for item in co_purchased:
                 product_id = item["product_id"]
                 if product_id in product_map:
                     product = product_map[product_id]
-                    recommendations.append({
-                        "id": product_id,
-                        "title": product.title,
-                        "handle": product.handle,
-                        "price": {
-                            "amount": str(product.price),
-                            "currency_code": product.currency_code or "USD",
-                        },
-                        "image": {
-                            "url": product.image_url,
-                        } if product.image_url else None,
-                        "available": product.available,
-                        "url": f"/products/{product.handle}",
-                        "co_occurrences": item["co_occurrences"],
-                    })
+                    recommendations.append(
+                        {
+                            "id": product_id,
+                            "title": product.title,
+                            "handle": product.handle,
+                            "price": {
+                                "amount": str(product.price),
+                            },
+                            "image": (
+                                {
+                                    "url": product.image_url,
+                                }
+                                if product.image_url
+                                else None
+                            ),
+                            "available": product.available,
+                            "url": f"/products/{product.handle}",
+                            "co_occurrences": item["co_occurrences"],
+                        }
+                    )
 
             return recommendations
 

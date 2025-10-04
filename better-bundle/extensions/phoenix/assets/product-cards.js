@@ -127,6 +127,13 @@ class ProductCardManager {
         // Store product data for variant price updates
         recommendations.forEach((product) => {
           this.productDataStore[product.id] = product;
+          console.log('🏪 Stored product data:', {
+            productId: product.id,
+            productTitle: product.title,
+            options: product.options,
+            variants: product.variants?.length,
+            storedData: this.productDataStore[product.id]
+          });
         });
 
         // Create new slides from recommendations
@@ -148,8 +155,10 @@ class ProductCardManager {
           swiperWrapper.appendChild(slide);
         });
 
-        // Reinitialize Swiper with new content
-        this.initializeSwiper();
+        // Reinitialize Swiper with new content after a small delay
+        setTimeout(() => {
+          this.initializeSwiper();
+        }, 200);
         console.log('✅ ProductCardManager: Successfully updated product cards');
       } catch (error) {
         console.error('❌ ProductCardManager: Error updating product cards:', error);
@@ -211,12 +220,31 @@ class ProductCardManager {
     let variantOptions = "";
     const maxInventory = product.inventory || (defaultVariant?.inventory || 0);
 
+    console.log('🎯 Creating variant options for product:', {
+      productId: product.id,
+      productTitle: product.title,
+      hasOptions: !!(product.options && product.options.length > 0),
+      optionsCount: product.options?.length || 0,
+      hasVariants: !!(product.variants && product.variants.length > 1),
+      variantsCount: product.variants?.length || 0
+    });
+
     if (product.options && product.options.length > 0) {
       // Use dynamic variant detection for better UX
       variantOptions = this.createDynamicVariantSelectors(product, defaultVariant);
+      console.log('✅ Created variant options from options:', variantOptions);
     } else if (product.variants && product.variants.length > 1) {
       // Fallback to variants data with dynamic detection
       variantOptions = this.createDynamicVariantSelectors(product, defaultVariant);
+      console.log('✅ Created variant options from variants:', variantOptions);
+    } else {
+      console.log('❌ No variant options created for product:', product.id);
+    }
+
+    // TEMPORARY: Force create simple dropdowns for testing
+    if (!variantOptions && product.options && product.options.length > 0) {
+      console.log('🧪 Creating test variant selectors...');
+      variantOptions = this.createTestVariantSelectors(product);
     }
 
     slide.innerHTML = `
@@ -229,16 +257,25 @@ class ProductCardManager {
         >
         <div class="product-card__body">
           <h4 class="product-card__title">${product.title}</h4>
-          <p class="product-card__price" data-product-id="${product.id}">${displayPrice}</p>
-          <div class="product-card__options">
-            ${variantOptions}
+          
+          <!-- Line 1: Price and Quantity on same line -->
+          <div class="product-card__price-quantity">
+            <p class="product-card__price" data-product-id="${product.id}">${displayPrice}</p>
             <div class="product-card__quantity">
               <button class="qty-btn qty-minus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, -1)">-</button>
               <input type="number" value="1" min="1" ${maxInventory ? `max="${Math.max(1, maxInventory)}"` : ""} class="qty-input" onclick="event.stopPropagation()">
               <button class="qty-btn qty-plus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, 1)">+</button>
             </div>
           </div>
+          
+          <!-- Line 2: Variant Dropdowns (2 side by side) -->
+          <div class="product-card__variants">
+            ${variantOptions}
+          </div>
+          
+          <!-- Line 3: Add to Cart Button -->
           <button class="product-card__btn" type="button" 
+            data-product-id="${product.id}"
             onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variant_id || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
             Add to cart
           </button>
@@ -246,7 +283,110 @@ class ProductCardManager {
       </div>
     `;
 
+    // Initialize button state and default selections with a small delay
+    setTimeout(() => {
+      this.initializeProductCard(product.id, defaultVariant);
+    }, 100);
+
     return slide;
+  }
+
+  // Initialize product card with default selections and button state
+  initializeProductCard(productId, defaultVariant) {
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+    if (!productCard) {
+      console.log('❌ Product card not found:', productId);
+      return;
+    }
+
+    // Check if already initialized to prevent multiple initializations
+    if (productCard.dataset.initialized === 'true') {
+      console.log('⚠️ Product card already initialized:', productId);
+      return;
+    }
+
+    console.log('🔧 Initializing product card:', productId, defaultVariant);
+
+    // Wait a bit more for DOM to be ready
+    setTimeout(() => {
+      const dropdowns = productCard.querySelectorAll('.variant-select');
+      console.log('🔍 Found dropdowns:', dropdowns.length);
+
+      // Select default variants - use provided default or first available
+      if (defaultVariant && defaultVariant.title) {
+        const variantParts = defaultVariant.title.split(' / ');
+        console.log('🎯 Setting default variants:', variantParts, 'Dropdowns:', dropdowns.length);
+
+        dropdowns.forEach((dropdown, index) => {
+          if (variantParts[index]) {
+            dropdown.value = variantParts[index];
+            dropdown.classList.add('selected');
+            console.log('✅ Set dropdown', index, 'to:', variantParts[index]);
+
+            // Trigger the selection logic to update price
+            const optionName = dropdown.dataset.option;
+            this.selectVariant(productId, optionName, variantParts[index]);
+          }
+        });
+      } else {
+        // Auto-select first available option for each dropdown
+        console.log('🎯 Auto-selecting first available options');
+        this.autoSelectFirstAvailable(productId);
+      }
+
+      // Mark as initialized to prevent multiple initializations
+      productCard.dataset.initialized = 'true';
+
+      // Update button state
+      this.updateAddToCartButton(productId);
+    }, 50);
+  }
+
+  // Auto-select first available option for each dropdown
+  autoSelectFirstAvailable(productId) {
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+    if (!productCard) {
+      console.log('❌ Product card not found for auto-select:', productId);
+      return;
+    }
+
+    const dropdowns = productCard.querySelectorAll('.variant-select');
+    console.log('🎯 Auto-selecting for', dropdowns.length, 'dropdowns');
+
+    dropdowns.forEach((dropdown, index) => {
+      // Select first available option (skip the empty "Select..." option)
+      const firstOption = dropdown.querySelector('option:not([value=""])');
+      if (firstOption) {
+        dropdown.value = firstOption.value;
+        dropdown.classList.add('selected');
+        console.log('✅ Auto-selected dropdown', index, 'to:', firstOption.value);
+
+        // Trigger the selection logic to update price
+        const optionName = dropdown.dataset.option;
+        if (optionName) {
+          this.selectVariant(productId, optionName, firstOption.value);
+        } else {
+          console.log('⚠️ No option name found for dropdown', index);
+        }
+      } else {
+        console.log('❌ No options found for dropdown', index);
+      }
+    });
+  }
+
+  // Update add to cart button state
+  updateAddToCartButton(productId) {
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+    if (!productCard) return;
+
+    const button = productCard.querySelector('.product-card__btn');
+    if (!button) return;
+
+    // Since we auto-select variants, button is always enabled
+    button.disabled = false;
+    button.textContent = 'Add to cart';
+    button.style.opacity = '1';
+    button.style.cursor = 'pointer';
   }
 
   // Update variant price when selection changes
@@ -264,7 +404,8 @@ class ProductCardManager {
         );
         if (priceElement) {
           const priceAmount = selectedVariant.price || selectedVariant.price_amount;
-          const priceCurrency = productData.price?.currency_code || "USD";
+          // Use currency from product data (now includes currency in API response)
+          const priceCurrency = productData.price?.currency_code || "INR";
           priceElement.textContent = formatPrice(priceAmount, priceCurrency);
         }
 
@@ -329,9 +470,17 @@ class ProductCardManager {
     return 'dropdown';
   }
 
-  // Create dynamic variant selectors based on option type
+  // Create simple dropdown selectors with availability filtering
   createDynamicVariantSelectors(product, defaultVariant) {
+    console.log('🔍 Creating variant selectors for product:', {
+      productId: product.id,
+      productTitle: product.title,
+      options: product.options,
+      variants: product.variants?.length
+    });
+
     if (!product.options || product.options.length === 0) {
+      console.log('❌ No options found for product:', product.id);
       return this.createFallbackVariantSelector(product, defaultVariant);
     }
 
@@ -339,33 +488,34 @@ class ProductCardManager {
     const hasMultipleChoices = product.options.some(option => option.values.length > 1);
 
     if (!hasMultipleChoices) {
+      console.log('❌ No multiple choices for product:', product.id);
       // Product has no real variant choices, hide variant selectors
       return '';
     }
 
+    // Create simple dropdown selectors for all options
     const selectors = product.options.map(option => {
-      const variantType = this.detectVariantType(option.name, option.values);
-
-      switch (variantType) {
-        case 'color':
-          return this.createColorSwatches(option, product.id, defaultVariant);
-        case 'size':
-          return this.createSizeButtons(option, product.id, defaultVariant);
-        case 'material':
-          return this.createMaterialSwatches(option, product.id, defaultVariant);
-        default:
-          return this.createDropdownSelector(option, product.id, defaultVariant);
-      }
+      const selector = this.createDropdownSelector(option, product.id, defaultVariant);
+      console.log('📝 Created selector for option:', option.name, 'Result:', selector ? 'SUCCESS' : 'EMPTY');
+      return selector;
     }).join('');
 
-    return `
-      <div class="product-card__variants">
-        ${selectors}
-      </div>
-    `;
+    // Count the number of selectors to determine layout
+    const selectorCount = product.options.length;
+    const layoutClass = selectorCount === 2 ? 'two-dropdowns' : '';
+
+    const result = `
+            <div class="product-card__variants ${layoutClass}">
+              ${selectors}
+            </div>
+          `;
+
+    console.log('✅ Final variant selectors HTML:', result);
+    return result;
   }
 
-  // Create color swatches for color options
+
+  // Create smart color swatches with better design
   createColorSwatches(option, productId, defaultVariant) {
     return `
       <div class="variant-option">
@@ -373,13 +523,14 @@ class ProductCardManager {
         <div class="color-swatches">
           ${option.values.map(value => {
       const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
+      const isAvailable = this.isVariantAvailable(option.name, value, productId);
       return `
-              <button class="color-swatch ${isSelected ? 'selected' : ''}" 
+              <button class="color-swatch ${isSelected ? 'selected' : ''} ${!isAvailable ? 'unavailable' : ''}" 
                       data-option="${option.name}"
                       data-value="${value}"
                       style="background-color: ${this.getColorValue(value)}"
-                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')">
-                <span class="color-name">${value}</span>
+                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')"
+                      title="${value}">
               </button>
             `;
     }).join('')}
@@ -388,7 +539,7 @@ class ProductCardManager {
     `;
   }
 
-  // Create size buttons for size options
+  // Create smart size buttons with better design
   createSizeButtons(option, productId, defaultVariant) {
     return `
       <div class="variant-option">
@@ -411,32 +562,34 @@ class ProductCardManager {
     `;
   }
 
-  // Create material swatches for material options
-  createMaterialSwatches(option, productId, defaultVariant) {
-    return `
-      <div class="variant-option">
-        <label class="variant-label">${option.name}:</label>
-        <div class="material-swatches">
-          ${option.values.map(value => {
-      const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
-      return `
-              <button class="material-swatch ${isSelected ? 'selected' : ''}" 
-                      data-option="${option.name}"
-                      data-value="${value}"
-                      style="background-image: url('${this.getMaterialTexture(value)}')"
-                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')">
-                <span class="material-name">${value}</span>
-              </button>
-            `;
-    }).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  // Create dropdown selector for other options
+  // Create dropdown selector for complex options with availability filtering
   createDropdownSelector(option, productId, defaultVariant) {
-    return `
+    console.log('🔧 Creating dropdown for option:', {
+      optionName: option.name,
+      optionValues: option.values,
+      productId: productId
+    });
+
+    // TEMPORARY: Show all values for debugging
+    const availableValues = option.values;
+    console.log('📊 Using all values (debug mode):', availableValues);
+
+    // Original filtering (commented out for debugging)
+    /*
+    const availableValues = option.values.filter(value => {
+      const isAvailable = this.isVariantAvailable(option.name, value, productId);
+      console.log(`🔍 Checking availability for ${option.name}: ${value} = ${isAvailable}`);
+      return isAvailable;
+    });
+    */
+
+    // If no available variants, don't show the selector
+    if (availableValues.length === 0) {
+      console.log('❌ No available variants for option:', option.name);
+      return '';
+    }
+
+    const result = `
       <div class="variant-option">
         <label class="variant-label">${option.name}:</label>
         <select class="variant-select" 
@@ -444,13 +597,16 @@ class ProductCardManager {
                 onchange="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', this.value)"
                 onclick="event.stopPropagation()">
           <option value="">Select ${option.name}</option>
-          ${option.values.map(value => {
+          ${availableValues.map(value => {
       const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
       return `<option value="${value}" ${isSelected ? 'selected' : ''}>${value}</option>`;
     }).join('')}
         </select>
       </div>
     `;
+
+    console.log('✅ Created dropdown selector:', result);
+    return result;
   }
 
   // Fallback selector for products without options
@@ -471,12 +627,51 @@ class ProductCardManager {
     `;
   }
 
+  // Test variant selectors (simple version for debugging)
+  createTestVariantSelectors(product) {
+    console.log('🧪 Creating test selectors for product:', product.id);
+
+    const selectors = product.options.map(option => {
+      return `
+        <div class="variant-option">
+          <label class="variant-label">${option.name}:</label>
+          <select class="variant-select" 
+                  data-option="${option.name}"
+                  onchange="event.stopPropagation(); productCardManager.selectVariant('${product.id}', '${option.name}', this.value)"
+                  onclick="event.stopPropagation()">
+            <option value="">Select ${option.name}</option>
+            ${option.values.map(value =>
+        `<option value="${value}">${value}</option>`
+      ).join('')}
+          </select>
+        </div>
+      `;
+    }).join('');
+
+    // Count the number of selectors to determine layout
+    const selectorCount = product.options.length;
+    const layoutClass = selectorCount === 2 ? 'two-dropdowns' : '';
+
+    return `
+      <div class="product-card__variants ${layoutClass}">
+        ${selectors}
+      </div>
+    `;
+  }
+
   // Handle variant selection for any option type
   selectVariant(productId, optionName, selectedValue) {
     const productData = this.productDataStore[productId];
     const productCard = document.querySelector(`[data-product-id="${productId}"]`);
 
     if (!productData || !productCard) return;
+
+    // Update visual state of the dropdown
+    const dropdown = productCard.querySelector(`[data-option="${optionName}"]`);
+    if (dropdown) {
+      dropdown.classList.add('selected');
+      console.log('✅ Updated dropdown visual state for:', optionName, selectedValue);
+    }
 
     // Update selection state
     this.updateSelectionState(productCard, optionName, selectedValue);
@@ -579,10 +774,21 @@ class ProductCardManager {
       );
     }
 
+    // For multi-variant products, check if any variant with this option value is available
     return productData.variants.some(variant => {
-      const optionPosition = this.getOptionPosition(optionName, productData.options);
-      return variant[`option${optionPosition}`] === value &&
-        (variant.inventory === undefined || variant.inventory > 0);
+      // Check if this variant has the selected option value
+      const variantTitle = variant.title || '';
+      const optionValues = variantTitle.split(' / ');
+
+      // Find the option position
+      const optionIndex = productData.options.findIndex(opt => opt.name === optionName);
+      if (optionIndex === -1) return false;
+
+      // Check if the variant has this option value
+      const hasOptionValue = optionValues[optionIndex] === value;
+      const isAvailable = variant.inventory === undefined || variant.inventory > 0;
+
+      return hasOptionValue && isAvailable;
     });
   }
 
@@ -594,18 +800,28 @@ class ProductCardManager {
 
   getColorValue(colorName) {
     const colorMap = {
-      'red': '#ff0000',
-      'blue': '#0000ff',
-      'green': '#00ff00',
-      'black': '#000000',
-      'white': '#ffffff',
-      'gray': '#808080',
-      'navy': '#000080',
-      'brown': '#8b4513',
-      'pink': '#ffc0cb',
-      'purple': '#800080',
-      'orange': '#ffa500',
-      'yellow': '#ffff00'
+      'red': '#ef4444',
+      'blue': '#3b82f6',
+      'green': '#10b981',
+      'black': '#1f2937',
+      'white': '#f9fafb',
+      'gray': '#6b7280',
+      'navy': '#1e3a8a',
+      'brown': '#92400e',
+      'pink': '#ec4899',
+      'purple': '#8b5cf6',
+      'orange': '#f59e0b',
+      'yellow': '#eab308',
+      'teal': '#14b8a6',
+      'indigo': '#6366f1',
+      'cyan': '#06b6d4',
+      'lime': '#84cc16',
+      'amber': '#f59e0b',
+      'emerald': '#10b981',
+      'rose': '#f43f5e',
+      'violet': '#8b5cf6',
+      'sky': '#0ea5e9',
+      'slate': '#64748b'
     };
 
     // If it's already a hex code, return as-is
@@ -613,29 +829,17 @@ class ProductCardManager {
       return colorName;
     }
 
-    return colorMap[colorName.toLowerCase()] || '#cccccc';
+    return colorMap[colorName.toLowerCase()] || '#e5e7eb';
   }
 
-  getMaterialTexture(materialName) {
-    const textureMap = {
-      'cotton': '/textures/cotton.jpg',
-      'wool': '/textures/wool.jpg',
-      'leather': '/textures/leather.jpg',
-      'silk': '/textures/silk.jpg',
-      'denim': '/textures/denim.jpg',
-      'polyester': '/textures/polyester.jpg',
-      'linen': '/textures/linen.jpg',
-      'cashmere': '/textures/cashmere.jpg'
-    };
-
-    return textureMap[materialName.toLowerCase()] || '/textures/default.jpg';
-  }
 
   updateVariantPriceFromSelection(variant, productId) {
     const priceElement = document.querySelector(`[data-product-id="${productId}"] .product-card__price`);
     if (priceElement && variant.price) {
       const priceAmount = variant.price || variant.price_amount;
-      const priceCurrency = variant.currency_code || "USD";
+      // Use currency from product data (now includes currency in API response)
+      const productData = this.productDataStore[productId];
+      const priceCurrency = productData?.price?.currency_code || "INR";
       priceElement.textContent = formatPrice(priceAmount, priceCurrency);
     }
   }
@@ -698,52 +902,61 @@ class ProductCardManager {
 
   // Initialize Swiper
   initializeSwiper() {
-    if (typeof Swiper !== "undefined") {
-      // Destroy existing Swiper instance if it exists
-      if (window.swiper) {
-        window.swiper.destroy(true, true);
-        window.swiper = null;
-      }
+    try {
+      if (typeof Swiper !== "undefined") {
+        // Always destroy existing Swiper instance if it exists
+        if (window.swiper && typeof window.swiper.destroy === 'function') {
+          console.log('🔄 Destroying existing Swiper instance');
+          window.swiper.destroy(true, true);
+          window.swiper = null;
+        }
 
-      // Swiper is loaded globally from CDN
-      window.swiper = new window.Swiper(".swiper", {
-        breakpoints: {
-          320: { slidesPerView: 1, spaceBetween: 20 },
-          750: { slidesPerView: 2, spaceBetween: 25 },
-          990: { slidesPerView: 3, spaceBetween: 30 },
-          1200: { slidesPerView: 4, spaceBetween: 30 },
-        },
-        autoplay: window.swiperConfig?.enable_autoplay
-          ? {
-            delay: window.swiperConfig.autoplay_delay || 2500,
-            disableOnInteraction: true,
-            pauseOnMouseEnter: true,
-          }
-          : false,
-        loop: true,
-        spaceBetween: 30,
-        freeMode: false,
-        grabCursor: true,
-        navigation: window.swiperConfig?.show_arrows
-          ? {
-            nextEl: ".swiper-button-next",
-            prevEl: ".swiper-button-prev",
-          }
-          : false,
-        pagination: window.swiperConfig?.show_pagination
-          ? {
-            el: ".swiper-pagination",
-            clickable: true,
-            dynamicBullets: false,
-            dynamicMainBullets: 1,
-          }
-          : false,
-        on: {
-          init: function () {
-            console.log("✅ Swiper initialized with recommendations!");
+        // Simple loop configuration - always enable loop
+        const shouldLoop = true;
+
+        // Swiper is loaded globally from CDN
+        window.swiper = new window.Swiper(".swiper", {
+          breakpoints: {
+            320: { slidesPerView: 1, spaceBetween: 20 },
+            640: { slidesPerView: 2, spaceBetween: 20 },
+            1024: { slidesPerView: 3, spaceBetween: 25 },
+            1280: { slidesPerView: 4, spaceBetween: 30 },
           },
-        },
-      });
+          autoplay: window.swiperConfig?.enable_autoplay
+            ? {
+              delay: window.swiperConfig.autoplay_delay || 2500,
+              disableOnInteraction: true,
+              pauseOnMouseEnter: true,
+            }
+            : false,
+          loop: shouldLoop,
+          spaceBetween: 30,
+          freeMode: false,
+          grabCursor: true,
+          navigation: window.swiperConfig?.show_arrows
+            ? {
+              nextEl: ".swiper-button-next",
+              prevEl: ".swiper-button-prev",
+            }
+            : false,
+          pagination: window.swiperConfig?.show_pagination
+            ? {
+              el: ".swiper-pagination",
+              clickable: true,
+              dynamicBullets: false,
+              dynamicMainBullets: 1,
+            }
+            : false,
+          on: {
+            init: function () {
+              console.log("✅ Swiper initialized with recommendations!");
+            },
+          },
+        });
+      }
+    } catch (error) {
+      console.error('❌ Swiper initialization failed:', error);
+      // Continue without Swiper - variants should still work
     }
   }
 

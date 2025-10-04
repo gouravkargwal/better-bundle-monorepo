@@ -64,44 +64,6 @@
     </div>
   {% endfor %}
 {% else %}
-  <!-- Empty container for live mode - will be populated by JavaScript -->
-  {% if dummy_data %}
-    {% assign dummy_products = dummy_data[0] | split: ',' %}
-    {% assign dummy_prices = dummy_data[1] | split: ',' %}
-    {% assign dummy_colors = dummy_data[2] | split: ',' %}
-    {% assign dummy_variants = dummy_data[3] | split: ',' %}
-    {% assign dummy_quantities = dummy_data[4] | split: ',' %}
-  {% else %}
-    {% assign dummy_products = 'Product 1,Product 2,Product 3,Product 4' | split: ',' %}
-    {% assign dummy_prices = '24.99,29.99,34.99,39.99' | split: ',' %}
-    {% assign dummy_colors = 'cccccc,e0e0e0,d5d5d5,c7c7c7' | split: ',' %}
-    {% assign dummy_variants = 'Size: Small|Size: Medium|Size: Large,Color: Red|Color: Blue|Color: Green|Color: Black,Size: XS|Size: S|Size: M|Size: L|Size: XL,Material: Cotton|Material: Wool|Material: Silk'
-      | split: ','
-    %}
-    {% assign dummy_quantities = '1,2,1,3' | split: ',' %}
-  {% endif %}
-
-  {% for product in dummy_products %}
-    {% assign product_index = forloop.index0 %}
-    <div class="swiper-slide loading-placeholder">
-      <div class="product-card">
-        <div class="product-card__image loading-skeleton"></div>
-        <div class="product-card__body">
-          <h4 class="product-card__title loading-skeleton"></h4>
-          <p class="product-card__price loading-skeleton"></p>
-          <div class="product-card__options">
-            <div class="product-card__variants">
-              <select class="variant-selector loading-skeleton"></select>
-            </div>
-            <div class="product-card__quantity">
-              <button class="qty-btn loading-skeleton"></button>
-              <input type="number" class="qty-input loading-skeleton">
-              <button class="qty-btn loading-skeleton"></button>
-            </div>
-          </div>
-          <button class="product-card__btn loading-skeleton"></button>
-        </div>
-      </div>
-    </div>
-  {% endfor %}
+  <!-- Skeleton loader for live mode -->
+  {% render 'skeleton-loader', type: 'carousel', count: 4 %}
 {% endif %}

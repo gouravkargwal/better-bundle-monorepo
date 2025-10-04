@@ -470,11 +470,19 @@ const activateTrialBillingPlan = async (
 ) => {
   const db = tx || prisma;
 
-  // Pattern 1: Create trial WITHOUT Shopify subscription
-  const TRIAL_THRESHOLD_USD = 200.0;
+  // Get trial config for the shop's currency
+  const { getTrialConfig } = await import("../services/trial-config.service");
+  const trialConfig = await getTrialConfig(
+    shopDomain,
+    shopRecord.currency_code,
+  );
+
+  // Use trial config USD threshold, fallback to 200 if not found
+  const TRIAL_THRESHOLD_USD = trialConfig?.threshold_usd || 200.0;
 
   const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
     shopRecord.currency_code,
+    TRIAL_THRESHOLD_USD,
   );
 
   const billingPlan = await db.billing_plans.upsert({
