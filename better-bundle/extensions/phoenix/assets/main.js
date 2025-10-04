@@ -1,3 +1,12 @@
+// Load required modules first
+// Note: These should be loaded in the correct order in the HTML
+// 1. variant-manager.js
+// 2. dropdown-manager.js  
+// 3. swiper-manager.js
+// 4. product-card-renderer.js
+// 5. product-cards.js
+// 6. main.js
+
 class RecommendationCarousel {
   constructor() {
     this.api = window.RecommendationAPI ? new window.RecommendationAPI() : null;

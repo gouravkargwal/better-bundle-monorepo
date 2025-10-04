@@ -37,9 +37,15 @@
   window.sessionId = {{ session_id | json }};
 </script>
 
-<!-- Load our custom JavaScript files -->
+<!-- Load our custom JavaScript files in correct order -->
 <script src="{{ 'analytics.js' | asset_url }}" defer></script>
 <script src="{{ 'api.js' | asset_url }}" defer></script>
+<!-- Core modules (load in order) -->
+<script src="{{ 'variant-manager.js' | asset_url }}" defer></script>
+<script src="{{ 'dropdown-manager.js' | asset_url }}" defer></script>
+<script src="{{ 'swiper-manager.js' | asset_url }}" defer></script>
+<script src="{{ 'product-card-renderer.js' | asset_url }}" defer></script>
+<!-- Main product cards manager -->
 <script src="{{ 'product-cards.js' | asset_url }}" defer></script>
 <script src="{{ 'main.js' | asset_url }}" defer></script>
 
