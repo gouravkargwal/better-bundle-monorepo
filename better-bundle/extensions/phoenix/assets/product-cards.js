@@ -110,14 +110,14 @@ class ProductCardManager {
     console.log('🔄 ProductCardManager: Updating skeleton loading...');
     this.setSkeletonState('loading');
 
-    // Check if skeleton already exists
-    const existingSkeleton = swiperWrapper.querySelector('.loading-placeholder');
+    // Check if skeleton already exists and is visible
+    const existingSkeleton = swiperWrapper.querySelector('.loading-placeholder:not(.fade-out)');
     if (existingSkeleton) {
-      console.log('✅ ProductCardManager: Skeleton already exists, just updating state');
+      console.log('✅ ProductCardManager: Skeleton already exists and visible, just updating state');
       return;
     }
 
-    // Only create skeleton if none exists
+    // Only create skeleton if none exists or if existing ones are faded out
     console.log('🔄 ProductCardManager: Creating skeleton loading...');
 
     // Clear existing content
@@ -130,34 +130,34 @@ class ProductCardManager {
       slide.className = 'swiper-slide loading-placeholder';
       slide.innerHTML = `
         <div class="product-card">
-          <div class="product-card__image loading-skeleton">&nbsp;</div>
+          <div class="product-card__image loading-skeleton"></div>
           <div class="product-card__body">
-            <h4 class="product-card__title loading-skeleton">&nbsp;</h4>
+            <h4 class="product-card__title loading-skeleton"></h4>
             
             <!-- Line 1: Price and Quantity on same line -->
             <div class="product-card__price-quantity">
-              <p class="product-card__price loading-skeleton">&nbsp;</p>
+              <p class="product-card__price loading-skeleton"></p>
               <div class="product-card__quantity">
-                <button class="qty-btn loading-skeleton">&nbsp;</button>
+                <button class="qty-btn loading-skeleton"></button>
                 <input type="number" class="qty-input loading-skeleton">
-                <button class="qty-btn loading-skeleton">&nbsp;</button>
+                <button class="qty-btn loading-skeleton"></button>
               </div>
             </div>
             
             <!-- Line 2: Variant Dropdowns -->
             <div class="product-card__variants two-dropdowns">
               <div class="variant-option">
-                <label class="variant-label loading-skeleton">&nbsp;</label>
+                <label class="variant-label loading-skeleton"></label>
                 <select class="variant-select loading-skeleton"></select>
               </div>
               <div class="variant-option">
-                <label class="variant-label loading-skeleton">&nbsp;</label>
+                <label class="variant-label loading-skeleton"></label>
                 <select class="variant-select loading-skeleton"></select>
               </div>
             </div>
             
             <!-- Line 3: Add to Cart Button -->
-            <button class="product-card__btn loading-skeleton">&nbsp;</button>
+            <button class="product-card__btn loading-skeleton"></button>
           </div>
         </div>
       `;
@@ -1091,7 +1091,9 @@ class ProductCardManager {
             init: function () {
               console.log("✅ Swiper initialized with recommendations!");
               // Prevent navigation clicks from triggering product card clicks
-              productCardManager.preventNavigationClickPropagation();
+              if (window.productCardManager) {
+                window.productCardManager.preventNavigationClickPropagation();
+              }
             },
             resize: function () {
               // Recalculate loop when viewport changes

@@ -288,17 +288,33 @@
 
   /* Centralized Loading Skeleton Styles */
   .loading-skeleton {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%) !important;
-    background-size: 200% 100% !important;
-    animation: skeleton-loading 1.5s infinite !important;
+    background: #f0f0f0 !important;
     border-radius: 4px;
     border: none !important;
     box-shadow: none !important;
     transition: opacity 0.3s ease, transform 0.3s ease;
     display: block !important;
+    position: relative;
+    overflow: hidden;
+    color: transparent !important;
+    min-height: 20px;
+    width: 100%;
   }
 
-  @keyframes skeleton-loading {
+  .loading-skeleton::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent 25%, rgba(255, 255, 255, 0.5) 50%, transparent 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s linear infinite;
+    border-radius: inherit;
+  }
+
+  @keyframes skeleton-shimmer {
     0% {
       background-position: -200% 0;
     }
@@ -319,6 +335,7 @@
     height: 200px;
     width: 100%;
     display: block !important;
+    min-height: 200px;
   }
 
   .product-card__title.loading-skeleton {
@@ -326,6 +343,7 @@
     width: 85%;
     margin-bottom: 8px;
     display: block !important;
+    min-height: 20px;
   }
 
   /* Price-quantity skeleton matching real layout */
@@ -604,14 +622,6 @@
     }
   }
 
-  @keyframes loading {
-    0% {
-      background-position: 200% 0;
-    }
-    100% {
-      background-position: -200% 0;
-    }
-  }
 
   @keyframes fadeInUp {
     0% {

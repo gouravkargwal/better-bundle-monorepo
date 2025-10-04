@@ -73,14 +73,23 @@ class RecommendationCarousel {
         return;
       }
 
-      // Show skeleton loading before API call (only if not already showing)
+      // Show skeleton loading before API call
       if (window.productCardManager) {
-        const existingSkeleton = document.querySelector('.loading-placeholder');
-        if (!existingSkeleton) {
-          window.productCardManager.showSkeletonLoading();
-        } else {
-          console.log('✅ Phoenix: Skeleton already exists, skipping creation');
-        }
+        console.log('🔄 Phoenix: Showing skeleton loading...');
+        window.productCardManager.showSkeletonLoading();
+
+        // Debug: Check if skeleton elements are created
+        setTimeout(() => {
+          const skeletonElements = document.querySelectorAll('.loading-skeleton');
+          console.log('🔍 Phoenix: Skeleton elements found:', skeletonElements.length);
+          if (skeletonElements.length > 0) {
+            console.log('✅ Phoenix: Skeleton animation should be visible');
+          } else {
+            console.warn('⚠️ Phoenix: No skeleton elements found');
+          }
+        }, 100);
+      } else {
+        console.error('❌ Phoenix: ProductCardManager not available');
       }
 
       // Fetch recommendations with timeout
