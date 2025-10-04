@@ -9,16 +9,23 @@ import {
   ClockIcon,
 } from "@shopify/polaris-icons";
 
-const FeatureCard = () => {
+interface FeatureCardProps {
+  trialConfig?: {
+    symbol: string;
+    trial_threshold_usd: number;
+  } | null;
+  convertedAmount?: number;
+}
+
+const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
   const features = [
     {
       icon: CreditCardIcon,
       title: "Pay-As-Performance",
-      description:
-        "Only pay when you see results! Start with $200 free credits, then pay only for actual revenue generated",
+      description: `Only pay when you see results! Start with ${trialConfig && convertedAmount ? `${trialConfig.symbol}${Math.round(convertedAmount).toLocaleString()}` : "$200"} free credits, then pay only for actual revenue generated`,
       color: "#F59E0B",
       badge: "Risk-free trial",
-      stats: "$200 free credits included",
+      stats: `${trialConfig && convertedAmount ? `${trialConfig.symbol}${Math.round(convertedAmount).toLocaleString()}` : "$200"} free credits included`,
       highlight: "No upfront costs",
       gradient: "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
     },

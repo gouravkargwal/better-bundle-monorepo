@@ -801,27 +801,6 @@ model customer_data {
   @@index([verified_email], map: "ix_customer_data_verified_email")
 }
 
-model feedback {
-  feedback_type String   @db.VarChar(256)
-  user_id       String   @db.VarChar(256)
-  item_id       String   @db.VarChar(256)
-  time_stamp    DateTime @db.Timestamptz(6)
-  comment       String   @default("")
-
-  @@id([feedback_type, user_id, item_id])
-  @@index([item_id], map: "item_id_index")
-  @@index([user_id], map: "user_id_index")
-}
-
-model items {
-  item_id    String   @id @db.VarChar(256)
-  is_hidden  Boolean  @default(false)
-  categories Json     @default("[]") @db.Json
-  time_stamp DateTime @db.Timestamptz(6)
-  labels     Json     @default("[]") @db.Json
-  comment    String   @default("")
-}
-
 model order_data {
   order_id                  String           @db.VarChar
   order_name                String?          @db.VarChar(100)
@@ -920,11 +899,23 @@ model product_data {
   @@index([vendor], map: "ix_product_data_vendor")
 }
 
-model users {
-  user_id   String @id @db.VarChar(256)
-  labels    Json   @default("[]") @db.Json
-  subscribe Json   @default("[]") @db.Json
-  comment   String @default("")
+model trial_configs {
+  currency_code       String    @unique(map: "ix_trial_configs_currency_code") @db.VarChar(3)
+  currency_symbol     String    @db.VarChar(10)
+  trial_threshold_usd Decimal   @db.Decimal(10, 2)
+  market_tier         String    @db.VarChar(20)
+  market_description  String?   @db.VarChar(100)
+  is_active           Boolean
+  effective_from      DateTime? @db.Timestamptz(6)
+  effective_to        DateTime? @db.Timestamptz(6)
+  id                  String    @id @db.VarChar
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "ix_trial_config_active")
+  @@index([currency_code], map: "ix_trial_config_currency")
+  @@index([market_tier], map: "ix_trial_config_tier")
+  @@index([is_active], map: "ix_trial_configs_is_active")
 }
 
 enum AppBlockTarget {

@@ -1,5 +1,11 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { useActionData, Form, json, useNavigation } from "@remix-run/react";
+import {
+  useActionData,
+  Form,
+  json,
+  useNavigation,
+  useLoaderData,
+} from "@remix-run/react";
 import {
   Page,
   Card,
@@ -26,17 +32,46 @@ import {
 import { triggerFullAnalysis } from "app/services/analysis.service";
 import FeatureCard from "app/components/Onboarding/FeatureCard";
 import { Benefits } from "app/components/Onboarding/Benefits";
+import { getTrialConfig } from "app/services/trial-config.service";
+import { getTrialThresholdInShopCurrency } from "app/utils/currency-converter";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, redirect } = await authenticate.admin(request);
+  const { session, redirect, admin } = await authenticate.admin(request);
   const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
 
   if (onboardingCompleted) {
     throw redirect("/app");
   }
-  return null;
+
+  // Get shop info from Shopify to get currency
+  const shopData = await getShopInfoFromShopify(admin);
+
+  // Get trial configuration for the shop's currency
+  const trialConfig = await getTrialConfig(session.shop, shopData.currencyCode);
+
+  // Calculate converted amount for display
+  let convertedAmount = 200; // fallback
+  if (trialConfig) {
+    console.log(
+      "🔄 Converting currency:",
+      trialConfig.currency_code,
+      trialConfig.threshold_usd,
+    );
+    convertedAmount = await getTrialThresholdInShopCurrency(
+      trialConfig.currency_code,
+      trialConfig.threshold_usd,
+    );
+    console.log("💰 Converted amount:", convertedAmount);
+  }
+
+  return {
+    shopDomain: session.shop,
+    shopCurrency: shopData.currencyCode,
+    trialConfig,
+    convertedAmount,
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -89,6 +124,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function OnboardingPage() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
+  const { shopDomain, shopCurrency, trialConfig, convertedAmount } =
+    useLoaderData<typeof loader>();
   const isLoading =
     ["loading", "submitting"].includes(navigation.state) &&
     navigation.formMethod === "POST";
@@ -194,7 +231,9 @@ export default function OnboardingPage() {
                   variant="bodyLg"
                   style={{ color: "rgba(255,255,255,0.9)" }}
                 >
-                  $200 Free Credits
+                  {trialConfig && convertedAmount
+                    ? `${trialConfig.symbol}${Math.round(convertedAmount).toLocaleString()} Free Credits`
+                    : "$200 Free Credits"}
                 </Text>
               </div>
               <div
@@ -393,7 +432,10 @@ export default function OnboardingPage() {
             }}
           />
         </div>
-        <FeatureCard />
+        <FeatureCard
+          trialConfig={trialConfig}
+          convertedAmount={convertedAmount}
+        />
         <Benefits />
 
         {/* Error Display Section */}

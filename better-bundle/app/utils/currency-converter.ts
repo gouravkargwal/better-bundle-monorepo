@@ -212,12 +212,21 @@ export async function convertUsdToCurrency(
   usdAmount: number,
   targetCurrency: string,
 ): Promise<number> {
+  console.log(
+    "🔄 convertUsdToCurrency called with:",
+    usdAmount,
+    targetCurrency,
+  );
+
   if (targetCurrency.toUpperCase() === "USD") {
+    console.log("💰 USD currency, returning original amount:", usdAmount);
     return usdAmount;
   }
 
   const rate = await getExchangeRate(targetCurrency);
-  return usdAmount * rate;
+  const result = usdAmount * rate;
+  console.log("💰 Conversion result:", usdAmount, "*", rate, "=", result);
+  return result;
 }
 
 /**
@@ -241,13 +250,21 @@ export async function convertCurrencyToUsd(
 /**
  * Get the trial threshold in shop currency
  * @param shopCurrency - Shop's currency code
+ * @param usdThreshold - USD threshold amount to convert
  * @returns Trial threshold in shop currency
  */
 export async function getTrialThresholdInShopCurrency(
   shopCurrency: string,
+  usdThreshold: number,
 ): Promise<number> {
-  const USD_TRIAL_THRESHOLD = 200.0;
-  return await convertUsdToCurrency(USD_TRIAL_THRESHOLD, shopCurrency);
+  console.log(
+    "🔄 getTrialThresholdInShopCurrency called with:",
+    shopCurrency,
+    usdThreshold,
+  );
+  const result = await convertUsdToCurrency(usdThreshold, shopCurrency);
+  console.log("💰 getTrialThresholdInShopCurrency result:", result);
+  return result;
 }
 
 /**

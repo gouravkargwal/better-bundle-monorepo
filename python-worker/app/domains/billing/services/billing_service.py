@@ -153,6 +153,8 @@ class BillingService:
             # Read current values
             old_revenue = billing_plan.trial_revenue or Decimal("0")
             new_revenue = old_revenue + attributed_revenue
+
+            # Use default trial threshold (keep existing logic)
             trial_threshold = Decimal(str(TRIAL_THRESHOLD_USD))
 
             # Update counters

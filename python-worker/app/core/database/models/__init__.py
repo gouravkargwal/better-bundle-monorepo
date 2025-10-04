@@ -71,6 +71,9 @@ from .billing import (
     BillingEvent,
 )
 
+# Trial configuration models
+from .trial_config import TrialConfig
+
 # Extension models
 
 # Export all models
@@ -123,5 +126,7 @@ __all__ = [
     "BillingPlan",
     "BillingInvoice",
     "BillingEvent",
+    # Trial configuration models
+    "TrialConfig",
     # Extension models
 ]
