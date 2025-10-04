@@ -1,14 +1,78 @@
 """
-Product data generator for creating realistic Shopify product data.
+Product data generator for creating realistic Shopify product data with variants.
 """
 
 import random
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from .base_generator import BaseGenerator
 
 
 class ProductGenerator(BaseGenerator):
-    """Generates realistic product data with enhanced features."""
+    """Generates realistic product data with enhanced features and variants."""
+
+    def __init__(self, shop_domain: str = "fashion-store.myshopify.com"):
+        super().__init__(shop_domain)
+        # Define variant options for different product types
+        self.clothing_sizes = ["XS", "S", "M", "L", "XL", "XXL"]
+        self.clothing_colors = [
+            "Black",
+            "White",
+            "Navy",
+            "Gray",
+            "Red",
+            "Blue",
+            "Green",
+            "Pink",
+            "Brown",
+            "Beige",
+            "Purple",
+            "Yellow",
+            "Orange",
+            "Maroon",
+            "Teal",
+        ]
+        self.electronics_colors = [
+            "Black",
+            "White",
+            "Silver",
+            "Space Gray",
+            "Rose Gold",
+            "Blue",
+        ]
+        self.electronics_storage = ["32GB", "64GB", "128GB", "256GB", "512GB", "1TB"]
+        self.accessories_colors = [
+            "Black",
+            "Brown",
+            "Tan",
+            "Navy",
+            "Red",
+            "Green",
+            "Blue",
+        ]
+        self.accessories_materials = ["Leather", "Canvas", "Synthetic", "Metal", "Wood"]
+        self.home_colors = [
+            "White",
+            "Black",
+            "Brown",
+            "Gray",
+            "Blue",
+            "Green",
+            "Red",
+            "Yellow",
+        ]
+        self.home_sizes = ["Small", "Medium", "Large", "Extra Large"]
+        self.sports_sizes = ["XS", "S", "M", "L", "XL", "XXL"]
+        self.sports_colors = [
+            "Black",
+            "White",
+            "Red",
+            "Blue",
+            "Green",
+            "Orange",
+            "Purple",
+            "Pink",
+        ]
+        self.sports_resistance = ["Light", "Medium", "Heavy", "Extra Heavy"]
 
     def generate_products(self) -> List[Dict[str, Any]]:
         """Generate 30 diverse products across multiple categories."""
@@ -512,27 +576,346 @@ class ProductGenerator(BaseGenerator):
 
         return self._build_product_payloads(sports_fitness_products, 26)
 
+    def _generate_clothing_variants(self, product_config: Dict) -> List[Dict[str, Any]]:
+        """Generate realistic variants for clothing products with size and color options."""
+        variants = []
+        base_price = random.uniform(*product_config["price_range"])
+
+        # Select 3-5 colors and 4-6 sizes for each clothing item
+        selected_colors = random.sample(self.clothing_colors, random.randint(3, 5))
+        selected_sizes = random.sample(self.clothing_sizes, random.randint(4, 6))
+
+        variant_index = 1
+        for color in selected_colors:
+            for size in selected_sizes:
+                # Price variation based on size (larger sizes cost more)
+                size_multiplier = 1.0
+                if size in ["XL", "XXL"]:
+                    size_multiplier = 1.05
+                elif size in ["XS", "S"]:
+                    size_multiplier = 0.98
+
+                price = round(base_price * size_multiplier, 2)
+                compare_at_price = None
+                if product_config["on_sale"]:
+                    compare_at_price = round(price * random.uniform(1.2, 1.4), 2)
+
+                # Inventory varies by size (medium sizes have more stock)
+                base_inventory = random.randint(*product_config["inventory_range"])
+                if size == "M":
+                    inventory = base_inventory + random.randint(5, 10)
+                elif size in ["XS", "XXL"]:
+                    inventory = max(1, base_inventory - random.randint(3, 8))
+                else:
+                    inventory = base_inventory
+
+                variants.append(
+                    {
+                        "title": f"{size} / {color}",
+                        "price": str(price),
+                        "compareAtPrice": (
+                            str(compare_at_price) if compare_at_price else None
+                        ),
+                        "sku": f"{product_config['handle'].upper().replace('-', '')}-{size}-{color[:3].upper()}-{variant_index:03d}",
+                        "inventoryQuantity": inventory,
+                        "taxable": True,
+                        "inventoryPolicy": "DENY",
+                        "option1": size,
+                        "option2": color,
+                        "position": variant_index,
+                    }
+                )
+                variant_index += 1
+
+        return variants
+
+    def _generate_electronics_variants(
+        self, product_config: Dict
+    ) -> List[Dict[str, Any]]:
+        """Generate realistic variants for electronics products with color and storage options."""
+        variants = []
+        base_price = random.uniform(*product_config["price_range"])
+
+        # Select 2-4 colors and 2-3 storage options
+        selected_colors = random.sample(self.electronics_colors, random.randint(2, 4))
+        selected_storage = random.sample(self.electronics_storage, random.randint(2, 3))
+
+        variant_index = 1
+        for color in selected_colors:
+            for storage in selected_storage:
+                # Price variation based on storage capacity
+                storage_multiplier = 1.0
+                if storage in ["512GB", "1TB"]:
+                    storage_multiplier = 1.3 + (0.1 if storage == "1TB" else 0)
+                elif storage in ["32GB", "64GB"]:
+                    storage_multiplier = 0.8 + (0.1 if storage == "64GB" else 0)
+
+                price = round(base_price * storage_multiplier, 2)
+                compare_at_price = None
+                if product_config["on_sale"]:
+                    compare_at_price = round(price * random.uniform(1.15, 1.3), 2)
+
+                # Inventory varies by storage (higher capacity = lower stock)
+                base_inventory = random.randint(*product_config["inventory_range"])
+                if storage in ["1TB", "512GB"]:
+                    inventory = max(1, base_inventory - random.randint(3, 6))
+                else:
+                    inventory = base_inventory
+
+                variants.append(
+                    {
+                        "title": f"{color} / {storage}",
+                        "price": str(price),
+                        "compareAtPrice": (
+                            str(compare_at_price) if compare_at_price else None
+                        ),
+                        "sku": f"{product_config['handle'].upper().replace('-', '')}-{color[:3].upper()}-{storage}-{variant_index:03d}",
+                        "inventoryQuantity": inventory,
+                        "taxable": True,
+                        "inventoryPolicy": "DENY",
+                        "option1": color,
+                        "option2": storage,
+                        "position": variant_index,
+                    }
+                )
+                variant_index += 1
+
+        return variants
+
+    def _generate_accessories_variants(
+        self, product_config: Dict
+    ) -> List[Dict[str, Any]]:
+        """Generate realistic variants for accessories with color and material options."""
+        variants = []
+        base_price = random.uniform(*product_config["price_range"])
+
+        # Select 2-4 colors and 2-3 materials
+        selected_colors = random.sample(self.accessories_colors, random.randint(2, 4))
+        selected_materials = random.sample(
+            self.accessories_materials, random.randint(2, 3)
+        )
+
+        variant_index = 1
+        for color in selected_colors:
+            for material in selected_materials:
+                # Price variation based on material (leather costs more)
+                material_multiplier = 1.0
+                if material == "Leather":
+                    material_multiplier = 1.2
+                elif material == "Metal":
+                    material_multiplier = 1.1
+                elif material == "Synthetic":
+                    material_multiplier = 0.9
+
+                price = round(base_price * material_multiplier, 2)
+                compare_at_price = None
+                if product_config["on_sale"]:
+                    compare_at_price = round(price * random.uniform(1.1, 1.3), 2)
+
+                # Inventory varies by material
+                base_inventory = random.randint(*product_config["inventory_range"])
+                if material == "Leather":
+                    inventory = max(1, base_inventory - random.randint(2, 5))
+                else:
+                    inventory = base_inventory
+
+                variants.append(
+                    {
+                        "title": f"{color} / {material}",
+                        "price": str(price),
+                        "compareAtPrice": (
+                            str(compare_at_price) if compare_at_price else None
+                        ),
+                        "sku": f"{product_config['handle'].upper().replace('-', '')}-{color[:3].upper()}-{material[:3].upper()}-{variant_index:03d}",
+                        "inventoryQuantity": inventory,
+                        "taxable": True,
+                        "inventoryPolicy": "DENY",
+                        "option1": color,
+                        "option2": material,
+                        "position": variant_index,
+                    }
+                )
+                variant_index += 1
+
+        return variants
+
+    def _generate_home_garden_variants(
+        self, product_config: Dict
+    ) -> List[Dict[str, Any]]:
+        """Generate realistic variants for home & garden products with size and color options."""
+        variants = []
+        base_price = random.uniform(*product_config["price_range"])
+
+        # Select 2-4 colors and 2-3 sizes
+        selected_colors = random.sample(self.home_colors, random.randint(2, 4))
+        selected_sizes = random.sample(self.home_sizes, random.randint(2, 3))
+
+        variant_index = 1
+        for color in selected_colors:
+            for size in selected_sizes:
+                # Price variation based on size
+                size_multiplier = 1.0
+                if size == "Extra Large":
+                    size_multiplier = 1.3
+                elif size == "Large":
+                    size_multiplier = 1.1
+                elif size == "Small":
+                    size_multiplier = 0.8
+
+                price = round(base_price * size_multiplier, 2)
+                compare_at_price = None
+                if product_config["on_sale"]:
+                    compare_at_price = round(price * random.uniform(1.1, 1.25), 2)
+
+                # Inventory varies by size
+                base_inventory = random.randint(*product_config["inventory_range"])
+                if size == "Extra Large":
+                    inventory = max(1, base_inventory - random.randint(2, 4))
+                else:
+                    inventory = base_inventory
+
+                variants.append(
+                    {
+                        "title": f"{size} / {color}",
+                        "price": str(price),
+                        "compareAtPrice": (
+                            str(compare_at_price) if compare_at_price else None
+                        ),
+                        "sku": f"{product_config['handle'].upper().replace('-', '')}-{size[:1]}-{color[:3].upper()}-{variant_index:03d}",
+                        "inventoryQuantity": inventory,
+                        "taxable": True,
+                        "inventoryPolicy": "DENY",
+                        "option1": size,
+                        "option2": color,
+                        "position": variant_index,
+                    }
+                )
+                variant_index += 1
+
+        return variants
+
+    def _generate_sports_fitness_variants(
+        self, product_config: Dict
+    ) -> List[Dict[str, Any]]:
+        """Generate realistic variants for sports & fitness products with size, color, and resistance options."""
+        variants = []
+        base_price = random.uniform(*product_config["price_range"])
+
+        # For different product types, use different variant combinations
+        if "band" in product_config["handle"].lower():
+            # Resistance bands - use resistance level and color
+            selected_colors = random.sample(self.sports_colors, random.randint(2, 4))
+            selected_resistance = random.sample(
+                self.sports_resistance, random.randint(2, 3)
+            )
+
+            variant_index = 1
+            for color in selected_colors:
+                for resistance in selected_resistance:
+                    # Price variation based on resistance level
+                    resistance_multiplier = 1.0
+                    if resistance == "Extra Heavy":
+                        resistance_multiplier = 1.2
+                    elif resistance == "Heavy":
+                        resistance_multiplier = 1.1
+                    elif resistance == "Light":
+                        resistance_multiplier = 0.9
+
+                    price = round(base_price * resistance_multiplier, 2)
+                    compare_at_price = None
+                    if product_config["on_sale"]:
+                        compare_at_price = round(price * random.uniform(1.1, 1.25), 2)
+
+                    # Inventory varies by resistance level
+                    base_inventory = random.randint(*product_config["inventory_range"])
+                    if resistance in ["Extra Heavy", "Light"]:
+                        inventory = max(1, base_inventory - random.randint(2, 4))
+                    else:
+                        inventory = base_inventory
+
+                    variants.append(
+                        {
+                            "title": f"{color} / {resistance}",
+                            "price": str(price),
+                            "compareAtPrice": (
+                                str(compare_at_price) if compare_at_price else None
+                            ),
+                            "sku": f"{product_config['handle'].upper().replace('-', '')}-{color[:3].upper()}-{resistance[:1]}-{variant_index:03d}",
+                            "inventoryQuantity": inventory,
+                            "taxable": True,
+                            "inventoryPolicy": "DENY",
+                            "option1": color,
+                            "option2": resistance,
+                            "position": variant_index,
+                        }
+                    )
+                    variant_index += 1
+        else:
+            # Other sports products - use size and color
+            selected_colors = random.sample(self.sports_colors, random.randint(2, 4))
+            selected_sizes = random.sample(self.sports_sizes, random.randint(3, 5))
+
+            variant_index = 1
+            for color in selected_colors:
+                for size in selected_sizes:
+                    # Price variation based on size
+                    size_multiplier = 1.0
+                    if size in ["XL", "XXL"]:
+                        size_multiplier = 1.05
+                    elif size in ["XS", "S"]:
+                        size_multiplier = 0.95
+
+                    price = round(base_price * size_multiplier, 2)
+                    compare_at_price = None
+                    if product_config["on_sale"]:
+                        compare_at_price = round(price * random.uniform(1.1, 1.25), 2)
+
+                    # Inventory varies by size
+                    base_inventory = random.randint(*product_config["inventory_range"])
+                    if size == "M":
+                        inventory = base_inventory + random.randint(3, 8)
+                    elif size in ["XS", "XXL"]:
+                        inventory = max(1, base_inventory - random.randint(2, 5))
+                    else:
+                        inventory = base_inventory
+
+                    variants.append(
+                        {
+                            "title": f"{size} / {color}",
+                            "price": str(price),
+                            "compareAtPrice": (
+                                str(compare_at_price) if compare_at_price else None
+                            ),
+                            "sku": f"{product_config['handle'].upper().replace('-', '')}-{size}-{color[:3].upper()}-{variant_index:03d}",
+                            "inventoryQuantity": inventory,
+                            "taxable": True,
+                            "inventoryPolicy": "DENY",
+                            "option1": size,
+                            "option2": color,
+                            "position": variant_index,
+                        }
+                    )
+                    variant_index += 1
+
+        return variants
+
     def _build_product_payloads(
         self, product_configs: List[Dict], start_index: int
     ) -> List[Dict[str, Any]]:
-        """Build complete product payloads from configurations."""
+        """Build complete product payloads from configurations with realistic variants."""
         products = []
 
         for i, config in enumerate(product_configs):
             product_index = start_index + i
             product_id = self.dynamic_ids[f"product_{product_index}_id"]
-            variant_id = self.dynamic_ids[f"variant_{product_index}_id"]
 
-            # Generate realistic pricing
-            min_price, max_price = config["price_range"]
-            price = round(random.uniform(min_price, max_price), 2)
-            compare_at_price = None
-            if config["on_sale"]:
-                compare_at_price = round(price * random.uniform(1.2, 1.5), 2)
+            # Generate variants based on product type
+            variants = self._generate_variants_for_product(config, product_index)
 
-            # Generate inventory
-            min_inv, max_inv = config["inventory_range"]
-            inventory = random.randint(min_inv, max_inv)
+            # Calculate total inventory from all variants
+            total_inventory = sum(
+                variant["node"]["inventoryQuantity"] for variant in variants
+            )
 
             # Build media array
             media_edges = self._build_media_edges(product_index, config)
@@ -544,6 +927,9 @@ class ProductGenerator(BaseGenerator):
                 else {"title": None, "description": None}
             )
 
+            # Build product options based on variant structure
+            product_options = self._build_product_options(variants)
+
             product_payload = {
                 "id": product_id,
                 "title": config["title"],
@@ -551,7 +937,7 @@ class ProductGenerator(BaseGenerator):
                 "description": config["description"],
                 "productType": config["productType"],
                 "vendor": self.get_vendor(config["productType"]),
-                "totalInventory": inventory,
+                "totalInventory": total_inventory,
                 "onlineStoreUrl": f"https://{self.shop_domain}/products/{config['handle']}",
                 "onlineStorePreviewUrl": f"https://{self.shop_domain}/products/{config['handle']}",
                 "seo": seo_data,
@@ -559,31 +945,8 @@ class ProductGenerator(BaseGenerator):
                     "custom-template" if config["seo_optimized"] else None
                 ),
                 "media": {"edges": media_edges},
-                "variants": {
-                    "edges": [
-                        {
-                            "node": {
-                                "id": variant_id,
-                                "title": "Default Title",
-                                "sku": f"{config['handle'].upper().replace('-', '')}-001",
-                                "price": str(price),
-                                "inventoryQuantity": inventory,
-                                "compareAtPrice": (
-                                    str(compare_at_price) if compare_at_price else None
-                                ),
-                                "taxable": True,
-                                "inventoryPolicy": "DENY",
-                                "position": 1,
-                                "createdAt": self.past_date(
-                                    config["created_days_ago"]
-                                ).isoformat(),
-                                "updatedAt": self.past_date(
-                                    config["created_days_ago"]
-                                ).isoformat(),
-                            }
-                        }
-                    ]
-                },
+                "variants": {"edges": variants},
+                "options": product_options,
                 "tags": config["tags"],
                 "createdAt": self.past_date(config["created_days_ago"]).isoformat(),
             }
@@ -591,6 +954,176 @@ class ProductGenerator(BaseGenerator):
             products.append(product_payload)
 
         return products
+
+    def _generate_variants_for_product(
+        self, config: Dict, product_index: int
+    ) -> List[Dict[str, Any]]:
+        """Generate variants for a specific product based on its type."""
+        product_type = config["productType"]
+
+        if product_type == "Clothing":
+            variants = self._generate_clothing_variants(config)
+        elif product_type == "Electronics":
+            variants = self._generate_electronics_variants(config)
+        elif product_type == "Accessories":
+            variants = self._generate_accessories_variants(config)
+        elif product_type == "Home & Garden":
+            variants = self._generate_home_garden_variants(config)
+        elif product_type == "Sports & Fitness":
+            variants = self._generate_sports_fitness_variants(config)
+        else:
+            # Fallback to simple variant
+            variants = self._generate_simple_variant(config, product_index)
+
+        # Convert to GraphQL format with proper IDs
+        variant_edges = []
+        for i, variant in enumerate(variants):
+            variant_id = f"gid://shopify/ProductVariant/{self.base_id + 1000 + product_index + i}"
+            variant_edges.append(
+                {
+                    "node": {
+                        "id": variant_id,
+                        "title": variant["title"],
+                        "sku": variant["sku"],
+                        "price": variant["price"],
+                        "inventoryQuantity": variant["inventoryQuantity"],
+                        "compareAtPrice": variant.get("compareAtPrice"),
+                        "taxable": variant["taxable"],
+                        "inventoryPolicy": variant["inventoryPolicy"],
+                        "position": variant["position"],
+                        "option1": variant.get("option1"),
+                        "option2": variant.get("option2"),
+                        "option3": variant.get("option3"),
+                        "createdAt": self.past_date(
+                            config["created_days_ago"]
+                        ).isoformat(),
+                        "updatedAt": self.past_date(
+                            config["created_days_ago"]
+                        ).isoformat(),
+                    }
+                }
+            )
+
+        return variant_edges
+
+    def _generate_simple_variant(
+        self, config: Dict, product_index: int
+    ) -> List[Dict[str, Any]]:
+        """Generate a simple single variant for products that don't need complex variants."""
+        min_price, max_price = config["price_range"]
+        price = round(random.uniform(min_price, max_price), 2)
+        compare_at_price = None
+        if config["on_sale"]:
+            compare_at_price = round(price * random.uniform(1.2, 1.5), 2)
+
+        min_inv, max_inv = config["inventory_range"]
+        inventory = random.randint(min_inv, max_inv)
+
+        return [
+            {
+                "title": "Default Title",
+                "price": str(price),
+                "compareAtPrice": str(compare_at_price) if compare_at_price else None,
+                "sku": f"{config['handle'].upper().replace('-', '')}-001",
+                "inventoryQuantity": inventory,
+                "taxable": True,
+                "inventoryPolicy": "DENY",
+                "position": 1,
+            }
+        ]
+
+    def _build_product_options(
+        self, variants: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Build product options based on variant structure."""
+        if not variants:
+            return []
+
+        # Determine option names based on the first variant
+        first_variant = variants[0]["node"]
+        options = []
+
+        if first_variant.get("option1"):
+            # Determine option name based on the values
+            option1_values = [
+                v["node"]["option1"] for v in variants if v["node"].get("option1")
+            ]
+            if option1_values and option1_values[0] in [
+                "XS",
+                "S",
+                "M",
+                "L",
+                "XL",
+                "XXL",
+            ]:
+                option_name = "Size"
+            elif option1_values and option1_values[0] in self.clothing_colors:
+                option_name = "Color"
+            elif option1_values and option1_values[0] in self.home_sizes:
+                option_name = "Size"
+            else:
+                option_name = "Option 1"
+
+            options.append(
+                {
+                    "name": option_name,
+                    "position": 1,
+                    "values": list(
+                        set(
+                            v["node"]["option1"]
+                            for v in variants
+                            if v["node"].get("option1")
+                        )
+                    ),
+                }
+            )
+
+        if first_variant.get("option2"):
+            # Determine option name based on the values
+            option2_values = [
+                v["node"]["option2"] for v in variants if v["node"].get("option2")
+            ]
+            if option2_values and option2_values[0] in self.clothing_colors:
+                option_name = "Color"
+            elif option2_values and option2_values[0] in self.accessories_materials:
+                option_name = "Material"
+            elif option2_values and option2_values[0] in self.electronics_storage:
+                option_name = "Storage"
+            elif option2_values and option2_values[0] in self.sports_resistance:
+                option_name = "Resistance"
+            else:
+                option_name = "Style"
+
+            options.append(
+                {
+                    "name": option_name,
+                    "position": 2,
+                    "values": list(
+                        set(
+                            v["node"]["option2"]
+                            for v in variants
+                            if v["node"].get("option2")
+                        )
+                    ),
+                }
+            )
+
+        if first_variant.get("option3"):
+            options.append(
+                {
+                    "name": "Storage",
+                    "position": 3,
+                    "values": list(
+                        set(
+                            v["node"]["option3"]
+                            for v in variants
+                            if v["node"].get("option3")
+                        )
+                    ),
+                }
+            )
+
+        return options
 
     def _build_media_edges(self, product_index: int, config: Dict) -> List[Dict]:
         """Build media edges for product."""

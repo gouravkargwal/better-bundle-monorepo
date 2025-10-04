@@ -207,50 +207,20 @@ class ProductCardManager {
       defaultVariantPrice: defaultVariant?.price,
     });
 
-    // Create variants options using options data or variants data
+    // Create variants options using dynamic variant detection
     let variantOptions = "";
     const maxInventory = product.inventory || (defaultVariant?.inventory || 0);
 
     if (product.options && product.options.length > 0) {
-      // Use options data to create proper variant selector
-      variantOptions = `
-        <div class="product-card__variants">
-          <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
-            ${product.variants
-          .map((variant, i) => {
-            const isSelected = variant.variant_id === defaultVariant?.variant_id;
-            const variantTitle = variant.title || `Option ${i + 1}`;
-            const isAvailable = variant.inventory === undefined || variant.inventory > 0;
-            return `<option value="${variant.variant_id}" ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}>
-                ${variantTitle}
-              </option>`;
-          })
-          .join("")}
-          </select>
-        </div>
-      `;
+      // Use dynamic variant detection for better UX
+      variantOptions = this.createDynamicVariantSelectors(product, defaultVariant);
     } else if (product.variants && product.variants.length > 1) {
-      // Fallback to variants data
-      variantOptions = `
-        <div class="product-card__variants">
-          <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
-            ${product.variants
-          .map((variant, i) => {
-            const isSelected = variant.variant_id === defaultVariant?.variant_id;
-            const variantTitle = variant.title || `Option ${i + 1}`;
-            const isAvailable = variant.inventory === undefined || variant.inventory > 0;
-            return `<option value="${variant.variant_id}" ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}>
-                ${variantTitle}
-              </option>`;
-          })
-          .join("")}
-          </select>
-        </div>
-      `;
+      // Fallback to variants data with dynamic detection
+      variantOptions = this.createDynamicVariantSelectors(product, defaultVariant);
     }
 
     slide.innerHTML = `
-      <div class="product-card" data-product-id="${product.id}" onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ""}', '${sessionId || ""}')">
+      <div class="product-card" data-product-id="${product.id}" onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ''}', '${sessionId || ''}')">
         <img
           class="product-card__image"
           src="${product.image?.url || "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=="}"
@@ -264,7 +234,7 @@ class ProductCardManager {
             ${variantOptions}
             <div class="product-card__quantity">
               <button class="qty-btn qty-minus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, -1)">-</button>
-              <input type="number" value="1" min="1" ${maxInventory ? `max=\"${Math.max(1, maxInventory)}\"` : ""} class="qty-input" onclick="event.stopPropagation()">
+              <input type="number" value="1" min="1" ${maxInventory ? `max="${Math.max(1, maxInventory)}"` : ""} class="qty-input" onclick="event.stopPropagation()">
               <button class="qty-btn qty-plus" type="button" onclick="event.stopPropagation(); productCardManager.updateQuantity(this, 1)">+</button>
             </div>
           </div>
@@ -310,6 +280,404 @@ class ProductCardManager {
             qtyInput.removeAttribute('max');
           }
         }
+      }
+    }
+  }
+
+  // Dynamic variant type detection
+  detectVariantType(optionName, optionValues) {
+    const name = optionName.toLowerCase();
+    const values = optionValues.map(v => v.toLowerCase());
+
+    // Color detection patterns
+    const colorPatterns = [
+      /color|colour|shade|hue/i,
+      /^#[0-9a-f]{6}$/i, // Hex codes
+      /^(red|blue|green|black|white|gray|navy|brown|pink|purple|orange|yellow)$/i
+    ];
+
+    // Size detection patterns
+    const sizePatterns = [
+      /size|fit|dimension/i,
+      /^[SMLX]+$/i, // S, M, L, XL
+      /^\d+$/i, // Numbers
+      /^(small|medium|large|extra large)$/i
+    ];
+
+    // Material detection patterns
+    const materialPatterns = [
+      /material|fabric|finish|texture/i,
+      /^(cotton|wool|leather|silk|denim|polyester|linen|cashmere)$/i
+    ];
+
+    // Check name patterns first
+    if (colorPatterns.some(pattern => pattern.test(name))) return 'color';
+    if (sizePatterns.some(pattern => pattern.test(name))) return 'size';
+    if (materialPatterns.some(pattern => pattern.test(name))) return 'material';
+
+    // Check value patterns
+    if (values.some(value => colorPatterns.some(pattern => pattern.test(value)))) return 'color';
+    if (values.some(value => sizePatterns.some(pattern => pattern.test(value)))) return 'size';
+    if (values.some(value => materialPatterns.some(pattern => pattern.test(value)))) return 'material';
+
+    // Check if values are mostly short (likely size/color)
+    if (values.every(v => v.length <= 3)) return 'size';
+
+    // Check if values are mostly long (likely material/style)
+    if (values.every(v => v.length > 5)) return 'material';
+
+    return 'dropdown';
+  }
+
+  // Create dynamic variant selectors based on option type
+  createDynamicVariantSelectors(product, defaultVariant) {
+    if (!product.options || product.options.length === 0) {
+      return this.createFallbackVariantSelector(product, defaultVariant);
+    }
+
+    // Check if product has only one option with one value (no real choice)
+    const hasMultipleChoices = product.options.some(option => option.values.length > 1);
+
+    if (!hasMultipleChoices) {
+      // Product has no real variant choices, hide variant selectors
+      return '';
+    }
+
+    const selectors = product.options.map(option => {
+      const variantType = this.detectVariantType(option.name, option.values);
+
+      switch (variantType) {
+        case 'color':
+          return this.createColorSwatches(option, product.id, defaultVariant);
+        case 'size':
+          return this.createSizeButtons(option, product.id, defaultVariant);
+        case 'material':
+          return this.createMaterialSwatches(option, product.id, defaultVariant);
+        default:
+          return this.createDropdownSelector(option, product.id, defaultVariant);
+      }
+    }).join('');
+
+    return `
+      <div class="product-card__variants">
+        ${selectors}
+      </div>
+    `;
+  }
+
+  // Create color swatches for color options
+  createColorSwatches(option, productId, defaultVariant) {
+    return `
+      <div class="variant-option">
+        <label class="variant-label">${option.name}:</label>
+        <div class="color-swatches">
+          ${option.values.map(value => {
+      const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
+      return `
+              <button class="color-swatch ${isSelected ? 'selected' : ''}" 
+                      data-option="${option.name}"
+                      data-value="${value}"
+                      style="background-color: ${this.getColorValue(value)}"
+                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')">
+                <span class="color-name">${value}</span>
+              </button>
+            `;
+    }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Create size buttons for size options
+  createSizeButtons(option, productId, defaultVariant) {
+    return `
+      <div class="variant-option">
+        <label class="variant-label">${option.name}:</label>
+        <div class="size-buttons">
+          ${option.values.map(value => {
+      const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
+      const isAvailable = this.isVariantAvailable(option.name, value, productId);
+      return `
+              <button class="size-button ${isSelected ? 'selected' : ''} ${!isAvailable ? 'unavailable' : ''}" 
+                      data-option="${option.name}"
+                      data-value="${value}"
+                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')">
+                ${value}
+              </button>
+            `;
+    }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Create material swatches for material options
+  createMaterialSwatches(option, productId, defaultVariant) {
+    return `
+      <div class="variant-option">
+        <label class="variant-label">${option.name}:</label>
+        <div class="material-swatches">
+          ${option.values.map(value => {
+      const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
+      return `
+              <button class="material-swatch ${isSelected ? 'selected' : ''}" 
+                      data-option="${option.name}"
+                      data-value="${value}"
+                      style="background-image: url('${this.getMaterialTexture(value)}')"
+                      onclick="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', '${value}')">
+                <span class="material-name">${value}</span>
+              </button>
+            `;
+    }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Create dropdown selector for other options
+  createDropdownSelector(option, productId, defaultVariant) {
+    return `
+      <div class="variant-option">
+        <label class="variant-label">${option.name}:</label>
+        <select class="variant-select" 
+                data-option="${option.name}"
+                onchange="event.stopPropagation(); productCardManager.selectVariant('${productId}', '${option.name}', this.value)"
+                onclick="event.stopPropagation()">
+          <option value="">Select ${option.name}</option>
+          ${option.values.map(value => {
+      const isSelected = this.isVariantSelected(option.name, value, defaultVariant);
+      return `<option value="${value}" ${isSelected ? 'selected' : ''}>${value}</option>`;
+    }).join('')}
+        </select>
+      </div>
+    `;
+  }
+
+  // Fallback selector for products without options
+  createFallbackVariantSelector(product, defaultVariant) {
+    return `
+      <div class="product-card__variants">
+        <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
+          ${product.variants.map((variant, i) => {
+      const isSelected = variant.variant_id === defaultVariant?.variant_id;
+      const variantTitle = variant.title || `Option ${i + 1}`;
+      const isAvailable = variant.inventory === undefined || variant.inventory > 0;
+      return `<option value="${variant.variant_id}" ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}>
+                ${variantTitle}
+              </option>`;
+    }).join("")}
+        </select>
+      </div>
+    `;
+  }
+
+  // Handle variant selection for any option type
+  selectVariant(productId, optionName, selectedValue) {
+    const productData = this.productDataStore[productId];
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+
+    if (!productData || !productCard) return;
+
+    // Update selection state
+    this.updateSelectionState(productCard, optionName, selectedValue);
+
+    // Get all selected options
+    const selectedOptions = this.getSelectedOptions(productCard);
+
+    // Find matching variant
+    const matchingVariant = this.findMatchingVariant(productData, selectedOptions);
+
+    if (matchingVariant) {
+      this.updateVariantPriceFromSelection(matchingVariant, productId);
+      this.updateAvailability(matchingVariant, productCard);
+    } else {
+      this.showVariantUnavailable(productId);
+    }
+  }
+
+  // Update selection state for any option type
+  updateSelectionState(productCard, optionName, selectedValue) {
+    // Update color swatches
+    const colorSwatches = productCard.querySelectorAll(`[data-option="${optionName}"].color-swatch`);
+    colorSwatches.forEach(swatch => {
+      swatch.classList.toggle('selected', swatch.dataset.value === selectedValue);
+    });
+
+    // Update size buttons
+    const sizeButtons = productCard.querySelectorAll(`[data-option="${optionName}"].size-button`);
+    sizeButtons.forEach(button => {
+      button.classList.toggle('selected', button.dataset.value === selectedValue);
+    });
+
+    // Update material swatches
+    const materialSwatches = productCard.querySelectorAll(`[data-option="${optionName}"].material-swatch`);
+    materialSwatches.forEach(swatch => {
+      swatch.classList.toggle('selected', swatch.dataset.value === selectedValue);
+    });
+
+    // Update dropdowns
+    const selects = productCard.querySelectorAll(`[data-option="${optionName}"].variant-select`);
+    selects.forEach(select => {
+      select.value = selectedValue;
+    });
+  }
+
+  // Get all selected options from the card
+  getSelectedOptions(productCard) {
+    const selectedOptions = {};
+
+    // Check all option types
+    const optionElements = productCard.querySelectorAll('[data-option][data-value]');
+    optionElements.forEach(element => {
+      if (element.classList.contains('selected') || element.value) {
+        selectedOptions[element.dataset.option] = element.dataset.value || element.value;
+      }
+    });
+
+    return selectedOptions;
+  }
+
+  // Find variant that matches all selected options
+  findMatchingVariant(productData, selectedOptions) {
+    if (!productData.variants) return null;
+
+    // If no options are selected, return the first available variant
+    if (Object.keys(selectedOptions).length === 0) {
+      return productData.variants.find(variant =>
+        variant.inventory === undefined || variant.inventory > 0
+      ) || productData.variants[0];
+    }
+
+    return productData.variants.find(variant => {
+      return Object.keys(selectedOptions).every(optionName => {
+        const optionPosition = this.getOptionPosition(optionName, productData.options);
+        const variantValue = variant[`option${optionPosition}`];
+        return variantValue === selectedOptions[optionName];
+      });
+    });
+  }
+
+  // Helper methods
+  isVariantSelected(optionName, value, defaultVariant) {
+    if (!defaultVariant) return false;
+    const optionPosition = this.getOptionPosition(optionName, [{ name: optionName }]);
+    return defaultVariant[`option${optionPosition}`] === value;
+  }
+
+  isVariantAvailable(optionName, value, productId) {
+    const productData = this.productDataStore[productId];
+    if (!productData || !productData.variants) return true;
+
+    // Check if this is a single-variant product (no real choice)
+    const hasMultipleChoices = productData.options &&
+      productData.options.some(option => option.values.length > 1);
+
+    if (!hasMultipleChoices) {
+      // For single-variant products, check if any variant is available
+      return productData.variants.some(variant =>
+        variant.inventory === undefined || variant.inventory > 0
+      );
+    }
+
+    return productData.variants.some(variant => {
+      const optionPosition = this.getOptionPosition(optionName, productData.options);
+      return variant[`option${optionPosition}`] === value &&
+        (variant.inventory === undefined || variant.inventory > 0);
+    });
+  }
+
+  getOptionPosition(optionName, options) {
+    if (!options) return 1;
+    const option = options.find(opt => opt.name === optionName);
+    return option ? option.position : 1;
+  }
+
+  getColorValue(colorName) {
+    const colorMap = {
+      'red': '#ff0000',
+      'blue': '#0000ff',
+      'green': '#00ff00',
+      'black': '#000000',
+      'white': '#ffffff',
+      'gray': '#808080',
+      'navy': '#000080',
+      'brown': '#8b4513',
+      'pink': '#ffc0cb',
+      'purple': '#800080',
+      'orange': '#ffa500',
+      'yellow': '#ffff00'
+    };
+
+    // If it's already a hex code, return as-is
+    if (/^#[0-9a-f]{6}$/i.test(colorName)) {
+      return colorName;
+    }
+
+    return colorMap[colorName.toLowerCase()] || '#cccccc';
+  }
+
+  getMaterialTexture(materialName) {
+    const textureMap = {
+      'cotton': '/textures/cotton.jpg',
+      'wool': '/textures/wool.jpg',
+      'leather': '/textures/leather.jpg',
+      'silk': '/textures/silk.jpg',
+      'denim': '/textures/denim.jpg',
+      'polyester': '/textures/polyester.jpg',
+      'linen': '/textures/linen.jpg',
+      'cashmere': '/textures/cashmere.jpg'
+    };
+
+    return textureMap[materialName.toLowerCase()] || '/textures/default.jpg';
+  }
+
+  updateVariantPriceFromSelection(variant, productId) {
+    const priceElement = document.querySelector(`[data-product-id="${productId}"] .product-card__price`);
+    if (priceElement && variant.price) {
+      const priceAmount = variant.price || variant.price_amount;
+      const priceCurrency = variant.currency_code || "USD";
+      priceElement.textContent = formatPrice(priceAmount, priceCurrency);
+    }
+  }
+
+  updateAvailability(variant, productCard) {
+    const qtyInput = productCard.querySelector('.qty-input');
+    if (qtyInput) {
+      const inv = typeof variant.inventory === 'number' ? variant.inventory : null;
+      if (inv !== null && inv >= 1) {
+        qtyInput.max = String(inv);
+        if (parseInt(qtyInput.value) > inv) qtyInput.value = String(inv);
+      } else {
+        qtyInput.removeAttribute('max');
+      }
+    }
+  }
+
+  showVariantUnavailable(productId) {
+    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+    if (productCard) {
+      const productData = this.productDataStore[productId];
+
+      // Check if this is a single-variant product
+      const hasMultipleChoices = productData.options &&
+        productData.options.some(option => option.values.length > 1);
+
+      if (!hasMultipleChoices) {
+        // For single-variant products, check if any variant is available
+        const hasAvailableVariant = productData.variants.some(variant =>
+          variant.inventory === undefined || variant.inventory > 0
+        );
+
+        if (hasAvailableVariant) {
+          // Product is available, don't show "Select Options"
+          return;
+        }
+      }
+
+      const addToCartBtn = productCard.querySelector('.product-card__btn');
+      if (addToCartBtn) {
+        addToCartBtn.textContent = 'Select Options';
+        addToCartBtn.disabled = true;
       }
     }
   }

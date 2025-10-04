@@ -282,6 +282,9 @@ class ShopifyGraphQLSeeder:
                             "inventoryPolicy": v["inventoryPolicy"],
                             "requiresShipping": True,
                             "fulfillmentService": "manual",
+                            "option1": v.get("option1"),
+                            "option2": v.get("option2"),
+                            "option3": v.get("option3"),
                         }
                     )
 
@@ -310,28 +313,51 @@ class ShopifyGraphQLSeeder:
                 }
                 """
 
-                # Create product options and variants
-                product_options = [
-                    {
-                        "name": "Size",
-                        "position": 1,
-                        "values": [
-                            {"name": "Small"},
-                            {"name": "Medium"},
-                            {"name": "Large"},
-                        ],
-                    }
-                ]
+                # Create product options from the product data
+                product_options = []
+                if product_data.get("options"):
+                    for option in product_data["options"]:
+                        product_options.append(
+                            {
+                                "name": option["name"],
+                                "position": option["position"],
+                                "values": [
+                                    {"name": value} for value in option["values"]
+                                ],
+                            }
+                        )
 
                 # Convert variants to productSet format with proper option values and inventory
                 product_variants = []
-                sizes = ["Small", "Medium", "Large"]
-                for i, variant_data in enumerate(variants):
-                    size = sizes[i % len(sizes)]  # Cycle through sizes
+                for variant_data in variants:
+                    # Build option values from the variant data
+                    option_values = []
+                    if variant_data.get("option1") and len(product_options) > 0:
+                        option_values.append(
+                            {
+                                "optionName": product_options[0]["name"],
+                                "name": variant_data["option1"],
+                            }
+                        )
+                    if variant_data.get("option2") and len(product_options) > 1:
+                        option_values.append(
+                            {
+                                "optionName": product_options[1]["name"],
+                                "name": variant_data["option2"],
+                            }
+                        )
+                    if variant_data.get("option3") and len(product_options) > 2:
+                        option_values.append(
+                            {
+                                "optionName": product_options[2]["name"],
+                                "name": variant_data["option3"],
+                            }
+                        )
+
                     product_variants.append(
                         {
                             "price": variant_data["price"],
-                            "sku": f"{variant_data['sku']}-{size[:1]}",  # Add size to SKU
+                            "sku": variant_data["sku"],
                             "compareAtPrice": variant_data.get("compareAtPrice"),
                             "taxable": variant_data["taxable"],
                             "inventoryPolicy": variant_data["inventoryPolicy"],
@@ -346,7 +372,7 @@ class ShopifyGraphQLSeeder:
                                     "quantity": variant_data["inventoryQuantity"],
                                 }
                             ],
-                            "optionValues": [{"optionName": "Size", "name": size}],
+                            "optionValues": option_values,
                         }
                     )
 

@@ -28,11 +28,11 @@ class SmartSelectionService:
         Intelligently determine the best recommendation type based on data availability
         Returns the most effective recommendation type that has data
         """
-        # Priority order based on conversion effectiveness
+        # Priority order based on product page effectiveness
         recommendation_types = [
-            "frequently_bought_together",  # Best for conversion
-            "item_neighbors",  # Always works
-            "user_neighbors",  # Social proof
+            "item_neighbors",  # Primary: Similar products (always works, high relevance)
+            "frequently_bought_together",  # Secondary: Complementary products
+            "user_neighbors",  # Tertiary: Social proof
             "user_recommendations",  # Personalized
             "popular_category",  # Fallback
         ]
@@ -138,9 +138,21 @@ class SmartSelectionService:
         result["smart_selection"] = {
             "selected_type": smart_type,
             "reason": (
-                "optimal_conversion"
-                if smart_type == "frequently_bought_together"
-                else "data_availability"
+                "similar_products"
+                if smart_type == "item_neighbors"
+                else (
+                    "complementary_products"
+                    if smart_type == "frequently_bought_together"
+                    else (
+                        "social_proof"
+                        if smart_type == "user_neighbors"
+                        else (
+                            "personalized"
+                            if smart_type == "user_recommendations"
+                            else "category_popularity"
+                        )
+                    )
+                )
             ),
         }
 
@@ -159,8 +171,8 @@ class SmartSelectionService:
         """
         # Priority order based on cart page effectiveness for AOV
         recommendation_types = [
-            "frequently_bought_together",  # Primary: Complementary products (AOV focus)
-            "item_neighbors",  # Secondary: Similar products (alternative options)
+            "item_neighbors",  # Primary: Similar products (always works, high relevance)
+            "frequently_bought_together",  # Secondary: Complementary products (AOV focus)
             "user_recommendations",  # Personalized (fallback)
             "popular",  # General popular items (fallback)
         ]
@@ -278,102 +290,6 @@ class SmartSelectionService:
 
         return result
 
-    async def get_smart_cart_page_recommendation_type(
-        self,
-        shop_id: str,
-        cart_items: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        limit: int = 6,
-    ) -> str:
-        """
-        Intelligently determine the best cart page recommendation type
-        Returns the most effective recommendation type for cart upsells and cross-sells
-        """
-        # Priority order based on cart page effectiveness for AOV
-        recommendation_types = [
-            "frequently_bought_together",  # Primary: Complementary products (AOV focus)
-            "item_neighbors",  # Secondary: Similar products (alternative options)
-            "user_recommendations",  # Personalized (fallback)
-            "popular",  # General popular items (fallback)
-        ]
-
-        for rec_type in recommendation_types:
-            try:
-                # Quick test to see if this type has data
-                test_result = (
-                    await self.recommendation_executor.execute_recommendation_level(
-                        level=rec_type,
-                        shop_id=shop_id,
-                        user_id=user_id,
-                        cart_items=cart_items,
-                        limit=1,  # Just test with 1 item
-                    )
-                )
-
-                if test_result["success"] and test_result.get("items"):
-                    logger.info(f"✅ Cart smart selection: {rec_type} has data")
-                    return rec_type
-                else:
-                    logger.debug(f"❌ {rec_type} has no data, trying next...")
-
-            except Exception as e:
-                logger.debug(f"⚠️ Error testing {rec_type}: {e}")
-                continue
-
-        # Fallback to popular items (always works)
-        logger.info("🔄 Cart smart selection: falling back to popular items")
-        return "popular"
-
-    async def get_smart_cart_page_recommendation(
-        self,
-        shop_id: str,
-        cart_items: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        limit: int = 6,
-    ) -> Dict[str, Any]:
-        """
-        Get smart cart page recommendation with intelligent type selection
-        Focuses on complementary products and upsells to increase AOV
-        """
-        # Get the smart recommendation type
-        smart_type = await self.get_smart_cart_page_recommendation_type(
-            shop_id=shop_id,
-            cart_items=cart_items,
-            user_id=user_id,
-            limit=limit,
-        )
-
-        # Execute the smart-selected recommendation type
-        result = await self.recommendation_executor.execute_recommendation_level(
-            level=smart_type,
-            shop_id=shop_id,
-            user_id=user_id,
-            cart_items=cart_items,
-            limit=limit,
-        )
-
-        # Add smart selection metadata to result
-        result["smart_selection"] = {
-            "selected_type": smart_type,
-            "visitor_type": ("returning" if user_id else "new"),
-            "cart_context": "upsell_cross_sell",
-            "reason": (
-                "complementary_products"
-                if smart_type == "frequently_bought_together"
-                else (
-                    "similar_alternatives"
-                    if smart_type == "item_neighbors"
-                    else (
-                        "personalized"
-                        if smart_type == "user_recommendations"
-                        else "general_popularity"
-                    )
-                )
-            ),
-        }
-
-        return result
-
     async def get_smart_collection_page_recommendation_type(
         self,
         shop_id: str,
@@ -460,102 +376,6 @@ class SmartSelectionService:
                 else (
                     "personalized_category"
                     if smart_type == "user_recommendations_category"
-                    else (
-                        "personalized"
-                        if smart_type == "user_recommendations"
-                        else "general_popularity"
-                    )
-                )
-            ),
-        }
-
-        return result
-
-    async def get_smart_cart_page_recommendation_type(
-        self,
-        shop_id: str,
-        cart_items: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        limit: int = 6,
-    ) -> str:
-        """
-        Intelligently determine the best cart page recommendation type
-        Returns the most effective recommendation type for cart upsells and cross-sells
-        """
-        # Priority order based on cart page effectiveness for AOV
-        recommendation_types = [
-            "frequently_bought_together",  # Primary: Complementary products (AOV focus)
-            "item_neighbors",  # Secondary: Similar products (alternative options)
-            "user_recommendations",  # Personalized (fallback)
-            "popular",  # General popular items (fallback)
-        ]
-
-        for rec_type in recommendation_types:
-            try:
-                # Quick test to see if this type has data
-                test_result = (
-                    await self.recommendation_executor.execute_recommendation_level(
-                        level=rec_type,
-                        shop_id=shop_id,
-                        user_id=user_id,
-                        cart_items=cart_items,
-                        limit=1,  # Just test with 1 item
-                    )
-                )
-
-                if test_result["success"] and test_result.get("items"):
-                    logger.info(f"✅ Cart smart selection: {rec_type} has data")
-                    return rec_type
-                else:
-                    logger.debug(f"❌ {rec_type} has no data, trying next...")
-
-            except Exception as e:
-                logger.debug(f"⚠️ Error testing {rec_type}: {e}")
-                continue
-
-        # Fallback to popular items (always works)
-        logger.info("🔄 Cart smart selection: falling back to popular items")
-        return "popular"
-
-    async def get_smart_cart_page_recommendation(
-        self,
-        shop_id: str,
-        cart_items: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        limit: int = 6,
-    ) -> Dict[str, Any]:
-        """
-        Get smart cart page recommendation with intelligent type selection
-        Focuses on complementary products and upsells to increase AOV
-        """
-        # Get the smart recommendation type
-        smart_type = await self.get_smart_cart_page_recommendation_type(
-            shop_id=shop_id,
-            cart_items=cart_items,
-            user_id=user_id,
-            limit=limit,
-        )
-
-        # Execute the smart-selected recommendation type
-        result = await self.recommendation_executor.execute_recommendation_level(
-            level=smart_type,
-            shop_id=shop_id,
-            user_id=user_id,
-            cart_items=cart_items,
-            limit=limit,
-        )
-
-        # Add smart selection metadata to result
-        result["smart_selection"] = {
-            "selected_type": smart_type,
-            "visitor_type": ("returning" if user_id else "new"),
-            "cart_context": "upsell_cross_sell",
-            "reason": (
-                "complementary_products"
-                if smart_type == "frequently_bought_together"
-                else (
-                    "similar_alternatives"
-                    if smart_type == "item_neighbors"
                     else (
                         "personalized"
                         if smart_type == "user_recommendations"
