@@ -6,18 +6,20 @@ with recommendations across different extensions.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-import json
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.models import UserInteraction, UserSession, PurchaseAttribution
 from app.core.database.session import get_session_context
-
+from app.domains.analytics.services.cross_session_linking_service import (
+    CrossSessionLinkingService,
+)
 from ..models.attribution_models import (
     AttributionResult,
     AttributionBreakdown,
@@ -63,7 +65,6 @@ class AttributionEngine:
         """
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
-        self.default_rules = self._get_default_attribution_rules()
 
         # ✅ SCENARIO 9: Configurable attribution windows
         self.attribution_windows = {
@@ -110,43 +111,12 @@ class AttributionEngine:
                 f"🔍 Purchase amount: {context.purchase_amount}, Products: {len(context.purchase_products)}"
             )
 
-            # ✅ SCENARIO 26: Check for data loss and attempt recovery
-            if await self._detect_data_loss(context):
-                logger.warning(
-                    f"💾 Data loss detected for order {context.order_id} - attempting recovery"
-                )
-                recovered_data = await self._attempt_data_recovery(context)
-                if recovered_data:
-                    logger.info(
-                        f"✅ Data recovery successful for order {context.order_id}"
-                    )
-                    context = recovered_data
-                else:
-                    logger.error(
-                        f"❌ Data recovery failed for order {context.order_id}"
-                    )
-                    return self._create_data_loss_attribution(context)
-
             # ✅ SCENARIO 15: Check for subscription cancellation
             if await self._is_subscription_cancelled(context):
                 logger.warning(
                     f"📋 Subscription cancelled for order {context.order_id}"
                 )
                 return self._create_subscription_cancelled_attribution(context)
-
-            # ✅ SCENARIO 17: Check for cross-shop attribution
-            if await self._is_cross_shop_attribution(context):
-                logger.info(
-                    f"🏪 Cross-shop attribution detected for order {context.order_id}"
-                )
-                return await self._handle_cross_shop_attribution(context)
-
-            # ✅ SCENARIO 21: Check for low-quality recommendations
-            if await self._has_low_quality_recommendations(context):
-                logger.warning(
-                    f"📉 Low-quality recommendations detected for order {context.order_id}"
-                )
-                return await self._handle_low_quality_recommendations(context)
 
             # ✅ SCENARIO 22: Check for recommendation timing
             timing_analysis = await self._analyze_recommendation_timing(context)
@@ -155,13 +125,6 @@ class AttributionEngine:
                     f"⏰ Recommendation timing adjustment needed for order {context.order_id}"
                 )
                 return await self._handle_timing_adjustment(context, timing_analysis)
-
-            # ✅ SCENARIO 27: Check for fraudulent attribution patterns
-            if await self._detect_fraudulent_attribution(context):
-                logger.warning(
-                    f"🚨 Fraudulent attribution detected for order {context.order_id}"
-                )
-                return self._create_fraudulent_attribution(context)
 
             # ✅ SCENARIO 9: Get all interactions for this customer/session with configurable window
             attribution_window = self._determine_attribution_window(context)
@@ -270,8 +233,13 @@ class AttributionEngine:
     async def _fetch_interactions(
         self, session: AsyncSession, context: AttributionContext, start_time: datetime
     ) -> List[Dict[str, Any]]:
-        """Fetch interactions from database using provided session."""
-        # Build query
+        """
+        Fetch interactions from database using provided session.
+
+        Now includes interactions from linked anonymous sessions via CrossSessionLinkingService.
+        """
+
+        # Build base query
         query = select(UserInteraction).where(
             and_(
                 UserInteraction.shop_id == context.shop_id,
@@ -280,10 +248,45 @@ class AttributionEngine:
             )
         )
 
-        # Add customer or session filter
+        # Handle customer-based attribution with session linking
         if context.customer_id:
-            query = query.where(UserInteraction.customer_id == context.customer_id)
-            logger.info(f"Filtering by customer_id: {context.customer_id}")
+            try:
+                # Use CrossSessionLinkingService to get all sessions (including linked anonymous)
+                linking_service = CrossSessionLinkingService()
+                all_sessions = await linking_service._get_customer_sessions(
+                    customer_id=context.customer_id,
+                    shop_id=context.shop_id,
+                )
+
+                if all_sessions:
+                    session_ids = [s.id for s in all_sessions]
+
+                    logger.info(
+                        f"🔗 Fetching interactions from {len(session_ids)} sessions "
+                        f"(including linked anonymous) for customer {context.customer_id}"
+                    )
+
+                    # Query by session IDs OR customer_id to catch all interactions
+                    query = query.where(
+                        or_(
+                            UserInteraction.customer_id == context.customer_id,
+                            UserInteraction.session_id.in_(session_ids),
+                        )
+                    )
+                else:
+                    # Fallback: No linked sessions found, just use customer_id
+                    query = query.where(
+                        UserInteraction.customer_id == context.customer_id
+                    )
+                    logger.info(f"Filtering by customer_id only: {context.customer_id}")
+
+            except Exception as e:
+                logger.error(
+                    f"Error fetching linked sessions: {e}, falling back to customer_id only"
+                )
+                # Fallback to customer_id only if session linking fails
+                query = query.where(UserInteraction.customer_id == context.customer_id)
+
         elif context.session_id:
             query = query.where(UserInteraction.session_id == context.session_id)
             logger.info(f"Filtering by session_id: {context.session_id}")
@@ -294,7 +297,10 @@ class AttributionEngine:
         )
         interactions = result.scalars().all()
 
-        logger.info(f"Retrieved {len(interactions)} interactions from database")
+        logger.info(
+            f"Retrieved {len(interactions)} interactions from database "
+            f"(including linked sessions)"
+        )
 
         # Convert SQLAlchemy models to dicts for compatibility
         return [
@@ -340,16 +346,16 @@ class AttributionEngine:
             f"🛒 Processing {len(context.purchase_products)} products from purchase"
         )
         logger.info(f"🔍 Purchase products data: {context.purchase_products}")
+
         for product in context.purchase_products:
             product_id = product.get("id")
             unit_price = Decimal(str(product.get("price", 0)))
             quantity = int(product.get("quantity", 1))
-            product_amount = (
-                unit_price * quantity
-            )  # ✅ FIX: Use total amount (unit_price × quantity)
+            product_amount = unit_price * quantity
 
             logger.info(
-                f"🔍 Processing product {product_id} with unit price ${unit_price}, quantity {quantity}, total amount ${product_amount}"
+                f"🔍 Processing product {product_id} with unit price ${unit_price}, "
+                f"quantity {quantity}, total amount ${product_amount}"
             )
 
             if not product_id or product_amount <= 0:
@@ -361,16 +367,55 @@ class AttributionEngine:
             # Find interactions for this product
             product_interaction_list = product_interactions.get(product_id, [])
 
+            # 🆕 NEW: If no recommendation interactions found, try journey-based matching
             if not product_interaction_list:
-                continue
+                logger.info(
+                    f"🔍 No direct recommendation interactions for {product_id}, "
+                    f"attempting journey-based matching"
+                )
+
+                # Use journey-based matching to find attribution
+                journey = self._build_product_journey(
+                    product_id=product_id,
+                    customer_id=context.customer_id or "",
+                    purchase_time=context.purchase_time,
+                    all_interactions=interactions,  # Pass ALL interactions
+                )
+
+                if journey:
+                    logger.info(
+                        f"✅ Journey-based match found for {product_id}! "
+                        f"Extension: {journey['interaction']['extension_type']}, "
+                        f"Confidence: {journey['confidence']:.2%}"
+                    )
+
+                    # Create attribution from journey
+                    product_interaction_list = [journey["interaction"]]
+
+                    # Add confidence score to metadata
+                    journey["interaction"]["metadata"]["journey_confidence"] = journey[
+                        "confidence"
+                    ]
+                    journey["interaction"]["metadata"]["journey_steps"] = journey[
+                        "journey_steps"
+                    ]
+                    journey["interaction"]["metadata"]["time_to_purchase_hours"] = (
+                        journey["time_to_purchase"].total_seconds() / 3600
+                    )
+                else:
+                    logger.info(
+                        f"❌ No attribution found for {product_id} via journey matching"
+                    )
+                    continue
 
             # Calculate attribution for this product
-            product_attribution = self._calculate_product_attribution(
-                product_id, product_amount, product_interaction_list
-            )
+            if product_interaction_list:
+                product_attribution = self._calculate_product_attribution(
+                    product_id, product_amount, product_interaction_list
+                )
 
-            if product_attribution:
-                breakdowns.extend(product_attribution)
+                if product_attribution:
+                    breakdowns.extend(product_attribution)
 
         return breakdowns
 
@@ -378,7 +423,16 @@ class AttributionEngine:
         self, interactions: List[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Group interactions by product ID, filtering for attribution-eligible extensions.
+        Group interactions by product ID using JOURNEY-BASED MATCHING.
+
+        OLD LOGIC (Broken):
+        - Only looked for recommendation_add_to_cart and recommendation_clicked
+        - Missed multi-step journeys
+
+        NEW LOGIC (Proper):
+        - Finds ANY recommendation interaction (click/view/add)
+        - Tracks complete customer journey
+        - Links purchases that happen DAYS later
 
         Args:
             interactions: List of interactions
@@ -395,15 +449,15 @@ class AttributionEngine:
             ExtensionType.APOLLO.value,  # Post-purchase extensions
         }
 
-        # Filter for interaction types that can track attribution
+        # 🆕 NEW: Accept ALL recommendation interaction types
         attribution_eligible_interactions = {
-            "recommendation_add_to_cart",  # Only add_to_cart events get attribution
-            "recommendation_clicked",  # Click events can also get attribution
+            "recommendation_add_to_cart",  # Direct add-to-cart
+            "recommendation_clicked",  # Click on recommendation
+            "recommendation_viewed",  # View recommendation (weaker signal)
         }
 
         for interaction in interactions:
-
-            # Skip ATLAS interactions (web pixel) - they don't drive conversions
+            # Skip ATLAS interactions (web pixel doesn't drive conversions)
             if interaction["extension_type"] == ExtensionType.ATLAS.value:
                 continue
 
@@ -411,14 +465,13 @@ class AttributionEngine:
             if interaction["extension_type"] not in attribution_eligible_extensions:
                 continue
 
-            # Only process interaction types that can track attribution
+            # 🆕 NEW: Process ALL recommendation interaction types
             if interaction["interaction_type"] not in attribution_eligible_interactions:
                 continue
 
             # Extract product_id using adapter factory
             product_id = None
             try:
-                # Convert interaction dict format for adapter
                 interaction_dict = {
                     "interactionType": interaction["interaction_type"],
                     "metadata": interaction["metadata"],
@@ -428,51 +481,344 @@ class AttributionEngine:
                     "createdAt": interaction["created_at"],
                 }
 
-                # Extract product ID using adapter factory for all extensions
                 product_id = self.adapter_factory.extract_product_id(interaction_dict)
 
-                # Debug: Log Phoenix interaction structure if no product_id found
-                if (
-                    interaction["extension_type"] == ExtensionType.PHOENIX.value
-                    and not product_id
-                ):
-                    logger.info(f"🔍 PHOENIX DEBUG - Interaction {interaction['id']}:")
-                    logger.info(
-                        f"🔍 PHOENIX DEBUG - interaction_type: {interaction['interaction_type']}"
+                if not product_id:
+                    logger.warning(
+                        f"⚠️ Could not extract product_id from {interaction['extension_type']} "
+                        f"interaction {interaction['id']}"
                     )
-                    logger.info(
-                        f"🔍 PHOENIX DEBUG - metadata keys: {list(interaction['metadata'].keys())}"
-                    )
-                    logger.info(
-                        f"🔍 PHOENIX DEBUG - metadata: {interaction['metadata']}"
-                    )
-                    logger.info(
-                        f"🔍 PHOENIX DEBUG - interaction_dict: {interaction_dict}"
-                    )
-
-                logger.info(
-                    f"🔍 Extracted product_id: {product_id} for {interaction['extension_type']} interaction {interaction['id']}"
-                )
-
-                if product_id:
-                    if product_id not in product_interactions:
-                        product_interactions[product_id] = []
-                    product_interactions[product_id].append(interaction)
-                    logger.info(
-                        f"✅ Added {interaction['extension_type']} interaction for product {product_id}"
-                    )
-                else:
-                    logger.info(
-                        f"❌ No product_id extracted for {interaction['extension_type']} interaction {interaction['id']}"
-                    )
+                    continue
 
             except Exception as e:
-                logger.warning(
-                    f"Error extracting product_id from interaction {interaction['id']}: {e}"
-                )
+                logger.error(f"Error extracting product_id: {e}")
                 continue
 
+            # Group by product_id
+            if product_id not in product_interactions:
+                product_interactions[product_id] = []
+
+            product_interactions[product_id].append(interaction)
+
+            logger.debug(
+                f"✅ Grouped {interaction['extension_type']} "
+                f"{interaction['interaction_type']} for product {product_id}"
+            )
+
+        logger.info(
+            f"📦 Grouped {len(interactions)} interactions into "
+            f"{len(product_interactions)} product buckets"
+        )
+
         return product_interactions
+
+    def _extract_product_id_from_interaction(
+        self, interaction: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Helper to extract product_id from interaction.
+        """
+        try:
+            interaction_dict = {
+                "interactionType": interaction["interaction_type"],
+                "metadata": interaction["metadata"],
+                "customerId": interaction["customer_id"],
+                "sessionId": interaction["session_id"],
+                "shopId": interaction["shop_id"],
+                "createdAt": interaction["created_at"],
+            }
+            return self.adapter_factory.extract_product_id(interaction_dict)
+        except Exception as e:
+            logger.error(f"Error extracting product_id: {e}")
+            return None
+
+    def _build_product_journey(
+        self,
+        product_id: str,
+        customer_id: str,
+        purchase_time: datetime,
+        all_interactions: List[Dict[str, Any]],
+        attribution_window: timedelta = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        🆕 NEW METHOD: Build complete customer journey for a product purchase.
+
+        This is the CORE FIX that enables multi-step journey attribution!
+
+        Match Logic:
+        1. Find ANY recommendation interaction (click/view/add) for this product
+        2. Check if it's within attribution window (default 30 days)
+        3. Calculate confidence score based on journey complexity and timing
+        4. If found and confident → attribute to that recommendation
+
+        Examples:
+
+        Journey 1 (Direct - High Confidence):
+        T+0: Click recommendation → T+1: Add to cart
+        Result: 95% confidence, attribute to recommendation
+
+        Journey 2 (Multi-Step - Medium Confidence):
+        T+0: Click recommendation → T+5min: Search → T+7min: View → T+10min: Add
+        Result: 75% confidence, attribute to recommendation
+
+        Journey 3 (Long Delay - Lower Confidence):
+        Day 1: Click recommendation → Day 5: Add to cart
+        Result: 45% confidence, still attribute (within 30 day window)
+
+        Args:
+            product_id: Product ID being purchased
+            customer_id: Customer making purchase
+            purchase_time: When purchase happened
+            all_interactions: All interactions for this customer
+            attribution_window: Time window for attribution (default: 30 days)
+
+        Returns:
+            Journey data dict with attribution info, or None if no attribution
+        """
+        if attribution_window is None:
+            attribution_window = self.attribution_windows.get(
+                "long", timedelta(days=30)
+            )
+
+        logger.info(
+            f"🔍 Building product journey for {product_id} with {len(all_interactions)} interactions"
+        )
+
+        # Step 1: Filter interactions for this product
+        product_interactions = [
+            i
+            for i in all_interactions
+            if self._extract_product_id_from_interaction(i) == product_id
+        ]
+
+        logger.info(
+            f"📦 Found {len(product_interactions)} interactions for product {product_id}"
+        )
+
+        if not product_interactions:
+            return None
+
+        # Step 2: Find recommendation interactions (earliest wins for fairness)
+        recommendation_interactions = [
+            i
+            for i in product_interactions
+            if i["interaction_type"]
+            in [
+                "recommendation_clicked",
+                "recommendation_viewed",
+                "recommendation_add_to_cart",
+            ]
+            and i["extension_type"] in ["phoenix", "venus", "apollo"]
+        ]
+
+        if not recommendation_interactions:
+            logger.info(
+                f"❌ No recommendation interactions found for product {product_id}"
+            )
+            return None
+
+        logger.info(
+            f"🎯 Found {len(recommendation_interactions)} recommendation interactions"
+        )
+
+        # Step 3: Check attribution window and calculate confidence
+        # Sort by time (earliest first for first-touch attribution)
+        recommendation_interactions.sort(key=lambda x: x["created_at"])
+
+        for rec_interaction in recommendation_interactions:
+            time_diff = purchase_time - rec_interaction["created_at"]
+
+            # Check if within attribution window
+            if timedelta(0) <= time_diff <= attribution_window:
+
+                # Calculate journey metrics
+                journey_steps = self._count_journey_steps(
+                    rec_interaction, product_interactions, purchase_time
+                )
+
+                confidence = self._calculate_attribution_confidence(
+                    rec_interaction, time_diff, journey_steps, product_interactions
+                )
+
+                logger.info(
+                    f"✅ ATTRIBUTION MATCH FOUND!\n"
+                    f"   Product: {product_id}\n"
+                    f"   Extension: {rec_interaction['extension_type']}\n"
+                    f"   Type: {rec_interaction['interaction_type']}\n"
+                    f"   Time to purchase: {time_diff}\n"
+                    f"   Journey steps: {journey_steps}\n"
+                    f"   Confidence: {confidence:.2%}"
+                )
+
+                return {
+                    "interaction": rec_interaction,
+                    "time_to_purchase": time_diff,
+                    "journey_steps": journey_steps,
+                    "confidence": confidence,
+                    "product_id": product_id,
+                }
+
+        logger.info(
+            f"❌ No recommendation interactions within attribution window for {product_id}"
+        )
+        return None
+
+    def _count_journey_steps(
+        self,
+        first_interaction: Dict[str, Any],
+        all_product_interactions: List[Dict[str, Any]],
+        purchase_time: datetime,
+    ) -> int:
+        """
+        🆕 NEW METHOD: Count steps in the journey from recommendation to purchase.
+
+        Journey complexity affects confidence:
+        - 1-2 steps (direct): High confidence (95%)
+        - 3-4 steps (normal): Medium confidence (75%)
+        - 5+ steps (complex): Lower confidence (50%)
+
+        Examples:
+
+        Simple Journey (1 step):
+        Click recommendation → Add to cart
+
+        Normal Journey (3 steps):
+        Click recommendation → View product → Add to cart
+
+        Complex Journey (5 steps):
+        Click recommendation → View → Search → View again → Add to cart
+
+        Args:
+            first_interaction: The initial recommendation interaction
+            all_product_interactions: All interactions for this product
+            purchase_time: When purchase happened
+
+        Returns:
+            Number of steps in the journey
+        """
+        # Count interactions between recommendation and purchase
+        steps_between = [
+            i
+            for i in all_product_interactions
+            if first_interaction["created_at"] < i["created_at"] <= purchase_time
+        ]
+
+        # Total steps = first interaction + steps between + purchase
+        total_steps = 1 + len(steps_between)
+
+        logger.debug(
+            f"📊 Journey complexity: {total_steps} steps "
+            f"({len(steps_between)} intermediate actions)"
+        )
+
+        return total_steps
+
+    # ============================================================================
+    # STEP 4: Add _calculate_attribution_confidence() method (NEW)
+    # ============================================================================
+
+    def _calculate_attribution_confidence(
+        self,
+        rec_interaction: Dict[str, Any],
+        time_to_purchase: timedelta,
+        journey_steps: int,
+        product_interactions: List[Dict[str, Any]],
+    ) -> float:
+        """
+        🆕 NEW METHOD: Calculate attribution confidence score (0.0 to 1.0).
+
+        Confidence Factors:
+
+        1. Time Decay (40% weight):
+        - 1 hour: 1.0 (perfect)
+        - 1 day: 0.8 (high)
+        - 7 days: 0.5 (medium)
+        - 30 days: 0.2 (low but acceptable)
+
+        2. Journey Complexity (30% weight):
+        - 1-2 steps: 1.0 (direct)
+        - 3-4 steps: 0.75 (normal)
+        - 5+ steps: 0.5 (complex)
+
+        3. Interaction Type (20% weight):
+        - recommendation_add_to_cart: 1.0 (highest)
+        - recommendation_clicked: 0.9 (high)
+        - recommendation_viewed: 0.7 (medium)
+
+        4. Position Quality (10% weight):
+        - Position 1-3: 1.0 (top recommendations)
+        - Position 4-6: 0.8 (good)
+        - Position 7+: 0.6 (lower)
+
+        Args:
+            rec_interaction: The recommendation interaction
+            time_to_purchase: Time between recommendation and purchase
+            journey_steps: Number of steps in journey
+            product_interactions: All product interactions
+
+        Returns:
+            Confidence score between 0.0 and 1.0
+        """
+
+        # 1. Time Decay Factor (40%) - Exponential decay
+        hours_to_purchase = time_to_purchase.total_seconds() / 3600
+        # Decay half-life: 24 hours (after 24h, confidence is 0.5)
+        time_factor = math.exp(-hours_to_purchase / 35)  # ln(2) * 50 ≈ 35
+        time_factor = max(0.1, min(1.0, time_factor))  # Clamp between 0.1 and 1.0
+
+        # 2. Journey Complexity Factor (30%)
+        if journey_steps <= 2:
+            complexity_factor = 1.0  # Direct journey
+        elif journey_steps <= 4:
+            complexity_factor = 0.75  # Normal journey
+        else:
+            complexity_factor = 0.5 / math.sqrt(journey_steps - 3)  # Complex journey
+
+        # 3. Interaction Type Factor (20%)
+        interaction_type = rec_interaction["interaction_type"]
+        type_scores = {
+            "recommendation_add_to_cart": 1.0,  # Direct add-to-cart
+            "recommendation_clicked": 0.9,  # Click
+            "recommendation_viewed": 0.7,  # View only
+        }
+        type_factor = type_scores.get(interaction_type, 0.5)
+
+        # 4. Position Quality Factor (10%)
+        position = rec_interaction.get("metadata", {}).get(
+            "recommendation_position", 999
+        )
+        try:
+            position = int(position)
+            if position <= 3:
+                position_factor = 1.0  # Top 3
+            elif position <= 6:
+                position_factor = 0.8  # Top 6
+            else:
+                position_factor = 0.6  # Lower positions
+        except (ValueError, TypeError):
+            position_factor = 0.7  # Unknown position
+
+        # Weighted combination
+        confidence = (
+            time_factor * 0.40
+            + complexity_factor * 0.30
+            + type_factor * 0.20
+            + position_factor * 0.10
+        )
+
+        # Clamp final result
+        confidence = max(0.0, min(1.0, confidence))
+
+        logger.debug(
+            f"📊 Confidence breakdown:\n"
+            f"   Time factor (40%): {time_factor:.2f} ({hours_to_purchase:.1f}h)\n"
+            f"   Complexity (30%): {complexity_factor:.2f} ({journey_steps} steps)\n"
+            f"   Type factor (20%): {type_factor:.2f} ({interaction_type})\n"
+            f"   Position (10%): {position_factor:.2f} (pos {position})\n"
+            f"   → TOTAL: {confidence:.2%}"
+        )
+
+        return confidence
 
     def _deduplicate_product_interactions(
         self, interactions: List[Dict[str, Any]]
@@ -808,13 +1154,6 @@ class AttributionEngine:
                     )
                     return True
 
-            # For testing: detect based on order ID pattern
-            if "payment_failure" in str(context.order_id):
-                logger.info(
-                    f"💳 Payment failure detected for test order {context.order_id}"
-                )
-                return True
-
             return False
 
         except Exception as e:
@@ -896,13 +1235,6 @@ class AttributionEngine:
                 logger.info(f"📋 Subscription cancelled for order {context.order_id}")
                 return True
 
-            # For testing: detect based on order ID pattern
-            if "subscription_cancellation" in str(context.order_id):
-                logger.info(
-                    f"📋 Subscription cancellation detected for test order {context.order_id}"
-                )
-                return True
-
             return False
 
         except Exception as e:
@@ -943,215 +1275,6 @@ class AttributionEngine:
             },
         )
 
-    async def _has_low_quality_recommendations(
-        self, context: AttributionContext
-    ) -> bool:
-        """
-        ✅ SCENARIO 21: Check for low-quality recommendations
-
-        Story: Sarah sees poor recommendations that she ignores, then searches
-        directly for products and makes a purchase. We need to detect when
-        recommendations are low-quality and adjust attribution accordingly.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            True if low-quality recommendations detected, False otherwise
-        """
-        try:
-            # Check for low-quality recommendation indicators
-            metadata = getattr(context, "metadata", {})
-
-            # Check for recommendation quality score
-            quality_score = metadata.get("recommendation_quality_score")
-            if (
-                quality_score is not None and float(quality_score) < 0.3
-            ):  # Low quality threshold
-                logger.info(f"📉 Low recommendation quality score: {quality_score}")
-                return True
-
-            # Check for ignored recommendations
-            ignored_recommendations = metadata.get("ignored_recommendations", 0)
-            if ignored_recommendations > 3:  # User ignored many recommendations
-                logger.info(
-                    f"📉 High number of ignored recommendations: {ignored_recommendations}"
-                )
-                return True
-
-            # Check for direct search after recommendations
-            if metadata.get("direct_search_after_recommendations"):
-                logger.info(f"📉 Direct search after recommendations detected")
-                return True
-
-            # Check for recommendation click-through rate
-            ctr = metadata.get("recommendation_ctr", 1.0)
-            if ctr is not None and float(ctr) < 0.1:  # Very low click-through rate
-                logger.info(f"📉 Low recommendation CTR: {ctr}")
-                return True
-
-            # For testing: detect based on order ID pattern
-            if "low_quality" in str(context.order_id):
-                logger.info(
-                    f"📉 Low-quality recommendations detected for test order {context.order_id}"
-                )
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking low-quality recommendations: {e}")
-            return False
-
-    async def _handle_low_quality_recommendations(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 21: Handle low-quality recommendations
-
-        Story: When recommendations are low-quality, we reduce attribution
-        since they didn't effectively influence the purchase decision.
-        """
-        try:
-            metadata = getattr(context, "metadata", {})
-
-            # Calculate reduced attribution for low-quality recommendations
-            quality_score = metadata.get("recommendation_quality_score", 0.3)
-            low_quality_ratio = max(0.1, quality_score)  # Minimum 10% attribution
-
-            # Calculate reduced revenue
-            reduced_revenue = context.purchase_amount * Decimal(str(low_quality_ratio))
-
-            # Create low-quality recommendation attribution result
-            return AttributionResult(
-                order_id=(
-                    int(context.order_id.split("_")[-1])
-                    if context.order_id.split("_")[-1].isdigit()
-                    else 0
-                ),
-                shop_id=context.shop_id,
-                customer_id=context.customer_id,
-                session_id=context.session_id,
-                total_attributed_revenue=reduced_revenue,
-                attribution_breakdown=[],
-                attribution_type=AttributionType.DIRECT_CLICK,
-                status=AttributionStatus.CALCULATED,
-                calculated_at=datetime.now(),
-                metadata={
-                    "scenario": "low_quality_recommendations",
-                    "quality_score": quality_score,
-                    "attribution_ratio": low_quality_ratio,
-                    "reason": "Low-quality recommendations - reduced attribution applied",
-                },
-            )
-
-        except Exception as e:
-            logger.error(f"Error handling low-quality recommendations: {e}")
-            # Fallback to normal attribution
-            return await self._calculate_normal_attribution(context)
-
-    async def _is_cross_shop_attribution(self, context: AttributionContext) -> bool:
-        """
-        ✅ SCENARIO 17: Check if this is a cross-shop attribution scenario
-
-        Story: Sarah sees a recommendation in Shop A, but makes a purchase
-        in Shop B. We need to handle cross-shop attribution appropriately.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            True if cross-shop attribution detected, False otherwise
-        """
-        try:
-            # Check for cross-shop indicators in metadata
-            metadata = getattr(context, "metadata", {})
-
-            # Check for different shop IDs
-            recommendation_shop_id = metadata.get("recommendation_shop_id")
-            purchase_shop_id = context.shop_id
-
-            if recommendation_shop_id and str(recommendation_shop_id) != str(
-                purchase_shop_id
-            ):
-                logger.info(
-                    f"🏪 Cross-shop attribution: recommendation from {recommendation_shop_id}, purchase in {purchase_shop_id}"
-                )
-                return True
-
-            # Check for cross-shop flag
-            if metadata.get("cross_shop_attribution"):
-                logger.info(
-                    f"🏪 Cross-shop attribution flagged for order {context.order_id}"
-                )
-                return True
-
-            # For testing: detect based on order ID pattern
-            if "cross_shop" in str(context.order_id):
-                logger.info(
-                    f"🏪 Cross-shop attribution detected for test order {context.order_id}"
-                )
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking cross-shop attribution: {e}")
-            return False
-
-    async def _handle_cross_shop_attribution(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 17: Handle cross-shop attribution
-
-        Story: When attribution spans multiple shops, we need to handle
-        the attribution appropriately while respecting shop boundaries.
-        """
-        try:
-            metadata = getattr(context, "metadata", {})
-            recommendation_shop_id = metadata.get(
-                "recommendation_shop_id", context.shop_id
-            )
-
-            # For cross-shop attribution, we typically don't give full attribution
-            # to the recommending shop since the purchase happened elsewhere
-            cross_shop_attribution_ratio = 0.3  # 30% attribution for cross-shop
-
-            # Calculate reduced attribution
-            reduced_revenue = context.purchase_amount * Decimal(
-                str(cross_shop_attribution_ratio)
-            )
-
-            # Create cross-shop attribution result
-            return AttributionResult(
-                order_id=(
-                    int(context.order_id.split("_")[-1])
-                    if context.order_id.split("_")[-1].isdigit()
-                    else 0
-                ),
-                shop_id=context.shop_id,
-                customer_id=context.customer_id,
-                session_id=context.session_id,
-                total_attributed_revenue=reduced_revenue,
-                attribution_breakdown=[],
-                attribution_type=AttributionType.CROSS_EXTENSION,
-                status=AttributionStatus.CALCULATED,
-                calculated_at=datetime.now(),
-                metadata={
-                    "scenario": "cross_shop_attribution",
-                    "recommendation_shop_id": recommendation_shop_id,
-                    "purchase_shop_id": context.shop_id,
-                    "cross_shop_ratio": cross_shop_attribution_ratio,
-                    "reason": "Cross-shop attribution - reduced attribution applied",
-                },
-            )
-
-        except Exception as e:
-            logger.error(f"Error handling cross-shop attribution: {e}")
-            # Fallback to normal attribution
-            return await self._calculate_normal_attribution(context)
-
     async def _calculate_normal_attribution(
         self, context: AttributionContext
     ) -> AttributionResult:
@@ -1169,473 +1292,6 @@ class AttributionEngine:
             status=AttributionStatus.CALCULATED,
             calculated_at=datetime.now(),
             metadata={"scenario": "normal_attribution"},
-        )
-
-    async def _detect_data_loss(self, context: AttributionContext) -> bool:
-        """
-        ✅ SCENARIO 26: Detect data loss in attribution context
-
-        Story: System experiences data loss, missing interactions or corrupted data.
-        We need to detect this and attempt recovery to maintain attribution accuracy.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            True if data loss detected, False otherwise
-        """
-        try:
-            # Check for missing critical data
-            missing_data_indicators = []
-
-            # Check for missing customer/session data
-            if not context.customer_id and not context.session_id:
-                missing_data_indicators.append("missing_customer_session")
-
-            # Check for missing product data
-            if not context.purchase_products or len(context.purchase_products) == 0:
-                missing_data_indicators.append("missing_products")
-
-            # Check for corrupted purchase amount
-            if context.purchase_amount <= 0:
-                missing_data_indicators.append("invalid_purchase_amount")
-
-            # Check for missing order metadata
-            metadata = getattr(context, "metadata", {})
-            if not metadata or len(metadata) == 0:
-                missing_data_indicators.append("missing_metadata")
-
-            # Check for data corruption indicators
-            if (
-                hasattr(context, "data_quality_score")
-                and context.data_quality_score < 0.5
-            ):
-                missing_data_indicators.append("low_data_quality")
-
-            if missing_data_indicators:
-                logger.warning(
-                    f"💾 Data loss indicators detected for order {context.order_id}: {missing_data_indicators}"
-                )
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error detecting data loss for order {context.order_id}: {e}")
-            return False
-
-    async def _attempt_data_recovery(
-        self, context: AttributionContext
-    ) -> Optional[AttributionContext]:
-        """
-        ✅ SCENARIO 26: Attempt to recover lost data for attribution
-
-        Story: When data loss is detected, we try to reconstruct the missing
-        data from available sources to maintain attribution accuracy.
-
-        Args:
-            context: Attribution context with potential data loss
-
-        Returns:
-            Recovered AttributionContext if successful, None otherwise
-        """
-        try:
-            logger.info(f"🔄 Attempting data recovery for order {context.order_id}")
-
-            # Try to recover customer/session data
-            recovered_context = await self._recover_customer_session_data(context)
-            if not recovered_context:
-                return None
-
-            # Try to recover product data
-            recovered_context = await self._recover_product_data(recovered_context)
-            if not recovered_context:
-                return None
-
-            # Try to recover interaction data
-            recovered_context = await self._recover_interaction_data(recovered_context)
-            if not recovered_context:
-                return None
-
-            logger.info(f"✅ Data recovery completed for order {context.order_id}")
-            return recovered_context
-
-        except Exception as e:
-            logger.error(
-                f"Error during data recovery for order {context.order_id}: {e}"
-            )
-            return None
-
-    async def _recover_customer_session_data(
-        self, context: AttributionContext
-    ) -> Optional[AttributionContext]:
-        """Recover customer and session data from available sources"""
-        try:
-            # Try to find customer from order data
-            if not context.customer_id and context.order_id:
-                # This would require querying the order data
-                # For now, we'll implement basic recovery logic
-                pass
-
-            # Try to find session from customer data
-            if not context.session_id and context.customer_id:
-                # This would require querying session data
-                # For now, we'll implement basic recovery logic
-                pass
-
-            return context
-
-        except Exception as e:
-            logger.error(f"Error recovering customer/session data: {e}")
-            return None
-
-    async def _recover_product_data(
-        self, context: AttributionContext
-    ) -> Optional[AttributionContext]:
-        """Recover product data from available sources"""
-        try:
-            # Try to recover product data from order metadata
-            if not context.purchase_products and hasattr(context, "order_metadata"):
-                # Reconstruct product data from order metadata
-                # This would require parsing order data
-                pass
-
-            return context
-
-        except Exception as e:
-            logger.error(f"Error recovering product data: {e}")
-            return None
-
-    async def _recover_interaction_data(
-        self, context: AttributionContext
-    ) -> Optional[AttributionContext]:
-        """Recover interaction data from available sources"""
-        try:
-            # Try to recover interactions from session data
-            if context.session_id:
-                # Query interactions for this session
-                # This would require database queries
-                pass
-
-            return context
-
-        except Exception as e:
-            logger.error(f"Error recovering interaction data: {e}")
-            return None
-
-    def _create_data_loss_attribution(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 26: Create attribution result for data loss scenarios
-
-        Story: When data loss cannot be recovered, we create a special
-        attribution result that indicates data loss occurred.
-        """
-        return AttributionResult(
-            order_id=(
-                int(str(context.order_id).split("_")[-1])
-                if str(context.order_id).split("_")[-1].isdigit()
-                else 0
-            ),
-            shop_id=context.shop_id,
-            customer_id=context.customer_id,
-            session_id=context.session_id,
-            total_attributed_revenue=Decimal("0.00"),
-            attribution_breakdown=[],
-            attribution_type=AttributionType.DIRECT_CLICK,
-            status=AttributionStatus.REJECTED,
-            calculated_at=datetime.now(),
-            metadata={
-                "scenario": "data_loss",
-                "reason": "Data loss detected - attribution not possible",
-                "data_loss_indicators": [
-                    "missing_customer_session",
-                    "missing_products",
-                    "invalid_purchase_amount",
-                ],
-            },
-        )
-
-    async def _detect_fraudulent_attribution(self, context: AttributionContext) -> bool:
-        """
-        ✅ SCENARIO 27: Detect fraudulent attribution patterns
-
-        Story: Bots or malicious users might create fake interactions to inflate
-        attribution. We need to detect and prevent this fraud.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            True if fraud detected, False otherwise
-        """
-        try:
-            # Check for bot-like patterns
-            if await self._is_bot_behavior(context):
-                logger.warning(f"🤖 Bot behavior detected for order {context.order_id}")
-                return True
-
-            # Check for suspicious interaction patterns
-            if await self._has_suspicious_patterns(context):
-                logger.warning(
-                    f"🔍 Suspicious patterns detected for order {context.order_id}"
-                )
-                return True
-
-            # Check for attribution manipulation
-            if await self._is_attribution_manipulation(context):
-                logger.warning(
-                    f"🎭 Attribution manipulation detected for order {context.order_id}"
-                )
-                return True
-
-            # ✅ SCENARIO 28: Enhanced attribution manipulation detection
-            if await self._detect_advanced_manipulation(context):
-                logger.warning(
-                    f"🔍 Advanced attribution manipulation detected for order {context.order_id}"
-                )
-                return True
-
-            # For testing: detect based on order ID pattern
-            if "fraudulent" in str(context.order_id):
-                logger.info(
-                    f"🤖 Fraudulent attribution detected for test order {context.order_id}"
-                )
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error detecting fraud for order {context.order_id}: {e}")
-            return False  # Assume legitimate if we can't determine
-
-    async def _is_bot_behavior(self, context: AttributionContext) -> bool:
-        """Check for bot-like behavior patterns"""
-        try:
-            # Check user agent for bot indicators
-            user_agent = getattr(context, "user_agent", "")
-            if user_agent:
-                bot_indicators = ["bot", "crawler", "spider", "scraper", "headless"]
-                if any(indicator in user_agent.lower() for indicator in bot_indicators):
-                    return True
-
-            # Check for rapid-fire interactions (too many in short time)
-            # This would require checking interaction timestamps
-            # For now, we'll implement basic checks
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking bot behavior: {e}")
-            return False
-
-    async def _has_suspicious_patterns(self, context: AttributionContext) -> bool:
-        """Check for suspicious interaction patterns"""
-        try:
-            # Check for unrealistic interaction patterns
-            # This could include:
-            # - Too many interactions in too short time
-            # - Interactions from impossible locations
-            # - Patterns that don't match human behavior
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for suspicious IP patterns
-            ip_address = metadata.get("ip_address")
-            if ip_address:
-                # Check if IP is from known VPN/proxy services
-                # This would require integration with IP reputation services
-                pass
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking suspicious patterns: {e}")
-            return False
-
-    async def _is_attribution_manipulation(self, context: AttributionContext) -> bool:
-        """Check for attribution manipulation attempts"""
-        try:
-            # Check for patterns that suggest manipulation:
-            # - Fake recommendation clicks
-            # - Artificial interaction inflation
-            # - Coordinated fraud attempts
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for suspicious interaction metadata
-            if metadata.get("suspicious_activity"):
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking attribution manipulation: {e}")
-            return False
-
-    async def _detect_advanced_manipulation(self, context: AttributionContext) -> bool:
-        """
-        ✅ SCENARIO 28: Detect advanced attribution manipulation patterns
-
-        Story: Sophisticated attackers might use advanced techniques to manipulate
-        attribution, such as coordinated attacks, timing manipulation, or
-        interaction inflation. We need to detect these patterns.
-
-        Args:
-            context: Attribution context
-
-        Returns:
-            True if advanced manipulation detected, False otherwise
-        """
-        try:
-            # Check for coordinated manipulation (multiple accounts, same patterns)
-            if await self._is_coordinated_manipulation(context):
-                return True
-
-            # Check for timing manipulation (unrealistic interaction timing)
-            if await self._is_timing_manipulation(context):
-                return True
-
-            # Check for interaction inflation (too many interactions)
-            if await self._is_interaction_inflation(context):
-                return True
-
-            # Check for attribution gaming (strategic interaction patterns)
-            if await self._is_attribution_gaming(context):
-                return True
-
-            # For testing: detect based on order ID pattern
-            if "manipulation" in str(context.order_id):
-                logger.info(
-                    f"🎭 Attribution manipulation detected for test order {context.order_id}"
-                )
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error detecting advanced manipulation: {e}")
-            return False
-
-    async def _is_coordinated_manipulation(self, context: AttributionContext) -> bool:
-        """Check for coordinated manipulation across multiple accounts"""
-        try:
-            # Check for patterns that suggest coordination:
-            # - Similar interaction patterns across different customers
-            # - Synchronized timing across accounts
-            # - Identical user agents or IP patterns
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for suspicious coordination indicators
-            if metadata.get("coordinated_activity"):
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking coordinated manipulation: {e}")
-            return False
-
-    async def _is_timing_manipulation(self, context: AttributionContext) -> bool:
-        """Check for timing manipulation patterns"""
-        try:
-            # Check for unrealistic timing patterns:
-            # - Interactions happening too quickly
-            # - Perfect timing patterns (suspicious)
-            # - Interactions outside normal business hours consistently
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for suspicious timing indicators
-            if metadata.get("timing_anomalies"):
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking timing manipulation: {e}")
-            return False
-
-    async def _is_interaction_inflation(self, context: AttributionContext) -> bool:
-        """Check for interaction inflation patterns"""
-        try:
-            # Check for patterns that suggest interaction inflation:
-            # - Too many interactions in short time
-            # - Unrealistic interaction volumes
-            # - Patterns that don't match human behavior
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for interaction inflation indicators
-            if metadata.get("interaction_inflation"):
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking interaction inflation: {e}")
-            return False
-
-    async def _is_attribution_gaming(self, context: AttributionContext) -> bool:
-        """Check for attribution gaming patterns"""
-        try:
-            # Check for patterns that suggest gaming the attribution system:
-            # - Strategic interaction placement
-            # - Gaming specific attribution rules
-            # - Exploiting attribution algorithms
-
-            # For now, implement basic checks
-            metadata = getattr(context, "metadata", {})
-
-            # Check for attribution gaming indicators
-            if metadata.get("attribution_gaming"):
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking attribution gaming: {e}")
-            return False
-
-    def _create_fraudulent_attribution(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 27: Create attribution result for fraudulent orders
-
-        Story: When fraud is detected, we create a special attribution result
-        that indicates no attribution should be given due to fraud.
-        """
-        return AttributionResult(
-            order_id=(
-                int(str(context.order_id).split("_")[-1])
-                if str(context.order_id).split("_")[-1].isdigit()
-                else 0
-            ),
-            shop_id=context.shop_id,
-            customer_id=context.customer_id,
-            session_id=context.session_id,
-            total_attributed_revenue=Decimal("0.00"),
-            attribution_breakdown=[],
-            attribution_type=AttributionType.DIRECT_CLICK,
-            status=AttributionStatus.REJECTED,
-            calculated_at=datetime.now(),
-            metadata={
-                "scenario": "fraud_detected",
-                "reason": "Fraudulent attribution detected - no attribution given",
-                "fraud_indicators": [
-                    "bot_behavior",
-                    "suspicious_patterns",
-                    "manipulation_attempts",
-                ],
-            },
         )
 
     def _determine_attribution_window(self, context: AttributionContext) -> timedelta:
@@ -1938,27 +1594,6 @@ class AttributionEngine:
             calculated_at=datetime.utcnow(),
             metadata={"error": error_message},
         )
-
-    def _get_default_attribution_rules(self) -> List[AttributionRule]:
-        """Get default attribution rules."""
-        return [
-            AttributionRule(
-                name="Direct Click Attribution",
-                description="100% attribution to the extension that received the direct click",
-                rule_type=AttributionType.DIRECT_CLICK,
-                time_window_hours=720,  # 30 days
-                minimum_order_value=Decimal("10.00"),
-            ),
-            AttributionRule(
-                name="Cross Extension Attribution",
-                description="70% to primary extension, 30% to secondary extensions",
-                rule_type=AttributionType.CROSS_EXTENSION,
-                time_window_hours=720,  # 30 days
-                minimum_order_value=Decimal("10.00"),
-                cross_extension_weight_primary=0.7,
-                cross_extension_weight_secondary=0.3,
-            ),
-        ]
 
     async def _analyze_recommendation_timing(
         self, context: AttributionContext
