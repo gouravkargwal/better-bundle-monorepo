@@ -132,8 +132,7 @@ export function TrialActive({ billingPlan, formatCurrency }: TrialActiveProps) {
                       billingPlan.currency,
                     )}{" "}
                     in attributed revenue, we'll prompt you to set up billing.
-                    You'll then pay 3% of attributed revenue, capped at{" "}
-                    {formatCurrency(1000, billingPlan.currency)} per month.
+                    You'll then pay 3% of attributed revenue.
                   </Text>
                 </BlockStack>
               </div>

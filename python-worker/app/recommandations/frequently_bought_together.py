@@ -93,19 +93,26 @@ class FrequentlyBoughtTogetherService:
         """Get order IDs that contain the target product"""
         try:
             # Get orders where the product was purchased
+            # Since order_id and product_id are stored in interaction_metadata JSON
             result = await session.execute(
-                select(UserInteraction.order_id)
-                .where(
+                select(UserInteraction.interaction_metadata).where(
                     and_(
                         UserInteraction.shop_id == shop_id,
-                        UserInteraction.product_id == product_id,
-                        UserInteraction.interaction_type == "product_purchased",
-                        UserInteraction.order_id.isnot(None),
+                        UserInteraction.interaction_type == "checkout_completed",
                     )
                 )
-                .distinct()
             )
-            return [row[0] for row in result.fetchall() if row[0]]
+
+            order_ids = []
+            for row in result.fetchall():
+                metadata = row[0] or {}
+                # Check if this order contains the target product
+                if self._order_contains_product(metadata, product_id):
+                    order_id = metadata.get("order_id")
+                    if order_id:
+                        order_ids.append(str(order_id))
+
+            return list(set(order_ids))  # Remove duplicates
 
         except Exception as e:
             logger.error(f"Error getting orders with product: {str(e)}")
@@ -121,36 +128,46 @@ class FrequentlyBoughtTogetherService:
     ) -> List[Dict[str, Any]]:
         """Find products frequently bought together in the same orders"""
         try:
-            # Get all products purchased in orders that contain the target product
-            # Exclude the target product itself
+            # Get all checkout completed events for the shop
             result = await session.execute(
-                select(
-                    UserInteraction.product_id,
-                    func.count(UserInteraction.product_id).label("co_occurrences"),
-                )
-                .where(
+                select(UserInteraction.interaction_metadata).where(
                     and_(
                         UserInteraction.shop_id == shop_id,
-                        UserInteraction.order_id.in_(order_ids),
-                        UserInteraction.interaction_type == "product_purchased",
-                        UserInteraction.product_id != target_product_id,
-                        UserInteraction.product_id.isnot(None),
+                        UserInteraction.interaction_type == "checkout_completed",
                     )
                 )
-                .group_by(UserInteraction.product_id)
-                .having(func.count(UserInteraction.product_id) >= min_co_occurrences)
-                .order_by(desc("co_occurrences"))
             )
 
-            co_purchased = []
-            for row in result.fetchall():
-                co_purchased.append(
-                    {
-                        "product_id": row.product_id,
-                        "co_occurrences": row.co_occurrences,
-                    }
-                )
+            # Count co-occurrences of products in the same orders
+            product_co_occurrences = {}
 
+            for row in result.fetchall():
+                metadata = row[0] or {}
+                order_id = metadata.get("order_id")
+
+                if order_id and str(order_id) in order_ids:
+                    # Extract products from this order
+                    products = self._extract_products_from_order(metadata)
+
+                    for product_id in products:
+                        if product_id != target_product_id:
+                            if product_id not in product_co_occurrences:
+                                product_co_occurrences[product_id] = 0
+                            product_co_occurrences[product_id] += 1
+
+            # Filter by minimum co-occurrences and sort
+            co_purchased = []
+            for product_id, count in product_co_occurrences.items():
+                if count >= min_co_occurrences:
+                    co_purchased.append(
+                        {
+                            "product_id": product_id,
+                            "co_occurrences": count,
+                        }
+                    )
+
+            # Sort by co-occurrences (descending)
+            co_purchased.sort(key=lambda x: x["co_occurrences"], reverse=True)
             return co_purchased
 
         except Exception as e:
@@ -213,4 +230,34 @@ class FrequentlyBoughtTogetherService:
 
         except Exception as e:
             logger.error(f"Error getting product details: {str(e)}")
+            return []
+
+    def _order_contains_product(
+        self, metadata: Dict[str, Any], product_id: str
+    ) -> bool:
+        """Check if an order contains a specific product"""
+        try:
+            # Look for product in order line items
+            line_items = metadata.get("line_items", [])
+            for item in line_items:
+                if isinstance(item, dict):
+                    item_product_id = item.get("product_id")
+                    if item_product_id == product_id:
+                        return True
+            return False
+        except Exception:
+            return False
+
+    def _extract_products_from_order(self, metadata: Dict[str, Any]) -> List[str]:
+        """Extract product IDs from order metadata"""
+        try:
+            products = []
+            line_items = metadata.get("line_items", [])
+            for item in line_items:
+                if isinstance(item, dict):
+                    product_id = item.get("product_id")
+                    if product_id:
+                        products.append(str(product_id))
+            return products
+        except Exception:
             return []

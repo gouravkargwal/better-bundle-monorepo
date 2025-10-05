@@ -86,7 +86,7 @@ class SessionDataService:
                 cart_contents = []
                 cart_data = None
                 for event in recent_cart_events:
-                    metadata = event.metadata or {}
+                    metadata = event.interaction_metadata or {}
 
                     # Handle cart_viewed events (full cart data)
                     if event.interaction_type == "cart_viewed" and metadata.get(
@@ -122,7 +122,7 @@ class SessionDataService:
             recent_views = []
             product_types = set()
             for event in recent_view_events:
-                metadata = event.metadata or {}
+                metadata = event.interaction_metadata or {}
                 product_id = self._extract_product_id_from_metadata(metadata)
 
                 if product_id and product_id not in recent_views:
@@ -136,7 +136,7 @@ class SessionDataService:
             # Extract recent adds to cart
             recent_adds = []
             for event in recent_add_events:
-                metadata = event.metadata or {}
+                metadata = event.interaction_metadata or {}
                 product_id = self._extract_product_id_from_metadata(metadata)
 
                 if product_id and product_id not in recent_adds:
@@ -155,7 +155,7 @@ class SessionDataService:
                     "total_adds": len(recent_adds),
                     "categories": list(product_types),
                     "last_activity": (
-                        recent_cart_events[0].createdAt.isoformat()
+                        recent_cart_events[0].created_at.isoformat()
                         if recent_cart_events
                         else None
                     ),
