@@ -72,6 +72,37 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // Update billing plan subscription status
+    const billingPlan = await prisma.billing_plans.findFirst({
+      where: {
+        shop_id: shop,
+        status: "active",
+      },
+      orderBy: { created_at: "desc" },
+    });
+
+    if (billingPlan) {
+      await prisma.billing_plans.update({
+        where: { id: billingPlan.id },
+        data: {
+          subscription_status: "CANCELLED",
+          subscription_cancelled_at: new Date(),
+          configuration: {
+            ...(billingPlan.configuration as any),
+            subscription_status: "CANCELLED",
+            subscription_cancelled_at: new Date().toISOString(),
+            cancellation_reason: "Charge cancelled by merchant",
+          },
+        },
+      });
+
+      console.log(
+        `🚫 Updated billing plan ${billingPlan.id} subscription status to CANCELLED`,
+      );
+    } else {
+      console.log(`⚠️ No billing plan found for shop ${shop}`);
+    }
+
     // Create billing event
     await prisma.billing_events.create({
       data: {
