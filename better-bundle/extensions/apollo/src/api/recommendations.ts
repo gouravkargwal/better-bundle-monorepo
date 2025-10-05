@@ -69,6 +69,10 @@ export interface ProductRecommendation {
   variants: ProductVariant[];
   default_variant_id: string;
   reason?: string;
+  // ✅ SHOPIFY RESTRICTION: Add fields for post-purchase compliance
+  requires_shipping?: boolean;
+  subscription?: boolean;
+  selling_plan?: any;
 }
 
 export interface PostPurchaseRecommendationResponse {
@@ -87,7 +91,7 @@ class ApolloRecommendationClient {
 
   constructor() {
     // Use the recommendation service URL
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app/api/v1/recommendations";
+    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
   }
 
   /**
@@ -97,14 +101,19 @@ class ApolloRecommendationClient {
     request: PostPurchaseRecommendationRequest,
   ): Promise<PostPurchaseRecommendationResponse> {
     try {
-      const response = await fetch(`${this.baseUrl}/post-purchase`, {
+      // Use main recommendation API with post_purchase context
+      const response = await fetch(`${this.baseUrl}/api/v1/recommendations/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...request,
-          context: "post_purchase", // Always use post_purchase context
+          shop_domain: request.shop_domain,
+          context: "post_purchase",
+          product_ids: request.purchased_products?.map((p) => p.product_id),
+          user_id: request.customer_id,
+          session_id: request.session_id,
+          limit: request.limit || 3,
         }),
       });
 

@@ -76,8 +76,20 @@ class UnifiedSessionService:
         """
         Get existing session or create new one for unified tracking.
 
+        ✅ SCENARIO 18: Cross-Device Attribution
+        ✅ SCENARIO 20: Session Expiration During Journey
+
+        Story: Sarah sees a recommendation, but her session expires while browsing.
+        She starts a new session and completes the purchase. We need to link
+        the expired session to the new one for proper attribution.
+
+        Story: Sarah browses on her phone, sees a recommendation, then switches
+        to her laptop to complete the purchase. We need to link these sessions
+        to give proper attribution to the mobile recommendation.
+
         This is the main entry point for session management. It handles:
         - Finding existing active sessions
+        - Cross-device session linking via client_id
         - Creating new sessions with UUID-based IDs
         - Race condition handling with retry logic
         - Proper transaction management
@@ -105,10 +117,31 @@ class UnifiedSessionService:
             current_time = utcnow()
 
             async with get_transaction_context() as session:
+                # ✅ SCENARIO 18: Cross-Device Session Linking
                 # Step 1: Try to find existing active session
                 existing_session = await self._find_existing_session(
                     session, shop_id, customer_id, browser_session_id, current_time
                 )
+
+                # ✅ SCENARIO 18: Cross-device linking via client_id
+                if not existing_session and client_id:
+                    existing_session = await self._find_cross_device_session(
+                        session, shop_id, client_id, current_time
+                    )
+                    if existing_session:
+                        logger.info(
+                            f"🔗 Cross-device session found: {existing_session.id} via client_id {client_id}"
+                        )
+
+                # ✅ SCENARIO 20: Check for expired sessions that can be linked
+                if not existing_session:
+                    existing_session = await self._find_expired_session_for_linking(
+                        session, shop_id, customer_id, browser_session_id, current_time
+                    )
+                    if existing_session:
+                        logger.info(
+                            f"🔄 Expired session found for linking: {existing_session.id}"
+                        )
 
                 if existing_session:
                     # Update activity in background and return existing session
@@ -431,6 +464,136 @@ class UnifiedSessionService:
     # ============================================================================
     # PRIVATE HELPER METHODS
     # ============================================================================
+
+    async def _find_cross_device_session(
+        self, session, shop_id: str, client_id: str, current_time: datetime
+    ) -> Optional[UserSessionModel]:
+        """
+        ✅ SCENARIO 18: Find cross-device session via client_id
+
+        Story: Sarah browses on her phone (client_id: abc123), sees a recommendation,
+        then switches to her laptop (same client_id: abc123) to complete the purchase.
+        We need to link these sessions to give proper attribution.
+
+        Args:
+            session: Database session
+            shop_id: Shop identifier
+            client_id: Shopify client ID
+            current_time: Current timestamp
+
+        Returns:
+            UserSessionModel if found, None otherwise
+        """
+        try:
+            # Find active session with same client_id
+            stmt = (
+                select(UserSessionModel)
+                .where(
+                    and_(
+                        UserSessionModel.shop_id == shop_id,
+                        UserSessionModel.client_id == client_id,
+                        UserSessionModel.status == "active",
+                        UserSessionModel.expires_at > current_time,
+                    )
+                )
+                .order_by(UserSessionModel.last_active.desc())
+                .limit(1)
+            )
+
+            result = await session.execute(stmt)
+            cross_device_session = result.scalar_one_or_none()
+
+            if cross_device_session:
+                logger.info(
+                    f"🔗 Cross-device session found: {cross_device_session.id} "
+                    f"for client_id {client_id}"
+                )
+
+            return cross_device_session
+
+        except Exception as e:
+            logger.error(f"Error finding cross-device session: {e}")
+            return None
+
+    async def _find_expired_session_for_linking(
+        self,
+        session,
+        shop_id: str,
+        customer_id: Optional[str],
+        browser_session_id: Optional[str],
+        current_time: datetime,
+    ) -> Optional[UserSessionModel]:
+        """
+        ✅ SCENARIO 20: Find expired session that can be linked for attribution
+
+        Story: Sarah's session expires while browsing, but she starts a new session
+        and completes the purchase. We need to link the expired session to the
+        new one to maintain attribution continuity.
+
+        Args:
+            session: Database session
+            shop_id: Shop identifier
+            customer_id: Customer identifier
+            browser_session_id: Browser session identifier
+            current_time: Current timestamp
+
+        Returns:
+            UserSessionModel if found, None otherwise
+        """
+        try:
+            # Look for recently expired sessions (within last 24 hours)
+            recent_expiry = current_time - timedelta(hours=24)
+
+            # Build query for expired sessions
+            conditions = [
+                UserSessionModel.shop_id == shop_id,
+                UserSessionModel.status == "active",  # Still marked as active
+                UserSessionModel.expires_at < current_time,  # But actually expired
+                UserSessionModel.expires_at > recent_expiry,  # Recently expired
+            ]
+
+            # Add customer or browser session matching
+            if customer_id:
+                conditions.append(UserSessionModel.customer_id == customer_id)
+            elif browser_session_id:
+                conditions.append(
+                    UserSessionModel.browser_session_id == browser_session_id
+                )
+            else:
+                # No identifiers to match - return None
+                return None
+
+            stmt = (
+                select(UserSessionModel)
+                .where(and_(*conditions))
+                .order_by(UserSessionModel.last_active.desc())
+                .limit(1)
+            )
+
+            result = await session.execute(stmt)
+            expired_session = result.scalar_one_or_none()
+
+            if expired_session:
+                logger.info(
+                    f"🔄 Found recently expired session: {expired_session.id} "
+                    f"(expired at {expired_session.expires_at})"
+                )
+
+                # Extend the expired session instead of creating new one
+                expired_session.expires_at = (
+                    current_time + self.anonymous_session_duration
+                )
+                expired_session.last_active = current_time
+                await session.commit()
+                await session.refresh(expired_session)
+
+                logger.info(f"🔄 Extended expired session: {expired_session.id}")
+
+            return expired_session
+
+        except Exception as e:
+            logger.error(f"Error finding expired session for linking: {e}")
+            return None
 
     async def _find_existing_session(
         self,

@@ -82,6 +82,15 @@ async def get_recommendations(request: RecommendationRequest):
                 detail="Either shop_domain or user_id must be provided to determine the shop.",
             )
 
+        # Post-purchase context handling
+        if request.context == "post_purchase":
+            logger.info(
+                f"Processing post-purchase recommendations for shop {shop_domain}"
+            )
+            # Apply Shopify post-purchase restrictions
+            request.metadata = request.metadata or {}
+            request.metadata["post_purchase"] = True
+
         valid_contexts = [
             "product_page",
             "product_page_similar",
@@ -94,6 +103,7 @@ async def get_recommendations(request: RecommendationRequest):
             "checkout",
             "order_history",
             "order_status",
+            "post_purchase",  # ✅ Apollo post-purchase extension support
         ]
         if request.context not in valid_contexts:
             logger.warning(

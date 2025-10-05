@@ -201,7 +201,7 @@ class ShopifyUsageBillingService:
         try:
             # GraphQL mutation for creating usage-based subscription
             mutation = """
-            mutation appSubscriptionCreate($name: String!, $returnUrl: String!, $lineItems: [AppSubscriptionLineItemInput!]!) {
+            mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!) {
                 appSubscriptionCreate(
                     name: $name,
                     returnUrl: $returnUrl,

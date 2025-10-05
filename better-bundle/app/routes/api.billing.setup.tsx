@@ -7,7 +7,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const { shop } = session;
 
   try {
-    console.log(`🔄 Starting billing setup for shop ${shop}`);
+    // Parse request body to get spending limit
+    const body = await request.json();
+    const spendingLimit = body.spendingLimit || 1000.0;
+
+    console.log(
+      `🔄 Starting billing setup for shop ${shop} with spending limit: $${spendingLimit}`,
+    );
 
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
@@ -63,10 +69,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Create Shopify subscription using GraphQL
     const currency = shopRecord.currency_code || "USD";
-    const cappedAmount = 1000.0; // $1000 monthly cap
+    const cappedAmount = spendingLimit; // User-selected monthly cap
 
     const mutation = `
-      mutation appSubscriptionCreate($name: String!, $returnUrl: String!, $lineItems: [AppSubscriptionLineItemInput!]!) {
+      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!) {
         appSubscriptionCreate(
           name: $name
           returnUrl: $returnUrl
@@ -109,7 +115,7 @@ export async function action({ request }: ActionFunctionArgs) {
         {
           plan: {
             appUsagePricingDetails: {
-              terms: "3% of attributed revenue (capped at $1,000/month)",
+              terms: `3% of attributed revenue (capped at $${cappedAmount}/month)`,
               cappedAmount: {
                 amount: cappedAmount,
                 currencyCode: currency,
@@ -187,6 +193,7 @@ export async function action({ request }: ActionFunctionArgs) {
           phase: "subscription_creation",
         },
         occurred_at: new Date(),
+        processed_at: new Date(),
       },
     });
 

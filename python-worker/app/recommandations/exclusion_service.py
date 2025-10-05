@@ -99,17 +99,20 @@ class ProductExclusionService:
                 logger.debug(
                     f"📦 Excluding {len(exclude_ids)} all-time purchases for context '{context}'"
                 )
-                # Customer might want to buy again for someone else
+
+            elif context == "post_purchase":
+                # For post-purchase, exclude very recent purchases (last 7 days)
+                # This allows for cross-sell/upsell without showing just-purchased items
                 exclude_ids = (
                     await PurchaseHistoryService.get_recently_purchased_product_ids(
                         session=session,
                         shop_id=shop_id,
                         customer_id=user_id,
-                        days=14,
+                        days=7,
                     )
                 )
                 logger.debug(
-                    f"📦 Excluding {len(exclude_ids)} recent purchases (14 days) for cart context"
+                    f"📦 Excluding {len(exclude_ids)} recent purchases (7 days) for post-purchase context"
                 )
 
             else:

@@ -185,7 +185,17 @@ class RefundAttributionKafkaConsumer:
     async def _process_single_refund_attribution(
         self, refund_id: str, shop_id: str, session: Any
     ):
-        """Process attribution for a single refund using single RefundAttribution table."""
+        """
+        Process attribution for a single refund using single RefundAttribution table.
+
+        ✅ SCENARIO 11: Refund Attribution
+        ✅ SCENARIO 16: Partial Refund Attribution
+
+        - When a customer gets a refund, we need to reverse the attribution
+        - Find original purchase attribution
+        - Calculate proportional refund attribution
+        - Create RefundAttribution record
+        """
         # Check if attribution already exists (idempotency)
         existing_attribution_query = select(RefundAttribution).where(
             and_(
@@ -197,7 +207,7 @@ class RefundAttributionKafkaConsumer:
         existing_attribution = existing_attribution_result.scalar_one_or_none()
 
         if existing_attribution:
-
+            logger.info(f"Refund attribution already exists for {refund_id}")
             return
 
         # Load refund data from RawOrder (single source of truth)
@@ -250,10 +260,22 @@ class RefundAttributionKafkaConsumer:
             )
             return
 
-        # Compute attribution using simplified logic
-        attribution_data = self._compute_simplified_refund_attribution(
-            refund_obj, order, payload_data
+        # ✅ SCENARIO 11: Find original purchase attribution for refund
+        original_attribution = await self._find_original_purchase_attribution(
+            session, shop_id, order_id
         )
+
+        if not original_attribution:
+            logger.warning(f"No original attribution found for order {order_id}")
+            # Create default attribution data
+            attribution_data = self._compute_simplified_refund_attribution(
+                refund_obj, order, payload_data
+            )
+        else:
+            # ✅ SCENARIO 12: Calculate proportional refund attribution
+            attribution_data = await self._calculate_proportional_refund_attribution(
+                original_attribution, refund_obj, order
+            )
 
         # Create single RefundAttribution record
         refund_attribution = RefundAttribution(
@@ -277,6 +299,100 @@ class RefundAttributionKafkaConsumer:
 
         session.add(refund_attribution)
         await session.flush()  # Flush to get the ID if needed
+
+    async def _find_original_purchase_attribution(
+        self, session: Any, shop_id: str, order_id: str
+    ):
+        """
+        ✅ SCENARIO 11: Find original purchase attribution for refund
+
+        Story: When a customer gets a refund, we need to find the original
+        purchase attribution to reverse it proportionally.
+        """
+        from app.core.database.models.purchase_attribution import PurchaseAttribution
+
+        query = select(PurchaseAttribution).where(
+            and_(
+                PurchaseAttribution.shop_id == shop_id,
+                PurchaseAttribution.order_id == order_id,
+            )
+        )
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def _calculate_proportional_refund_attribution(
+        self, original_attribution, refund_obj, order
+    ):
+        """
+        ✅ SCENARIO 12: Calculate proportional refund attribution
+        ✅ SCENARIO 16: Enhanced partial refund attribution
+
+        Story: If original purchase was $100 with 70% Phoenix attribution,
+        and refund is $30, then Phoenix should get 70% of $30 = $21 refund attribution.
+
+        Enhanced for partial refunds: Handles multiple partial refunds
+        and maintains attribution accuracy across refund cycles.
+        """
+        refund_amount = float(refund_obj.get("total_refund_amount", 0.0))
+        original_revenue = float(original_attribution.total_revenue)
+
+        # ✅ SCENARIO 16: Enhanced partial refund handling
+        refund_amount = float(refund_obj.get("total_refund_amount", 0.0))
+        original_revenue = float(original_attribution.total_revenue)
+
+        # Check if this is a partial refund
+        is_partial_refund = refund_amount < original_revenue
+
+        # Calculate refund ratio
+        refund_ratio = refund_amount / original_revenue if original_revenue > 0 else 0
+
+        # Apply ratio to original attribution weights
+        original_weights = original_attribution.attribution_weights or {}
+        refund_weights = {
+            extension: weight * refund_ratio
+            for extension, weight in original_weights.items()
+        }
+
+        # Calculate attributed refund amounts
+        attributed_refund = {
+            extension: refund_amount * weight
+            for extension, weight in refund_weights.items()
+        }
+
+        # ✅ SCENARIO 16: Enhanced metadata for partial refunds
+        metadata = {
+            "refund_ratio": refund_ratio,
+            "original_attribution_id": original_attribution.id,
+            "scenario": "proportional_refund_attribution",
+            "is_partial_refund": is_partial_refund,
+            "remaining_revenue": original_revenue - refund_amount,
+            "refund_percentage": (
+                (refund_amount / original_revenue) * 100 if original_revenue > 0 else 0
+            ),
+        }
+
+        # Add partial refund specific metadata
+        if is_partial_refund:
+            metadata.update(
+                {
+                    "partial_refund_details": {
+                        "refunded_amount": refund_amount,
+                        "remaining_amount": original_revenue - refund_amount,
+                        "refund_type": "partial",
+                    }
+                }
+            )
+
+        return {
+            "contributing_extensions": list(
+                original_attribution.contributing_extensions
+            ),
+            "attribution_weights": refund_weights,
+            "attributed_refund": attributed_refund,
+            "total_interactions": original_attribution.total_interactions,
+            "interactions_by_extension": original_attribution.interactions_by_extension,
+            "metadata": metadata,
+        }
 
     def _compute_simplified_refund_attribution(
         self, refund_obj: Dict[str, Any], order: Any, payload_data: Dict[str, Any]

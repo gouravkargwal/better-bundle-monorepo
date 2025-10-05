@@ -277,6 +277,51 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         end_cursor: endCursor
                     }
                 }
+                refunds {
+                    id
+                    created_at: createdAt
+                    note
+                    total_refunded: totalRefunded {
+                        amount
+                        currency_code: currencyCode
+                    }
+                    refund_line_items: refundLineItems(first: 10) {
+                        edges {
+                            node {
+                                id
+                                quantity
+                                subtotal
+                                line_item: lineItem {
+                                    id
+                                    product {
+                                        id
+                                    }
+                                    variant {
+                                        id
+                                    }
+                                    title
+                                    sku
+                                    customAttributes {
+                                        key
+                                        value
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    transactions(first: 10) {
+                        edges {
+                            node {
+                                id
+                                kind
+                                amount
+                                gateway
+                                status
+                                created_at: createdAt
+                            }
+                        }
+                    }
+                }
             }
         }
         """
@@ -319,6 +364,39 @@ class OrderAPIClient(BaseShopifyAPIClient):
 
             order["line_items"] = {
                 "edges": all_line_items,
+                "page_info": {"has_next_page": False},
+            }
+
+        # Refunds are returned as a direct list, no pagination needed
+        # The refunds field returns all refunds for the order directly
+        refunds = order.get("refunds", [])
+        if refunds:
+            # Process each refund to handle connection fields
+            processed_refunds = []
+            for refund in refunds:
+                # Process refund line items (connection format)
+                refund_line_items = refund.get("refund_line_items", {})
+                if refund_line_items:
+                    line_item_edges = refund_line_items.get("edges", [])
+                    refund["refund_line_items"] = {
+                        "edges": line_item_edges,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                # Process transactions (connection format)
+                transactions = refund.get("transactions", {})
+                if transactions:
+                    transaction_edges = transactions.get("edges", [])
+                    refund["transactions"] = {
+                        "edges": transaction_edges,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                processed_refunds.append(refund)
+
+            # Convert to the expected format for consistency
+            order["refunds"] = {
+                "edges": [{"node": refund} for refund in processed_refunds],
                 "page_info": {"has_next_page": False},
             }
 
@@ -369,3 +447,74 @@ class OrderAPIClient(BaseShopifyAPIClient):
         result = await self.execute_query(line_items_query, variables, shop_domain)
         order_data = result.get("order", {})
         return order_data.get("line_items", {})
+
+    async def _fetch_order_refunds(
+        self, shop_domain: str, order_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of refunds for a specific order"""
+        refunds_query = """
+        query($orderId: ID!, $first: Int!, $after: String) {
+            order(id: $orderId) {
+                refunds(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            created_at: createdAt
+                            note
+                            total_refunded: totalRefunded {
+                                amount
+                                currency_code: currencyCode
+                            }
+                            refund_line_items: refundLineItems(first: 10) {
+                                edges {
+                                    node {
+                                        id
+                                        quantity
+                                        subtotal
+                                        line_item: lineItem {
+                                            id
+                                            product_id: productId
+                                            variant_id: variantId
+                                            title
+                                            sku
+                                            properties {
+                                                key
+                                                value
+                                            }
+                                        }
+                                    }
+                                }
+                                page_info: pageInfo {
+                                    has_next_page: hasNextPage
+                                    end_cursor: endCursor
+                                }
+                            }
+                            transactions {
+                                id
+                                kind
+                                amount
+                                currency
+                                gateway
+                                status
+                                created_at: createdAt
+                            }
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "orderId": order_id,
+            "first": 50,  # Smaller batch size for cost efficiency
+            "after": cursor,
+        }
+
+        result = await self.execute_query(refunds_query, variables, shop_domain)
+        order_data = result.get("order", {})
+        return order_data.get("refunds", {})

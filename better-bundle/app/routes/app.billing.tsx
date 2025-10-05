@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useSubmit } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import {
@@ -15,13 +15,12 @@ import {
   Badge,
   Icon,
   Spinner,
+  Select,
 } from "@shopify/polaris";
 import {
   AlertTriangleIcon,
   CheckCircleIcon,
   StarFilledIcon,
-  BillIcon,
-  CashDollarIcon,
   ClockIcon,
 } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -80,8 +79,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       throw new Error("No billing plan found");
     }
 
-    const config = (billingPlan.configuration as any) || {};
-
     // Calculate trial status
     const trialRevenue = Number(billingPlan.trial_revenue) || 0;
     const trialThreshold = Number(billingPlan.trial_threshold) || 200;
@@ -115,9 +112,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function BillingPage() {
-  const { shop, billingPlan } = useLoaderData<typeof loader>();
-  const submit = useSubmit();
+  const { billingPlan } = useLoaderData<typeof loader>();
   const [isLoading, setIsLoading] = useState(false);
+  const [spendingLimit, setSpendingLimit] = useState("1000");
 
   // Add loading state for initial page load
   if (!billingPlan) {
@@ -146,6 +143,7 @@ export default function BillingPage() {
       const response = await fetch("/api/billing/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spendingLimit: parseFloat(spendingLimit) }),
       });
 
       const result = await response.json();
@@ -417,13 +415,47 @@ export default function BillingPage() {
                           • Pay only 3% of attributed revenue
                         </Text>
                         <Text as="p" variant="bodyMd">
-                          • Capped at $1,000 per month (no surprise charges)
+                          • Capped at your selected limit per month (no surprise
+                          charges)
                         </Text>
                         <Text as="p" variant="bodyMd">
                           • Cancel anytime
                         </Text>
                         <Text as="p" variant="bodyMd">
                           • Only pay for the value we deliver
+                        </Text>
+                      </BlockStack>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#FEFEFE",
+                        borderRadius: "8px",
+                        border: "1px solid #E5E7EB",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <Text as="p" variant="headingSm" fontWeight="bold">
+                          Select Monthly Spending Limit
+                        </Text>
+
+                        <Select
+                          label="Monthly spending limit"
+                          value={spendingLimit}
+                          onChange={setSpendingLimit}
+                          options={[
+                            { label: "$100 USD", value: "100" },
+                            { label: "$250 USD", value: "250" },
+                            { label: "$500 USD", value: "500" },
+                            { label: "$1,000 USD", value: "1000" },
+                            { label: "$2,500 USD", value: "2500" },
+                            { label: "$5,000 USD", value: "5000" },
+                          ]}
+                        />
+
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          You can change this limit anytime after setup
                         </Text>
                       </BlockStack>
                     </div>
@@ -445,6 +477,147 @@ export default function BillingPage() {
                       alignment="center"
                     >
                       You'll be redirected to Shopify to approve the billing
+                      plan
+                    </Text>
+                  </BlockStack>
+                </div>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </BlockStack>
+      </Page>
+    );
+  }
+
+  // ============= SUBSCRIPTION CANCELLED =============
+  if (
+    billingPlan.subscription_status === "CANCELLED" ||
+    billingPlan.subscription_status === "CANCELLED_BY_MERCHANT"
+  ) {
+    return (
+      <Page>
+        <TitleBar title="Billing" />
+        <BlockStack gap="300">
+          <HeroHeader
+            badge="❌ Subscription Cancelled"
+            title="Billing Subscription Cancelled"
+            subtitle="Your billing subscription has been cancelled. Services are currently paused."
+            gradient="red"
+          />
+
+          <Layout>
+            <Layout.Section>
+              <Banner tone="critical">
+                <BlockStack gap="300">
+                  <InlineStack gap="200" align="start">
+                    <Icon source={AlertTriangleIcon} tone="critical" />
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Services Paused
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        Your billing subscription has been cancelled. Better
+                        Bundle services are currently paused and recommendations
+                        are not being shown to your customers.
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </BlockStack>
+              </Banner>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: "20px" }}>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd" fontWeight="bold">
+                      Resume Services
+                    </Text>
+
+                    <Text as="p" variant="bodyMd">
+                      To resume Better Bundle services, you can set up a new
+                      billing subscription:
+                    </Text>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#F0F9FF",
+                        borderRadius: "8px",
+                        border: "1px solid #0EA5E9",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <Text as="p" variant="headingSm" fontWeight="bold">
+                          Continue with Usage-Based Billing
+                        </Text>
+
+                        <Text as="p" variant="bodyMd">
+                          • Pay only 3% of attributed revenue
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Capped at your selected limit per month (no surprise
+                          charges)
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Cancel anytime
+                        </Text>
+                        <Text as="p" variant="bodyMd">
+                          • Only pay for the value we deliver
+                        </Text>
+                      </BlockStack>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#FEFEFE",
+                        borderRadius: "8px",
+                        border: "1px solid #E5E7EB",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <Text as="p" variant="headingSm" fontWeight="bold">
+                          Select Monthly Spending Limit
+                        </Text>
+
+                        <Select
+                          label="Monthly spending limit"
+                          value={spendingLimit}
+                          onChange={setSpendingLimit}
+                          options={[
+                            { label: "$100 USD", value: "100" },
+                            { label: "$250 USD", value: "250" },
+                            { label: "$500 USD", value: "500" },
+                            { label: "$1,000 USD", value: "1000" },
+                            { label: "$2,500 USD", value: "2500" },
+                            { label: "$5,000 USD", value: "5000" },
+                          ]}
+                        />
+
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          You can change this limit anytime after setup
+                        </Text>
+                      </BlockStack>
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="large"
+                      onClick={handleSetupBilling}
+                      loading={isLoading}
+                      fullWidth
+                    >
+                      Setup New Billing & Resume Services
+                    </Button>
+
+                    <Text
+                      as="p"
+                      variant="bodySm"
+                      tone="subdued"
+                      alignment="center"
+                    >
+                      You'll be redirected to Shopify to approve the new billing
                       plan
                     </Text>
                   </BlockStack>
@@ -494,13 +667,40 @@ export default function BillingPage() {
               <Card>
                 <div style={{ padding: "20px" }}>
                   <BlockStack gap="400">
+                    <div
+                      style={{
+                        padding: "20px",
+                        backgroundColor: "#FEF3C7",
+                        borderRadius: "8px",
+                        border: "1px solid #F59E0B",
+                      }}
+                    >
+                      <BlockStack gap="300">
+                        <InlineStack gap="200" align="start">
+                          <Icon source={ClockIcon} tone="warning" />
+                          <BlockStack gap="100">
+                            <Text as="p" variant="bodyMd" fontWeight="bold">
+                              Next Steps
+                            </Text>
+                            <Text as="p" variant="bodySm">
+                              1. Click "Approve Subscription" below
+                              <br />
+                              2. Complete the approval process in Shopify
+                              <br />
+                              3. Services will automatically resume
+                            </Text>
+                          </BlockStack>
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
+
                     <Text as="h2" variant="headingMd" fontWeight="bold">
-                      Waiting for Approval
+                      Approve Your Subscription
                     </Text>
 
                     <Text as="p" variant="bodyMd">
-                      If you haven't approved the subscription yet, please click
-                      the button below:
+                      To resume Better Bundle services, please approve your
+                      billing subscription:
                     </Text>
 
                     {billingPlan.subscription_confirmation_url && (
@@ -519,6 +719,19 @@ export default function BillingPage() {
                       </Button>
                     )}
 
+                    <InlineStack gap="200" align="center">
+                      <Button
+                        variant="tertiary"
+                        onClick={() => window.location.reload()}
+                        loading={isLoading}
+                      >
+                        Check Status
+                      </Button>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Already approved? Click to refresh
+                      </Text>
+                    </InlineStack>
+
                     <Text
                       as="p"
                       variant="bodySm"
@@ -536,6 +749,101 @@ export default function BillingPage() {
       </Page>
     );
   }
+
+  // ============= OTHER SUBSCRIPTION STATUSES =============
+  // Handle any other subscription statuses (DECLINED, EXPIRED, etc.)
+  return (
+    <Page>
+      <TitleBar title="Billing" />
+      <BlockStack gap="300">
+        <HeroHeader
+          badge="⚠️ Unknown Status"
+          title="Subscription Status Unknown"
+          subtitle={`Your subscription status is "${billingPlan.subscription_status}". Please contact support if this persists.`}
+          gradient="gray"
+        />
+
+        <Layout>
+          <Layout.Section>
+            <Banner tone="warning">
+              <BlockStack gap="300">
+                <InlineStack gap="200" align="start">
+                  <Icon source={AlertTriangleIcon} tone="warning" />
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      Unknown Subscription Status
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Your subscription status is "
+                      {billingPlan.subscription_status}". This may indicate an
+                      issue with your billing setup.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <div style={{ padding: "20px" }}>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd" fontWeight="bold">
+                    Need Help?
+                  </Text>
+
+                  <Text as="p" variant="bodyMd">
+                    If you're experiencing issues with your billing
+                    subscription, please try:
+                  </Text>
+
+                  <div
+                    style={{
+                      padding: "20px",
+                      backgroundColor: "#F0F9FF",
+                      borderRadius: "8px",
+                      border: "1px solid #0EA5E9",
+                    }}
+                  >
+                    <BlockStack gap="300">
+                      <Text as="p" variant="headingSm" fontWeight="bold">
+                        Troubleshooting Steps
+                      </Text>
+                      <Text as="p" variant="bodyMd">
+                        • Refresh this page to check for updates
+                        <br />
+                        • Contact support if the issue persists
+                        <br />• Check your Shopify admin for billing
+                        notifications
+                      </Text>
+                    </BlockStack>
+                  </div>
+
+                  <InlineStack gap="200" align="center">
+                    <Button
+                      variant="primary"
+                      onClick={() => window.location.reload()}
+                      loading={isLoading}
+                    >
+                      Refresh Page
+                    </Button>
+                    <Button
+                      variant="tertiary"
+                      onClick={() =>
+                        window.open("mailto:support@betterbundle.com", "_blank")
+                      }
+                    >
+                      Contact Support
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </div>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </BlockStack>
+    </Page>
+  );
 
   // ============= SUBSCRIPTION ACTIVE =============
   if (billingPlan.subscription_status === "ACTIVE") {
