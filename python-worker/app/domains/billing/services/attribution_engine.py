@@ -99,7 +99,9 @@ class AttributionEngine:
                 logger.warning(
                     f"⚠️ Payment failed for order {context.order_id} - skipping attribution"
                 )
-                return self._create_payment_failed_attribution(context)
+                result = self._create_payment_failed_attribution(context)
+                await self._store_attribution_result(result)  # ✅ Store rejected
+                return result
 
             logger.info(
                 f"🔍 Starting attribution calculation for order {context.order_id}"
@@ -116,7 +118,9 @@ class AttributionEngine:
                 logger.warning(
                     f"📋 Subscription cancelled for order {context.order_id}"
                 )
-                return self._create_subscription_cancelled_attribution(context)
+                result = self._create_subscription_cancelled_attribution(context)
+                await self._store_attribution_result(result)  # ✅ Store rejected
+                return result
 
             # ✅ SCENARIO 22: Check for recommendation timing
             timing_analysis = await self._analyze_recommendation_timing(context)
@@ -124,7 +128,9 @@ class AttributionEngine:
                 logger.info(
                     f"⏰ Recommendation timing adjustment needed for order {context.order_id}"
                 )
-                return await self._handle_timing_adjustment(context, timing_analysis)
+                result = await self._handle_timing_adjustment(context, timing_analysis)
+                await self._store_attribution_result(result)  # ✅ Store rejected
+                return result
 
             # ✅ SCENARIO 9: Get all interactions for this customer/session with configurable window
             attribution_window = self._determine_attribution_window(context)
@@ -137,7 +143,9 @@ class AttributionEngine:
 
             if not interactions:
                 logger.warning(f"⚠️ No interactions found for order {context.order_id}")
-                return self._create_empty_attribution(context)
+                result = self._create_empty_attribution(context)
+                await self._store_attribution_result(result)  # ✅ Store rejected
+                return result
 
             # 3. Calculate attribution breakdown
             logger.info(
@@ -229,93 +237,6 @@ class AttributionEngine:
         except Exception as e:
             logger.error(f"Error fetching interactions: {str(e)}")
             return []
-
-    async def _fetch_interactions(
-        self, session: AsyncSession, context: AttributionContext, start_time: datetime
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetch interactions from database using provided session.
-
-        Now includes interactions from linked anonymous sessions via CrossSessionLinkingService.
-        """
-
-        # Build base query
-        query = select(UserInteraction).where(
-            and_(
-                UserInteraction.shop_id == context.shop_id,
-                UserInteraction.created_at >= start_time,
-                UserInteraction.created_at <= context.purchase_time,
-            )
-        )
-
-        # Handle customer-based attribution with session linking
-        if context.customer_id:
-            try:
-                # Use CrossSessionLinkingService to get all sessions (including linked anonymous)
-                linking_service = CrossSessionLinkingService()
-                all_sessions = await linking_service._get_customer_sessions(
-                    customer_id=context.customer_id,
-                    shop_id=context.shop_id,
-                )
-
-                if all_sessions:
-                    session_ids = [s.id for s in all_sessions]
-
-                    logger.info(
-                        f"🔗 Fetching interactions from {len(session_ids)} sessions "
-                        f"(including linked anonymous) for customer {context.customer_id}"
-                    )
-
-                    # Query by session IDs OR customer_id to catch all interactions
-                    query = query.where(
-                        or_(
-                            UserInteraction.customer_id == context.customer_id,
-                            UserInteraction.session_id.in_(session_ids),
-                        )
-                    )
-                else:
-                    # Fallback: No linked sessions found, just use customer_id
-                    query = query.where(
-                        UserInteraction.customer_id == context.customer_id
-                    )
-                    logger.info(f"Filtering by customer_id only: {context.customer_id}")
-
-            except Exception as e:
-                logger.error(
-                    f"Error fetching linked sessions: {e}, falling back to customer_id only"
-                )
-                # Fallback to customer_id only if session linking fails
-                query = query.where(UserInteraction.customer_id == context.customer_id)
-
-        elif context.session_id:
-            query = query.where(UserInteraction.session_id == context.session_id)
-            logger.info(f"Filtering by session_id: {context.session_id}")
-
-        # Execute query
-        result = await session.execute(
-            query.order_by(UserInteraction.created_at.desc())
-        )
-        interactions = result.scalars().all()
-
-        logger.info(
-            f"Retrieved {len(interactions)} interactions from database "
-            f"(including linked sessions)"
-        )
-
-        # Convert SQLAlchemy models to dicts for compatibility
-        return [
-            {
-                "id": i.id,
-                "shop_id": i.shop_id,
-                "customer_id": i.customer_id,
-                "session_id": i.session_id,
-                "interaction_type": i.interaction_type,
-                "extension_type": i.extension_type,
-                "created_at": i.created_at,
-                "metadata": i.interaction_metadata or {},
-            }
-            for i in interactions
-        ]
 
     def _calculate_attribution_breakdown(
         self, context: AttributionContext, interactions: List[Dict[str, Any]]
@@ -1162,36 +1083,6 @@ class AttributionEngine:
             )
             return False  # Assume successful if we can't determine
 
-    def _create_payment_failed_attribution(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 14: Create attribution result for failed payments
-
-        Story: When payment fails, we create a special attribution result
-        that indicates no attribution should be given.
-        """
-        return AttributionResult(
-            order_id=(
-                int(str(context.order_id).split("_")[-1])
-                if str(context.order_id).split("_")[-1].isdigit()
-                else 0
-            ),
-            shop_id=context.shop_id,
-            customer_id=context.customer_id,
-            session_id=context.session_id,
-            total_attributed_revenue=Decimal("0.00"),
-            attribution_breakdown=[],
-            attribution_type=AttributionType.DIRECT_CLICK,
-            status=AttributionStatus.REJECTED,
-            calculated_at=datetime.now(),
-            metadata={
-                "scenario": "payment_failed",
-                "reason": "Payment failed - no attribution given",
-                "financial_status": getattr(context, "financial_status", "unknown"),
-            },
-        )
-
     async def _is_subscription_cancelled(self, context: AttributionContext) -> bool:
         """
         ✅ SCENARIO 15: Check if subscription was cancelled for this order
@@ -1242,38 +1133,6 @@ class AttributionEngine:
                 f"Error checking subscription cancellation for order {context.order_id}: {e}"
             )
             return False
-
-    def _create_subscription_cancelled_attribution(
-        self, context: AttributionContext
-    ) -> AttributionResult:
-        """
-        ✅ SCENARIO 15: Create attribution result for cancelled subscriptions
-
-        Story: When a subscription is cancelled, we create a special attribution
-        result that indicates the subscription was cancelled.
-        """
-        return AttributionResult(
-            order_id=(
-                int(str(context.order_id).split("_")[-1])
-                if str(context.order_id).split("_")[-1].isdigit()
-                else 0
-            ),
-            shop_id=context.shop_id,
-            customer_id=context.customer_id,
-            session_id=context.session_id,
-            total_attributed_revenue=Decimal("0.00"),
-            attribution_breakdown=[],
-            attribution_type=AttributionType.DIRECT_CLICK,
-            status=AttributionStatus.REJECTED,
-            calculated_at=datetime.now(),
-            metadata={
-                "scenario": "subscription_cancelled",
-                "reason": "Subscription cancelled - attribution adjusted",
-                "subscription_status": getattr(
-                    context, "subscription_status", "cancelled"
-                ),
-            },
-        )
 
     async def _calculate_normal_attribution(
         self, context: AttributionContext
@@ -1611,85 +1470,303 @@ class AttributionEngine:
             Timing analysis results
         """
         try:
-            # Mock timing analysis for testing
-            # In real implementation, this would analyze actual timing data
-            timing_analysis = {
-                "timing_score": 0.6,  # 60% timing score
-                "time_to_purchase_minutes": 120,  # 2 hours
-                "session_duration_minutes": 15,  # 15 minutes
-                "user_activity_level": "medium",
-                "recommendation_effectiveness": 0.7,
-                "requires_adjustment": True,  # Key for tests
+            # Get interactions to analyze timing
+            attribution_window = self._determine_attribution_window(context)
+            interactions = await self._get_relevant_interactions(
+                context, attribution_window
+            )
+
+            if not interactions:
+                # No interactions = no timing adjustment needed
+                return {
+                    "timing_score": 1.0,
+                    "time_to_purchase_minutes": 0,
+                    "session_duration_minutes": 0,
+                    "user_activity_level": "unknown",
+                    "recommendation_effectiveness": 0.0,
+                    "requires_adjustment": False,  # ✅ No adjustment if no interactions
+                }
+
+            # Find earliest recommendation interaction
+            recommendation_interactions = [
+                i
+                for i in interactions
+                if i["interaction_type"]
+                in [
+                    "recommendation_clicked",
+                    "recommendation_viewed",
+                    "recommendation_add_to_cart",
+                ]
+            ]
+
+            if not recommendation_interactions:
+                # No recommendation interactions = no timing adjustment
+                return {
+                    "timing_score": 1.0,
+                    "time_to_purchase_minutes": 0,
+                    "session_duration_minutes": 0,
+                    "user_activity_level": "unknown",
+                    "recommendation_effectiveness": 0.0,
+                    "requires_adjustment": False,  # ✅ No adjustment
+                }
+
+            # Calculate time to purchase from first recommendation
+            earliest_rec = min(
+                recommendation_interactions, key=lambda x: x["created_at"]
+            )
+            time_to_purchase = context.purchase_time - earliest_rec["created_at"]
+            time_to_purchase_minutes = time_to_purchase.total_seconds() / 60
+
+            # Calculate session duration (last interaction - first interaction)
+            first_interaction = min(interactions, key=lambda x: x["created_at"])
+            last_interaction = max(interactions, key=lambda x: x["created_at"])
+            session_duration = (
+                last_interaction["created_at"] - first_interaction["created_at"]
+            )
+            session_duration_minutes = session_duration.total_seconds() / 60
+
+            # Calculate timing score using exponential decay
+            # Half-life: 24 hours (1440 minutes)
+            hours_to_purchase = time_to_purchase_minutes / 60
+            timing_score = math.exp(-hours_to_purchase / 35)  # ln(2) * 50 ≈ 35
+            timing_score = max(0.1, min(1.0, timing_score))
+
+            # Determine user activity level
+            interaction_count = len(interactions)
+            if interaction_count >= 10:
+                activity_level = "high"
+            elif interaction_count >= 5:
+                activity_level = "medium"
+            else:
+                activity_level = "low"
+
+            # Calculate recommendation effectiveness
+            # Based on: number of recommendation interactions / total interactions
+            rec_count = len(recommendation_interactions)
+            effectiveness = min(1.0, rec_count / max(1, interaction_count))
+
+            # Determine if adjustment is needed
+            # Only adjust if timing is significantly delayed (> 24 hours or < 70% score)
+            requires_adjustment = timing_score < 0.7 or time_to_purchase_minutes > 1440
+
+            result = {
+                "timing_score": timing_score,
+                "time_to_purchase_minutes": int(time_to_purchase_minutes),
+                "session_duration_minutes": int(session_duration_minutes),
+                "user_activity_level": activity_level,
+                "recommendation_effectiveness": effectiveness,
+                "requires_adjustment": requires_adjustment,
+                "interaction_count": interaction_count,
+                "recommendation_count": rec_count,
             }
 
-            logger.info(
-                f"📊 Timing analysis for order {context.order_id}: {timing_analysis}"
-            )
-            return timing_analysis
+            logger.info(f"📊 Timing analysis for order {context.order_id}: {result}")
+            return result
 
         except Exception as e:
             logger.error(f"Error analyzing recommendation timing: {e}")
+            # Default to no adjustment on error
             return {
-                "timing_score": 0.5,
+                "timing_score": 1.0,
                 "time_to_purchase_minutes": 0,
                 "session_duration_minutes": 0,
                 "user_activity_level": "unknown",
                 "recommendation_effectiveness": 0.5,
+                "requires_adjustment": False,  # ✅ Don't adjust on error
             }
 
     async def _handle_timing_adjustment(
         self, context: AttributionContext, timing_analysis: Dict[str, Any]
     ) -> AttributionResult:
         """
-        ✅ SCENARIO 22: Handle timing-based attribution adjustment
+        Handle timing-based attribution adjustment.
 
-        Story: When timing analysis shows poor timing, we adjust attribution
-        to reflect the reduced influence of recommendations.
+        IMPORTANT: Does NOT store result - that's done by the caller.
         """
         try:
-            # Calculate timing-based attribution reduction
-            timing_score = timing_analysis.get("timing_score", 0.5)
-            time_to_purchase = timing_analysis.get("time_to_purchase_minutes", 0)
-            session_duration = timing_analysis.get("session_duration_minutes", 0)
+            timing_score = timing_analysis.get("timing_score", 1.0)
 
-            # Adjust attribution based on timing
-            if time_to_purchase > 1440:  # More than 24 hours
-                timing_score *= 0.5  # Reduce by 50%
-            elif time_to_purchase > 720:  # More than 12 hours
-                timing_score *= 0.7  # Reduce by 30%
+            # Get interactions and calculate attribution
+            attribution_window = self._determine_attribution_window(context)
+            interactions = await self._get_relevant_interactions(
+                context, attribution_window
+            )
 
-            # Adjust based on session duration
-            if session_duration < 5:  # Very short session
-                timing_score *= 0.8  # Reduce by 20%
+            if not interactions:
+                logger.warning(f"No interactions found for timing adjustment")
+                return self._create_empty_attribution(context)
 
-            # Calculate adjusted revenue
-            adjusted_revenue = context.purchase_amount * Decimal(str(timing_score))
+            # Calculate normal attribution breakdown
+            attribution_breakdown = self._calculate_attribution_breakdown(
+                context, interactions
+            )
 
-            # Create timing-adjusted attribution result
+            # Apply timing discount to each breakdown item
+            adjusted_breakdown = []
+            for breakdown in attribution_breakdown:
+                adjusted_amount = breakdown.attributed_amount * Decimal(
+                    str(timing_score)
+                )
+
+                adjusted_breakdown.append(
+                    AttributionBreakdown(
+                        extension_type=breakdown.extension_type,
+                        product_id=breakdown.product_id,
+                        attributed_amount=adjusted_amount,
+                        attribution_weight=breakdown.attribution_weight * timing_score,
+                        attribution_type=AttributionType.TIME_DECAY,
+                        interaction_id=breakdown.interaction_id,
+                        metadata={
+                            **breakdown.metadata,
+                            "timing_adjusted": True,
+                            "timing_score": timing_score,
+                            "original_amount": float(breakdown.attributed_amount),
+                        },
+                    )
+                )
+
+            # Calculate total
+            total_adjusted_revenue = sum(
+                breakdown.attributed_amount for breakdown in adjusted_breakdown
+            )
+
+            logger.info(
+                f"Timing adjustment applied: Score {timing_score:.2%} -> ${total_adjusted_revenue}"
+            )
+
+            # Return result WITHOUT storing (caller will store)
             return AttributionResult(
-                order_id=(
-                    int(str(context.order_id).split("_")[-1])
-                    if str(context.order_id).split("_")[-1].isdigit()
-                    else 0
-                ),
+                order_id=context.order_id,
                 shop_id=context.shop_id,
                 customer_id=context.customer_id,
                 session_id=context.session_id,
-                total_attributed_revenue=adjusted_revenue,
-                attribution_breakdown=[],
+                total_attributed_revenue=total_adjusted_revenue,
+                attribution_breakdown=adjusted_breakdown,
                 attribution_type=AttributionType.TIME_DECAY,
                 status=AttributionStatus.CALCULATED,
-                calculated_at=datetime.now(),
+                calculated_at=datetime.utcnow(),
                 metadata={
                     "scenario": "timing_adjusted",
                     "timing_score": timing_score,
-                    "time_to_purchase_minutes": time_to_purchase,
-                    "session_duration_minutes": session_duration,
-                    "reason": "Timing-based attribution adjustment applied",
+                    "time_to_purchase_minutes": timing_analysis.get(
+                        "time_to_purchase_minutes"
+                    ),
+                    "interaction_count": len(interactions),
                 },
             )
 
         except Exception as e:
-            logger.error(f"Error handling timing adjustment: {e}")
-            # Fallback to normal attribution
-            return await self._calculate_normal_attribution(context)
+            logger.error(f"Error handling timing adjustment: {e}", exc_info=True)
+            return self._create_empty_attribution(context)
+
+    def _create_payment_failed_attribution(
+        self, context: AttributionContext
+    ) -> AttributionResult:
+        """Create attribution result for failed payments"""
+        return AttributionResult(
+            order_id=context.order_id,  # Use directly, not split
+            shop_id=context.shop_id,
+            customer_id=context.customer_id,
+            session_id=context.session_id,
+            total_attributed_revenue=Decimal("0.00"),
+            attribution_breakdown=[],
+            attribution_type=AttributionType.DIRECT_CLICK,
+            status=AttributionStatus.REJECTED,
+            calculated_at=datetime.utcnow(),
+            metadata={
+                "scenario": "payment_failed",
+                "reason": "Payment failed - no attribution given",
+            },
+        )
+
+    def _create_subscription_cancelled_attribution(
+        self, context: AttributionContext
+    ) -> AttributionResult:
+        """Create attribution result for cancelled subscriptions"""
+        return AttributionResult(
+            order_id=context.order_id,  # Use directly, not split
+            shop_id=context.shop_id,
+            customer_id=context.customer_id,
+            session_id=context.session_id,
+            total_attributed_revenue=Decimal("0.00"),
+            attribution_breakdown=[],
+            attribution_type=AttributionType.DIRECT_CLICK,
+            status=AttributionStatus.REJECTED,
+            calculated_at=datetime.utcnow(),
+            metadata={
+                "scenario": "subscription_cancelled",
+                "reason": "Subscription cancelled",
+            },
+        )
+
+    async def _fetch_interactions(
+        self, session: AsyncSession, context: AttributionContext, start_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch interactions with proper async handling.
+        """
+        try:
+            # Build query
+            query = select(UserInteraction).where(
+                and_(
+                    UserInteraction.shop_id == context.shop_id,
+                    UserInteraction.created_at >= start_time,
+                    UserInteraction.created_at <= context.purchase_time,
+                )
+            )
+
+            # Add customer/session filters
+            if context.customer_id:
+                try:
+                    linking_service = CrossSessionLinkingService()
+                    all_sessions = await linking_service._get_customer_sessions(
+                        customer_id=context.customer_id,
+                        shop_id=context.shop_id,
+                    )
+
+                    if all_sessions:
+                        session_ids = [s.id for s in all_sessions]
+                        query = query.where(
+                            or_(
+                                UserInteraction.customer_id == context.customer_id,
+                                UserInteraction.session_id.in_(session_ids),
+                            )
+                        )
+                    else:
+                        query = query.where(
+                            UserInteraction.customer_id == context.customer_id
+                        )
+                except Exception as e:
+                    logger.error(f"Error fetching linked sessions: {e}")
+                    query = query.where(
+                        UserInteraction.customer_id == context.customer_id
+                    )
+
+            elif context.session_id:
+                query = query.where(UserInteraction.session_id == context.session_id)
+
+            # Execute query
+            result = await session.execute(
+                query.order_by(UserInteraction.created_at.desc())
+            )
+            interactions = result.scalars().all()
+
+            # Convert to dicts
+            return [
+                {
+                    "id": i.id,
+                    "shop_id": i.shop_id,
+                    "customer_id": i.customer_id,
+                    "session_id": i.session_id,
+                    "interaction_type": i.interaction_type,
+                    "extension_type": i.extension_type,
+                    "created_at": i.created_at,
+                    "metadata": i.interaction_metadata or {},
+                }
+                for i in interactions
+            ]
+
+        except Exception as e:
+            logger.error(f"Error fetching interactions: {e}", exc_info=True)
+            return []
+        # Note: No finally block closing session - caller manages session lifecycle
