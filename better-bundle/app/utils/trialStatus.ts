@@ -21,21 +21,21 @@ export interface TrialStatus {
 export async function getTrialStatus(shopId: string): Promise<TrialStatus> {
   try {
     // Get billing plan for the shop
-    const billingPlan = await prisma.billingPlan.findFirst({
+    const billingPlan = await prisma.billing_plans.findFirst({
       where: {
-        shopId: shopId,
+        shop_id: shopId,
         status: "active",
-        isTrialActive: true,
+        is_trial_active: true,
       },
     });
 
     if (!billingPlan) {
       // No trial plan found - check if they have a paid plan
-      const paidPlan = await prisma.billingPlan.findFirst({
+      await prisma.billing_plans.findFirst({
         where: {
-          shopId: shopId,
+          shop_id: shopId,
           status: "active",
-          isTrialActive: false,
+          is_trial_active: false,
         },
       });
 
@@ -44,17 +44,21 @@ export async function getTrialStatus(shopId: string): Promise<TrialStatus> {
         trialCompleted: true,
         needsConsent: false,
         currentRevenue: 0,
-        threshold: 200,
+        threshold: 0,
         remainingRevenue: 0,
         progress: 100,
-        currency: "USD",
+        currency: "UNKNOWN",
       };
     }
 
     // Get current attributed revenue for this period
-    const currentRevenue = billingPlan.trialRevenue || 0;
-    const threshold = billingPlan.trialThreshold || 200;
-    const currency = billingPlan.configuration?.currency || "USD";
+    const currentRevenue = billingPlan.trial_revenue || 0;
+    const threshold = billingPlan.trial_threshold || 0;
+    const currency = billingPlan.configuration?.currency;
+
+    if (!currency) {
+      throw new Error("No currency configured for billing plan");
+    }
 
     // Check if trial is still active
     const isTrialActive = currentRevenue < threshold;
@@ -85,10 +89,10 @@ export async function getTrialStatus(shopId: string): Promise<TrialStatus> {
       trialCompleted: false,
       needsConsent: false,
       currentRevenue: 0,
-      threshold: 200,
-      remainingRevenue: 200,
+      threshold: 0,
+      remainingRevenue: 0,
       progress: 0,
-      currency: "USD",
+      currency: "UNKNOWN",
     };
   }
 }
@@ -99,14 +103,14 @@ export async function updateTrialRevenue(
 ): Promise<boolean> {
   try {
     // Update trial revenue
-    await prisma.billingPlan.updateMany({
+    await prisma.billing_plans.updateMany({
       where: {
-        shopId: shopId,
+        shop_id: shopId,
         status: "active",
-        isTrialActive: true,
+        is_trial_active: true,
       },
       data: {
-        trialRevenue: {
+        trial_revenue: {
           increment: additionalRevenue,
         },
       },
@@ -117,14 +121,14 @@ export async function updateTrialRevenue(
 
     if (trialStatus.trialCompleted && !trialStatus.needsConsent) {
       // Trial completed and subscription already created
-      await prisma.billingPlan.updateMany({
+      await prisma.billing_plans.updateMany({
         where: {
-          shopId: shopId,
+          shop_id: shopId,
           status: "active",
-          isTrialActive: true,
+          is_trial_active: true,
         },
         data: {
-          isTrialActive: false,
+          is_trial_active: false,
         },
       });
     }
@@ -143,9 +147,9 @@ export async function createTrialPlan(
 ): Promise<boolean> {
   try {
     // Check if trial plan already exists
-    const existingPlan = await prisma.billingPlan.findFirst({
+    const existingPlan = await prisma.billing_plans.findFirst({
       where: {
-        shopId: shopId,
+        shop_id: shopId,
         status: "active",
       },
     });
@@ -155,26 +159,26 @@ export async function createTrialPlan(
     }
 
     // Create trial plan without subscription
-    await prisma.billingPlan.create({
+    await prisma.billing_plans.create({
       data: {
-        shopId: shopId,
-        shopDomain: shopDomain,
+        shop_id: shopId,
+        shop_domain: shopDomain,
         name: "Free Trial Plan",
         type: "trial_only",
         status: "active",
         configuration: {
           trial_active: true,
-          trial_threshold: 200.0,
+          trial_threshold: 0.0,
           trial_revenue: 0.0,
           revenue_share_rate: 0.03,
           currency: currency,
           subscription_required: false,
           trial_without_consent: true,
         },
-        effectiveFrom: new Date(),
-        isTrialActive: true,
-        trialThreshold: 200.0,
-        trialRevenue: 0.0,
+        effective_from: new Date(),
+        is_trial_active: true,
+        trial_threshold: 0.0,
+        trial_revenue: 0.0,
       },
     });
 
@@ -190,14 +194,14 @@ export async function completeTrialWithConsent(
 ): Promise<boolean> {
   try {
     // Update billing plan to mark trial as completed
-    await prisma.billingPlan.updateMany({
+    await prisma.billing_plans.updateMany({
       where: {
-        shopId: shopId,
+        shop_id: shopId,
         status: "active",
-        isTrialActive: true,
+        is_trial_active: true,
       },
       data: {
-        isTrialActive: false,
+        is_trial_active: false,
         configuration: {
           trial_active: false,
           trial_completed_at: new Date().toISOString(),
@@ -208,9 +212,9 @@ export async function completeTrialWithConsent(
     });
 
     // Create billing event
-    await prisma.billingEvent.create({
+    await prisma.billing_events.create({
       data: {
-        shopId: shopId,
+        shop_id: shopId,
         type: "trial_completed_with_consent",
         data: {
           completed_at: new Date().toISOString(),

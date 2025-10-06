@@ -154,8 +154,8 @@ class BillingService:
             old_revenue = billing_plan.trial_revenue or Decimal("0")
             new_revenue = old_revenue + attributed_revenue
 
-            # Use default trial threshold (keep existing logic)
-            trial_threshold = Decimal(str(TRIAL_THRESHOLD_USD))
+            # Use trial threshold from billing plan (already in shop currency)
+            trial_threshold = Decimal(str(billing_plan.trial_threshold or 0))
 
             # Update counters
             billing_plan.trial_revenue = new_revenue

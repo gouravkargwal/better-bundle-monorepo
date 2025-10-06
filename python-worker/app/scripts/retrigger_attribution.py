@@ -86,14 +86,18 @@ class AttributionRetriggerScript:
                     f"Found {len(customer_interactions)} interactions for customer {order.customer_id}"
                 )
 
-                # Create purchase event
+                # Create purchase event using order's currency_code (shop's base currency)
+                if not order.currency_code:
+                    logger.error(f"Order {order_id} has no currency_code, skipping")
+                    return False
+
                 purchase_event = PurchaseEvent(
                     order_id=order_id,
                     customer_id=order.customer_id,
                     shop_id=shop_id,
                     session_id=None,  # Will be determined from interactions
                     total_amount=Decimal(str(order.total_amount)),
-                    currency=order.currency_code or "USD",
+                    currency=order.currency_code,  # Shop's base currency for trial calculations
                     products=self._parse_order_products(order.line_items),
                     created_at=order.order_date or order.created_at,
                     metadata={
@@ -101,6 +105,8 @@ class AttributionRetriggerScript:
                         "original_order_date": (
                             order.order_date or order.created_at
                         ).isoformat(),
+                        "shop_currency": order.currency_code,
+                        "presentment_currency": order.presentment_currency_code,
                     },
                 )
 

@@ -487,8 +487,8 @@ class BillingCalculator:
             # Get current attributed revenue for this period
             current_revenue = Decimal(str(metrics_data.get("attributed_revenue", 0)))
 
-            # Get trial threshold (default $200)
-            trial_threshold = Decimal(str(billing_plan.trialThreshold or 200.00))
+            # Get trial threshold from billing plan configuration
+            trial_threshold = Decimal(str(billing_plan.trialThreshold or 0.00))
 
             # Check if trial is still active
             is_trial_active = (
@@ -521,8 +521,8 @@ class BillingCalculator:
             return {
                 "is_trial_active": False,
                 "current_revenue": 0,
-                "threshold": 200,
-                "remaining_revenue": 200,
+                "threshold": 0,
+                "remaining_revenue": 0,
                 "trial_progress": 0,
             }
 

@@ -477,8 +477,13 @@ const activateTrialBillingPlan = async (
     shopRecord.currency_code,
   );
 
-  // Use trial config USD threshold, fallback to 200 if not found
-  const TRIAL_THRESHOLD_USD = trialConfig?.threshold_usd || 200.0;
+  // Use trial config USD threshold, throw error if not found
+  if (!trialConfig?.threshold_usd) {
+    throw new Error(
+      `No trial threshold configured for currency: ${shopRecord.currency_code}`,
+    );
+  }
+  const TRIAL_THRESHOLD_USD = trialConfig.threshold_usd;
 
   const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
     shopRecord.currency_code,

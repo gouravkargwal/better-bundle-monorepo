@@ -117,15 +117,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error("Error loading billing data:", error);
 
     // Try to get shop currency even in error case
-    let shopCurrency = "USD";
+    let shopCurrency = "UNKNOWN";
     try {
       const shopInfo = await prisma.shops.findUnique({
         where: { shop_domain: shop },
         select: { currency_code: true },
       });
-      shopCurrency = shopInfo?.currency_code || "USD";
+      shopCurrency = shopInfo?.currency_code || "UNKNOWN";
     } catch (e) {
-      // Use USD as fallback
+      // Use UNKNOWN as fallback
     }
 
     return json({
@@ -135,7 +135,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         subscription_id: null,
         usage_count: 0,
         attributed_revenue: 0,
-        trial_threshold: 200, // Default trial threshold
+        trial_threshold: 0, // No default trial threshold
         currency: shopCurrency,
       },
       billingEvents: [],
