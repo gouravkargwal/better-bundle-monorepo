@@ -290,16 +290,6 @@ class RefundAttributionKafkaConsumer:
         session.add(refund_attribution)
         await session.flush()  # Flush to get the ID if needed
 
-        # 🔥 CRITICAL: Update trial revenue to reverse the attributed refund
-        if attribution_data["attributed_refund"]:
-            total_attributed_refund = sum(
-                attribution_data["attributed_refund"].values()
-            )
-            if total_attributed_refund > 0:
-                await self._update_trial_revenue_for_refund(
-                    session, shop_id, total_attributed_refund, refund_attribution
-                )
-
     async def _find_original_purchase_attribution(
         self, session: Any, shop_id: str, order_id: str
     ):
@@ -561,86 +551,6 @@ class RefundAttributionKafkaConsumer:
                 "reason": "no_customer_interactions",
             },
         }
-
-    async def _update_trial_revenue_for_refund(
-        self,
-        session: Any,
-        shop_id: str,
-        attributed_refund_amount: float,
-        refund_attribution,
-    ):
-        """
-        Update trial revenue to reverse the attributed refund amount.
-
-        This is critical for proper trial revenue tracking when refunds occur.
-        """
-        try:
-            from app.core.database.models.billing import BillingPlan
-            from sqlalchemy import select, and_
-            from decimal import Decimal
-
-            # Get billing plan with lock to prevent race conditions
-            billing_plan_query = (
-                select(BillingPlan)
-                .where(
-                    and_(BillingPlan.shop_id == shop_id, BillingPlan.status == "active")
-                )
-                .with_for_update()
-            )
-
-            result = await session.execute(billing_plan_query)
-            billing_plan = result.scalar_one_or_none()
-
-            if not billing_plan:
-                logger.warning(f"No active billing plan found for shop {shop_id}")
-                return
-
-            if not billing_plan.is_trial_active:
-                logger.info(
-                    f"Shop {shop_id} is not in trial - skipping trial revenue update"
-                )
-                return
-
-            # Calculate new trial revenue (subtract the attributed refund)
-            old_trial_revenue = float(billing_plan.trial_revenue or 0)
-            new_trial_revenue = old_trial_revenue - attributed_refund_amount
-
-            # Ensure trial revenue doesn't go below 0
-            new_trial_revenue = max(0, new_trial_revenue)
-
-            # Update billing plan
-            billing_plan.trial_revenue = Decimal(str(new_trial_revenue))
-            billing_plan.updated_at = datetime.utcnow()
-
-            # Check if trial should be reactivated (if revenue falls below threshold)
-            trial_threshold = float(billing_plan.trial_threshold or 0)
-            if new_trial_revenue < trial_threshold and billing_plan.is_trial_active:
-                # Trial is still active, no need to change
-                pass
-            elif (
-                new_trial_revenue < trial_threshold and not billing_plan.is_trial_active
-            ):
-                # Trial was completed but now revenue is below threshold, reactivate
-                billing_plan.is_trial_active = True
-                logger.info(f"🔄 Trial reactivated for shop {shop_id} due to refund")
-            elif new_trial_revenue >= trial_threshold and billing_plan.is_trial_active:
-                # Revenue is above threshold, trial should be completed
-                billing_plan.is_trial_active = False
-                logger.info(
-                    f"🎉 Trial completed for shop {shop_id} due to refund adjustment"
-                )
-
-            await session.commit()
-
-            logger.info(
-                f"📊 Trial revenue updated for refund: ${old_trial_revenue} → ${new_trial_revenue} "
-                f"(reversed ${attributed_refund_amount})"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to update trial revenue for refund: {e}")
-            await session.rollback()
-            raise
 
     def _compute_attribution_weights(
         self, interactions: List[Dict[str, Any]]

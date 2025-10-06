@@ -40,8 +40,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let message: string;
 
     if (billingPlan.is_trial_active) {
+      // Compute idempotent trial progress from attribution tables
+      const purchasesAgg = await prisma.purchase_attributions.aggregate({
+        where: { shop_id: shopRecord.id },
+        _sum: { total_revenue: true },
+      });
+      const refundsAgg = await prisma.refund_attributions.aggregate({
+        where: { shop_id: shopRecord.id },
+        _sum: { total_refunded_revenue: true },
+      });
+      const purchases = Number(purchasesAgg._sum.total_revenue || 0);
+      const refunds = Number(refundsAgg._sum.total_refunded_revenue || 0);
+      const currentRevenue = Math.max(0, purchases - refunds);
+      const threshold = billingPlan.trial_threshold || 200;
+
       status = "trial_active";
-      message = `Trial active - $${billingPlan.trial_revenue || 0} / $${billingPlan.trial_threshold || 200} revenue`;
+      message = `Trial active - $${currentRevenue} / $${threshold} revenue`;
     } else if (billingPlan.subscription_status === "ACTIVE") {
       status = "subscription_active";
       message = "Subscription active";

@@ -527,7 +527,7 @@ async function getMetricsForPeriod(
     startDate <= dateRange._max.created_at &&
     endDate >= dateRange._min.created_at;
   console.log("Date range overlap with data:", hasOverlap);
-  const [viewCount, clickCount, revenueStats, customerCount] =
+  const [viewCount, clickCount, purchasesAgg, refundsAgg, customerCount] =
     await Promise.all([
       // Count views from recommendation_viewed and product_viewed events
       prisma.user_interactions.count({
@@ -557,6 +557,13 @@ async function getMetricsForPeriod(
         _sum: { total_revenue: true },
         _avg: { total_revenue: true },
       }),
+      prisma.refund_attributions.aggregate({
+        where: {
+          shop_id: shopId,
+          refunded_at: { gte: startDate, lte: endDate },
+        },
+        _sum: { total_refunded_revenue: true },
+      }),
       prisma.user_sessions
         .groupBy({
           by: ["customer_id"],
@@ -571,14 +578,17 @@ async function getMetricsForPeriod(
   console.log("Final metrics:", {
     viewCount,
     clickCount,
-    revenue: revenueStats._sum.total_revenue,
+    purchases: purchasesAgg._sum.total_revenue,
+    refunded: refundsAgg._sum.total_refunded_revenue,
   });
-
+  const purchases = safeNumber(purchasesAgg._sum.total_revenue);
+  const refunds = safeNumber(refundsAgg._sum.total_refunded_revenue);
+  const netRevenue = Math.max(0, purchases - refunds);
   return {
     views: viewCount,
     clicks: clickCount,
-    revenue: safeNumber(revenueStats._sum.total_revenue),
-    averageOrderValue: safeNumber(revenueStats._avg.total_revenue),
+    revenue: netRevenue,
+    averageOrderValue: safeNumber(purchasesAgg._avg.total_revenue),
     customers: customerCount,
   };
 }
@@ -729,22 +739,13 @@ async function getTopProducts(
 
     const titleMap = new Map(products.map((p) => [p.product_id, p.title]));
 
-    // Calculate total revenue for distribution
-    const revenueData = await prisma.purchase_attributions.aggregate({
-      where: {
-        shop_id: shopId,
-        purchase_at: { gte: startDate, lte: endDate },
-      },
-      _sum: { total_revenue: true },
-    });
-
-    const totalRevenue = safeNumber(revenueData._sum.total_revenue);
+    // No reliable per-product attribution stored yet; hide revenue for now
 
     return Array.from(productStats.entries())
       .map(([productId, stats]) => ({
         product_id: productId,
         title: titleMap.get(productId) || `Product ${productId}`,
-        revenue: totalRevenue / Math.max(productStats.size, 1),
+        revenue: 0,
         clicks: stats.clicks,
         conversion_rate: roundToDecimalPlaces(
           safeDivision(stats.clicks, stats.views) * 100,
@@ -753,7 +754,11 @@ async function getTopProducts(
         currency_code: currencyCode,
         customers: stats.customers.size,
       }))
-      .sort((a, b) => b.clicks - a.clicks)
+      .sort((a, b) =>
+        a.conversion_rate !== b.conversion_rate
+          ? b.conversion_rate - a.conversion_rate
+          : b.clicks - a.clicks,
+      )
       .slice(0, limit);
   } catch (error) {
     console.error("Error in getTopProducts:", error);
@@ -817,50 +822,62 @@ async function getActivityMetrics(
   startDate: Date,
   endDate: Date,
 ): Promise<ActivityMetrics> {
-  const [recommendations, clicks, revenue, customers] = await Promise.all([
-    // Count recommendations viewed (phoenix and atlas)
-    prisma.user_interactions.count({
-      where: {
-        shop_id: shopId,
-        created_at: { gte: startDate, lte: endDate },
-        interaction_type: {
-          in: ["recommendation_viewed", "product_viewed"],
-        },
-      },
-    }),
-    // Count clicks and add to cart events
-    prisma.user_interactions.count({
-      where: {
-        shop_id: shopId,
-        created_at: { gte: startDate, lte: endDate },
-        interaction_type: {
-          in: ["recommendation_add_to_cart", "product_added_to_cart"],
-        },
-      },
-    }),
-    prisma.purchase_attributions.aggregate({
-      where: {
-        shop_id: shopId,
-        purchase_at: { gte: startDate, lte: endDate },
-      },
-      _sum: { total_revenue: true },
-    }),
-    prisma.user_sessions
-      .groupBy({
-        by: ["customer_id"],
+  const [recommendations, clicks, purchasesAgg, refundsAgg, customers] =
+    await Promise.all([
+      // Count recommendations viewed (phoenix and atlas)
+      prisma.user_interactions.count({
         where: {
           shop_id: shopId,
           created_at: { gte: startDate, lte: endDate },
-          customer_id: { not: null },
+          interaction_type: {
+            in: ["recommendation_viewed", "product_viewed"],
+          },
         },
-      })
-      .then((result) => result.length),
-  ]);
+      }),
+      // Count clicks and add to cart events
+      prisma.user_interactions.count({
+        where: {
+          shop_id: shopId,
+          created_at: { gte: startDate, lte: endDate },
+          interaction_type: {
+            in: ["recommendation_add_to_cart", "product_added_to_cart"],
+          },
+        },
+      }),
+      prisma.purchase_attributions.aggregate({
+        where: {
+          shop_id: shopId,
+          purchase_at: { gte: startDate, lte: endDate },
+        },
+        _sum: { total_revenue: true },
+      }),
+      prisma.refund_attributions.aggregate({
+        where: {
+          shop_id: shopId,
+          refunded_at: { gte: startDate, lte: endDate },
+        },
+        _sum: { total_refunded_revenue: true },
+      }),
+      prisma.user_sessions
+        .groupBy({
+          by: ["customer_id"],
+          where: {
+            shop_id: shopId,
+            created_at: { gte: startDate, lte: endDate },
+            customer_id: { not: null },
+          },
+        })
+        .then((result) => result.length),
+    ]);
+
+  const purchases = safeNumber(purchasesAgg._sum.total_revenue);
+  const refunds = safeNumber(refundsAgg._sum.total_refunded_revenue);
+  const netRevenue = Math.max(0, purchases - refunds);
 
   return {
     recommendations,
     clicks,
-    revenue: safeNumber(revenue._sum.total_revenue),
+    revenue: netRevenue,
     customers,
   };
 }

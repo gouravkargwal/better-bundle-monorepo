@@ -51,10 +51,23 @@ export async function getTrialStatus(shopId: string): Promise<TrialStatus> {
       };
     }
 
-    // Get current attributed revenue for this period
-    const currentRevenue = billingPlan.trial_revenue || 0;
-    const threshold = billingPlan.trial_threshold || 0;
-    const currency = billingPlan.configuration?.currency;
+    // Compute current attributed net revenue (idempotent): purchases - refunds
+    const purchasesAgg = await prisma.purchase_attributions.aggregate({
+      where: { shop_id: shopId },
+      _sum: { total_revenue: true },
+    });
+    const refundsAgg = await prisma.refund_attributions.aggregate({
+      where: { shop_id: shopId },
+      _sum: { total_refunded_revenue: true },
+    });
+
+    const purchases = Number(purchasesAgg._sum.total_revenue || 0);
+    const refunds = Number(refundsAgg._sum.total_refunded_revenue || 0);
+    const currentRevenue = Math.max(0, purchases - refunds);
+    const threshold = Number(billingPlan.trial_threshold || 0);
+    const currency = (billingPlan.configuration as any)?.currency as
+      | string
+      | undefined;
 
     if (!currency) {
       throw new Error("No currency configured for billing plan");
@@ -66,11 +79,13 @@ export async function getTrialStatus(shopId: string): Promise<TrialStatus> {
 
     // Check if consent is needed (trial completed but no subscription created)
     const needsConsent =
-      trialCompleted && !billingPlan.configuration?.subscription_created;
+      trialCompleted &&
+      !(billingPlan.configuration as any)?.subscription_created;
 
     // Calculate remaining revenue and progress
     const remainingRevenue = Math.max(0, threshold - currentRevenue);
-    const progress = Math.min(100, (currentRevenue / threshold) * 100);
+    const progress =
+      threshold > 0 ? Math.min(100, (currentRevenue / threshold) * 100) : 0;
 
     return {
       isTrialActive,
@@ -179,6 +194,7 @@ export async function createTrialPlan(
         is_trial_active: true,
         trial_threshold: 0.0,
         trial_revenue: 0.0,
+        trial_usage_records_count: 0,
       },
     });
 
@@ -220,10 +236,16 @@ export async function completeTrialWithConsent(
           completed_at: new Date().toISOString(),
           consent_given: true,
         },
-        metadata: {
+        billing_metadata: {
           event_type: "trial_completion",
           consent_given: true,
         },
+        plan_id: (await prisma.billing_plans.findFirst({
+          where: { shop_id: shopId, status: "active" },
+          select: { id: true },
+        }))!.id,
+        occurred_at: new Date(),
+        processed_at: new Date(),
       },
     });
 

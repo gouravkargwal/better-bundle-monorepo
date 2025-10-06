@@ -103,12 +103,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
       currency: shopCurrency,
     });
 
+    // Compute idempotent trial progress from attribution tables
+    const shopRecord = await prisma.shops.findUnique({
+      where: { shop_domain: shop },
+      select: { id: true },
+    });
+    const shopId = shopRecord?.id || billingPlan.shop_id;
+
+    const purchasesAgg = await prisma.purchase_attributions.aggregate({
+      where: { shop_id: shopId },
+      _sum: { total_revenue: true },
+    });
+    const refundsAgg = await prisma.refund_attributions.aggregate({
+      where: { shop_id: shopId },
+      _sum: { total_refunded_revenue: true },
+    });
+    const ordersTracked = await prisma.purchase_attributions.count({
+      where: { shop_id: shopId },
+    });
+
+    const purchases = Number(purchasesAgg._sum.total_revenue || 0);
+    const refunds = Number(refundsAgg._sum.total_refunded_revenue || 0);
+    const netAttributed = Math.max(0, purchases - refunds);
+
     // Map the billing plan data to the correct field names for the UI
     const updatedBillingPlan = {
       ...billingPlan,
-      // Map database fields to UI field names
-      attributed_revenue: Number(billingPlan.trial_revenue) || 0,
-      usage_count: billingPlan.trial_usage_records_count || 0,
+      attributed_revenue: netAttributed,
+      usage_count: ordersTracked,
       currency: shopCurrency,
     };
 

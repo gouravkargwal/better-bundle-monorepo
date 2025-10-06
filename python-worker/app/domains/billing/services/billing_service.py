@@ -12,14 +12,20 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .attribution_engine import AttributionEngine, AttributionContext
 from .shopify_usage_billing_service import ShopifyUsageBillingService
 from ..repositories.billing_repository import BillingRepository
 from ..models.attribution_models import AttributionResult, PurchaseEvent
-from app.core.database.models import Shop, BillingPlan, BillingEvent
+from app.core.database.models import (
+    Shop,
+    BillingPlan,
+    BillingEvent,
+    PurchaseAttribution,
+    RefundAttribution,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,18 +156,24 @@ class BillingService:
         Track internally, check threshold, suspend if needed.
         """
         try:
-            # Read current values
-            old_revenue = billing_plan.trial_revenue or Decimal("0")
-            new_revenue = old_revenue + attributed_revenue
-
-            # Use trial threshold from billing plan (already in shop currency)
+            # Compute trial net revenue from attribution tables (idempotent)
             trial_threshold = Decimal(str(billing_plan.trial_threshold or 0))
 
-            # Update counters
-            billing_plan.trial_revenue = new_revenue
-            billing_plan.trial_usage_records_count = (
-                billing_plan.trial_usage_records_count or 0
-            ) + 1
+            # Net attributed revenue = purchases - refunds
+            sum_purchases_q = select(
+                func.coalesce(func.sum(PurchaseAttribution.total_revenue), 0)
+            ).where(PurchaseAttribution.shop_id == shop_id)
+            sum_refunds_q = select(
+                func.coalesce(func.sum(RefundAttribution.total_refunded_revenue), 0)
+            ).where(RefundAttribution.shop_id == shop_id)
+
+            purchases_sum = (await self.session.execute(sum_purchases_q)).scalar_one()
+            refunds_sum = (await self.session.execute(sum_refunds_q)).scalar_one()
+
+            new_revenue = Decimal(str(purchases_sum)) - Decimal(str(refunds_sum))
+            old_revenue = billing_plan.trial_revenue or Decimal("0")
+
+            # Do not mutate counters; keep plan fields as metadata if desired
             billing_plan.updated_at = datetime.utcnow()
 
             logger.info(
@@ -181,11 +193,11 @@ class BillingService:
                     "attributed_revenue": float(attributed_revenue),
                     "cumulative_revenue": float(new_revenue),
                     "threshold": float(trial_threshold),
-                    "usage_count": billing_plan.trial_usage_records_count,
+                    "usage_count": None,
                 },
                 billing_metadata={
                     "phase": "trial",
-                    "internal_tracking": True,
+                    "internal_tracking": False,
                 },
             )
             self.session.add(event)

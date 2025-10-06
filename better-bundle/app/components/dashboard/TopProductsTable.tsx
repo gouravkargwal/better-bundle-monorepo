@@ -8,17 +8,12 @@ import {
   Button,
 } from "@shopify/polaris";
 import type { TopProductData } from "../../services/dashboard.service";
-import { formatCurrency } from "../../utils/currency";
 
 interface TopProductsTableProps {
   data: TopProductData[];
 }
 
 export function TopProductsTable({ data }: TopProductsTableProps) {
-  const formatCurrencyAmount = (amount: number, currencyCode: string) => {
-    return formatCurrency(amount, currencyCode);
-  };
-
   const formatPercentage = (value: number) => {
     return `${value.toFixed(1)}%`;
   };
@@ -84,7 +79,6 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
   const rows = data.map((product, index) => [
     `#${index + 1}`,
     product.title,
-    formatCurrencyAmount(product.revenue, product.currency_code),
     formatPercentage(product.conversion_rate),
     product.clicks.toLocaleString(),
     product.recommendations_shown.toLocaleString(),
@@ -122,7 +116,7 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
                 Performance Rankings
               </Text>
               <Text as="p" variant="bodySm" tone="subdued">
-                Ranked by conversion rate and revenue
+                Ranked by conversion rate
               </Text>
             </BlockStack>
             <Button variant="plain" size="slim">
@@ -138,12 +132,10 @@ export function TopProductsTable({ data }: TopProductsTableProps) {
               "text",
               "text",
               "text",
-              "text",
             ]}
             headings={[
               "Rank",
               "Product",
-              "Revenue",
               "Conv. Rate",
               "Clicks",
               "Shown",
