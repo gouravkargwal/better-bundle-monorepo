@@ -1,28 +1,22 @@
 """
-Shop Resolver Service - Handles shop domain to ID resolution with caching
+Shop Resolver Service - Resolves shop domain/customer to shop_id using Redis cache
 """
 
-from typing import Optional, Dict
-from datetime import datetime, timedelta
-import asyncio
+from typing import Optional
 
 from app.core.database import get_database
 from app.core.logging.logger import get_logger
+from app.services.shop_cache_service import get_shop_cache_service
 
 logger = get_logger(__name__)
 
 
 class ShopResolverService:
-    """Service for resolving shop domains to shop IDs with caching"""
-
-    def __init__(self):
-        self._cache: Dict[str, dict] = {}
-        self._cache_ttl = timedelta(hours=1)  # Cache for 1 hour
-        self._lock = asyncio.Lock()
+    """Service for resolving shop info using Redis-backed cache only"""
 
     async def get_shop_id_from_domain(self, shop_domain: str) -> Optional[str]:
         """
-        Get shop ID from domain with caching
+        Get shop ID from domain using Redis-backed ShopCacheService.
 
         Args:
             shop_domain: Shop domain (e.g., 'mystore.myshopify.com')
@@ -30,69 +24,38 @@ class ShopResolverService:
         Returns:
             str: Shop ID if found, None otherwise
         """
-        # Normalize domain (remove protocol, trailing slashes, etc.)
         normalized_domain = self._normalize_domain(shop_domain)
 
-        # Check cache first
-        async with self._lock:
-            if normalized_domain in self._cache:
-                cache_entry = self._cache[normalized_domain]
-                if datetime.utcnow() < cache_entry["expires_at"]:
-                    logger.debug(f"Cache hit for domain: {normalized_domain}")
-                    return cache_entry["shop_id"]
-                else:
-                    # Cache expired, remove it
-                    del self._cache[normalized_domain]
+        # Use Redis-backed cache service exclusively
+        cache_service = await get_shop_cache_service()
+        shop = await cache_service.get_active_shop_by_domain(normalized_domain)
+        if shop and shop.get("id"):
+            return shop["id"]
 
-        # Cache miss or expired, fetch from database
-        shop_id = await self._fetch_shop_id_from_db(normalized_domain)
-
-        if shop_id:
-            # Cache the result
-            async with self._lock:
-                self._cache[normalized_domain] = {
-                    "shop_id": shop_id,
-                    "expires_at": datetime.utcnow() + self._cache_ttl,
-                }
-            logger.debug(f"Cached shop ID for domain: {normalized_domain}")
-
-        return shop_id
+        # Fallback to DB only if cache layer returns None and no negative cache present
+        # (ShopCacheService already caches negative results.)
+        return await self._fetch_shop_id_from_db(normalized_domain)
 
     async def get_shop_details_from_domain(self, shop_domain: str) -> Optional[dict]:
         """
-        Get complete shop details from domain with caching
+        Get complete shop details from domain using Redis-backed ShopCacheService.
 
         Returns:
             dict: Shop details if found, None otherwise
         """
         normalized_domain = self._normalize_domain(shop_domain)
 
-        # Check cache for full details
-        cache_key = f"{normalized_domain}:details"
-        async with self._lock:
-            if cache_key in self._cache:
-                cache_entry = self._cache[cache_key]
-                if datetime.utcnow() < cache_entry["expires_at"]:
-                    return cache_entry["data"]
-                else:
-                    del self._cache[cache_key]
+        cache_service = await get_shop_cache_service()
+        shop = await cache_service.get_active_shop_by_domain(normalized_domain)
+        if shop:
+            return shop
 
-        # Fetch from database
-        shop_details = await self._fetch_shop_details_from_db(normalized_domain)
-
-        if shop_details:
-            # Cache the result
-            async with self._lock:
-                self._cache[cache_key] = {
-                    "data": shop_details,
-                    "expires_at": datetime.utcnow() + self._cache_ttl,
-                }
-
-        return shop_details
+        # Fallback to database (and let cache service negative-cache future lookups)
+        return await self._fetch_shop_details_from_db(normalized_domain)
 
     async def get_shop_id_from_customer_id(self, customer_id: str) -> Optional[str]:
         """
-        Get shop ID from customer ID with caching
+        Get shop ID from customer ID without any in-memory caching.
 
         Args:
             customer_id: Customer ID
@@ -100,31 +63,7 @@ class ShopResolverService:
         Returns:
             str: Shop ID if found, None otherwise
         """
-        # Check cache first
-        cache_key = f"customer:{customer_id}"
-        async with self._lock:
-            if cache_key in self._cache:
-                cache_entry = self._cache[cache_key]
-                if datetime.utcnow() < cache_entry["expires_at"]:
-                    logger.debug(f"Cache hit for customer_id: {customer_id}")
-                    return cache_entry["shop_id"]
-                else:
-                    # Cache expired, remove it
-                    del self._cache[cache_key]
-
-        # Cache miss or expired, fetch from database
-        shop_id = await self._fetch_shop_id_from_customer_id_db(customer_id)
-
-        if shop_id:
-            # Cache the result
-            async with self._lock:
-                self._cache[cache_key] = {
-                    "shop_id": shop_id,
-                    "expires_at": datetime.utcnow() + self._cache_ttl,
-                }
-            logger.debug(f"Cached shop ID for customer_id: {customer_id}")
-
-        return shop_id
+        return await self._fetch_shop_id_from_customer_id_db(customer_id)
 
     async def _fetch_shop_id_from_customer_id_db(
         self, customer_id: str
@@ -156,24 +95,9 @@ class ShopResolverService:
             return None
 
     async def invalidate_cache(self, shop_domain: str) -> None:
-        """Invalidate cache for a specific domain"""
-        normalized_domain = self._normalize_domain(shop_domain)
-        async with self._lock:
-            keys_to_remove = [
-                key for key in self._cache.keys() if key.startswith(normalized_domain)
-            ]
-            for key in keys_to_remove:
-                del self._cache[key]
-
-    async def clear_expired_cache(self) -> None:
-        """Clear expired cache entries (call periodically)"""
-        now = datetime.utcnow()
-        async with self._lock:
-            expired_keys = [
-                key for key, value in self._cache.items() if now >= value["expires_at"]
-            ]
-            for key in expired_keys:
-                del self._cache[key]
+        """Invalidate Redis cache for a specific domain"""
+        cache_service = await get_shop_cache_service()
+        await cache_service.invalidate_shop_cache(self._normalize_domain(shop_domain))
 
     def _normalize_domain(self, domain: str) -> str:
         """Normalize domain for consistent caching"""

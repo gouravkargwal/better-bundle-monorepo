@@ -276,7 +276,10 @@ class RefundAttributionKafkaConsumer:
             currency_code=refund_data.currency_code,
             contributing_extensions=attribution_data["contributing_extensions"],
             attribution_weights=attribution_data["attribution_weights"],
-            total_refunded_revenue=refund_data.total_refund_amount,
+            # Store ONLY pre-tax attributed refund (sum of refunded attributed line subtotals)
+            total_refunded_revenue=float(
+                attribution_data.get("metadata", {}).get("refunded_attribution", 0.0)
+            ),
             attributed_refund=attribution_data["attributed_refund"],
             total_interactions=attribution_data["total_interactions"],
             interactions_by_extension=attribution_data["interactions_by_extension"],
