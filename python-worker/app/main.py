@@ -23,6 +23,7 @@ from app.core.kafka.consumer_manager import KafkaConsumerManager
 
 
 from app.api.v1.unified_gorse import router as unified_gorse_router
+from app.api.v1.attribution_backfill import router as attribution_backfill_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
 
@@ -68,6 +69,7 @@ app = FastAPI(
 
 # Include API routers
 app.include_router(unified_gorse_router)
+app.include_router(attribution_backfill_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
 

@@ -14,7 +14,7 @@ from app.shared.helpers import now_utc
 from app.core.database.session import get_session_context
 from app.core.database.models.collection_data import CollectionData
 from app.core.database.models.refund_data import RefundData
-from sqlalchemy import select
+from sqlalchemy import select, and_
 
 logger = get_logger(__name__)
 
@@ -682,22 +682,44 @@ class OrderNormalizationService:
                         )
                         continue
 
-                    # Create RefundData record
-                    refund_data = RefundData(
-                        shop_id=shop_id,
-                        order_id=order_id,
-                        refund_id=refund_id,
-                        refunded_at=refund.get("refunded_at"),
-                        total_refund_amount=float(refund.get("total_refund_amount", 0)),
-                        currency_code=refund.get("currency_code", "USD"),
-                        note=refund.get("note"),
-                        restock=False,  # restock field not available in GraphQL API
-                        refund_line_items=refund.get("refund_line_items"),
+                    # Upsert RefundData (update-or-create) to avoid duplicates
+                    existing_q = select(RefundData).where(
+                        and_(
+                            RefundData.shop_id == shop_id,
+                            RefundData.refund_id == refund_id,
+                        )
                     )
+                    existing = (await session.execute(existing_q)).scalar_one_or_none()
 
-                    session.add(refund_data)
-                    await session.flush()  # Flush to get the ID
-                    refund_data_ids.append(str(refund_data.id))
+                    if existing:
+                        existing.order_id = order_id
+                        existing.refunded_at = refund.get("refunded_at")
+                        existing.total_refund_amount = float(
+                            refund.get("total_refund_amount", 0)
+                        )
+                        existing.currency_code = refund.get("currency_code", "USD")
+                        existing.note = refund.get("note")
+                        existing.restock = False
+                        existing.refund_line_items = refund.get("refund_line_items")
+                        await session.flush()
+                        refund_data_ids.append(str(existing.id))
+                    else:
+                        refund_data = RefundData(
+                            shop_id=shop_id,
+                            order_id=order_id,
+                            refund_id=refund_id,
+                            refunded_at=refund.get("refunded_at"),
+                            total_refund_amount=float(
+                                refund.get("total_refund_amount", 0)
+                            ),
+                            currency_code=refund.get("currency_code", "USD"),
+                            note=refund.get("note"),
+                            restock=False,  # restock field not available in GraphQL API
+                            refund_line_items=refund.get("refund_line_items"),
+                        )
+                        session.add(refund_data)
+                        await session.flush()  # Flush to get the ID
+                        refund_data_ids.append(str(refund_data.id))
 
                 await session.commit()
                 self.logger.info(

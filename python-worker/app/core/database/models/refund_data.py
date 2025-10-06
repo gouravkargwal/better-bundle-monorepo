@@ -34,11 +34,18 @@ class RefundData(BaseModel, ShopMixin):
     # Relationships
     shop = relationship("Shop", back_populates="refund_data")
 
-    # Indexes for performance
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_refund_data_shop_order", "shop_id", "order_id"),
         Index("idx_refund_data_shop_refund", "shop_id", "refund_id"),
         Index("idx_refund_data_refunded_at", "refunded_at"),
+        # Enforce uniqueness to prevent duplicate rows on re-normalization
+        Index(
+            "ux_refund_data_shop_refund",
+            "shop_id",
+            "refund_id",
+            unique=True,
+        ),
     )
 
     def __repr__(self):
