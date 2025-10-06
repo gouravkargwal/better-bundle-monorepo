@@ -13,6 +13,7 @@ from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
 from app.core.database.session import get_session_context
 from app.core.database.models.collection_data import CollectionData
+from app.core.database.models.refund_data import RefundData
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -507,6 +508,34 @@ class OrderNormalizationService:
                 canonical_data_list, shop_id
             )
 
+            # Process refunds for orders that have them
+            refund_processing_count = 0
+            for canonical in canonical_data_list:
+                order_id = canonical.get("order_id")
+                refunds = canonical.get("refunds", [])
+
+                if refunds:
+                    self.logger.info(
+                        f"Processing {len(refunds)} refunds for order {order_id}"
+                    )
+                    try:
+                        # Create RefundData records and publish events
+                        await self._publish_refund_events(shop_id, order_id, refunds)
+                        refund_processing_count += len(refunds)
+                    except Exception as e:
+                        self.logger.error(
+                            f"Failed to process refunds for order {order_id}: {e}"
+                        )
+                        # Don't fail the whole batch for refund processing errors
+                        continue
+                else:
+                    self.logger.debug(f"Order {order_id} has no refunds")
+
+            if refund_processing_count > 0:
+                self.logger.info(
+                    f"Processed {refund_processing_count} refunds across {processed_count} orders"
+                )
+
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
@@ -568,7 +597,7 @@ class OrderNormalizationService:
         self, shop_id: str, order_id: str, refunds: List[Dict[str, Any]]
     ):
         """
-        Publish refund attribution events for all refunds in an order.
+        Create RefundData records and publish refund attribution events for all refunds in an order.
 
         Args:
             shop_id: Shop identifier
@@ -580,12 +609,64 @@ class OrderNormalizationService:
             return
 
         try:
+            # Create RefundData records first
+            refund_data_ids = await self._create_refund_data_records(
+                shop_id, order_id, refunds
+            )
+
+            # Then publish events
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
 
             try:
                 published_count = 0
 
+                for refund_data_id in refund_data_ids:
+                    # Publish refund attribution event with RefundData ID
+                    await publisher.publish_refund_attribution_event(
+                        {
+                            "event_type": "refund_created",
+                            "shop_id": shop_id,
+                            "order_id": order_id,
+                            "refund_data_id": refund_data_id,
+                            "timestamp": now_utc().isoformat(),
+                        }
+                    )
+
+                    published_count += 1
+
+                self.logger.info(
+                    f"Created {len(refund_data_ids)} RefundData records and published {published_count} refund attribution events for order {order_id}"
+                )
+
+            finally:
+                await publisher.close()
+
+        except Exception as e:
+            self.logger.error(
+                f"❌ Failed to create refund data and publish events for order {order_id}: {e}",
+                exc_info=True,
+            )
+            # Don't raise - we don't want refund event publishing to fail the whole normalization
+
+    async def _create_refund_data_records(
+        self, shop_id: str, order_id: str, refunds: List[Dict[str, Any]]
+    ) -> List[str]:
+        """
+        Create RefundData records for all refunds in an order.
+
+        Args:
+            shop_id: Shop identifier
+            order_id: Order identifier
+            refunds: List of refund dictionaries from canonical format
+
+        Returns:
+            List of RefundData IDs
+        """
+        refund_data_ids = []
+
+        async with get_session_context() as session:
+            try:
                 for refund in refunds:
                     # Extract refund ID (handle different possible field names)
                     refund_id = (
@@ -601,28 +682,34 @@ class OrderNormalizationService:
                         )
                         continue
 
-                    # Publish refund attribution event
-                    await publisher.publish_refund_attribution_event(
-                        {
-                            "event_type": "refund_created",
-                            "shop_id": shop_id,
-                            "order_id": order_id,
-                            "refund_id": refund_id,
-                            "timestamp": now_utc().isoformat(),
-                        }
+                    # Create RefundData record
+                    refund_data = RefundData(
+                        shop_id=shop_id,
+                        order_id=order_id,
+                        refund_id=refund_id,
+                        refunded_at=refund.get("refunded_at"),
+                        total_refund_amount=float(refund.get("total_refund_amount", 0)),
+                        currency_code=refund.get("currency_code", "USD"),
+                        note=refund.get("note"),
+                        restock=False,  # restock field not available in GraphQL API
+                        refund_line_items=refund.get("refund_line_items"),
                     )
 
-                    published_count += 1
+                    session.add(refund_data)
+                    await session.flush()  # Flush to get the ID
+                    refund_data_ids.append(str(refund_data.id))
 
-            finally:
-                await publisher.close()
+                await session.commit()
+                self.logger.info(
+                    f"Created {len(refund_data_ids)} RefundData records for order {order_id}"
+                )
 
-        except Exception as e:
-            self.logger.error(
-                f"❌ Failed to publish refund events for order {order_id}: {e}",
-                exc_info=True,
-            )
-            # Don't raise - we don't want refund event publishing to fail the whole normalization
+            except Exception as e:
+                await session.rollback()
+                self.logger.error(f"Failed to create RefundData records: {e}")
+                raise
+
+        return refund_data_ids
 
 
 class FeatureComputationService:

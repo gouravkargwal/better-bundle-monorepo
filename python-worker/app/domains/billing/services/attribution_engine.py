@@ -1001,12 +1001,19 @@ class AttributionEngine:
         )
 
         # Distribute attribution based on calculated weights
-        for interaction in interactions:
-            extension = interaction["extension_type"]
-            weight = extension_weights.get(extension, 0.0)
+        # Create one breakdown per extension, not per interaction
+        for extension, weight in extension_weights.items():
             attributed_amount = product_amount * Decimal(str(weight))
 
             if attributed_amount > 0:
+                # Find the most recent interaction for this extension
+                extension_interactions = [
+                    i for i in interactions if i["extension_type"] == extension
+                ]
+                most_recent_interaction = max(
+                    extension_interactions, key=lambda x: x["created_at"]
+                )
+
                 breakdowns.append(
                     AttributionBreakdown(
                         extension_type=ExtensionType(extension),
@@ -1014,14 +1021,19 @@ class AttributionEngine:
                         attributed_amount=attributed_amount,
                         attribution_weight=weight,
                         attribution_type=AttributionType.CROSS_EXTENSION,
-                        interaction_id=interaction["id"],
+                        interaction_id=most_recent_interaction["id"],
                         metadata={
-                            "interaction_type": interaction["interaction_type"],
-                            "recommendation_position": interaction["metadata"].get(
-                                "recommendation_position"
-                            ),
-                            "created_at": interaction["created_at"].isoformat(),
+                            "interaction_type": most_recent_interaction[
+                                "interaction_type"
+                            ],
+                            "recommendation_position": most_recent_interaction[
+                                "metadata"
+                            ].get("recommendation_position"),
+                            "created_at": most_recent_interaction[
+                                "created_at"
+                            ].isoformat(),
                             "attribution_role": "cross_extension",
+                            "total_interactions": len(extension_interactions),
                         },
                     )
                 )

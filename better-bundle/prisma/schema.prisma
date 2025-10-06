@@ -494,6 +494,29 @@ model refund_attributions {
   @@index([shop_id], map: "ix_refund_attributions_shop_id")
 }
 
+model refund_data {
+  order_id            String   @db.VarChar
+  refund_id           String   @db.VarChar
+  refunded_at         DateTime @db.Timestamptz(6)
+  total_refund_amount Float
+  currency_code       String   @db.VarChar
+  note                String?  @db.VarChar
+  restock             Boolean?
+  refund_line_items   Json?    @db.Json
+  id                  String   @id @default(cuid()) @db.VarChar
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  shop_id             String   @db.VarChar
+  shops               shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([refunded_at], map: "idx_refund_data_refunded_at")
+  @@index([shop_id, order_id], map: "idx_refund_data_shop_order")
+  @@index([shop_id, refund_id], map: "idx_refund_data_shop_refund")
+  @@index([order_id], map: "ix_refund_data_order_id")
+  @@index([refund_id], map: "ix_refund_data_refund_id")
+  @@index([shop_id], map: "ix_refund_data_shop_id")
+}
+
 model search_product_features {
   search_query                       String   @db.VarChar(500)
   search_click_rate                  Float
@@ -610,6 +633,7 @@ model shops {
   raw_orders                 raw_orders[]
   raw_products               raw_products[]
   refund_attributions        refund_attributions[]
+  refund_data                refund_data[]
   search_product_features    search_product_features[]
   session_features           session_features[]
   user_features              user_features[]

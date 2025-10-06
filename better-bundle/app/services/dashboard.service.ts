@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getCacheService, CacheKeys, CacheTTL } from "./redis.service";
+import { getCacheService } from "./redis.service";
 
 // Constants
 const DEFAULT_CURRENCY = "USD";
@@ -113,43 +113,44 @@ function safeDivision(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
 }
 
-// Enhanced shop info retrieval with better error handling
+// Enhanced shop info retrieval with better error handling - NO CACHE
 async function getShopInfo(shopDomain: string): Promise<{
   id: string;
   currency_code: string;
   money_format: string;
 }> {
   try {
-    const cache = await getCacheService();
-    const cacheKey = CacheKeys.shop(shopDomain);
+    console.log("🔍 DEBUG: getShopInfo called with shopDomain:", shopDomain);
 
-    return await cache.getOrSet(
-      cacheKey,
-      async () => {
-        const shop = await prisma.shops.findUnique({
-          where: { shop_domain: shopDomain },
-          select: {
-            id: true,
-            currency_code: true,
-            money_format: true,
-          },
-        });
-
-        if (!shop) {
-          throw new DashboardError(
-            `Shop not found: ${shopDomain}`,
-            "SHOP_NOT_FOUND",
-          );
-        }
-
-        return {
-          id: shop.id,
-          currency_code: shop.currency_code || DEFAULT_CURRENCY,
-          money_format: shop.money_format || DEFAULT_MONEY_FORMAT,
-        };
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: shopDomain },
+      select: {
+        id: true,
+        currency_code: true,
+        money_format: true,
       },
-      CacheTTL.SHOP,
-    );
+    });
+
+    console.log("🔍 DEBUG: getShopInfo query result:", shop);
+
+    if (!shop) {
+      throw new DashboardError(
+        `Shop not found: ${shopDomain}`,
+        "SHOP_NOT_FOUND",
+      );
+    }
+
+    console.log("🔍 DEBUG: getShopInfo returning:", {
+      id: shop.id,
+      currency_code: shop.currency_code || DEFAULT_CURRENCY,
+      money_format: shop.money_format || DEFAULT_MONEY_FORMAT,
+    });
+
+    return {
+      id: shop.id,
+      currency_code: shop.currency_code || DEFAULT_CURRENCY,
+      money_format: shop.money_format || DEFAULT_MONEY_FORMAT,
+    };
   } catch (error) {
     if (error instanceof DashboardError) throw error;
     throw new DashboardError(
@@ -872,19 +873,89 @@ async function getAttributedMetrics(
   currencyCode: string,
 ): Promise<AttributedMetrics> {
   try {
+    console.log("🔍 DEBUG: getAttributedMetrics called with:", {
+      shopId,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      currencyCode,
+    });
+
+    // DEBUG: Check what shop_id the dashboard is using vs what's in attribution data
+    console.log("🔍 DEBUG: Dashboard shop_id:", shopId);
+
+    // DEBUG: Check if there's a cache issue - let's see what getShopInfo returns
+    // We need to get the shop domain from somewhere - let's use the shop_id to find the domain
+    const shopInfo = await prisma.shops.findUnique({
+      where: { id: shopId },
+      select: { id: true, shop_domain: true },
+    });
+    console.log("🔍 DEBUG: Direct shop query result:", shopInfo);
+
+    // Use the shop_id from the database query (should be the correct one)
+    const correctShopId = shopInfo?.id || shopId;
+    console.log(
+      "🔍 DEBUG: Using shop_id for attribution query:",
+      correctShopId,
+    );
+
     // Get attributed revenue from purchase_attributions table
     const attributedRevenueData = await prisma.purchase_attributions.aggregate({
       where: {
-        shop_id: shopId,
+        shop_id: correctShopId, // Use the correct shop_id
         purchase_at: { gte: startDate, lte: endDate },
       },
       _sum: { total_revenue: true },
     });
 
+    console.log("🔍 DEBUG: attributedRevenueData:", attributedRevenueData);
+
+    // DEBUG: Check if there are any records in purchase_attributions table
+    const totalRecords = await prisma.purchase_attributions.count({
+      where: { shop_id: shopId },
+    });
+    console.log(
+      "🔍 DEBUG: Total purchase_attributions records for shop:",
+      totalRecords,
+    );
+
+    const recentRecords = await prisma.purchase_attributions.findMany({
+      where: { shop_id: shopId },
+      orderBy: { purchase_at: "desc" },
+      take: 5,
+      select: {
+        order_id: true,
+        total_revenue: true,
+        purchase_at: true,
+        shop_id: true,
+      },
+    });
+    console.log(
+      "🔍 DEBUG: Recent purchase_attributions records:",
+      recentRecords,
+    );
+
+    // DEBUG: Check all shop_ids in purchase_attributions table
+    const allShopIds = await prisma.purchase_attributions.findMany({
+      select: { shop_id: true },
+      distinct: ["shop_id"],
+    });
+    console.log("🔍 DEBUG: All shop_ids in purchase_attributions:", allShopIds);
+
+    // DEBUG: Check if there are multiple shops with the same domain
+    const allShops = await prisma.shops.findMany({
+      where: { shop_domain: shopInfo?.shop_domain },
+      select: { id: true, shop_domain: true, created_at: true },
+    });
+    console.log(
+      "🔍 DEBUG: All shops for domain:",
+      shopInfo?.shop_domain,
+      allShops,
+    );
+
     // FIXED: Get attributed refunds from refund_attributions table (NOT purchase_attributions)
     const attributedRefundsData = await prisma.refund_attributions.aggregate({
       where: {
-        shop_id: shopId,
+        shop_id: correctShopId, // Use the correct shop_id
         refunded_at: { gte: startDate, lte: endDate },
       },
       _sum: {
@@ -896,7 +967,7 @@ async function getAttributedMetrics(
     // Get total revenue for attribution rate from order_data table
     const totalRevenueData = await prisma.order_data.aggregate({
       where: {
-        shop_id: shopId,
+        shop_id: correctShopId, // Use the correct shop_id
         order_date: { gte: startDate, lte: endDate },
       },
       _sum: { total_amount: true },

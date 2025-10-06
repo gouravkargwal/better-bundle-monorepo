@@ -294,39 +294,49 @@ class GraphQLOrderAdapter(BaseAdapter):
                 raw_line_items = refund.get("refund_line_items", [])
 
                 # Handle line items - they are in edges format from our working test
-                if isinstance(raw_line_items, list):
-                    for rli in raw_line_items:
-                        line_item = rli.get("line_item", {})
+                if isinstance(raw_line_items, dict) and "edges" in raw_line_items:
+                    # Handle GraphQL edges format
+                    raw_line_items = [
+                        edge.get("node", {}) for edge in raw_line_items.get("edges", [])
+                    ]
+                elif isinstance(raw_line_items, list):
+                    # Already in list format
+                    pass
+                else:
+                    raw_line_items = []
 
-                        refund_line_item = {
-                            "refund_id": str(refund.get("id", "")),
-                            "order_id": str(payload.get("id", "")),
-                            "product_id": str(
-                                line_item.get("product", {}).get("id", "")
-                            ),
-                            "variant_id": str(
-                                line_item.get("variant", {}).get("id", "")
-                            ),
-                            "quantity": int(rli.get("quantity", 0)),
-                            "unit_price": float(rli.get("subtotal", 0)),
-                            "refund_amount": float(rli.get("subtotal", 0)),
-                            "properties": line_item.get("customAttributes", []),
-                        }
-                        refund_line_items.append(refund_line_item)
+                for rli in raw_line_items:
+                    line_item = rli.get("line_item", {})
+
+                    refund_line_item = {
+                        "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
+                        "order_id": _extract_numeric_gid(str(payload.get("id", ""))),
+                        "product_id": _extract_numeric_gid(
+                            str(line_item.get("product", {}).get("id", ""))
+                        ),
+                        "variant_id": _extract_numeric_gid(
+                            str(line_item.get("variant", {}).get("id", ""))
+                        ),
+                        "quantity": int(rli.get("quantity", 0)),
+                        "unit_price": float(rli.get("subtotal", 0)),
+                        "refund_amount": float(rli.get("subtotal", 0)),
+                        "properties": line_item.get("customAttributes", []),
+                    }
+                    refund_line_items.append(refund_line_item)
 
                 # Create refund data
                 refund_data = {
                     "shop_id": shop_id,
                     "order_id": str(payload.get("id", "")),
-                    "refund_id": str(refund.get("id", "")),
-                    "refunded_at": self._parse_iso(refund.get("created_at")),
+                    "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
+                    "refunded_at": _parse_iso(refund.get("created_at")),
                     "note": refund.get("note", ""),
-                    "restock": refund.get("restock", False),
+                    "restock": False,  # restock field not available in GraphQL API
                     "total_refund_amount": total_refund_amount,
                     "currency_code": currency_code,
                     "refund_line_items": refund_line_items,
-                    "created_at": self._parse_iso(refund.get("created_at")),
-                    "updated_at": self._parse_iso(refund.get("processed_at")),
+                    "created_at": _parse_iso(refund.get("created_at")),
+                    "updated_at": _parse_iso(refund.get("processed_at")),
                     "extras": refund,
                 }
 
