@@ -1,323 +1,359 @@
+import { useEffect } from "react";
 import {
-  Banner,
   BlockStack,
   Button,
   Card,
   InlineStack,
   Text,
   Icon,
-  ProgressBar,
-  Badge,
+  RangeSlider,
 } from "@shopify/polaris";
-import {
-  CreditCardIcon,
-  CheckCircleIcon,
-  AlertTriangleIcon,
-  StarFilledIcon,
-} from "@shopify/polaris-icons";
+import { AlertTriangleIcon, CreditCardIcon } from "@shopify/polaris-icons";
+import { BillingLayout } from "./BillingLayout";
+import { HeroHeader } from "../UI/HeroHeader";
+import { formatCurrency } from "app/utils/currency";
 
 interface BillingSetupProps {
-  billingData: {
-    billing_plan: {
-      id: string;
-      name: string;
-      type: string;
-      status: string;
-      configuration: any;
-      currency: string;
-      trial_status: {
-        is_trial_active?: boolean;
-        trial_threshold?: number;
-        trial_revenue?: number;
-        remaining_revenue: number;
-        trial_progress: number;
-      };
-    };
-  };
+  billingPlan: any;
+  spendingLimit: string;
+  setSpendingLimit: (value: string) => void;
   onSetupBilling: () => void;
   isLoading?: boolean;
 }
 
 export function BillingSetup({
-  billingData,
+  billingPlan,
+  spendingLimit,
+  setSpendingLimit,
   onSetupBilling,
   isLoading = false,
 }: BillingSetupProps) {
-  const plan = billingData.billing_plan;
-  const trialStatus = plan.trial_status;
-  const config = plan.configuration || {};
+  const currency = billingPlan.currency || "USD";
 
-  // Check if trial is completed and billing setup is required
-  const isTrialCompleted =
-    !trialStatus.is_trial_active && config.trial_completed_at;
-  const needsBillingSetup =
-    config.subscription_required && !config.subscription_id;
-  const hasActiveSubscription =
-    config.subscription_id && config.subscription_status === "ACTIVE";
+  // Slider configuration
+  const sliderMultiplier = currency === "INR" ? 80 : 1;
+  const sliderMin = 100 * sliderMultiplier;
+  const sliderMax = 10000 * sliderMultiplier;
+  const sliderStep = 50 * sliderMultiplier;
+  const defaultValue = 1000 * sliderMultiplier;
 
-  // Safe trial status values
-  const safeTrialStatus = {
-    is_trial_active: trialStatus?.is_trial_active || false,
-    trial_threshold: Number(trialStatus?.trial_threshold) || 0,
-    trial_revenue: Number(trialStatus?.trial_revenue) || 0,
-    remaining_revenue: Math.max(
-      0,
-      (Number(trialStatus?.trial_threshold) || 0) -
-        (Number(trialStatus?.trial_revenue) || 0),
-    ),
-    trial_progress:
-      trialStatus?.trial_threshold > 0
-        ? ((Number(trialStatus?.trial_revenue) || 0) /
-            (Number(trialStatus?.trial_threshold) || 1)) *
-          100
-        : 0,
-  };
+  const currentValue = parseFloat(spendingLimit);
+  const displayValue =
+    Number.isFinite(currentValue) && currentValue >= sliderMin
+      ? currentValue
+      : defaultValue;
 
-  const formatCurrency = (
-    amount: number | string | null | undefined,
-    currencyCode: string = "USD",
-  ) => {
-    if (amount === null || amount === undefined || amount === "") {
-      return `$${0.0}`;
+  // Initialize with proper default on mount
+  useEffect(() => {
+    const needsDefault =
+      !Number.isFinite(currentValue) ||
+      currentValue < sliderMin ||
+      (currency === "INR" && currentValue === 1000);
+
+    if (needsDefault) {
+      setSpendingLimit(defaultValue.toString());
     }
-    const numericAmount =
-      typeof amount === "string" ? parseFloat(amount) : amount;
-    if (isNaN(numericAmount)) {
-      return `$${0.0}`;
-    }
-    return `$${numericAmount.toFixed(2)}`;
-  };
+  }, [currency, currentValue, sliderMin, defaultValue, setSpendingLimit]);
 
-  if (hasActiveSubscription) {
-    return (
-      <Card>
-        <BlockStack gap="400">
-          <InlineStack align="space-between">
-            <Text as="h2" variant="headingMd" fontWeight="bold">
-              🎉 Billing Active
-            </Text>
-            <Badge tone="success">Active</Badge>
-          </InlineStack>
-
-          <div
-            style={{
-              padding: "16px",
-              backgroundColor: "#F0F9FF",
-              borderRadius: "8px",
-              border: "1px solid #0EA5E9",
-            }}
-          >
-            <InlineStack gap="200" align="start">
-              <Icon source={CheckCircleIcon} tone="success" />
-              <BlockStack gap="200">
-                <Text as="p" variant="bodyMd" fontWeight="medium">
-                  Your usage-based billing is now active!
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  You'll be charged 3% of attributed revenue with a $1,000
-                  monthly cap.
-                </Text>
-              </BlockStack>
-            </InlineStack>
-          </div>
-        </BlockStack>
-      </Card>
-    );
-  }
-
-  if (isTrialCompleted && needsBillingSetup) {
-    return (
-      <Card>
-        <BlockStack gap="400">
-          <InlineStack align="space-between">
-            <Text as="h2" variant="headingMd" fontWeight="bold">
-              💳 Setup Billing Required
-            </Text>
-            <Badge tone="warning">Action Required</Badge>
-          </InlineStack>
-
-          <Banner tone="warning">
-            <Text as="p">
-              Your trial has completed! To continue using Better Bundle, please
-              set up billing.
-            </Text>
-          </Banner>
-
-          <div
-            style={{
-              padding: "20px",
-              backgroundColor: "#FEF3C7",
-              borderRadius: "8px",
-              border: "1px solid #F59E0B",
-            }}
-          >
-            <BlockStack gap="300">
-              <InlineStack gap="200" align="start">
-                <Icon source={AlertTriangleIcon} tone="warning" />
-                <Text as="p" variant="bodyMd" fontWeight="medium">
-                  Services are currently suspended
-                </Text>
-              </InlineStack>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Your Better Bundle features are paused until billing is
-                configured.
-              </Text>
-            </BlockStack>
-          </div>
-
-          <div
-            style={{
-              padding: "20px",
-              backgroundColor: "#F8FAFC",
-              borderRadius: "8px",
-              border: "1px solid #E2E8F0",
-            }}
-          >
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm" fontWeight="bold">
-                Usage-Based Billing Plan
-              </Text>
-
-              <BlockStack gap="200">
-                <InlineStack align="space-between">
-                  <Text as="p" variant="bodyMd">
-                    Base Price:
-                  </Text>
-                  <Text as="p" variant="bodyMd" fontWeight="medium">
-                    $0.00/month
-                  </Text>
-                </InlineStack>
-                <InlineStack align="space-between">
-                  <Text as="p" variant="bodyMd">
-                    Usage Fee:
-                  </Text>
-                  <Text as="p" variant="bodyMd" fontWeight="medium">
-                    3% of attributed revenue
-                  </Text>
-                </InlineStack>
-                <InlineStack align="space-between">
-                  <Text as="p" variant="bodyMd">
-                    Monthly Cap:
-                  </Text>
-                  <Text as="p" variant="bodyMd" fontWeight="medium">
-                    $1,000.00
-                  </Text>
-                </InlineStack>
-                <InlineStack align="space-between">
-                  <Text as="p" variant="bodyMd">
-                    Billing Cycle:
-                  </Text>
-                  <Text as="p" variant="bodyMd" fontWeight="medium">
-                    Every 30 days
-                  </Text>
-                </InlineStack>
-              </BlockStack>
-            </BlockStack>
-          </div>
-
-          <Button
-            primary
-            size="large"
-            onClick={onSetupBilling}
-            loading={isLoading}
-            icon={CreditCardIcon}
-          >
-            Setup Billing & Activate Services
-          </Button>
-
-          <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-            By setting up billing, you agree to our usage-based pricing model.
-          </Text>
-        </BlockStack>
-      </Card>
-    );
-  }
-
-  if (safeTrialStatus.is_trial_active) {
-    return (
-      <Card>
-        <BlockStack gap="400">
-          <InlineStack align="space-between">
-            <Text as="h2" variant="headingMd" fontWeight="bold">
-              🚀 Trial in Progress
-            </Text>
-            <Badge tone="info">Trial Active</Badge>
-          </InlineStack>
-
-          <div
-            style={{
-              padding: "20px",
-              backgroundColor: "#F0F9FF",
-              borderRadius: "8px",
-              border: "1px solid #0EA5E9",
-            }}
-          >
-            <BlockStack gap="300">
-              <InlineStack gap="200" align="start">
-                <Icon source={StarFilledIcon} tone="info" />
-                <Text as="p" variant="bodyMd" fontWeight="medium">
-                  You're currently in your free trial period
-                </Text>
-              </InlineStack>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Once you reach ${safeTrialStatus.trial_threshold} in attributed
-                revenue, you'll be prompted to set up billing.
-              </Text>
-            </BlockStack>
-          </div>
-
-          <BlockStack gap="300">
-            <InlineStack align="space-between">
-              <Text as="p" variant="bodyMd" fontWeight="medium">
-                Trial Progress
-              </Text>
-              <Text as="p" variant="bodyMd">
-                {formatCurrency(safeTrialStatus.trial_revenue, plan.currency)} /{" "}
-                {formatCurrency(safeTrialStatus.trial_threshold, plan.currency)}
-              </Text>
-            </InlineStack>
-
-            <ProgressBar
-              progress={Math.min(safeTrialStatus.trial_progress, 100)}
-              size="medium"
-            />
-
-            <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-              {safeTrialStatus.remaining_revenue > 0
-                ? `${formatCurrency(safeTrialStatus.remaining_revenue, plan.currency)} remaining until trial completion`
-                : "Trial threshold reached"}
-            </Text>
-          </BlockStack>
-
-          <div
-            style={{
-              padding: "16px",
-              backgroundColor: "#F8FAFC",
-              borderRadius: "8px",
-              border: "1px solid #E2E8F0",
-            }}
-          >
-            <Text as="p" variant="bodySm" tone="subdued">
-              <strong>What happens next?</strong> When your trial completes,
-              you'll be automatically enrolled in our usage-based billing plan
-              at 3% of attributed revenue (capped at $1,000/month).
-            </Text>
-          </div>
-        </BlockStack>
-      </Card>
-    );
-  }
+  const revenueCapacity = Math.round(displayValue / 0.03);
 
   return (
-    <Card>
-      <BlockStack gap="400">
-        <Text as="h2" variant="headingMd" fontWeight="bold">
-          Billing Status
-        </Text>
-        <Text as="p" variant="bodyMd" tone="subdued">
-          No billing information available.
-        </Text>
+    <BillingLayout>
+      <BlockStack gap="500">
+        <HeroHeader
+          badge="💳 Action Required"
+          title="Setup Billing to Continue"
+          subtitle="Your free trial has ended. Choose your spending limit and activate usage-based billing."
+          gradient="orange"
+        />
+
+        <Card>
+          <div style={{ padding: "24px" }}>
+            <BlockStack gap="400">
+              {/* Warning Banner */}
+              <div
+                style={{
+                  padding: "20px",
+                  backgroundColor: "#FEF3C7",
+                  borderRadius: "12px",
+                  border: "1px solid #FCD34D",
+                }}
+              >
+                <InlineStack gap="300" align="start" blockAlign="center">
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: "40px",
+                      minHeight: "40px",
+                      padding: "12px",
+                      backgroundColor: "#F59E0B15",
+                      borderRadius: "16px",
+                      border: "2px solid #F59E0B30",
+                    }}
+                  >
+                    <Icon source={AlertTriangleIcon} tone="base" />
+                  </div>
+                  <BlockStack gap="100">
+                    <div style={{ color: "#92400E" }}>
+                      <Text as="h3" variant="headingMd" fontWeight="bold">
+                        Services Currently Paused
+                      </Text>
+                    </div>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Your Better Bundle features are paused until billing is
+                      configured. Setup takes less than 2 minutes.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </div>
+
+              {/* Plan Details */}
+              <div
+                style={{
+                  padding: "20px",
+                  backgroundColor: "#F8FAFC",
+                  borderRadius: "12px",
+                  border: "1px solid #E2E8F0",
+                }}
+              >
+                <BlockStack gap="300">
+                  <div
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#DBEAFE",
+                      borderRadius: "12px",
+                      border: "1px solid #BAE6FD",
+                    }}
+                  >
+                    <div style={{ color: "#0C4A6E" }}>
+                      <Text as="h3" variant="headingMd" fontWeight="bold">
+                        💡 Usage-Based Billing Plan
+                      </Text>
+                    </div>
+                  </div>
+
+                  <BlockStack gap="200">
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Commission Rate:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        3% of attributed revenue
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Billing Cycle:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Every 30 Days
+                      </Text>
+                    </InlineStack>
+
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        When You Pay:
+                      </Text>
+                      <Text as="p" variant="bodyMd" fontWeight="bold">
+                        Only when you make sales
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+
+                  <div
+                    style={{
+                      padding: "12px",
+                      backgroundColor: "#FFFFFF",
+                      borderRadius: "8px",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      ✅ Cancel anytime • No hidden fees • Pay for value
+                      delivered
+                    </Text>
+                  </div>
+                </BlockStack>
+              </div>
+
+              {/* Spending Limit Slider */}
+              <div
+                style={{
+                  padding: "20px",
+                  backgroundColor: "#FFFFFF",
+                  borderRadius: "12px",
+                  border: "2px solid #3B82F6",
+                }}
+              >
+                <BlockStack gap="400">
+                  <InlineStack gap="200" align="start" blockAlign="center">
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minWidth: "40px",
+                        minHeight: "40px",
+                        padding: "12px",
+                        backgroundColor: "#3B82F615",
+                        borderRadius: "16px",
+                        border: "2px solid #3B82F630",
+                      }}
+                    >
+                      <Icon source={CreditCardIcon} tone="base" />
+                    </div>
+                    <BlockStack gap="100">
+                      <Text as="h3" variant="headingMd" fontWeight="bold">
+                        Choose Your Monthly Spending Cap
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        This is the maximum you'll be charged per month. You can
+                        change this anytime.
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+
+                  <div style={{ paddingTop: "8px" }}>
+                    <Text as="p" variant="headingLg" fontWeight="bold">
+                      {formatCurrency(displayValue, currency)}
+                    </Text>
+                  </div>
+
+                  <RangeSlider
+                    label="Monthly Spending Cap"
+                    labelHidden
+                    min={sliderMin}
+                    max={sliderMax}
+                    step={sliderStep}
+                    value={displayValue}
+                    onChange={(value) => setSpendingLimit(value.toString())}
+                    output
+                  />
+
+                  <div
+                    style={{
+                      padding: "12px",
+                      backgroundColor: "#F0F9FF",
+                      borderRadius: "8px",
+                      border: "1px solid #BAE6FD",
+                    }}
+                  >
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      💡 With a {formatCurrency(displayValue, currency)} monthly
+                      cap, you'll never pay more than that—even if your 3%
+                      commission exceeds it. This cap lets you handle up to{" "}
+                      <strong>
+                        {formatCurrency(revenueCapacity, currency)}
+                      </strong>{" "}
+                      in monthly attributed revenue.
+                    </Text>
+                  </div>
+                </BlockStack>
+              </div>
+
+              {/* Action Buttons */}
+              <BlockStack gap="300">
+                <Button
+                  variant="primary"
+                  size="large"
+                  onClick={onSetupBilling}
+                  loading={isLoading}
+                  fullWidth
+                >
+                  Continue to Shopify Approval
+                </Button>
+
+                <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+                  You'll be redirected to Shopify to review and approve your
+                  billing setup
+                </Text>
+              </BlockStack>
+            </BlockStack>
+          </div>
+        </Card>
+
+        {/* Help Section */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: "24px",
+          }}
+        >
+          <Card>
+            <div style={{ padding: "20px" }}>
+              <BlockStack gap="300">
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#DBEAFE",
+                    borderRadius: "12px",
+                    border: "1px solid #BAE6FD",
+                  }}
+                >
+                  <div style={{ color: "#0C4A6E" }}>
+                    <Text as="h3" variant="headingMd" fontWeight="bold">
+                      ℹ️ How It Works
+                    </Text>
+                  </div>
+                </div>
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodySm">
+                    <strong>1.</strong> Choose your monthly spending cap
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    <strong>2.</strong> Click "Continue to Shopify Approval"
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    <strong>3.</strong> Review and approve in Shopify
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    <strong>4.</strong> Services resume automatically
+                  </Text>
+                </BlockStack>
+              </BlockStack>
+            </div>
+          </Card>
+
+          <Card>
+            <div style={{ padding: "20px" }}>
+              <BlockStack gap="300">
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#FEF3C7",
+                    borderRadius: "12px",
+                    border: "1px solid #FCD34D",
+                  }}
+                >
+                  <div style={{ color: "#92400E" }}>
+                    <Text as="h3" variant="headingMd" fontWeight="bold">
+                      💡 Good to Know
+                    </Text>
+                  </div>
+                </div>
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    <strong>Safe & Predictable:</strong> Your spending cap
+                    protects you from unexpected charges.
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    <strong>Flexible:</strong> Change your spending cap anytime
+                    or cancel with no penalties.
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    <strong>Fair Pricing:</strong> Only pay 3% when Better
+                    Bundle generates revenue for you.
+                  </Text>
+                </BlockStack>
+              </BlockStack>
+            </div>
+          </Card>
+        </div>
       </BlockStack>
-    </Card>
+    </BillingLayout>
   );
 }

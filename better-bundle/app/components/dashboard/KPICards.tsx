@@ -38,7 +38,6 @@ function KPICard({
   color = "#3B82F6",
   description,
 }: KPICardProps) {
-  console.log(`KPICard ${title}:`, { value, change, trend });
   const getTrendColor = () => {
     if (trend === "up") return "success";
     if (trend === "down") return "critical";

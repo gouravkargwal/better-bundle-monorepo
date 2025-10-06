@@ -633,9 +633,6 @@ class ShopifyBillingService:
             # Get billing plan
             billing_plan = await self.billing_repository.get_billing_plan(shop_id)
 
-            # Get recent billing events
-            events = await self.billing_repository.get_billing_events(shop_id, limit=10)
-
             return {
                 "shop_id": shop_id,
                 "billing_plan": {
@@ -654,15 +651,6 @@ class ShopifyBillingService:
                         "created_at": invoice.createdAt.isoformat(),
                     }
                     for invoice in invoices
-                ],
-                "recent_events": [
-                    {
-                        "id": event.id,
-                        "type": event.type,
-                        "data": event.data,
-                        "occurred_at": event.occurredAt.isoformat(),
-                    }
-                    for event in events
                 ],
             }
 

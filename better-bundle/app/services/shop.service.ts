@@ -1,7 +1,7 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
-import { getTrialThresholdInShopCurrency } from "../utils/currency-converter";
 import { createUsageBasedSubscription } from "./subscription.service";
+import { getTrialThresholdInShopCurrency } from "app/utils/currency-converter";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -109,27 +109,6 @@ const createShopAndSetOnboardingCompleted = async (
       onboarding_completed: false as any, // Start as false, will be set to true later
     },
   });
-
-  // Create billing event for reactivation if it's a reinstall
-  if (isReinstall) {
-    await db.billing_events.create({
-      data: {
-        shop_id: shop.id,
-        type: "billing_reactivated",
-        data: {
-          reason: "app_reinstalled",
-          reactivated_at: new Date().toISOString(),
-          shop_domain: shopData.myshopifyDomain,
-          preserved_onboarding: existingShop.onboarding_completed,
-        },
-        metadata: {
-          processed_at: new Date().toISOString(),
-          is_reinstall: true,
-        },
-        occurred_at: new Date(),
-      },
-    });
-  }
 
   return shop;
 };
@@ -262,27 +241,6 @@ const deactivateShopBilling = async (
       select: { id: true, shop_id: true },
     });
 
-    if (billingPlan) {
-      await prisma.billing_events.create({
-        data: {
-          plan_id: billingPlan.id,
-          shop_id: billingPlan.shop_id,
-          type: "billing_suspended",
-          data: {
-            reason,
-            deactivated_at: new Date().toISOString(),
-            shop_domain: shopDomain,
-          },
-          billing_metadata: {
-            processed_at: new Date().toISOString(),
-            plans_affected_count: updatedPlans.count,
-          },
-          occurred_at: new Date(),
-          processed_at: new Date(),
-        },
-      });
-    }
-
     console.log(`✅ Successfully deactivated billing for ${shopDomain}:`);
     console.log(`   - Marked shop as inactive`);
     console.log(`   - Deactivated ${updatedPlans.count} billing plans`);
@@ -374,26 +332,6 @@ const handleTrialCompletion = async (
         },
       });
 
-      // Create billing event for trial completion
-      await prisma.billing_events.create({
-        data: {
-          shop_id: shopId,
-          type: "trial_completed",
-          data: {
-            final_revenue: finalRevenue,
-            completed_at: new Date().toISOString(),
-            subscription_id: subscription.id,
-            subscription_created: true,
-          },
-          metadata: {
-            trial_completion: true,
-            final_revenue: finalRevenue,
-            subscription_created: true,
-          },
-          occurred_at: new Date(),
-        },
-      });
-
       return {
         success: true,
         subscription_created: true,
@@ -402,26 +340,6 @@ const handleTrialCompletion = async (
       };
     } else {
       console.error(`❌ Failed to create subscription for shop ${shopDomain}`);
-
-      // Create billing event for trial completion without subscription
-      await prisma.billing_events.create({
-        data: {
-          shop_id: shopId,
-          type: "trial_completed_no_subscription",
-          data: {
-            final_revenue: finalRevenue,
-            completed_at: new Date().toISOString(),
-            subscription_created: false,
-            error: "Failed to create subscription",
-          },
-          metadata: {
-            trial_completion: true,
-            final_revenue: finalRevenue,
-            subscription_created: false,
-          },
-          occurred_at: new Date(),
-        },
-      });
 
       return {
         success: false,
@@ -435,25 +353,6 @@ const handleTrialCompletion = async (
       `❌ Error handling trial completion for shop ${shopDomain}:`,
       error,
     );
-
-    // Create billing event for error
-    await prisma.billing_events.create({
-      data: {
-        shop_id: shopId,
-        type: "trial_completion_error",
-        data: {
-          final_revenue: finalRevenue,
-          error: error instanceof Error ? error.message : "Unknown error",
-          occurred_at: new Date().toISOString(),
-        },
-        metadata: {
-          trial_completion: true,
-          final_revenue: finalRevenue,
-          error: true,
-        },
-        occurred_at: new Date(),
-      },
-    });
 
     throw new Error(
       `Failed to handle trial completion: ${error instanceof Error ? error.message : "Unknown error"}`,

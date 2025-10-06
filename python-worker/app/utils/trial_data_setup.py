@@ -75,27 +75,6 @@ async def create_shop_with_trial_plan(
             }
         )
 
-        # Create billing event
-        await db.billingevent.create(
-            {
-                "shopId": shop_id,
-                "type": "plan_created",
-                "data": Json(
-                    {
-                        "trial_threshold": trial_threshold,
-                        "plan_id": billing_plan.id,
-                    }
-                ),
-                "metadata": Json(
-                    {
-                        "trial_type": "revenue_based",
-                        "created_at": datetime.utcnow().isoformat(),
-                    }
-                ),
-                "occurredAt": datetime.utcnow(),
-            }
-        )
-
         logger.info(f"✅ Created shop with trial plan: {shop_domain}")
 
         return {

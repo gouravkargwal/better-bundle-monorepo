@@ -409,37 +409,6 @@ class PaymentFailureService:
         except Exception as e:
             logger.error(f"Error creating retry job: {e}")
 
-    async def _create_billing_event(
-        self,
-        shop_id: str,
-        failure_type: PaymentFailureType,
-        failure_details: Dict[str, Any],
-    ):
-        """Create billing event for payment failure"""
-        try:
-            await self.prisma.billingevent.create(
-                {
-                    "data": {
-                        "shopId": shop_id,
-                        "type": "payment_failure",
-                        "data": {
-                            "failure_type": failure_type.value,
-                            "failure_details": failure_details,
-                            "occurred_at": datetime.utcnow().isoformat(),
-                        },
-                        "metadata": {
-                            "failure_type": failure_type.value,
-                            "event_type": "payment_failure",
-                        },
-                    }
-                }
-            )
-
-            logger.info(f"Created billing event for payment failure: {shop_id}")
-
-        except Exception as e:
-            logger.error(f"Error creating billing event: {e}")
-
     async def recover_from_failure(self, shop_id: str) -> bool:
         """
         Recover from payment failure when payment is successful.
@@ -515,25 +484,3 @@ class PaymentFailureService:
 
         except Exception as e:
             logger.error(f"Error restoring service functionality: {e}")
-
-    async def _create_recovery_event(self, shop_id: str):
-        """Create recovery event"""
-        try:
-            await self.prisma.billingevent.create(
-                {
-                    "data": {
-                        "shopId": shop_id,
-                        "type": "payment_recovered",
-                        "data": {
-                            "recovered_at": datetime.utcnow().isoformat(),
-                            "service_restored": True,
-                        },
-                        "metadata": {"event_type": "payment_recovery"},
-                    }
-                }
-            )
-
-            logger.info(f"Created recovery event for shop {shop_id}")
-
-        except Exception as e:
-            logger.error(f"Error creating recovery event: {e}")

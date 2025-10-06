@@ -54,16 +54,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Calculate converted amount for display
   let convertedAmount = 200; // fallback
   if (trialConfig) {
-    console.log(
-      "🔄 Converting currency:",
-      trialConfig.currency_code,
-      trialConfig.threshold_usd,
-    );
     convertedAmount = await getTrialThresholdInShopCurrency(
       trialConfig.currency_code,
       trialConfig.threshold_usd,
     );
-    console.log("💰 Converted amount:", convertedAmount);
   }
 
   return {

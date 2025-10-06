@@ -47,7 +47,6 @@ from app.core.database.models import (
     RefundAttribution,
     BillingPlan,
     BillingInvoice,
-    BillingEvent,
 )
 
 
@@ -148,7 +147,6 @@ class SeedPipelineRunner:
             # Watermark tables
             PipelineWatermark,
             # Billing tables
-            BillingEvent,
             BillingInvoice,
             BillingPlan,
             # Extension tables

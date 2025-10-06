@@ -13,7 +13,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload
 
 from app.core.database.session import get_transaction_context
-from app.core.database.models import Shop, BillingPlan, BillingInvoice, BillingEvent
+from app.core.database.models import Shop, BillingPlan, BillingInvoice
 from app.core.logging import get_logger
 from app.domains.billing.services.billing_service import BillingService
 from app.domains.billing.repositories.billing_repository import (

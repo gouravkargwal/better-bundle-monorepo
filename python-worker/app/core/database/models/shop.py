@@ -97,9 +97,6 @@ class Shop(BaseModel):
     billing_plans = relationship(
         "BillingPlan", back_populates="shop", cascade="all, delete-orphan"
     )
-    billing_events = relationship(
-        "BillingEvent", back_populates="shop", cascade="all, delete-orphan"
-    )
     billing_invoices = relationship(
         "BillingInvoice", back_populates="shop", cascade="all, delete-orphan"
     )

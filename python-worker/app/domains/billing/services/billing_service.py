@@ -22,7 +22,6 @@ from ..models.attribution_models import AttributionResult, PurchaseEvent
 from app.core.database.models import (
     Shop,
     BillingPlan,
-    BillingEvent,
     PurchaseAttribution,
     RefundAttribution,
 )
@@ -181,27 +180,6 @@ class BillingService:
                 f"(threshold: ${trial_threshold})"
             )
 
-            # Create billing event for tracking
-            event = BillingEvent(
-                shop_id=shop_id,
-                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
-                type="trial_usage_recorded",
-                occurred_at=datetime.utcnow(),
-                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
-                data={
-                    "order_id": purchase_event.order_id,
-                    "attributed_revenue": float(attributed_revenue),
-                    "cumulative_revenue": float(new_revenue),
-                    "threshold": float(trial_threshold),
-                    "usage_count": None,
-                },
-                billing_metadata={
-                    "phase": "trial",
-                    "internal_tracking": False,
-                },
-            )
-            self.session.add(event)
-
             # ✅ CHECK THRESHOLD
             if new_revenue >= trial_threshold:
                 logger.warning(
@@ -261,27 +239,6 @@ class BillingService:
                 )
             )
             await self.session.execute(shop_stmt)
-
-            # 3. Create event
-            event = BillingEvent(
-                shop_id=shop_id,
-                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
-                type="trial_completed",
-                occurred_at=datetime.utcnow(),
-                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
-                data={
-                    "final_revenue": float(final_revenue),
-                    "threshold": TRIAL_THRESHOLD_USD,
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "services_suspended": True,
-                    "requires_subscription": True,
-                },
-                billing_metadata={
-                    "phase": "trial_completion",
-                    "next_action": "create_subscription",
-                },
-            )
-            self.session.add(event)
 
             await self.session.commit()
 
@@ -362,26 +319,6 @@ class BillingService:
             if usage_record:
                 logger.info(f"✅ Usage recorded with Shopify: {usage_record.id}")
 
-                # Store event for analytics
-                event = BillingEvent(
-                    shop_id=shop_id,
-                    plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
-                    type="usage_recorded",
-                    occurred_at=datetime.utcnow(),
-                    processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
-                    data={
-                        "order_id": purchase_event.order_id,
-                        "attributed_revenue": float(attributed_revenue),
-                        "fee_amount": float(fee_amount),
-                        "shopify_usage_record_id": usage_record.id,
-                        "currency": currency,
-                    },
-                    metadata={
-                        "phase": "post_trial",
-                        "shopify_tracking": True,
-                    },
-                )
-                self.session.add(event)
                 await self.session.commit()
             else:
                 logger.error(
@@ -462,25 +399,6 @@ class BillingService:
             )
             billing_plan.configuration = config
 
-            # Create event
-            event = BillingEvent(
-                shop_id=shop_id,
-                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
-                type="subscription_created",
-                occurred_at=datetime.utcnow(),
-                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
-                data={
-                    "subscription_id": subscription.id,
-                    "status": "PENDING",
-                    "capped_amount": PAID_CAPPED_AMOUNT_USD,
-                    "currency": currency,
-                },
-                billing_metadata={
-                    "phase": "subscription_creation",
-                },
-            )
-            self.session.add(event)
-
             await self.session.commit()
 
             logger.info(
@@ -552,24 +470,6 @@ class BillingService:
                 )
             )
             await self.session.execute(shop_stmt)
-
-            # Create event
-            event = BillingEvent(
-                shop_id=shop_id,
-                plan_id=billing_plan.id,  # ✅ FIX: Add required plan_id
-                type="subscription_activated",
-                occurred_at=datetime.utcnow(),
-                processed_at=datetime.utcnow(),  # ✅ FIX: Add required processed_at
-                data={
-                    "subscription_id": subscription_id,
-                    "status": "ACTIVE",
-                    "services_resumed": True,
-                },
-                billing_metadata={
-                    "phase": "subscription_activation",
-                },
-            )
-            self.session.add(event)
 
             await self.session.commit()
 

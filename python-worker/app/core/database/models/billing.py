@@ -55,9 +55,6 @@ class BillingPlan(BaseModel, ShopMixin):
     # ✅ PATTERN 1: State Flags
     requires_subscription_approval = Column(Boolean, default=False, index=True)
 
-    events = relationship(
-        "BillingEvent", back_populates="plan", cascade="all, delete-orphan"
-    )
     invoices = relationship(
         "BillingInvoice", back_populates="plan", cascade="all, delete-orphan"
     )
@@ -159,35 +156,3 @@ class BillingInvoice(BaseModel, ShopMixin):
 
     def __repr__(self) -> str:
         return f"<BillingInvoice(shop_id={self.shop_id}, invoice_number={self.invoice_number}, status={self.status})>"
-
-
-class BillingEvent(BaseModel, ShopMixin):
-    """Billing event model for tracking billing events"""
-
-    __tablename__ = "billing_events"
-
-    # Foreign key to BillingPlan
-    plan_id = Column(String, ForeignKey("billing_plans.id"), nullable=False, index=True)
-
-    # Event identification
-    type = Column(String, nullable=False, index=True)  # BillingEventType enum
-    data = Column(JSON, default={}, nullable=False)
-    billing_metadata = Column(JSON, default={}, nullable=False)
-
-    # Timing
-    occurred_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
-    processed_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
-
-    # Relationships
-    plan = relationship("BillingPlan", back_populates="events")
-    shop = relationship("Shop", back_populates="billing_events")
-    # Indexes
-    __table_args__ = (
-        Index("ix_billing_event_shop_id", "shop_id"),
-        Index("ix_billing_event_type", "type"),
-        Index("ix_billing_event_occurred_at", "occurred_at"),
-        Index("ix_billing_event_processed_at", "processed_at"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<BillingEvent(shop_id={self.shop_id}, type={self.type})>"

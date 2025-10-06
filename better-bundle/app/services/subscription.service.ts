@@ -364,28 +364,6 @@ export class SubscriptionService {
         },
       });
 
-      // Create billing event
-      await prisma.billing_events.create({
-        data: {
-          shop_id: shopId,
-          plan_id: "", // Usage-based doesn't have a plan ID
-          type: "subscription_created",
-          data: {
-            subscription_id: subscription.id,
-            subscription_name: subscription.name,
-            subscription_status: subscription.status,
-            created_at: subscription.createdAt,
-          },
-          billing_metadata: {
-            usage_based: true,
-            subscription_type: "usage_based",
-          },
-          occurred_at: new Date(),
-          processed_at: new Date(),
-          created_at: new Date(),
-        },
-      });
-
       console.log(`✅ Subscription stored in database for shop ${shopId}`);
     } catch (error) {
       console.error("❌ Error storing subscription:", error);

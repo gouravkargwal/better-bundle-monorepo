@@ -71,26 +71,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Create billing event
-    await prisma.billing_events.create({
-      data: {
-        shop_id: shop,
-        type: "charge_failed",
-        data: {
-          charge_id: chargeData.id,
-          amount: parseFloat(chargeData.price),
-          currency: chargeData.currency,
-          status: chargeData.status,
-          name: chargeData.name,
-          failure_reason: "Payment failed",
-        },
-        billing_metadata: {
-          webhook_topic: topic,
-          shopify_charge_id: chargeData.id,
-        },
-      },
-    });
-
     console.log(`✅ Billing webhook processed successfully for shop ${shop}`);
 
     return json({ success: true });

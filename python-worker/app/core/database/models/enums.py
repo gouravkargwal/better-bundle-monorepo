@@ -58,20 +58,6 @@ class InvoiceStatus(str, Enum):
     REFUNDED = "refunded"
 
 
-class BillingEventType(str, Enum):
-    """Billing event types"""
-
-    PLAN_CREATED = "plan_created"
-    PLAN_UPDATED = "plan_updated"
-    METRICS_CALCULATED = "metrics_calculated"
-    INVOICE_GENERATED = "invoice_generated"
-    PAYMENT_RECEIVED = "payment_received"
-    PAYMENT_FAILED = "payment_failed"
-    REFUND_PROCESSED = "refund_processed"
-    BILLING_SUSPENDED = "billing_suspended"
-    BILLING_REACTIVATED = "billing_reactivated"
-
-
 class ExtensionType(str, Enum):
     """Extension types"""
 

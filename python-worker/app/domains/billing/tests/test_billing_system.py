@@ -36,7 +36,6 @@ class TestBillingSystem:
         prisma.purchaseAttribution = Mock()
         prisma.billingPlan = Mock()
         prisma.billingInvoice = Mock()
-        prisma.billingEvent = Mock()
         prisma.shop = Mock()
         return prisma
 

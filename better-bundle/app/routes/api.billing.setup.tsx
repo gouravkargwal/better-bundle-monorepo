@@ -108,9 +108,19 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
+    // Build return URL:
+    // - Preferred: embedded admin path with your app handle
+    // - Fallback: your app URL (Remix) which will re-embed automatically
+    const storeSlug = shop.replace(".myshopify.com", "");
+    const appHandle = process.env.SHOPIFY_APP_HANDLE;
+    const embeddedReturnUrl = appHandle
+      ? `https://admin.shopify.com/store/${storeSlug}/apps/${appHandle}/app/billing`
+      : `${process.env.SHOPIFY_APP_URL}/app/billing?shop=${shop}`;
+
     const variables = {
       name: "Better Bundle - Usage Based",
-      returnUrl: `https://${shop}/admin/apps/${process.env.SHOPIFY_APP_HANDLE}/app/billing`,
+      // Redirect back to embedded app route after approval (inside Admin)
+      returnUrl: embeddedReturnUrl,
       lineItems: [
         {
           plan: {
@@ -174,26 +184,6 @@ export async function action({ request }: ActionFunctionArgs) {
           capped_amount: cappedAmount,
           currency: currency,
         },
-      },
-    });
-
-    // Create billing event
-    await prisma.billing_events.create({
-      data: {
-        shop_id: shopRecord.id,
-        type: "subscription_created",
-        data: {
-          subscription_id: subscription.id,
-          status: "PENDING",
-          capped_amount: cappedAmount,
-          currency: currency,
-          created_at: new Date().toISOString(),
-        },
-        billing_metadata: {
-          phase: "subscription_creation",
-        },
-        occurred_at: new Date(),
-        processed_at: new Date(),
       },
     });
 

@@ -12,7 +12,6 @@ from .services.billing_service import BillingService
 from .services.attribution_engine import AttributionEngine
 from .services.billing_calculator import BillingCalculator
 from .services.shopify_billing_service import ShopifyBillingService
-from .services.notification_service import BillingNotificationService
 from .repositories.billing_repository import BillingRepository
 from .jobs.monthly_billing_job import MonthlyBillingJob
 
@@ -21,7 +20,6 @@ __all__ = [
     "AttributionEngine",
     "BillingCalculator",
     "ShopifyBillingService",
-    "BillingNotificationService",
     "BillingRepository",
     "MonthlyBillingJob",
 ]

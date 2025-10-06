@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { BlockStack, Badge, Tabs } from "@shopify/polaris";
 import { default as getCurrencySymbol } from "currency-symbol-map";
 import { BillingStatus } from "./BillingStatus";
-import { BillingEvents } from "./BillingEvents";
 import { InvoicesHistory } from "./InvoiceHistory";
 
 interface BillingData {
@@ -136,10 +135,6 @@ export function BillingDashboard({ billingData }: BillingDashboardProps) {
             formatDate={formatDate}
             getStatusBadge={getStatusBadge}
           />
-        );
-      case 2: // Billing Events
-        return (
-          <BillingEvents billingData={billingData} formatDate={formatDate} />
         );
       default:
         return null;

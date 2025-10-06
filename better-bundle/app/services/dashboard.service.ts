@@ -120,8 +120,6 @@ async function getShopInfo(shopDomain: string): Promise<{
   money_format: string;
 }> {
   try {
-    console.log("🔍 DEBUG: getShopInfo called with shopDomain:", shopDomain);
-
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
       select: {
@@ -131,20 +129,12 @@ async function getShopInfo(shopDomain: string): Promise<{
       },
     });
 
-    console.log("🔍 DEBUG: getShopInfo query result:", shop);
-
     if (!shop) {
       throw new DashboardError(
         `Shop not found: ${shopDomain}`,
         "SHOP_NOT_FOUND",
       );
     }
-
-    console.log("🔍 DEBUG: getShopInfo returning:", {
-      id: shop.id,
-      currency_code: shop.currency_code || DEFAULT_CURRENCY,
-      money_format: shop.money_format || DEFAULT_MONEY_FORMAT,
-    });
 
     return {
       id: shop.id,
@@ -277,38 +267,6 @@ export async function getDashboardOverview(
       getPerformanceMetrics(shopInfo.id, start, end),
     ]);
 
-    console.log("=== PROMISE RESULTS ===");
-    console.log("Overview status:", overview.status);
-    if (overview.status === "rejected") {
-      console.error("Overview FAILED:", overview.reason);
-    } else {
-      console.log("Overview SUCCESS:", overview.value);
-    }
-    console.log("TopProducts status:", topProducts.status);
-    if (topProducts.status === "rejected") {
-      console.error("TopProducts FAILED:", topProducts.reason);
-    } else {
-      console.log("TopProducts SUCCESS:", topProducts.value);
-    }
-    console.log("RecentActivity status:", recentActivity.status);
-    if (recentActivity.status === "rejected") {
-      console.error("RecentActivity FAILED:", recentActivity.reason);
-    } else {
-      console.log("RecentActivity SUCCESS:", recentActivity.value);
-    }
-    console.log("AttributedMetrics status:", attributedMetrics.status);
-    if (attributedMetrics.status === "rejected") {
-      console.error("AttributedMetrics FAILED:", attributedMetrics.reason);
-    } else {
-      console.log("AttributedMetrics SUCCESS:", attributedMetrics.value);
-    }
-    console.log("Performance status:", performance.status);
-    if (performance.status === "rejected") {
-      console.error("Performance FAILED:", performance.reason);
-    } else {
-      console.log("Performance SUCCESS:", performance.value);
-    }
-
     // Handle partial failures gracefully
     const results = {
       overview:
@@ -380,44 +338,11 @@ async function getOverviewMetrics(
       previousEndDate.getTime() - periodDuration,
     );
 
-    console.log("=== DATE RANGES ===");
-    console.log(
-      "Current period:",
-      startDate.toISOString(),
-      "to",
-      endDate.toISOString(),
-    );
-    console.log(
-      "Previous period:",
-      previousStartDate.toISOString(),
-      "to",
-      previousEndDate.toISOString(),
-    );
-
     // Optimized: Use fewer, more efficient queries
     const [currentMetrics, previousMetrics] = await Promise.all([
       getMetricsForPeriod(shopId, startDate, endDate),
       getMetricsForPeriod(shopId, previousStartDate, previousEndDate),
     ]);
-    console.log("=== OVERVIEW METRICS ===");
-    console.log("currentMetrics:", currentMetrics);
-    console.log("previousMetrics:", previousMetrics);
-    console.log("=== CHANGE PERCENTAGES ===");
-    console.log(
-      "revenue_change:",
-      calculatePercentageChange(
-        currentMetrics.revenue,
-        previousMetrics.revenue,
-      ),
-    );
-    console.log(
-      "recommendations_change:",
-      calculatePercentageChange(currentMetrics.views, previousMetrics.views),
-    );
-    console.log(
-      "clicks_change:",
-      calculatePercentageChange(currentMetrics.clicks, previousMetrics.clicks),
-    );
 
     const conversionRate =
       safeDivision(currentMetrics.clicks, currentMetrics.views) * 100;
@@ -474,59 +399,6 @@ async function getMetricsForPeriod(
   startDate: Date,
   endDate: Date,
 ) {
-  console.log("getMetricsForPeriod called with:");
-  console.log("  shopId:", shopId);
-  console.log("  startDate:", startDate);
-  console.log("  endDate:", endDate);
-
-  // First, let's check if there's any data at all for this shop
-  const totalInteractions = await prisma.user_interactions.count({
-    where: { shop_id: shopId },
-  });
-  console.log("Total interactions for shop:", totalInteractions);
-
-  const interactionsInRange = await prisma.user_interactions.count({
-    where: {
-      shop_id: shopId,
-      created_at: { gte: startDate, lte: endDate },
-    },
-  });
-  console.log("Interactions in date range:", interactionsInRange);
-
-  // Check what interaction types exist
-  const interactionTypes = await prisma.user_interactions.findMany({
-    where: { shop_id: shopId },
-    select: { interaction_type: true },
-    distinct: ["interaction_type"],
-  });
-  console.log(
-    "Available interaction types:",
-    interactionTypes.map((i) => i.interaction_type),
-  );
-
-  // Check the actual date range of the data
-  const dateRange = await prisma.user_interactions.aggregate({
-    where: { shop_id: shopId },
-    _min: { created_at: true },
-    _max: { created_at: true },
-  });
-  console.log("Data date range:", {
-    earliest: dateRange._min.created_at,
-    latest: dateRange._max.created_at,
-  });
-
-  // Check if our query dates overlap with the data
-  console.log("Query date range:", {
-    startDate: startDate.toISOString(),
-    endDate: endDate.toISOString(),
-  });
-
-  const hasOverlap =
-    dateRange._min.created_at &&
-    dateRange._max.created_at &&
-    startDate <= dateRange._max.created_at &&
-    endDate >= dateRange._min.created_at;
-  console.log("Date range overlap with data:", hasOverlap);
   const [viewCount, clickCount, purchasesAgg, refundsAgg, customerCount] =
     await Promise.all([
       // Count views from recommendation_viewed and product_viewed events
@@ -575,12 +447,6 @@ async function getMetricsForPeriod(
         })
         .then((result) => result.length),
     ]);
-  console.log("Final metrics:", {
-    viewCount,
-    clickCount,
-    purchases: purchasesAgg._sum.total_revenue,
-    refunded: refundsAgg._sum.total_refunded_revenue,
-  });
   const purchases = safeNumber(purchasesAgg._sum.total_revenue);
   const refunds = safeNumber(refundsAgg._sum.total_refunded_revenue);
   const netRevenue = Math.max(0, purchases - refunds);
@@ -890,30 +756,15 @@ async function getAttributedMetrics(
   currencyCode: string,
 ): Promise<AttributedMetrics> {
   try {
-    console.log("🔍 DEBUG: getAttributedMetrics called with:", {
-      shopId,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      currencyCode,
-    });
-
-    // DEBUG: Check what shop_id the dashboard is using vs what's in attribution data
-    console.log("🔍 DEBUG: Dashboard shop_id:", shopId);
-
     // DEBUG: Check if there's a cache issue - let's see what getShopInfo returns
     // We need to get the shop domain from somewhere - let's use the shop_id to find the domain
     const shopInfo = await prisma.shops.findUnique({
       where: { id: shopId },
       select: { id: true, shop_domain: true },
     });
-    console.log("🔍 DEBUG: Direct shop query result:", shopInfo);
 
     // Use the shop_id from the database query (should be the correct one)
     const correctShopId = shopInfo?.id || shopId;
-    console.log(
-      "🔍 DEBUG: Using shop_id for attribution query:",
-      correctShopId,
-    );
 
     // Get attributed revenue from purchase_attributions table
     const attributedRevenueData = await prisma.purchase_attributions.aggregate({
@@ -923,51 +774,6 @@ async function getAttributedMetrics(
       },
       _sum: { total_revenue: true },
     });
-
-    console.log("🔍 DEBUG: attributedRevenueData:", attributedRevenueData);
-
-    // DEBUG: Check if there are any records in purchase_attributions table
-    const totalRecords = await prisma.purchase_attributions.count({
-      where: { shop_id: shopId },
-    });
-    console.log(
-      "🔍 DEBUG: Total purchase_attributions records for shop:",
-      totalRecords,
-    );
-
-    const recentRecords = await prisma.purchase_attributions.findMany({
-      where: { shop_id: shopId },
-      orderBy: { purchase_at: "desc" },
-      take: 5,
-      select: {
-        order_id: true,
-        total_revenue: true,
-        purchase_at: true,
-        shop_id: true,
-      },
-    });
-    console.log(
-      "🔍 DEBUG: Recent purchase_attributions records:",
-      recentRecords,
-    );
-
-    // DEBUG: Check all shop_ids in purchase_attributions table
-    const allShopIds = await prisma.purchase_attributions.findMany({
-      select: { shop_id: true },
-      distinct: ["shop_id"],
-    });
-    console.log("🔍 DEBUG: All shop_ids in purchase_attributions:", allShopIds);
-
-    // DEBUG: Check if there are multiple shops with the same domain
-    const allShops = await prisma.shops.findMany({
-      where: { shop_domain: shopInfo?.shop_domain },
-      select: { id: true, shop_domain: true, created_at: true },
-    });
-    console.log(
-      "🔍 DEBUG: All shops for domain:",
-      shopInfo?.shop_domain,
-      allShops,
-    );
 
     // FIXED: Get attributed refunds from refund_attributions table (NOT purchase_attributions)
     const attributedRefundsData = await prisma.refund_attributions.aggregate({

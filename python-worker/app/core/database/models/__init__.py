@@ -15,7 +15,6 @@ from .enums import (
     BillingPlanStatus,
     BillingCycle,
     InvoiceStatus,
-    BillingEventType,
     ExtensionType,
     AppBlockTarget,
 )
@@ -69,7 +68,6 @@ from .refund_data import RefundData
 from .billing import (
     BillingPlan,
     BillingInvoice,
-    BillingEvent,
 )
 
 # Trial configuration models
@@ -88,7 +86,6 @@ __all__ = [
     "BillingPlanStatus",
     "BillingCycle",
     "InvoiceStatus",
-    "BillingEventType",
     "ExtensionType",
     "AppBlockTarget",
     # Core models
@@ -127,7 +124,6 @@ __all__ = [
     # Billing models
     "BillingPlan",
     "BillingInvoice",
-    "BillingEvent",
     # Trial configuration models
     "TrialConfig",
     # Extension models

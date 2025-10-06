@@ -225,11 +225,6 @@ class MonthlyBillingJob:
         try:
             cutoff_date = datetime.utcnow() - timedelta(days=months_to_keep * 30)
 
-            # Clean up old billing events
-            deleted_events = await self.prisma.billingevent.delete_many(
-                where={"occurredAt": {"lt": cutoff_date}}
-            )
-
             # Clean up old billing metrics (keep invoices for audit)
             deleted_metrics = await self.prisma.billingmetrics.delete_many(
                 where={"calculatedAt": {"lt": cutoff_date}}
@@ -238,7 +233,6 @@ class MonthlyBillingJob:
             return {
                 "status": "completed",
                 "message": f"Cleaned up billing data older than {months_to_keep} months",
-                "deleted_events": deleted_events,
                 "deleted_metrics": deleted_metrics,
                 "cutoff_date": cutoff_date.isoformat(),
             }

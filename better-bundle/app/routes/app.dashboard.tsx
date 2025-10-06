@@ -125,11 +125,7 @@ export default function Dashboard() {
   const loaderData = useLoaderData<typeof loader>();
   const { dashboardData, startDate, endDate } = loaderData;
   const error = "error" in loaderData ? loaderData.error : undefined;
-  console.log("Component received data:", {
-    dashboardData,
-    overview: dashboardData?.overview,
-    hasData: !!dashboardData,
-  });
+
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [selectedTab, setSelectedTab] = useState(0);

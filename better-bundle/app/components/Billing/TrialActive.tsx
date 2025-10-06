@@ -8,13 +8,13 @@ import {
 } from "@shopify/polaris";
 import { HeroHeader } from "../UI/HeroHeader";
 import { BillingLayout } from "./BillingLayout";
+import { formatCurrency } from "app/utils/currency";
 
 interface TrialActiveProps {
   billingPlan: any;
-  formatCurrency: (amount: number, currency?: string) => string;
 }
 
-export function TrialActive({ billingPlan, formatCurrency }: TrialActiveProps) {
+export function TrialActive({ billingPlan }: TrialActiveProps) {
   const trialProgress =
     (billingPlan.attributed_revenue / billingPlan.trial_threshold) * 100;
   const remainingAmount =

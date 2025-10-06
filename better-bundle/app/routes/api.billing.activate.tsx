@@ -17,10 +17,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    console.log(
-      `🔄 Activating subscription ${subscriptionId} for shop ${shop}`,
-    );
-
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
@@ -74,26 +70,6 @@ export async function action({ request }: ActionFunctionArgs) {
         updated_at: new Date(),
       },
     });
-
-    // Create billing event
-    await prisma.billing_events.create({
-      data: {
-        shop_id: shopRecord.id,
-        type: "subscription_activated",
-        data: {
-          subscription_id: subscriptionId,
-          status: "ACTIVE",
-          services_resumed: true,
-          activated_at: new Date().toISOString(),
-        },
-        billing_metadata: {
-          phase: "subscription_activation",
-        },
-        occurred_at: new Date(),
-      },
-    });
-
-    console.log(`✅ Subscription activated for shop ${shop}`);
 
     return json({
       success: true,

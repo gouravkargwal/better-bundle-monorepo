@@ -12,7 +12,6 @@ from prisma import Prisma
 from prisma.models import (
     BillingPlan,
     BillingInvoice,
-    BillingEvent,
     UserInteraction,
     UserSession,
     PurchaseAttribution,
@@ -395,58 +394,6 @@ class BillingRepository:
             return []
 
     # ============= BILLING EVENTS =============
-
-    async def create_billing_event(
-        self,
-        shop_id: str,
-        event_type: str,
-        data: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> BillingEvent:
-        """Create a billing event for audit trail."""
-        try:
-            event = await self.prisma.billingevent.create(
-                {
-                    "shopId": shop_id,
-                    "type": event_type,
-                    "data": data,
-                    "metadata": metadata or {},
-                    "occurredAt": datetime.utcnow(),
-                }
-            )
-
-            logger.debug(f"Created billing event {event.id} for shop {shop_id}")
-            return event
-
-        except Exception as e:
-            logger.error(f"Error creating billing event for shop {shop_id}: {e}")
-            raise
-
-    async def get_billing_events(
-        self,
-        shop_id: str,
-        event_type: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> List[BillingEvent]:
-        """Get billing events for a shop."""
-        try:
-            where_conditions = {"shopId": shop_id}
-            if event_type:
-                where_conditions["type"] = event_type
-
-            events = await self.prisma.billingevent.find_many(
-                where=where_conditions,
-                order={"occurredAt": "desc"},
-                take=limit,
-                skip=offset,
-            )
-            return events
-        except Exception as e:
-            logger.error(f"Error getting billing events for shop {shop_id}: {e}")
-            return []
-
-    # ============= UTILITY METHODS =============
 
     async def get_shops_for_billing(self) -> List[str]:
         """Get list of shop IDs that need billing processing."""

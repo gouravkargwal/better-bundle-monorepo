@@ -227,28 +227,6 @@ export async function completeTrialWithConsent(
       },
     });
 
-    // Create billing event
-    await prisma.billing_events.create({
-      data: {
-        shop_id: shopId,
-        type: "trial_completed_with_consent",
-        data: {
-          completed_at: new Date().toISOString(),
-          consent_given: true,
-        },
-        billing_metadata: {
-          event_type: "trial_completion",
-          consent_given: true,
-        },
-        plan_id: (await prisma.billing_plans.findFirst({
-          where: { shop_id: shopId, status: "active" },
-          select: { id: true },
-        }))!.id,
-        occurred_at: new Date(),
-        processed_at: new Date(),
-      },
-    });
-
     return true;
   } catch (error) {
     console.error("Error completing trial with consent:", error);

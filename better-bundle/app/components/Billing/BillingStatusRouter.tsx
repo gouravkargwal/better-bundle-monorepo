@@ -1,5 +1,5 @@
+import { BillingSetup } from "./BillingSetup";
 import { TrialActive } from "./TrialActive";
-import { SubscriptionCancelled } from "./SubscriptionCancelled";
 import { SubscriptionPending } from "./SubscriptionPending";
 import { SubscriptionActive } from "./SubscriptionActive";
 
@@ -11,96 +11,83 @@ interface BillingStatusRouterProps {
     setSpendingLimit: (value: string) => void;
     handleSetupBilling: () => void;
     handleCancelSubscription: () => void;
-    formatCurrency: (amount: number, currency?: string) => string;
   };
+  billing: any;
 }
 
 export function BillingStatusRouter({
   billingPlan,
   billingActions,
+  billing,
 }: BillingStatusRouterProps) {
-  // Debug logging
-  console.log("🔍 Billing Status Router:", {
-    subscription_status: billingPlan.subscription_status,
-    is_trial_active: billingPlan.is_trial_active,
-    subscription_id: billingPlan.subscription_id,
-  });
-
-  // ============= TRIAL ACTIVE =============
-  // Check if trial is active based on revenue vs threshold
   const isTrialActive =
-    billingPlan.is_trial_active ||
-    (billingPlan.attributed_revenue < billingPlan.trial_threshold &&
-      billingPlan.subscription_status !== "ACTIVE");
+    billingPlan.is_trial_active &&
+    billingPlan.attributed_revenue < billingPlan.trial_threshold;
 
   if (isTrialActive) {
-    return (
-      <TrialActive
-        billingPlan={billingPlan}
-        formatCurrency={billingActions.formatCurrency}
-      />
-    );
+    return <TrialActive billingPlan={billingPlan} />;
   }
 
-  // ============= TRIAL COMPLETED - SUBSCRIPTION REQUIRED =============
-  // If trial completed but subscription not active yet
-  if (
-    billingPlan.attributed_revenue >= billingPlan.trial_threshold &&
-    billingPlan.subscription_status !== "ACTIVE" &&
-    billingPlan.subscription_status !== "CANCELLED"
-  ) {
-    return (
-      <SubscriptionPending
-        billingPlan={billingPlan}
-        handleCancelSubscription={billingActions.handleCancelSubscription}
-        isLoading={billingActions.isLoading}
-      />
-    );
-  }
-
-  // ============= SUBSCRIPTION CANCELLED =============
-  if (
-    billingPlan.subscription_status === "CANCELLED" ||
-    billingPlan.subscription_status === "CANCELLED_BY_MERCHANT"
-  ) {
-    return (
-      <SubscriptionCancelled
-        spendingLimit={billingActions.spendingLimit}
-        setSpendingLimit={billingActions.setSpendingLimit}
-        handleSetupBilling={billingActions.handleSetupBilling}
-        isLoading={billingActions.isLoading}
-      />
-    );
-  }
-
-  // ============= SUBSCRIPTION PENDING =============
-  if (billingPlan.subscription_status === "PENDING") {
-    return (
-      <SubscriptionPending
-        billingPlan={billingPlan}
-        handleCancelSubscription={billingActions.handleCancelSubscription}
-        isLoading={billingActions.isLoading}
-      />
-    );
-  }
-
-  // ============= SUBSCRIPTION ACTIVE =============
   if (billingPlan.subscription_status === "ACTIVE") {
     return (
       <SubscriptionActive
         billingPlan={billingPlan}
-        formatCurrency={billingActions.formatCurrency}
         handleCancelSubscription={billingActions.handleCancelSubscription}
         isLoading={billingActions.isLoading}
       />
     );
   }
 
-  // ============= FALLBACK =============
+  if (
+    billingPlan.subscription_id &&
+    billingPlan.subscription_status === "PENDING"
+  ) {
+    return (
+      <SubscriptionPending
+        billingPlan={billingPlan}
+        isLoading={billingActions.isLoading}
+        handleCancelSubscription={billingActions.handleCancelSubscription}
+      />
+    );
+  }
+
+  const isTrialCompleted = !billingPlan.is_trial_active;
+
+  const noSubscriptionCreated =
+    !billingPlan.subscription_id ||
+    billingPlan.subscription_status === "none" ||
+    billingPlan.subscription_status === null ||
+    billingPlan.subscription_status === "CANCELLED" ||
+    billingPlan.subscription_status === "CANCELLED_BY_MERCHANT" ||
+    billingPlan.subscription_status === "DECLINED";
+
+  if (isTrialCompleted && noSubscriptionCreated) {
+    return (
+      <BillingSetup
+        billingPlan={billingPlan}
+        spendingLimit={billingActions.spendingLimit}
+        setSpendingLimit={billingActions.setSpendingLimit}
+        onSetupBilling={billingActions.handleSetupBilling}
+        isLoading={billingActions.isLoading}
+      />
+    );
+  }
+
   return (
-    <div>
-      <h2>Unknown Status</h2>
-      <p>Status: {billingPlan.subscription_status}</p>
+    <div style={{ padding: "24px" }}>
+      <h2>Unknown Billing Status</h2>
+      <p>
+        <strong>Status:</strong> {billingPlan.subscription_status || "none"}
+      </p>
+      <p>
+        <strong>Trial Active:</strong>{" "}
+        {billingPlan.is_trial_active ? "Yes" : "No"}
+      </p>
+      <p>
+        <strong>Subscription ID:</strong>{" "}
+        {billingPlan.subscription_id || "none"}
+      </p>
+      <p>Please contact support if you see this message.</p>
     </div>
   );
 }

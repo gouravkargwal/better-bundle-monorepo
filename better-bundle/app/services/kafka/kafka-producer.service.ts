@@ -75,7 +75,10 @@ export class KafkaProducerService {
         throw new Error("Producer not initialized");
       }
 
-      console.log("📤 Sending message to Kafka topic 'shopify-events' with key:", key);
+      console.log(
+        "📤 Sending message to Kafka topic 'shopify-events' with key:",
+        key,
+      );
 
       const result: RecordMetadata = await this.producer.send({
         topic: "shopify-events",
@@ -107,7 +110,7 @@ export class KafkaProducerService {
         stack: error instanceof Error ? error.stack : undefined,
         producerInitialized: !!this.producer,
         messageCount: this.messageCount,
-        errorCount: this.errorCount
+        errorCount: this.errorCount,
       });
       throw error;
     }
@@ -158,55 +161,6 @@ export class KafkaProducerService {
     } catch (error) {
       this.errorCount++;
       console.error(`❌ Failed to publish data job:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Publish a billing event
-   */
-  public async publishBillingEvent(billingData: any): Promise<string> {
-    try {
-      console.log(
-        `🚀 Publishing billing event: ${billingData.event_type} for shop ${billingData.shop_id}`,
-      );
-
-      const messageWithMetadata = {
-        ...billingData,
-        timestamp: new Date().toISOString(),
-        worker_id: kafkaConfig.workerId,
-        source: "billing",
-      };
-
-      const key = billingData.shop_id;
-
-      if (!this.producer) {
-        throw new Error("Producer not initialized");
-      }
-
-      const result: RecordMetadata = await this.producer.send({
-        topic: "billing-events",
-        messages: [
-          {
-            key,
-            value: JSON.stringify(messageWithMetadata),
-            headers: {
-              "event-type": billingData.event_type,
-              "shop-id": billingData.shop_id,
-              timestamp: new Date().toISOString(),
-            },
-          },
-        ],
-      });
-
-      this.messageCount++;
-      const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
-
-      console.log(`✅ Billing event published: ${messageId}`);
-      return messageId;
-    } catch (error) {
-      this.errorCount++;
-      console.error(`❌ Failed to publish billing event:`, error);
       throw error;
     }
   }
