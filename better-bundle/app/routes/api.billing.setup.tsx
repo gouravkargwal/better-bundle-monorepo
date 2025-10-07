@@ -9,11 +9,7 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     // Parse request body to get spending limit
     const body = await request.json();
-    const spendingLimit = body.spendingLimit || 1000.0;
-
-    console.log(
-      `🔄 Starting billing setup for shop ${shop} with spending limit: $${spendingLimit}`,
-    );
+    const spendingLimit = body.spendingLimit;
 
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
@@ -29,7 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const billingPlan = await prisma.billing_plans.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: { in: ["active", "suspended"] },
+        status: { in: ["active", "suspended", "pending"] },
       },
     });
 
@@ -68,7 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Create Shopify subscription using GraphQL
-    const currency = shopRecord.currency_code || "USD";
+    const currency = shopRecord.currency_code;
     const cappedAmount = spendingLimit; // User-selected monthly cap
 
     const mutation = `
@@ -168,10 +164,9 @@ export async function action({ request }: ActionFunctionArgs) {
     console.log(`✅ Subscription created: ${subscription.id}`);
 
     // Create NEW usage-based billing plan (don't update trial plan)
-    const newBillingPlan = await prisma.billing_plans.create({
+    const newBillingPlan = await prisma.billing_plans.update({
+      where: { id: billingPlan.id },
       data: {
-        shop_id: shopRecord.id,
-        shop_domain: shop,
         name: "Usage-Based Paid Plan",
         type: "usage_based",
         status: "pending", // New plan starts as pending

@@ -40,10 +40,18 @@ export function useRecommendations({
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId] = useState(
-    () =>
-      `venus_${context}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-  );
+  const [sessionId] = useState(() => {
+    // Try to get unified session_id from sessionStorage first
+    const unifiedSessionId = sessionStorage.getItem("unified_session_id");
+    if (unifiedSessionId) {
+      console.log("🔗 Venus: Using unified session_id:", unifiedSessionId);
+      return unifiedSessionId;
+    }
+    // Fallback to generated session_id
+    const generatedId = `venus_${context}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log("🔗 Venus: Generated session_id:", generatedId);
+    return generatedId;
+  });
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
@@ -110,6 +118,7 @@ export function useRecommendations({
           context,
           limit,
           user_id: customerId,
+          session_id: sessionId,
           ...(shopDomain && { shop_domain: shopDomain }),
         });
 

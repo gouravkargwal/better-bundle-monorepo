@@ -45,7 +45,16 @@ class RecommendationAPI {
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings
       if (customerId) requestBody.user_id = String(customerId); // Convert to string as backend expects string
-      if (window.sessionId) requestBody.session_id = String(window.sessionId); // Add session ID for session-based recommendations
+
+      // Get session_id from sessionStorage (unified across all extensions)
+      const unifiedSessionId = sessionStorage.getItem('unified_session_id');
+      if (unifiedSessionId) {
+        requestBody.session_id = unifiedSessionId;
+        console.log('🔗 Phoenix: Using unified session_id:', unifiedSessionId);
+      } else if (window.sessionId) {
+        requestBody.session_id = String(window.sessionId); // Fallback to window.sessionId
+        console.log('🔗 Phoenix: Using window.sessionId:', window.sessionId);
+      }
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
       console.log('🌐 Fetching recommendations from unified API:', apiUrl);

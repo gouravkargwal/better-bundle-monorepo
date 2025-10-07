@@ -19,9 +19,13 @@ import { useBillingActions } from "../../hooks/useBillingActions";
 
 interface SubscriptionActiveProps {
   billingPlan: any;
+  shopCurrency: string;
 }
 
-export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
+export function SubscriptionActive({
+  billingPlan,
+  shopCurrency,
+}: SubscriptionActiveProps) {
   // ✅ USE NEW DATA - Only post-trial revenue (industry standard)
   const metrics = billingPlan.currentCycleMetrics || {
     purchases: { count: 0, total: 0 },
@@ -40,9 +44,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
 
   const [showCapIncreaseModal, setShowCapIncreaseModal] = useState(false);
   const [newCapAmount, setNewCapAmount] = useState(0);
-  const { handleIncreaseCap, isLoading } = useBillingActions(
-    billingPlan.currency,
-  );
+  const { handleIncreaseCap, isLoading } = useBillingActions(shopCurrency);
 
   const handleCapIncrease = async () => {
     if (newCapAmount <= metrics.capped_amount) {
@@ -69,55 +71,6 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
           gradient="green"
         />
 
-        {/* Status Banner */}
-        <Card>
-          <div style={{ padding: "24px" }}>
-            <BlockStack gap="400">
-              <div
-                style={{
-                  padding: "20px",
-                  backgroundColor: "#F0FDF4",
-                  borderRadius: "12px",
-                  border: "1px solid #BBF7D0",
-                }}
-              >
-                <BlockStack gap="300">
-                  <InlineStack gap="300" align="start" blockAlign="center">
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        minWidth: "40px",
-                        minHeight: "40px",
-                        padding: "12px",
-                        backgroundColor: "#22C55E15",
-                        borderRadius: "16px",
-                        border: "2px solid #22C55E30",
-                      }}
-                    >
-                      <Icon source={CheckCircleIcon} tone="base" />
-                    </div>
-                    <BlockStack gap="100">
-                      <div style={{ color: "#14532D" }}>
-                        <Text as="h3" variant="headingMd" fontWeight="bold">
-                          All Systems Running
-                        </Text>
-                      </div>
-                      <Text as="p" variant="bodyMd" tone="subdued">
-                        Your bundles are live and generating revenue. You're
-                        only charged for sales made through Better Bundle.
-                      </Text>
-                    </BlockStack>
-                    <Badge tone="success" size="large">
-                      Active
-                    </Badge>
-                  </InlineStack>
-                </BlockStack>
-              </div>
-            </BlockStack>
-          </div>
-        </Card>
         {/* ✅ IMPROVED: Usage Overview Card */}
         <Card>
           <div style={{ padding: "24px" }}>
@@ -170,10 +123,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                       Attributed Revenue
                     </Text>
                     <Text variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(
-                        metrics.net_revenue,
-                        billingPlan.currency,
-                      )}
+                      {formatCurrency(metrics.net_revenue, shopCurrency)}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -183,7 +133,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                         <Text variant="bodySm">
                           {formatCurrency(
                             metrics.purchases.total,
-                            billingPlan.currency,
+                            shopCurrency,
                           )}{" "}
                           ({metrics.purchases.count})
                         </Text>
@@ -211,17 +161,10 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                       fontWeight="bold"
                       tone={isOverLimit ? "critical" : undefined}
                     >
-                      {formatCurrency(
-                        metrics.final_commission,
-                        billingPlan.currency,
-                      )}
+                      {formatCurrency(metrics.final_commission, shopCurrency)}
                     </Text>
                     <Text variant="bodySm" tone="subdued">
-                      3% of{" "}
-                      {formatCurrency(
-                        metrics.net_revenue,
-                        billingPlan.currency,
-                      )}
+                      3% of {formatCurrency(metrics.net_revenue, shopCurrency)}
                     </Text>
                     {isOverLimit && (
                       <div
@@ -233,10 +176,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                       >
                         <Text variant="bodySm" tone="critical">
                           ⚠️ Capped at{" "}
-                          {formatCurrency(
-                            metrics.capped_amount,
-                            billingPlan.currency,
-                          )}
+                          {formatCurrency(metrics.capped_amount, shopCurrency)}
                         </Text>
                       </div>
                     )}
@@ -262,15 +202,8 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                     {usagePercentage.toFixed(1)}% of cap used
                   </Text>
                   <Text variant="bodySm" tone="subdued">
-                    {formatCurrency(
-                      metrics.final_commission,
-                      billingPlan.currency,
-                    )}{" "}
-                    /{" "}
-                    {formatCurrency(
-                      metrics.capped_amount,
-                      billingPlan.currency,
-                    )}
+                    {formatCurrency(metrics.final_commission, shopCurrency)} /{" "}
+                    {formatCurrency(metrics.capped_amount, shopCurrency)}
                   </Text>
                 </InlineStack>
               </BlockStack>
@@ -328,12 +261,9 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                         </div>
                         <Text variant="bodySm" tone="subdued">
                           You've reached your monthly spending cap of{" "}
-                          {formatCurrency(
-                            metrics.capped_amount,
-                            billingPlan.currency,
-                          )}
-                          . New commissions will be tracked but not charged
-                          until next billing cycle.
+                          {formatCurrency(metrics.capped_amount, shopCurrency)}.
+                          New commissions will be tracked but not charged until
+                          next billing cycle.
                         </Text>
                       </BlockStack>
                     </InlineStack>
@@ -370,39 +300,6 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
             </BlockStack>
           </div>
         </Card>
-
-        {/* ✅ Post-Trial Billing Info */}
-        {metrics.purchases.count === 0 && (
-          <Card>
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#F0F9FF",
-                borderRadius: "12px",
-                border: "1px solid #BAE6FD",
-              }}
-            >
-              <BlockStack gap="300">
-                <InlineStack gap="200" blockAlign="center">
-                  <Text as="span" variant="heading2xl">
-                    🎯
-                  </Text>
-                  <Text variant="headingMd" fontWeight="bold">
-                    Fresh Start Billing
-                  </Text>
-                </InlineStack>
-
-                <Text variant="bodyMd" tone="subdued">
-                  Your billing cycle started fresh after trial completion.
-                  You'll only be charged for new sales made through Better
-                  Bundle.
-                </Text>
-              </BlockStack>
-            </div>
-          </Card>
-        )}
-
-        {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
 
         {/* Help Cards */}
         <div
@@ -517,10 +414,10 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
             <div>
               <Text as="p" variant="bodySm" tone="subdued">
                 Current Cap:{" "}
-                {formatCurrency(metrics.capped_amount, billingPlan.currency)}
+                {formatCurrency(metrics.capped_amount, shopCurrency)}
               </Text>
               <Text as="p" variant="bodySm" tone="subdued">
-                New Cap: {formatCurrency(newCapAmount, billingPlan.currency)}
+                New Cap: {formatCurrency(newCapAmount, shopCurrency)}
               </Text>
             </div>
 

@@ -112,7 +112,8 @@ class ApolloRecommendationClient {
           context: "post_purchase",
           product_ids: request.purchased_products?.map((p) => p.product_id),
           user_id: request.customer_id,
-          session_id: request.session_id,
+          session_id:
+            request.session_id || sessionStorage.getItem("unified_session_id"),
           limit: request.limit || 3,
         }),
       });

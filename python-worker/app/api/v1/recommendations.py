@@ -24,6 +24,7 @@ from app.recommandations.session_service import SessionDataService
 from app.recommandations.recommendation_executor import RecommendationExecutor
 from app.recommandations.smart_selection_service import SmartSelectionService
 from app.recommandations.shop_lookup_service import ShopLookupService
+from app.recommandations.client_id_resolver import ClientIdResolver
 
 logger = get_logger(__name__)
 
@@ -45,6 +46,7 @@ session_service = SessionDataService()
 recommendation_executor = RecommendationExecutor(gorse_client)
 smart_selection_service = SmartSelectionService(recommendation_executor)
 shop_lookup_service = ShopLookupService()
+client_id_resolver = ClientIdResolver()
 
 
 @router.post("/", response_model=RecommendationResponse)
@@ -162,7 +164,49 @@ async def get_recommendations(request: RecommendationRequest):
                 f"🚫 Excluding context products from recommendations | context={request.context} | exclude_ids={request.product_ids}"
             )
 
-        if request.user_id:
+        # Enhanced user_id resolution and validation
+        effective_user_id = request.user_id
+
+        # Try to resolve user_id from client_id if not provided
+        if not effective_user_id and request.metadata:
+            try:
+                async with get_transaction_context() as session:
+                    resolved_user_id = (
+                        await client_id_resolver.resolve_user_id_from_metadata(
+                            session=session, shop_id=shop.id, metadata=request.metadata
+                        )
+                    )
+                    if resolved_user_id:
+                        effective_user_id = resolved_user_id
+                        logger.info(
+                            f"🔗 Resolved user_id {resolved_user_id} from client_id/metadata for context {request.context}"
+                        )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to resolve user_id from metadata: {e}")
+
+        # Try to resolve user_id from session data if still not found
+        if not effective_user_id and request.session_id:
+            try:
+                async with get_transaction_context() as session:
+                    resolved_user_id = (
+                        await client_id_resolver.resolve_user_id_from_session_data(
+                            session=session,
+                            shop_id=shop.id,
+                            session_id=request.session_id,
+                        )
+                    )
+                    if resolved_user_id:
+                        effective_user_id = resolved_user_id
+                        logger.info(
+                            f"🔗 Resolved user_id {resolved_user_id} from session data for context {request.context}"
+                        )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to resolve user_id from session data: {e}")
+
+        if effective_user_id:
+            logger.info(
+                f"👤 Processing recommendations for user_id: {effective_user_id} | context: {request.context}"
+            )
             try:
                 async with get_transaction_context() as session:
                     # Get purchase history exclusions
@@ -170,7 +214,7 @@ async def get_recommendations(request: RecommendationRequest):
                         await exclusion_service.get_smart_purchase_exclusions(
                             session=session,
                             shop_id=shop.id,
-                            user_id=request.user_id,
+                            user_id=effective_user_id,
                             context=request.context,
                         )
                     )
@@ -179,22 +223,30 @@ async def get_recommendations(request: RecommendationRequest):
                         exclude_items.extend(purchase_exclusions)
                         logger.info(
                             f"✅ Added {len(purchase_exclusions)} purchased products to exclusion list | "
-                            f"user_id={request.user_id} | context={request.context}"
+                            f"user_id={effective_user_id} | context={request.context}"
+                        )
+                    else:
+                        logger.info(
+                            f"ℹ️ No purchase exclusions found for user {effective_user_id}"
                         )
             except Exception as e:
                 logger.warning(
-                    f"⚠️ Failed to get purchase exclusions for user {request.user_id}: {e}"
+                    f"⚠️ Failed to get purchase exclusions for user {effective_user_id}: {e}"
                 )
+        else:
+            logger.warning(
+                f"⚠️ No user_id available for context {request.context} - personalized recommendations will be limited"
+            )
 
         # Also exclude products that are already in the user's cart (with time decay)
-        if request.user_id:
+        if effective_user_id:
             try:
                 async with get_transaction_context() as session:
                     time_decay_exclusions = (
                         await exclusion_service.get_cart_time_decay_exclusions(
                             session=session,
                             shop_id=shop.id,
-                            user_id=request.user_id,
+                            user_id=effective_user_id,
                         )
                     )
 
@@ -203,7 +255,7 @@ async def get_recommendations(request: RecommendationRequest):
 
             except Exception as e:
                 logger.warning(
-                    f"⚠️ Failed to get cart contents for user {request.user_id}: {e}"
+                    f"⚠️ Failed to get cart contents for user {effective_user_id}: {e}"
                 )
 
         # Remove duplicates and convert to set for efficient lookup
@@ -217,7 +269,7 @@ async def get_recommendations(request: RecommendationRequest):
             shop_id=shop.id,
             context=request.context,
             product_ids=request.product_ids,
-            user_id=request.user_id,
+            user_id=effective_user_id,
             session_id=request.session_id,
             category=category,
             limit=request.limit,
@@ -314,7 +366,7 @@ async def get_recommendations(request: RecommendationRequest):
                 context=request.context,
                 shop_id=shop.id,
                 product_ids=request.product_ids,
-                user_id=request.user_id,
+                user_id=effective_user_id,
                 session_id=effective_session_id,
                 category=effective_category,  # Mixed-category aware
                 limit=request.limit,
@@ -334,7 +386,7 @@ async def get_recommendations(request: RecommendationRequest):
                     context=request.context,
                     shop_id=shop.id,
                     product_ids=request.product_ids,
-                    user_id=request.user_id,
+                    user_id=effective_user_id,
                     session_id=request.session_id,
                     category=category,
                     limit=request.limit,
@@ -349,7 +401,7 @@ async def get_recommendations(request: RecommendationRequest):
                     await smart_selection_service.get_smart_product_page_recommendation(
                         shop_id=shop.id,
                         product_ids=request.product_ids,
-                        user_id=request.user_id,
+                        user_id=effective_user_id,
                         limit=request.limit,
                     )
                 )
@@ -358,7 +410,7 @@ async def get_recommendations(request: RecommendationRequest):
                 result = (
                     await smart_selection_service.get_smart_homepage_recommendation(
                         shop_id=shop.id,
-                        user_id=request.user_id,
+                        user_id=effective_user_id,
                         limit=request.limit,
                     )
                 )
@@ -368,7 +420,7 @@ async def get_recommendations(request: RecommendationRequest):
                     shop_id=shop.id,
                     collection_id=request.collection_id,
                     category=category,
-                    user_id=request.user_id,
+                    user_id=effective_user_id,
                     limit=request.limit,
                 )
 
@@ -377,7 +429,7 @@ async def get_recommendations(request: RecommendationRequest):
                 result = await smart_selection_service.get_smart_cart_page_recommendation(
                     shop_id=shop.id,
                     cart_items=request.product_ids,  # Cart items passed as product_ids
-                    user_id=request.user_id,
+                    user_id=effective_user_id,
                     limit=request.limit,
                 )
 
@@ -387,7 +439,7 @@ async def get_recommendations(request: RecommendationRequest):
                     context=request.context,
                     shop_id=shop.id,
                     product_ids=request.product_ids,
-                    user_id=request.user_id,
+                    user_id=effective_user_id,
                     session_id=request.session_id,
                     category=category,
                     limit=request.limit,
@@ -468,7 +520,7 @@ async def get_recommendations(request: RecommendationRequest):
                 context=request.context,
                 source=result["source"],
                 count=len(enriched_items),
-                user_id=request.user_id,
+                user_id=effective_user_id,
                 product_ids=request.product_ids,
                 category=category,
             )

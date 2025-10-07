@@ -476,33 +476,37 @@ class RecommendationExecutor:
             "homepage": [
                 "recently_viewed",  # Level 1: For returning visitors (continuity)
                 "user_recommendations",  # Level 2: Personalized (if user_id)
-                "popular",  # Level 3: Best sellers (for new visitors)
-                "latest",  # Level 4: New arrivals (fresh content)
+                "latest",  # Level 3: New arrivals (fresh content)
+                "popular",  # Level 4: Best sellers (for new visitors)
             ],
             "cart": [
                 "session_recommendations",  # Level 1: Session-based
-                "user_recommendations",  # Level 2: Personalized
-                "popular",  # Level 3: Popular items
-                "user_neighbors",  # Level 4: Neighbor-based
+                "frequently_bought_together",  # Level 2: Cross-sell items
+                "user_recommendations",  # Level 3: Personalized
+                "popular",  # Level 4: Popular items
             ],
             "profile": [
                 "user_recommendations",  # Level 1: Personalized
-                "popular",  # Level 2: Popular items
+                "recently_viewed",  # Level 2: Recently viewed items
+                "popular",  # Level 3: Popular items
             ],
             "checkout": ["popular"],  # Level 1: Popular items (fast)
             "order_history": [
                 "user_recommendations",  # Level 1: Personalized based on order history
-                "popular_category",  # Level 2: Popular in categories from order history
-                "popular",  # Level 3: General popular items
+                "item_neighbors",  # Level 2: Similar to previously ordered items
+                "popular_category",  # Level 3: Popular in categories from order history
+                "popular",  # Level 4: General popular items
             ],
             "order_status": [
                 "item_neighbors",  # Level 1: Similar to ordered products
                 "user_recommendations",  # Level 2: Personalized
                 "popular_category",  # Level 3: Popular in same category
+                "latest",  # Level 4: New arrivals
             ],
             "collection_page": [
                 "popular_category",  # Level 1: Popular in collection category
                 "user_recommendations",  # Level 2: Personalized
-                "popular",  # Level 3: General popular items
+                "latest",  # Level 3: Latest in category
+                "popular",  # Level 4: General popular items
             ],
         }

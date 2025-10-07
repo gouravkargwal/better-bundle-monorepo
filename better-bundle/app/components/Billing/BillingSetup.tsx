@@ -100,15 +100,19 @@ export function BillingSetup({
                       }}
                     >
                       <Text as="h3" variant="headingMd" fontWeight="bold">
-                        {billingPlan.status === "pending"
-                          ? "Awaiting Shopify Approval"
-                          : "Services Currently Paused"}
+                        {billingPlan.subscription_status === "DECLINED"
+                          ? "Subscription Declined"
+                          : billingPlan.status === "pending"
+                            ? "Awaiting Shopify Approval"
+                            : "Services Currently Paused"}
                       </Text>
                     </div>
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      {billingPlan.status === "pending"
-                        ? "Your subscription is created and waiting for approval. Complete the process in Shopify to activate services."
-                        : "Your Better Bundle features are paused until billing is configured. Setup takes less than 2 minutes."}
+                      {billingPlan.subscription_status === "DECLINED"
+                        ? "Your subscription has been declined. Please try again."
+                        : billingPlan.status === "pending"
+                          ? "Your subscription is created and waiting for approval. Complete the process in Shopify to activate services."
+                          : "Your Better Bundle features are paused until billing is configured. Setup takes less than 2 minutes."}
                     </Text>
                   </BlockStack>
                 </InlineStack>

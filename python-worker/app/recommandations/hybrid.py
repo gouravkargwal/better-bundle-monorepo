@@ -197,6 +197,12 @@ class HybridRecommendationService:
                 f"🔄 Deduplicating and blending | total_collected={len(all_recommendations)} | target_limit={limit}"
             )
             blended_items = self._deduplicate_and_blend(all_recommendations, limit)
+
+            # Apply cross-context deduplication for better diversity
+            blended_items = self._apply_cross_context_deduplication(
+                blended_items, context, user_id
+            )
+
             logger.info(
                 f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len([s for s in source_info.values() if s['success']])}"
             )
@@ -344,28 +350,31 @@ class HybridRecommendationService:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
 
-            # We allow session recommendations even without an explicit session_id
-            # as long as we have session-derived metadata (cart/recent views/context products).
-            has_session_context = False
-            if metadata:
-                has_session_context = any(
-                    bool(metadata.get(key))
-                    for key in [
-                        "cart_contents",
-                        "recent_views",
-                        "recent_adds",
-                        "cart_data",
-                        "product_ids",
-                    ]
-                )
-
             # If session_id is missing, synthesize a lightweight one for logging/comment purposes
             effective_session_id = session_id or "auto"
+
+            # Try to extract session data from behavioral events if we have a session_id
+            enhanced_metadata = metadata or {}
+            if session_id and user_id:
+                try:
+                    from app.recommandations.session_service import SessionDataService
+
+                    session_data_service = SessionDataService()
+                    session_behavioral_data = await session_data_service.extract_session_data_from_behavioral_events(
+                        user_id=user_id, shop_id=shop_id
+                    )
+                    # Merge behavioral data with existing metadata
+                    enhanced_metadata.update(session_behavioral_data)
+                    logger.info(
+                        f"📊 Enhanced metadata with session data: {enhanced_metadata}"
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to extract session behavioral data: {e}")
 
             session_data = self._build_session_data(
                 session_id=effective_session_id,
                 user_id=prefixed_user_id,
-                metadata=metadata,
+                metadata=enhanced_metadata,
                 shop_id=shop_id,
             )
             logger.info(f"📊 Session data built: {session_data}")
@@ -621,9 +630,24 @@ class HybridRecommendationService:
                 logger.debug(f"🚫 Skipping empty item during deduplication: {item}")
                 continue
 
-            if item_key not in seen:
+            # Enhanced deduplication: also check for shop-prefixed items
+            # Remove shop prefix for comparison if present
+            clean_item_key = item_key
+            if isinstance(item_key, str) and item_key.startswith("shop_"):
+                # Extract the actual product ID after shop prefix
+                parts = item_key.split("_", 2)
+                if len(parts) >= 3:
+                    clean_item_key = parts[2]  # Get the actual product ID
+
+            # Check both original and clean keys for deduplication
+            if item_key not in seen and clean_item_key not in seen:
                 seen.add(item_key)
+                seen.add(clean_item_key)
                 deduplicated.append(item)
+            else:
+                logger.debug(
+                    f"🚫 Duplicate item filtered: {item_key} (clean: {clean_item_key})"
+                )
 
         # Sort by source ratio (higher ratio items first)
         deduplicated.sort(
@@ -633,3 +657,99 @@ class HybridRecommendationService:
 
         # Return top items up to limit
         return deduplicated[:limit]
+
+    def _apply_cross_context_deduplication(
+        self,
+        recommendations: List[Dict[str, Any]],
+        context: str,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply cross-context deduplication to prevent same products across different contexts
+
+        Args:
+            recommendations: List of recommendation items
+            context: Current recommendation context
+            user_id: User ID for context-specific filtering
+
+        Returns:
+            Deduplicated recommendations with context diversity
+        """
+        if not recommendations:
+            return recommendations
+
+        # Context-specific diversity rules
+        context_diversity_rules = {
+            "homepage": {
+                "max_similarity": 0.3,  # Allow 30% similarity with other contexts
+                "prefer_fresh": True,  # Prefer fresh/new content
+            },
+            "product_page": {
+                "max_similarity": 0.5,  # Allow 50% similarity (more focused)
+                "prefer_related": True,  # Prefer related products
+            },
+            "cart": {
+                "max_similarity": 0.4,  # Allow 40% similarity
+                "prefer_cross_sell": True,  # Prefer cross-sell items
+            },
+            "profile": {
+                "max_similarity": 0.2,  # Allow only 20% similarity (highly personalized)
+                "prefer_personalized": True,  # Prefer highly personalized items
+            },
+        }
+
+        # Get diversity rules for current context
+        rules = context_diversity_rules.get(
+            context,
+            {
+                "max_similarity": 0.5,
+                "prefer_fresh": False,
+            },
+        )
+
+        # Apply diversity filtering
+        diverse_recommendations = []
+        seen_products = set()
+
+        for item in recommendations:
+            if isinstance(item, dict):
+                item_id = item.get("Id", item.get("id", ""))
+            else:
+                item_id = str(item)
+
+            # Skip if already seen (basic deduplication)
+            if item_id in seen_products:
+                continue
+
+            # Apply context-specific diversity rules
+            if rules.get("prefer_fresh") and "latest" in str(item.get("source", "")):
+                # Prioritize fresh content for homepage
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_related") and "neighbors" in str(
+                item.get("source", "")
+            ):
+                # Prioritize related products for product page
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_cross_sell") and "frequently_bought" in str(
+                item.get("source", "")
+            ):
+                # Prioritize cross-sell items for cart
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_personalized") and "user" in str(
+                item.get("source", "")
+            ):
+                # Prioritize personalized items for profile
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            else:
+                # Add other items if within similarity threshold
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+
+        logger.debug(
+            f"🎯 Cross-context deduplication applied | context={context} | original={len(recommendations)} | filtered={len(diverse_recommendations)}"
+        )
+        return diverse_recommendations

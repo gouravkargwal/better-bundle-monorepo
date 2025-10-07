@@ -115,7 +115,7 @@ class SessionDataService:
                             ):
                                 cart_contents.append(product_id)
                             elif (
-                                event.interactionType == "product_removed_from_cart"
+                                event.interaction_type == "product_removed_from_cart"
                                 and product_id in cart_contents
                             ):
                                 cart_contents.remove(product_id)

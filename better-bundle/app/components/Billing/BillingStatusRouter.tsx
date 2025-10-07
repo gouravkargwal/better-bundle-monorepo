@@ -23,6 +23,8 @@ export function BillingStatusRouter({
     isLoading,
   } = useBillingActions(shopCurrency);
 
+  console.log(billingPlan, "------------------>");
+
   // Trial is active - show trial progress
   if (trialPlanData && trialPlanData.isTrialActive) {
     return (
@@ -32,9 +34,8 @@ export function BillingStatusRouter({
 
   // Trial completed but no subscription yet - show setup billing
   if (
-    billingPlan &&
-    billingPlan.status === "suspended" &&
-    !billingPlan.subscription_id
+    (billingPlan && billingPlan.status === "suspended") ||
+    billingPlan.subscription_status === "DECLINED"
   ) {
     return (
       <BillingSetup
@@ -70,7 +71,12 @@ export function BillingStatusRouter({
     billingPlan.status === "active" &&
     billingPlan.subscription_status === "ACTIVE"
   ) {
-    return <SubscriptionActive billingPlan={billingPlan} />;
+    return (
+      <SubscriptionActive
+        billingPlan={billingPlan}
+        shopCurrency={shopCurrency}
+      />
+    );
   }
 
   return null;

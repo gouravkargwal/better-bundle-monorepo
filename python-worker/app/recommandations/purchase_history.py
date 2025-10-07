@@ -52,8 +52,7 @@ class PurchaseHistoryService:
             if exclude_cancelled:
                 query_filters.append(OrderData.cancelled_at.is_(None))
 
-            # Exclude test orders
-            query_filters.append(OrderData.test == False)
+            # Don't filter test orders - use all real data from database
 
             # Only look back N days if specified
             if days_lookback:

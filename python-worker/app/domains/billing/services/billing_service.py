@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 from app.shared.helpers import now_utc
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .attribution_engine import AttributionEngine, AttributionContext
@@ -318,6 +318,11 @@ class BillingService:
             if usage_record:
                 logger.info(f"✅ Usage recorded with Shopify: {usage_record.id}")
 
+                # Update commission record status to RECORDED
+                await self._update_commission_status_for_order(
+                    shop_id, purchase_event.order_id, usage_record.id
+                )
+
                 await self.session.commit()
             else:
                 logger.error(
@@ -328,6 +333,63 @@ class BillingService:
             logger.error(f"❌ Error handling subscription purchase: {e}")
             # Don't raise - we don't want to block order processing
             # if Shopify API has issues
+
+    async def _update_commission_status_for_order(
+        self, shop_id: str, order_id: str, shopify_usage_record_id: str
+    ) -> None:
+        """
+        Update commission record status to RECORDED after successful Shopify usage recording.
+
+        Args:
+            shop_id: Shop ID
+            order_id: Order ID
+            shopify_usage_record_id: Shopify usage record ID
+        """
+        try:
+            # Find commission record by order_id through purchase attribution
+            from app.core.database.models import CommissionRecord, PurchaseAttribution
+            from app.core.database.models.enums import CommissionStatus
+            from app.shared.helpers import now_utc
+
+            # Join commission records with purchase attributions to find by order_id
+            stmt = (
+                select(CommissionRecord)
+                .join(
+                    PurchaseAttribution,
+                    CommissionRecord.purchase_attribution_id == PurchaseAttribution.id,
+                )
+                .where(
+                    and_(
+                        PurchaseAttribution.shop_id == shop_id,
+                        PurchaseAttribution.order_id == str(order_id),
+                        CommissionRecord.status == CommissionStatus.PENDING,
+                    )
+                )
+            )
+
+            result = await self.session.execute(stmt)
+            commission = result.scalar_one_or_none()
+
+            if commission:
+                # Update commission record with Shopify details
+                commission.shopify_usage_record_id = shopify_usage_record_id
+                commission.shopify_recorded_at = now_utc()
+                commission.status = CommissionStatus.RECORDED
+                commission.updated_at = now_utc()
+
+                logger.info(
+                    f"✅ Updated commission record {commission.id} status to RECORDED "
+                    f"for order {order_id}"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ No pending commission record found for order {order_id} in shop {shop_id}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"❌ Error updating commission status for order {order_id}: {e}"
+            )
 
     # ============= SUBSCRIPTION CREATION =============
 

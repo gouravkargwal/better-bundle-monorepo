@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from app.shared.helpers import now_utc
 
 import httpx
-from prisma import Prisma
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 
 from ..repositories.billing_repository import BillingRepository, BillingPeriod
 
@@ -170,8 +171,8 @@ class UsageRecord:
 class ShopifyUsageBillingService:
     """Service for managing Shopify usage-based billing"""
 
-    def __init__(self, prisma: Prisma, billing_repository: BillingRepository):
-        self.prisma = prisma
+    def __init__(self, session: AsyncSession, billing_repository: BillingRepository):
+        self.session = session
         self.billing_repository = billing_repository
         self.base_url = "https://{shop_domain}/admin/api/2024-01/graphql.json"
 
@@ -486,11 +487,17 @@ class ShopifyUsageBillingService:
     ) -> None:
         """Store subscription data in database"""
         try:
-            # Store subscription in billing plan
-            await self.prisma.billingplan.update_many(
-                where={"shopId": shop_id, "status": "active"},
-                data={
-                    "configuration": {
+            # Import the BillingPlan model
+            from app.core.database.models import BillingPlan
+
+            # Update billing plan with subscription data
+            stmt = (
+                update(BillingPlan)
+                .where(
+                    (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
+                )
+                .values(
+                    configuration={
                         "subscription_id": subscription_data["id"],
                         "subscription_status": subscription_data["status"],
                         "line_items": subscription_data["lineItems"],
@@ -502,8 +509,11 @@ class ShopifyUsageBillingService:
                             "pricingDetails"
                         ]["cappedAmount"]["currencyCode"],
                     }
-                },
+                )
             )
+
+            await self.session.execute(stmt)
+            await self.session.flush()
 
             logger.info(f"Stored subscription data for shop {shop_id}")
         except Exception as e:
@@ -519,30 +529,35 @@ class ShopifyUsageBillingService:
     ) -> None:
         """Store usage record in database"""
         try:
-            # Create billing invoice for usage record
-            await self.prisma.billinginvoice.create(
-                {
-                    "data": {
-                        "shopId": shop_id,
-                        "planId": None,  # Usage-based doesn't have a plan ID
-                        "invoiceNumber": f"USAGE-{now_utc().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
-                        "amount": amount,
-                        "currency": currency,
-                        "status": "pending",
-                        "period": {
-                            "start_date": now_utc().isoformat(),
-                            "end_date": now_utc().isoformat(),
-                            "cycle": "usage",
-                        },
-                        "metadata": {
-                            "usage_record_id": usage_record_data["id"],
-                            "description": description,
-                            "recorded_at": usage_record_data["createdAt"],
-                            "type": "usage_based",
-                        },
-                    }
-                }
+            # Import the BillingInvoice model
+            from app.core.database.models import BillingInvoice
+
+            # Create billing invoice for usage record using SQLAlchemy
+            invoice = BillingInvoice(
+                shop_id=shop_id,
+                plan_id=None,  # Usage-based doesn't have a plan ID
+                invoice_number=f"USAGE-{now_utc().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
+                subtotal=amount,
+                taxes=Decimal("0.00"),
+                discounts=Decimal("0.00"),
+                total=amount,
+                currency=currency,
+                status="pending",
+                period_start=now_utc(),
+                period_end=now_utc(),
+                metrics_id=f"usage-{usage_record_data['id']}",
+                due_date=now_utc(),
+                billing_metadata={
+                    "usage_record_id": usage_record_data["id"],
+                    "description": description,
+                    "recorded_at": usage_record_data["createdAt"],
+                    "type": "usage_based",
+                },
             )
+
+            # Add to session and commit
+            self.session.add(invoice)
+            await self.session.flush()
 
             logger.info(f"Stored usage record for shop {shop_id}")
         except Exception as e:
@@ -562,24 +577,30 @@ class ShopifyUsageBillingService:
             Created usage record or None if failed
         """
         try:
+            # Import the models
+            from app.core.database.models import Shop, BillingPlan
+
             # Get shop information
-            shop = await self.prisma.shop.find_unique(
-                where={"id": shop_id},
-                select={"domain": True, "accessToken": True, "currencyCode": True},
-            )
+            shop_stmt = select(
+                Shop.domain, Shop.access_token, Shop.currency_code
+            ).where(Shop.id == shop_id)
+            shop_result = await self.session.execute(shop_stmt)
+            shop = shop_result.scalar_one_or_none()
 
             if not shop:
                 logger.error(f"Shop {shop_id} not found")
                 return None
 
-            if not shop.accessToken:
+            if not shop.access_token:
                 logger.error(f"No access token for shop {shop_id}")
                 return None
 
             # Get subscription information
-            billing_plan = await self.prisma.billingplan.find_first(
-                where={"shopId": shop_id, "status": "active"}
+            billing_plan_stmt = select(BillingPlan).where(
+                (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
             )
+            billing_plan_result = await self.session.execute(billing_plan_stmt)
+            billing_plan = billing_plan_result.scalar_one_or_none()
 
             if not billing_plan or not billing_plan.configuration:
                 logger.error(f"No active billing plan found for shop {shop_id}")
@@ -607,7 +628,7 @@ class ShopifyUsageBillingService:
                 return None
 
             # Create usage description
-            currency = shop.currencyCode or "USD"
+            currency = shop.currency_code or "USD"
             currency_symbol = self._get_currency_symbol(currency)
             description = (
                 f"Better Bundle - {billing_result['period']['start_date'][:7]} "
@@ -618,7 +639,7 @@ class ShopifyUsageBillingService:
             usage_record = await self.record_usage(
                 shop_id=shop_id,
                 shop_domain=shop.domain,
-                access_token=shop.accessToken,
+                access_token=shop.access_token,
                 subscription_line_item_id=line_item_id,
                 description=description,
                 amount=usage_amount,

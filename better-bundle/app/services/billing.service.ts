@@ -84,7 +84,7 @@ export async function getCurrentCycleMetrics(
       billingPlan.subscription_activated_at ||
       new Date();
     const cycleEnd = new Date(cycleStart);
-    cycleEnd.setDate(cycleEnd.getDate() + 30); // 30-day cycle
+    cycleEnd.setUTCDate(cycleEnd.getUTCDate() + 30);
 
     // Get commission records for current cycle (only PAID phase, not trial)
     const commissionRecords = await prisma.commission_records.findMany({
@@ -97,6 +97,8 @@ export async function getCurrentCycleMetrics(
         },
       },
     });
+
+    console.log(commissionRecords, "------------------>");
 
     // Calculate metrics
     const purchases = commissionRecords.filter(
