@@ -2,37 +2,77 @@ import { NavMenu } from "@shopify/app-bridge-react";
 import { useLocation } from "@remix-run/react";
 import NavItem from "./NavItem";
 
-export function EnhancedNavMenu() {
+interface EnhancedNavMenuProps {
+  isOnboarded: boolean; // ⬅️ PROP ACCEPT KAR
+}
+
+export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
   const location = useLocation();
 
-  return (
-    <div style={{ padding: "16px 0" }}>
+  // ⬅️ AGAR ONBOARDED NAHI HAI
+  if (!isOnboarded) {
+    return (
       <NavMenu>
         <NavItem
-          to="/app/dashboard"
-          isActive={location.pathname === "/app/dashboard"}
+          to="/app/onboarding"
+          isActive={location.pathname === "/app/onboarding"}
+          prefetch="intent"
         >
-          Dashboard
+          Get Started
         </NavItem>
 
         <NavItem
-          to="/app/extensions"
-          isActive={location.pathname === "/app/extensions"}
+          to="/app/help"
+          isActive={location.pathname === "/app/help"}
+          prefetch="intent"
         >
-          Extensions
-        </NavItem>
-
-        <NavItem
-          to="/app/billing"
-          isActive={location.pathname === "/app/billing"}
-        >
-          Billing
-        </NavItem>
-
-        <NavItem to="/app/help" isActive={location.pathname === "/app/help"}>
           Help & Support
         </NavItem>
       </NavMenu>
-    </div>
+    );
+  }
+
+  // ⬅️ AGAR ONBOARDED HAI - FULL MENU
+  return (
+    <NavMenu>
+      <NavItem
+        to="/app/overview"
+        isActive={location.pathname === "/app/overview"}
+        prefetch="intent"
+      >
+        Overview
+      </NavItem>
+      <NavItem
+        to="/app/dashboard"
+        isActive={location.pathname === "/app/dashboard"}
+        prefetch="intent"
+      >
+        Dashboard
+      </NavItem>
+
+      <NavItem
+        to="/app/extensions"
+        isActive={location.pathname === "/app/extensions"}
+        prefetch="intent"
+      >
+        Extensions
+      </NavItem>
+
+      <NavItem
+        to="/app/billing"
+        isActive={location.pathname === "/app/billing"}
+        prefetch="intent"
+      >
+        Billing
+      </NavItem>
+
+      <NavItem
+        to="/app/help"
+        isActive={location.pathname === "/app/help"}
+        prefetch="intent"
+      >
+        Help & Support
+      </NavItem>
+    </NavMenu>
   );
 }
