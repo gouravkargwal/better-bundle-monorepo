@@ -8,6 +8,8 @@ from typing import Optional
 from datetime import datetime
 from dataclasses import dataclass
 
+from app.shared.helpers import now_utc
+
 from app.core.config.settings import settings
 from app.core.exceptions import DatabaseConnectionError
 from app.core.logging import get_logger
@@ -42,7 +44,7 @@ async def check_database_health() -> DatabaseHealthStatus:
         return DatabaseHealthStatus(
             is_healthy=True,
             connection_count=1,  # Simplified for single connection
-            last_check=datetime.now().isoformat(),
+            last_check=now_utc().isoformat(),
             response_time_ms=response_time,
         )
 
@@ -56,7 +58,7 @@ async def check_database_health() -> DatabaseHealthStatus:
         return DatabaseHealthStatus(
             is_healthy=False,
             connection_count=0,
-            last_check=datetime.now().isoformat(),
+            last_check=now_utc().isoformat(),
             error_message=str(e),
             response_time_ms=response_time,
         )

@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 import statistics
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from .base_feature_generator import BaseFeatureGenerator
 
@@ -404,7 +405,7 @@ class SearchProductFeatureGenerator(BaseFeatureGenerator):
 
         if isinstance(datetime_str, str):
             try:
-                return datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+                return parse_iso_timestamp(datetime_str)
             except:
                 return None
 

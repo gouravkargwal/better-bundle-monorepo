@@ -21,7 +21,11 @@ class UserIdentityLink(BaseModel, ShopMixin):
     identifier = Column(String, nullable=False, index=True)
     identifier_type = Column(String, nullable=False, index=True)
     customer_id = Column(String, nullable=False, index=True)
-    linked_at = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
+    linked_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
+    )
 
     # Indexes - matches actual database schema
     __table_args__ = (

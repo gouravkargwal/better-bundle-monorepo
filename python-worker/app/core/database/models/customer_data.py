@@ -4,7 +4,7 @@ Customer data model for SQLAlchemy
 Represents customer information from Shopify.
 """
 
-from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer
+from sqlalchemy import Column, String, Float, Boolean, Integer
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
@@ -20,7 +20,7 @@ class CustomerData(BaseModel, ShopMixin):
     last_name = Column(String(100), nullable=True)
     total_spent = Column(Float, default=0.0, nullable=False, index=True)
     order_count = Column(Integer, default=0, nullable=False)
-    last_order_date = Column(DateTime, nullable=True, index=True)
+    last_order_date = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     last_order_id = Column(String(100), nullable=True)
     verified_email = Column(Boolean, default=False, nullable=False, index=True)
     tax_exempt = Column(Boolean, default=False, nullable=False)

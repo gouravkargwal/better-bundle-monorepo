@@ -10,6 +10,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
 from enum import Enum
 
+from app.shared.helpers import now_utc
+
 
 class SessionStatus(str, Enum):
     """Session status enumeration"""
@@ -83,7 +85,7 @@ class SessionCreate(BaseModel):
 
     def get_expires_at(self) -> datetime:
         """Calculate expiration time based on session duration"""
-        return datetime.utcnow() + timedelta(hours=self.session_duration_hours)
+        return now_utc() + timedelta(hours=self.session_duration_hours)
 
 
 class SessionUpdate(BaseModel):

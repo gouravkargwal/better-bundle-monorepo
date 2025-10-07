@@ -5,6 +5,7 @@ Adapter for collection_viewed events
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from .base_adapter import BaseInteractionEventAdapter
 
 
@@ -46,7 +47,7 @@ class CollectionViewedAdapter(BaseInteractionEventAdapter):
             timestamp = event.get("createdAt") or event.get("timestamp")
             if timestamp:
                 if isinstance(timestamp, str):
-                    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    return parse_iso_timestamp(timestamp)
                 return timestamp
             return None
         except Exception:

@@ -13,6 +13,8 @@ Key improvements:
 
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
+
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from collections import Counter
 import statistics
 import math
@@ -544,7 +546,7 @@ class CustomerBehaviorFeatureGenerator(BaseFeatureGenerator):
             if isinstance(datetime_str, str):
                 # Handle various ISO formats
                 if datetime_str.endswith("Z"):
-                    return datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+                    return parse_iso_timestamp(datetime_str)
                 elif "+" in datetime_str or datetime_str.endswith("UTC"):
                     return datetime.fromisoformat(datetime_str.replace("UTC", "+00:00"))
                 else:

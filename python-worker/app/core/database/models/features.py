@@ -9,7 +9,6 @@ from sqlalchemy import (
     String,
     Float,
     Boolean,
-    DateTime,
     Integer,
     ForeignKey,
     Index,
@@ -43,7 +42,9 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     user_lifecycle_stage = Column(String(100), nullable=True)
     churn_risk_score = Column(Float, default=1.0, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -81,7 +82,9 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     inventory_health_score = Column(Float, nullable=False)
     product_category = Column(String(100), nullable=True)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -174,7 +177,9 @@ class CollectionFeatures(BaseModel, ShopMixin):
     collection_recency_score = Column(Float, nullable=False)
     is_curated_collection = Column(Boolean, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -228,7 +233,9 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     customer_product_loyalty = Column(Float, nullable=False)
     total_interaction_value = Column(Float, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -320,7 +327,9 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
     traffic_source = Column(String(100), nullable=False)
     returning_visitor = Column(Boolean, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -364,7 +373,9 @@ class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     pair_confidence_level = Column(String(100), nullable=False)
     cross_sell_potential = Column(Float, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -461,7 +472,9 @@ class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
 
     # Computation tracking
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -516,7 +529,9 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     total_interactions = Column(Integer, default=0, nullable=False)
     days_since_last_purchase = Column(Integer, nullable=True)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships

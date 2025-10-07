@@ -5,7 +5,8 @@ Represents user sessions for the Shopify app.
 Uses snake_case column names for consistency.
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, BigInteger, Index
+from sqlalchemy import Column, String, Boolean, BigInteger, Index
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from .base import Base, TimestampMixin
 
 
@@ -24,7 +25,7 @@ class Session(Base, TimestampMixin):
 
     # OAuth information (snake_case for consistency)
     scope = Column(String(500), nullable=True)
-    expires = Column(DateTime, nullable=True)
+    expires = Column(TIMESTAMP(timezone=True), nullable=True)
     access_token = Column(String(1000), nullable=False)
 
     # User information (snake_case for consistency)

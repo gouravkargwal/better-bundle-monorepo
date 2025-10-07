@@ -9,6 +9,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+
+from app.shared.helpers import now_utc
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload
@@ -121,7 +123,7 @@ class BillingSchedulerService:
                 "total_fees": 0.0,
                 "shop_results": [],
                 "errors": [],
-                "started_at": datetime.utcnow().isoformat(),
+                "started_at": now_utc().isoformat(),
                 "dry_run": dry_run,
             }
 
@@ -164,7 +166,7 @@ class BillingSchedulerService:
                     results["shop_results"].append(result)
 
             results["status"] = "completed"
-            results["completed_at"] = datetime.utcnow().isoformat()
+            results["completed_at"] = now_utc().isoformat()
 
             logger.info(
                 f"Monthly billing process completed: {results['successful_shops']} successful, {results['failed_shops']} failed"
@@ -177,7 +179,7 @@ class BillingSchedulerService:
             return {
                 "status": "error",
                 "error": str(e),
-                "completed_at": datetime.utcnow().isoformat(),
+                "completed_at": now_utc().isoformat(),
             }
 
     async def process_shop_billing(
@@ -379,7 +381,7 @@ class BillingSchedulerService:
                 amount=float(billing_result.get("final_fee", 0.0)),
                 currency_code=billing_result.get("currency", "USD"),
                 status="PENDING",
-                due_date=datetime.utcnow() + timedelta(days=30),
+                due_date=now_utc() + timedelta(days=30),
                 period_start=period.start_date,
                 period_end=period.end_date,
                 metadata={
@@ -401,7 +403,7 @@ class BillingSchedulerService:
 
     def _get_previous_month_period(self) -> BillingPeriod:
         """Get billing period for previous month"""
-        now = datetime.utcnow()
+        now = now_utc()
         first_day_current_month = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
@@ -447,7 +449,7 @@ class BillingSchedulerService:
                     "active_shops": active_shops_count,
                     "shops_with_billing_plans": shops_with_plans_count,
                     "pending_invoices": pending_invoices_count,
-                    "last_updated": datetime.utcnow().isoformat(),
+                    "last_updated": now_utc().isoformat(),
                 }
 
         except Exception as e:
@@ -455,5 +457,5 @@ class BillingSchedulerService:
             return {
                 "status": "error",
                 "error": str(e),
-                "last_updated": datetime.utcnow().isoformat(),
+                "last_updated": now_utc().isoformat(),
             }

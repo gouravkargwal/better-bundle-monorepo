@@ -4,6 +4,8 @@ Purchase History Service - Fetches user purchase history for exclusion from reco
 
 from typing import List, Optional, Set
 from datetime import datetime, timedelta
+
+from app.shared.helpers import now_utc
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +57,7 @@ class PurchaseHistoryService:
 
             # Only look back N days if specified
             if days_lookback:
-                cutoff_date = datetime.utcnow() - timedelta(days=days_lookback)
+                cutoff_date = now_utc() - timedelta(days=days_lookback)
                 query_filters.append(OrderData.order_date >= cutoff_date)
 
             # Query orders with their line items

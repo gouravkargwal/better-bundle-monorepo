@@ -33,8 +33,8 @@ class PipelineWatermark(Base, IDMixin, ShopMixin, TimestampMixin):
     # Only updatedAt exists in Prisma schema, no createdAt
     updated_at = Column(
         TIMESTAMP(timezone=True),
-        default=func.now(),
-        onupdate=func.now(),
+        default=func.timezone("UTC", func.current_timestamp()),
+        onupdate=func.timezone("UTC", func.current_timestamp()),
         nullable=False,
     )
 

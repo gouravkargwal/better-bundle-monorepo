@@ -5,6 +5,8 @@ Kafka-based feature computation consumer for processing feature engineering jobs
 from typing import Dict, Any
 from datetime import datetime
 
+from app.shared.helpers import now_utc
+
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.domains.ml.services import FeatureEngineeringService
@@ -109,7 +111,7 @@ class FeatureComputationKafkaConsumer:
                     original_message=message,
                     reason="shop_suspended",
                     original_topic="feature-computation-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
                 await self.consumer.commit(message)
                 return

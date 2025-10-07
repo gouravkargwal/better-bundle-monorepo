@@ -28,7 +28,7 @@ from app.domains.analytics.models.extension import (
     get_extension_capability,
 )
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
-from app.shared.helpers.datetime_utils import utcnow
+from app.shared.helpers import now_utc
 from app.core.logging.logger import get_logger
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
@@ -342,7 +342,7 @@ class AnalyticsTrackingService:
         try:
 
             # Calculate date range
-            end_date = utcnow()
+            end_date = now_utc()
             start_date = end_date - timedelta(days=days)
 
             query = InteractionQuery(
@@ -438,7 +438,7 @@ class AnalyticsTrackingService:
                     customer_id=interaction_data.customer_id,
                     shop_id=interaction_data.shop_id,
                     interaction_metadata=interaction_data.interaction_metadata,
-                    created_at=utcnow(),
+                    created_at=now_utc(),
                 )
 
                 session.add(interaction_model)
@@ -489,7 +489,7 @@ class AnalyticsTrackingService:
         try:
 
             # Generate a unique job ID
-            job_id = f"analytics_triggered_{shop_id}_{int(utcnow().timestamp())}"
+            job_id = f"analytics_triggered_{shop_id}_{int(now_utc().timestamp())}"
 
             # Prepare event metadata
             interaction_metadata = {
@@ -497,7 +497,7 @@ class AnalyticsTrackingService:
                 "incremental": incremental,
                 "trigger_source": trigger_source,
                 "interaction_id": interaction_id,
-                "timestamp": utcnow().isoformat(),
+                "timestamp": now_utc().isoformat(),
                 "processed_count": 0,
             }
 
@@ -509,7 +509,7 @@ class AnalyticsTrackingService:
                 "interaction_metadata": interaction_metadata,
                 "event_type": "feature_computation",
                 "data_type": "interactions",
-                "timestamp": utcnow().isoformat(),
+                "timestamp": now_utc().isoformat(),
                 "source": "analytics_tracking",
             }
 

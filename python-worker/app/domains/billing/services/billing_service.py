@@ -12,6 +12,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Optional
 
+from app.shared.helpers import now_utc
+
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -173,7 +175,7 @@ class BillingService:
             old_revenue = billing_plan.trial_revenue or Decimal("0")
 
             # Do not mutate counters; keep plan fields as metadata if desired
-            billing_plan.updated_at = datetime.utcnow()
+            billing_plan.updated_at = now_utc()
 
             logger.info(
                 f"📊 Trial revenue updated: ${old_revenue} → ${new_revenue} "
@@ -209,7 +211,7 @@ class BillingService:
 
             # 1. Mark trial as completed
             billing_plan.is_trial_active = False
-            billing_plan.trial_completed_at = datetime.utcnow()
+            billing_plan.trial_completed_at = now_utc()
             billing_plan.status = "suspended"
             billing_plan.requires_subscription_approval = True
 
@@ -218,7 +220,7 @@ class BillingService:
             config.update(
                 {
                     "trial_active": False,
-                    "trial_completed_at": datetime.utcnow().isoformat(),
+                    "trial_completed_at": now_utc().isoformat(),
                     "trial_final_revenue": float(final_revenue),
                     "subscription_required": True,
                     "services_suspended": True,
@@ -232,10 +234,10 @@ class BillingService:
                 .where(Shop.id == shop_id)
                 .values(
                     is_active=False,
-                    suspended_at=datetime.utcnow(),
+                    suspended_at=now_utc(),
                     suspension_reason="trial_completed_subscription_required",
                     service_impact="suspended",
-                    updated_at=datetime.utcnow(),
+                    updated_at=now_utc(),
                 )
             )
             await self.session.execute(shop_stmt)
@@ -393,7 +395,7 @@ class BillingService:
                 {
                     "subscription_id": subscription.id,
                     "subscription_status": "PENDING",
-                    "subscription_created_at": datetime.utcnow().isoformat(),
+                    "subscription_created_at": now_utc().isoformat(),
                     "capped_amount": PAID_CAPPED_AMOUNT_USD,
                 }
             )
@@ -451,7 +453,7 @@ class BillingService:
             config.update(
                 {
                     "subscription_status": "ACTIVE",
-                    "subscription_activated_at": datetime.utcnow().isoformat(),
+                    "subscription_activated_at": now_utc().isoformat(),
                     "services_suspended": False,
                 }
             )
@@ -466,7 +468,7 @@ class BillingService:
                     suspended_at=None,
                     suspension_reason=None,
                     service_impact=None,
-                    updated_at=datetime.utcnow(),
+                    updated_at=now_utc(),
                 )
             )
             await self.session.execute(shop_stmt)

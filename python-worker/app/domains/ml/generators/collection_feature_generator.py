@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.logging import get_logger
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -103,7 +104,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
             return 0.0
 
         # Filter interactions for this collection (last 30 days)
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = now_utc() - timedelta(days=30)
         collection_interactions = []
 
         for interaction in user_interactions:
@@ -386,7 +387,7 @@ class CollectionFeatureGenerator(BaseFeatureGenerator):
 
         if isinstance(datetime_str, str):
             try:
-                return datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+                return parse_iso_timestamp(datetime_str)
             except:
                 return None
 

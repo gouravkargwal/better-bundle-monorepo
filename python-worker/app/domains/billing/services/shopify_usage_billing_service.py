@@ -12,6 +12,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
+from app.shared.helpers import now_utc
+
 import httpx
 from prisma import Prisma
 
@@ -523,13 +525,13 @@ class ShopifyUsageBillingService:
                     "data": {
                         "shopId": shop_id,
                         "planId": None,  # Usage-based doesn't have a plan ID
-                        "invoiceNumber": f"USAGE-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
+                        "invoiceNumber": f"USAGE-{now_utc().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
                         "amount": amount,
                         "currency": currency,
                         "status": "pending",
                         "period": {
-                            "start_date": datetime.utcnow().isoformat(),
-                            "end_date": datetime.utcnow().isoformat(),
+                            "start_date": now_utc().isoformat(),
+                            "end_date": now_utc().isoformat(),
                             "cycle": "usage",
                         },
                         "metadata": {

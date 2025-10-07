@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
 from ..interfaces.permission_service import IShopifyPermissionService
@@ -627,7 +627,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         Uses existing NormalizationWatermark table to avoid schema churn.
         """
         # Accept both Z and +00:00 formats
-        last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        last_dt = parse_iso_timestamp(iso_time)
         # Normalize to aware UTC
         if last_dt.tzinfo is None:
             last_dt = last_dt.replace(tzinfo=timezone.utc)

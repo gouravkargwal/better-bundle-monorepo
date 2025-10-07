@@ -5,6 +5,8 @@ Kafka-based purchase attribution consumer for processing purchase attribution ev
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+
+from app.shared.helpers import now_utc
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 from app.core.kafka.consumer import KafkaConsumer
@@ -75,7 +77,7 @@ class PurchaseAttributionKafkaConsumer:
         """Get health status of the purchase attribution consumer"""
         return {
             "status": "running" if self._initialized else "stopped",
-            "last_health_check": datetime.utcnow().isoformat(),
+            "last_health_check": now_utc().isoformat(),
         }
 
     async def _handle_message(self, message: Dict[str, Any]):
@@ -112,7 +114,7 @@ class PurchaseAttributionKafkaConsumer:
                     original_message=payload,
                     reason="shop_suspended",
                     original_topic="purchase-attribution-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
 
                 # Commit the message (remove from original queue)
@@ -193,7 +195,7 @@ class PurchaseAttributionKafkaConsumer:
                     total_amount=total_amount,
                     currency=currency,
                     products=products,
-                    created_at=getattr(order, "order_date", None) or datetime.utcnow(),
+                    created_at=getattr(order, "order_date", None) or now_utc(),
                     metadata={
                         "source": "normalization",
                         "line_item_count": len(products),
@@ -217,7 +219,7 @@ class PurchaseAttributionKafkaConsumer:
         """
         try:
             # Check for interactions in the last 30 days
-            cutoff_time = datetime.utcnow() - timedelta(days=30)
+            cutoff_time = now_utc() - timedelta(days=30)
 
             # Build query conditions
             query_conditions = [

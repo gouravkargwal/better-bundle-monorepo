@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
+from app.shared.helpers import now_utc
+
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.config.settings import settings
@@ -508,7 +510,7 @@ class HybridRecommendationService:
             "Comment": f"session_{session_id}",
             "FeedbackType": GorseFeedbackType.VIEW,  # Default feedback type
             "ItemId": "",  # Will be filled if we have cart contents
-            "Timestamp": datetime.now().isoformat(),
+            "Timestamp": now_utc().isoformat(),
             "UserId": user_id or "",
         }
 

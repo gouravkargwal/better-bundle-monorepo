@@ -8,6 +8,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
+from app.shared.helpers import now_utc
+
 from prisma import Prisma
 from prisma.models import (
     BillingPlan,
@@ -93,7 +95,7 @@ class BillingRepository:
                     "type": plan_type,
                     "status": "active",
                     "configuration": configuration,
-                    "effectiveFrom": datetime.utcnow(),
+                    "effectiveFrom": now_utc(),
                 }
             )
 
@@ -178,7 +180,7 @@ class BillingRepository:
                         "trial_threshold": trial_threshold,
                         "trial_active": True,
                     },
-                    "effectiveFrom": datetime.utcnow(),
+                    "effectiveFrom": now_utc(),
                     "isTrialActive": True,
                     "trialThreshold": trial_threshold,
                     "trialRevenue": 0.0,
@@ -195,7 +197,7 @@ class BillingRepository:
                 },
                 metadata={
                     "trial_type": "revenue_based",
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": now_utc().isoformat(),
                 },
             )
 
@@ -303,7 +305,7 @@ class BillingRepository:
         """Create a billing invoice."""
         try:
             # Generate invoice number
-            invoice_number = f"BB-{shop_id[:8]}-{period.start_date.strftime('%Y%m')}-{datetime.utcnow().strftime('%H%M%S')}"
+            invoice_number = f"BB-{shop_id[:8]}-{period.start_date.strftime('%Y%m')}-{now_utc().strftime('%H%M%S')}"
 
             invoice = await self.prisma.billinginvoice.create(
                 {
@@ -319,8 +321,7 @@ class BillingRepository:
                     "periodStart": period.start_date,
                     "periodEnd": period.end_date,
                     "metricsId": metrics_id,
-                    "dueDate": datetime.utcnow()
-                    + timedelta(days=30),  # 30 days from now
+                    "dueDate": now_utc() + timedelta(days=30),  # 30 days from now
                 }
             )
 
@@ -352,7 +353,7 @@ class BillingRepository:
             if status == "paid" and payment_data:
                 update_data.update(
                     {
-                        "paidAt": datetime.utcnow(),
+                        "paidAt": now_utc(),
                         "paymentMethod": payment_data.get("payment_method"),
                         "paymentReference": payment_data.get("payment_reference"),
                     }
@@ -419,9 +420,7 @@ class BillingRepository:
             if cycle == "monthly":
                 # Get last 3 months
                 for i in range(3):
-                    period_start = datetime.utcnow().replace(day=1) - timedelta(
-                        days=30 * i
-                    )
+                    period_start = now_utc().replace(day=1) - timedelta(days=30 * i)
                     period_end = period_start + timedelta(days=30)
                     periods.append(
                         BillingPeriod(

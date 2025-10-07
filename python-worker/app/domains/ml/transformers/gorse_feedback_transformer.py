@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 import math
 
 logger = get_logger(__name__)
@@ -585,7 +585,7 @@ class GorseFeedbackTransformer:
 
         try:
             if isinstance(timestamp, str):
-                event_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                event_time = parse_iso_timestamp(timestamp)
             elif isinstance(timestamp, datetime):
                 event_time = timestamp
             else:

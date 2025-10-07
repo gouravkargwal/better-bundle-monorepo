@@ -12,6 +12,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
+from app.shared.helpers import now_utc
+
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -184,7 +186,7 @@ class AttributionEngine:
                 attribution_breakdown=attribution_breakdown,
                 attribution_type=AttributionType.DIRECT_CLICK,
                 status=AttributionStatus.CALCULATED,
-                calculated_at=datetime.utcnow(),
+                calculated_at=now_utc(),
                 metadata={
                     "interaction_count": len(interactions),
                     "calculation_method": "multi_touch_attribution",
@@ -1161,7 +1163,7 @@ class AttributionEngine:
             attribution_breakdown=[],
             attribution_type=AttributionType.DIRECT_CLICK,
             status=AttributionStatus.CALCULATED,
-            calculated_at=datetime.now(),
+            calculated_at=now_utc(),
             metadata={"scenario": "normal_attribution"},
         )
 
@@ -1445,7 +1447,7 @@ class AttributionEngine:
             attribution_breakdown=[],
             attribution_type=AttributionType.DIRECT_CLICK,
             status=AttributionStatus.CALCULATED,
-            calculated_at=datetime.utcnow(),
+            calculated_at=now_utc(),
             metadata={"reason": "no_interactions_found"},
         )
 
@@ -1462,7 +1464,7 @@ class AttributionEngine:
             attribution_breakdown=[],
             attribution_type=AttributionType.DIRECT_CLICK,
             status=AttributionStatus.REJECTED,
-            calculated_at=datetime.utcnow(),
+            calculated_at=now_utc(),
             metadata={"error": error_message},
         )
 
@@ -1656,7 +1658,7 @@ class AttributionEngine:
                 attribution_breakdown=adjusted_breakdown,
                 attribution_type=AttributionType.TIME_DECAY,
                 status=AttributionStatus.CALCULATED,
-                calculated_at=datetime.utcnow(),
+                calculated_at=now_utc(),
                 metadata={
                     "scenario": "timing_adjusted",
                     "timing_score": timing_score,
@@ -1684,7 +1686,7 @@ class AttributionEngine:
             attribution_breakdown=[],
             attribution_type=AttributionType.DIRECT_CLICK,
             status=AttributionStatus.REJECTED,
-            calculated_at=datetime.utcnow(),
+            calculated_at=now_utc(),
             metadata={
                 "scenario": "payment_failed",
                 "reason": "Payment failed - no attribution given",
@@ -1704,7 +1706,7 @@ class AttributionEngine:
             attribution_breakdown=[],
             attribution_type=AttributionType.DIRECT_CLICK,
             status=AttributionStatus.REJECTED,
-            calculated_at=datetime.utcnow(),
+            calculated_at=now_utc(),
             metadata={
                 "scenario": "subscription_cancelled",
                 "reason": "Subscription cancelled",

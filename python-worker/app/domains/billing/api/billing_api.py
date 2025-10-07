@@ -9,6 +9,8 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 
+from app.shared.helpers.datetime_utils import now_utc
+
 from app.core.database.session import get_session_context
 from app.core.database.models import Shop, BillingPlan, BillingInvoice
 from app.core.logging import get_logger
@@ -145,7 +147,7 @@ async def get_billing_status():
             active_shops=status.get("active_shops", 0),
             shops_with_plans=status.get("shops_with_billing_plans", 0),
             pending_invoices=status.get("pending_invoices", 0),
-            last_updated=status.get("last_updated", datetime.utcnow().isoformat()),
+            last_updated=status.get("last_updated", now_utc().isoformat()),
         )
 
     except Exception as e:

@@ -6,6 +6,8 @@ Handles logic for excluding products from recommendations based on purchase hist
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any, Dict
 
+from app.shared.helpers.datetime_utils import now_utc
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
@@ -220,7 +222,7 @@ class ProductExclusionService:
             List of product IDs to exclude from recommendations
         """
         try:
-            now = datetime.now(timezone.utc)
+            now = now_utc()
             product_interactions = {}  # product_id -> list of interactions
 
             # Group interactions by product ID
@@ -307,7 +309,7 @@ class ProductExclusionService:
             logger.error(f"💥 Time decay filtering failed: {str(e)}")
             # Fallback: exclude all products from last 24 hours
             fallback_exclusions = []
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+            cutoff_time = now_utc() - timedelta(hours=24)
             for interaction in cart_interactions:
                 if interaction.productId:
                     # Ensure timestamp is timezone-aware for comparison
@@ -341,8 +343,7 @@ class ProductExclusionService:
                                 "product_removed_from_cart",
                             ]
                         ),
-                        UserInteraction.created_at
-                        >= datetime.utcnow() - timedelta(hours=48),
+                        UserInteraction.created_at >= now_utc() - timedelta(hours=48),
                     )
                 )
                 .order_by(desc(UserInteraction.created_at))

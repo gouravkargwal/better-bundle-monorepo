@@ -3,6 +3,8 @@ import hashlib
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+from app.shared.helpers.datetime_utils import now_utc
+
 
 from app.core.logging import get_logger
 from app.core.redis_client import get_redis_client
@@ -134,7 +136,7 @@ class RecommendationCacheService:
             # Add metadata to cached data
             cached_data = {
                 "recommendations": recommendations,
-                "cached_at": datetime.now().isoformat(),
+                "cached_at": now_utc().isoformat(),
                 "context": context,
                 "ttl": ttl,
             }

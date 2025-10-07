@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
+from app.shared.helpers import now_utc
+
 from app.core.database.session import get_transaction_context
 from app.core.database.models.user_session import UserSession as UserSessionModel
 from app.core.database.models.shop import Shop
@@ -28,7 +30,6 @@ from app.domains.analytics.models.session import (
     SessionQuery,
     SessionStatus,
 )
-from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -57,7 +58,7 @@ class UnifiedSessionService:
 
         # Cleanup settings
         self.cleanup_interval = timedelta(hours=1)
-        self._last_cleanup = datetime.utcnow()
+        self._last_cleanup = now_utc()
 
     # ============================================================================
     # MAIN SESSION OPERATIONS
@@ -114,7 +115,7 @@ class UnifiedSessionService:
             if not shop_id:
                 raise ValueError("shop_id is required for session creation")
 
-            current_time = utcnow()
+            current_time = now_utc()
 
             async with get_transaction_context() as session:
                 # ✅ SCENARIO 18: Cross-Device Session Linking
@@ -198,7 +199,7 @@ class UnifiedSessionService:
                 if (
                     session_data
                     and session_data.status == SessionStatus.ACTIVE
-                    and session_data.expires_at > utcnow()
+                    and session_data.expires_at > now_utc()
                 ):
                     # Convert to Pydantic model and update activity
                     user_session = self._convert_to_user_session(session_data)
@@ -240,7 +241,7 @@ class UnifiedSessionService:
                 # Prepare update data
                 update_dict = update_data.dict(exclude_unset=True)
                 if "last_active" not in update_dict:
-                    update_dict["last_active"] = utcnow()
+                    update_dict["last_active"] = now_utc()
 
                 # Check for constraint violations if updating customer_id
                 if "customer_id" in update_dict and update_dict["customer_id"]:
@@ -318,7 +319,7 @@ class UnifiedSessionService:
                 stmt = (
                     update(UserSessionModel)
                     .where(UserSessionModel.id == session_id)
-                    .values(status=SessionStatus.TERMINATED, last_active=utcnow())
+                    .values(status=SessionStatus.TERMINATED, last_active=now_utc())
                 )
                 await session.execute(stmt)
                 await session.commit()
@@ -864,7 +865,7 @@ class UnifiedSessionService:
                 where_conditions = [
                     UserSessionModel.shop_id == shop_id,
                     UserSessionModel.status == SessionStatus.ACTIVE,
-                    UserSessionModel.expires_at > utcnow(),
+                    UserSessionModel.expires_at > now_utc(),
                 ]
 
                 # For logged-in customers, prioritize customer_id
@@ -945,7 +946,7 @@ class UnifiedSessionService:
                     update_stmt = (
                         update(UserSessionModel)
                         .where(UserSessionModel.id == session_id)
-                        .values(last_active=utcnow())
+                        .values(last_active=now_utc())
                     )
                     await session.execute(update_stmt)
                     await session.commit()
@@ -963,7 +964,7 @@ class UnifiedSessionService:
                 stmt = (
                     update(UserSessionModel)
                     .where(UserSessionModel.id == session_id)
-                    .values(last_active=utcnow())
+                    .values(last_active=now_utc())
                 )
                 await session.execute(stmt)
                 await session.commit()
@@ -975,7 +976,7 @@ class UnifiedSessionService:
         """Clean up expired sessions periodically."""
         try:
             # Only cleanup every hour to avoid excessive database operations
-            if utcnow() - self._last_cleanup < self.cleanup_interval:
+            if now_utc() - self._last_cleanup < self.cleanup_interval:
                 return
 
             async with get_transaction_context() as session:
@@ -985,7 +986,7 @@ class UnifiedSessionService:
                     .where(
                         and_(
                             UserSessionModel.status == SessionStatus.ACTIVE,
-                            UserSessionModel.expires_at <= utcnow(),
+                            UserSessionModel.expires_at <= now_utc(),
                         )
                     )
                     .values(status=SessionStatus.EXPIRED)
@@ -993,7 +994,7 @@ class UnifiedSessionService:
                 await session.execute(stmt)
 
                 # Delete very old sessions (older than 30 days)
-                cutoff_date = utcnow() - timedelta(days=30)
+                cutoff_date = now_utc() - timedelta(days=30)
                 delete_stmt = select(UserSessionModel).where(
                     UserSessionModel.created_at < cutoff_date
                 )
@@ -1005,7 +1006,7 @@ class UnifiedSessionService:
 
                 await session.commit()
 
-            self._last_cleanup = utcnow()
+            self._last_cleanup = now_utc()
 
         except Exception as e:
             logger.error(f"Error cleaning up expired sessions: {str(e)}")

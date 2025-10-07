@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from app.core.logging import get_logger
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from .base_feature_generator import BaseFeatureGenerator
 
 logger = get_logger(__name__)
@@ -332,7 +333,7 @@ class SessionFeatureGenerator(BaseFeatureGenerator):
 
         if isinstance(datetime_str, str):
             try:
-                return datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+                return parse_iso_timestamp(datetime_str)
             except:
                 return None
 

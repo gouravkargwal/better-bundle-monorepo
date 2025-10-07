@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
+from app.shared.helpers.datetime_utils import now_utc
+
 from app.core.redis_client import get_redis_client
 from app.core.database.session import get_transaction_context
 from app.core.database.models.product_data import ProductData
@@ -135,7 +137,7 @@ class UserNeighborsService:
         try:
             # Query recent orders from neighbor users
             # We'll look at orders from the last 90 days to get recent purchases
-            cutoff_date = datetime.now() - timedelta(days=90)
+            cutoff_date = now_utc() - timedelta(days=90)
 
             async with get_transaction_context() as session:
                 # Get orders from neighbor users

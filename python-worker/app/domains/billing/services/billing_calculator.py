@@ -10,6 +10,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
 
+from app.shared.helpers import now_utc
+
 from ..models.attribution_models import AttributionMetrics
 from ..repositories.billing_repository import BillingRepository, BillingPeriod
 
@@ -137,7 +139,7 @@ class BillingCalculator:
                     "currency": store_currency,
                 },
                 "breakdown": self._create_fee_breakdown(metrics_data, plan_config),
-                "calculated_at": datetime.utcnow().isoformat(),
+                "calculated_at": now_utc().isoformat(),
             }
 
             logger.info(f"Calculated billing fee for shop {shop_id}: ${final_fee}")
@@ -341,7 +343,7 @@ class BillingCalculator:
                 "currency": "USD",
             },
             "breakdown": {},
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
             "error": "No billing plan found",
         }
 
@@ -366,7 +368,7 @@ class BillingCalculator:
                 "currency": "USD",
             },
             "breakdown": {},
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
             "error": error_message,
         }
 
@@ -461,7 +463,7 @@ class BillingCalculator:
                     "months_analyzed": len(monthly_summaries),
                 },
                 "monthly_breakdown": monthly_summaries,
-                "calculated_at": datetime.utcnow().isoformat(),
+                "calculated_at": now_utc().isoformat(),
             }
 
         except Exception as e:
@@ -549,7 +551,7 @@ class BillingCalculator:
                     data={
                         "isTrialActive": False,
                         "trialRevenue": trial_status["current_revenue"],
-                        "trialCompletedAt": datetime.utcnow(),
+                        "trialCompletedAt": now_utc(),
                     },
                 )
 
@@ -574,7 +576,7 @@ class BillingCalculator:
 
             # Create trial completion period
             trial_start = billing_plan.createdAt
-            trial_end = datetime.utcnow()
+            trial_end = now_utc()
 
             period = BillingPeriod(
                 start_date=trial_start, end_date=trial_end, cycle="trial_completion"
@@ -644,5 +646,5 @@ class BillingCalculator:
                 "remaining_revenue": trial_status["remaining_revenue"],
                 "trial_progress": trial_status["trial_progress"],
             },
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
         }

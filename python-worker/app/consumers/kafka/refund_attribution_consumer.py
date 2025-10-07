@@ -4,6 +4,8 @@ Kafka-based refund attribution consumer for processing refund attribution events
 
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+
+from app.shared.helpers import now_utc
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from app.core.kafka.consumer import KafkaConsumer
@@ -68,7 +70,7 @@ class RefundAttributionKafkaConsumer:
         """Get health status of the refund attribution consumer"""
         return {
             "status": "running" if self._initialized else "stopped",
-            "last_health_check": datetime.utcnow().isoformat(),
+            "last_health_check": now_utc().isoformat(),
         }
 
     async def _handle_message(self, message: Dict[str, Any]):
@@ -133,7 +135,7 @@ class RefundAttributionKafkaConsumer:
                     original_message=message,
                     reason="shop_suspended",
                     original_topic="refund-attribution-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
                 await self.consumer.commit(message)
                 return

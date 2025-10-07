@@ -6,6 +6,8 @@ Handles extraction and processing of session data from behavioral events
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
+from app.shared.helpers.datetime_utils import now_utc
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
@@ -24,7 +26,7 @@ class SessionDataService:
     ) -> Dict[str, Any]:
         """Extract recent cart and browsing data from behavioral events for session recommendations"""
         try:
-            now = datetime.now(timezone.utc)
+            now = now_utc()
             cutoff_time = now - timedelta(hours=24)
 
             async with get_transaction_context() as session:

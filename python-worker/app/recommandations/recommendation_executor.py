@@ -6,6 +6,8 @@ Handles execution of individual recommendation levels and fallback chains
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+from app.shared.helpers import now_utc
+
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.recommandations.user_neighbors import UserNeighborsService
@@ -216,7 +218,7 @@ class RecommendationExecutor:
             "Comment": f"session_{effective_session_id}",
             "FeedbackType": "view",
             "ItemId": "",
-            "Timestamp": datetime.now().isoformat(),
+            "Timestamp": now_utc().isoformat(),
             "UserId": prefixed_user_id or "",
         }
 

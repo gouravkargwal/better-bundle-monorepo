@@ -10,6 +10,8 @@ from decimal import Decimal
 import asyncio
 import logging
 
+from app.shared.helpers.datetime_utils import now_utc
+
 from app.core.database.session import get_session_context
 from app.core.database.models import (
     Shop,
@@ -65,7 +67,7 @@ async def settle_daily_periods(
     total_commission = 0.0
 
     async with get_session_context() as session:
-        yesterday = (datetime.utcnow() - timedelta(days=1)).date()
+        yesterday = (now_utc() - timedelta(days=1)).date()
 
         logger.info(f"📅 Checking for periods ending on: {yesterday}")
 
@@ -445,7 +447,7 @@ async def settle_shop_period(
         period_start=period_start_dt,
         period_end=period_end_dt,
         metrics_id="",
-        due_date=datetime.utcnow() + timedelta(days=30),
+        due_date=now_utc() + timedelta(days=30),
         shopify_charge_id=usage_record.id,
         billing_metadata=invoice_metadata,
     )

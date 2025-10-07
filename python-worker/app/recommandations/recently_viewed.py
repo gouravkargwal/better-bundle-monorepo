@@ -5,6 +5,8 @@ Provides recently viewed products for returning visitors to create continuity
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
+
+from app.shared.helpers import now_utc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 from app.core.logging import get_logger
@@ -88,7 +90,7 @@ class RecentlyViewedService:
     ) -> List[Dict[str, Any]]:
         """Get recently viewed product IDs with timestamps"""
         try:
-            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+            cutoff_date = now_utc() - timedelta(days=days_back)
 
             # Get recent product views, ordered by most recent
             result = await session.execute(

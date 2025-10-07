@@ -7,6 +7,8 @@ import asyncio
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
+from app.shared.helpers import now_utc
+
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.database.session import get_transaction_context
@@ -263,7 +265,7 @@ async def get_recommendations(request: RecommendationRequest):
                 count=len(recommendations),
                 source="cache",
                 context=request.context,
-                timestamp=datetime.now(),
+                timestamp=now_utc(),
             )
 
         logger.debug(
@@ -401,7 +403,7 @@ async def get_recommendations(request: RecommendationRequest):
                 count=0,
                 source=result.get("source", "no_recommendations"),
                 context=request.context,
-                timestamp=datetime.now(),
+                timestamp=now_utc(),
             )
 
         # Enrich with Shopify product data
@@ -447,7 +449,7 @@ async def get_recommendations(request: RecommendationRequest):
             "context": request.context,
             "shop_id": shop.id,
             "user_id": request.user_id,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_utc().isoformat(),
             "category_detected": category if not request.category else None,
         }
 
@@ -478,7 +480,7 @@ async def get_recommendations(request: RecommendationRequest):
             count=len(enriched_items),
             source=result["source"],
             context=request.context,
-            timestamp=datetime.now(),
+            timestamp=now_utc(),
         )
 
     except HTTPException:

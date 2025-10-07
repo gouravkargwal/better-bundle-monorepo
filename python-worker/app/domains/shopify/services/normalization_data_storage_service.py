@@ -4,6 +4,8 @@ import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
+
 from app.core.logging import get_logger
 from app.core.database.session import get_session_context, get_transaction_context
 from app.core.database.models import (
@@ -343,7 +345,7 @@ class NormalizationDataStorageService:
     ):
         """Persist last normalized time for incremental normalization."""
         try:
-            last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+            last_dt = parse_iso_timestamp(iso_time)
 
             if format_type == "graphql":
                 async with get_transaction_context() as session:

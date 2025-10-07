@@ -4,7 +4,7 @@ Refund attribution model for SQLAlchemy
 Represents refund attribution data for revenue adjustment tracking.
 """
 
-from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import DECIMAL

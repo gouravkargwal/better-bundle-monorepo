@@ -24,10 +24,10 @@ from app.domains.analytics.models.session import (
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 
 # Removed deprecated CustomerIdentityResolutionService import
-from app.shared.helpers.datetime_utils import utcnow
 from app.core.logging.logger import get_logger
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
+from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
 
@@ -235,7 +235,7 @@ class CrossSessionLinkingService:
                         SAUserSession.shop_id == shop_id,
                         SAUserSession.customer_id.is_(None),
                         SAUserSession.status == "active",
-                        SAUserSession.expires_at > utcnow(),
+                        SAUserSession.expires_at > now_utc(),
                         or_(*or_conditions),  # ✅ Use or_() properly
                     )
                     .order_by(SAUserSession.created_at.asc())
@@ -713,7 +713,7 @@ class CrossSessionLinkingService:
                         link_type="temporal",
                         confidence=1.0
                         - (time_gap / 604800),  # Confidence decreases with time gap
-                        created_at=utcnow(),
+                        created_at=now_utc(),
                     )
                     session_links.append(link)
 
@@ -860,7 +860,7 @@ class CrossSessionLinkingService:
                         identifier=identifier,
                         identifier_type=identifier_type,
                         customer_id=customer_id,
-                        linked_at=utcnow(),
+                        linked_at=now_utc(),
                     )
                     session.add(link)
                     await session.commit()
@@ -895,7 +895,9 @@ class CrossSessionLinkingService:
         """
         try:
             # Generate a unique job ID
-            job_id = f"customer_linking_triggered_{shop_id}_{int(utcnow().timestamp())}"
+            job_id = (
+                f"customer_linking_triggered_{shop_id}_{int(now_utc().timestamp())}"
+            )
 
             # Prepare event metadata
             metadata = {
@@ -903,7 +905,7 @@ class CrossSessionLinkingService:
                 "incremental": incremental,
                 "trigger_source": trigger_source,
                 "interaction_id": interaction_id,
-                "timestamp": utcnow().isoformat(),
+                "timestamp": now_utc().isoformat(),
                 "processed_count": 0,
             }
 
@@ -915,7 +917,7 @@ class CrossSessionLinkingService:
                 "metadata": metadata,
                 "event_type": "feature_computation",
                 "data_type": "interactions",
-                "timestamp": utcnow().isoformat(),
+                "timestamp": now_utc().isoformat(),
                 "source": "cross_session_linking",
             }
 

@@ -4,7 +4,7 @@ User interaction model for SQLAlchemy
 Represents user interactions with extensions.
 """
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin, CustomerMixin

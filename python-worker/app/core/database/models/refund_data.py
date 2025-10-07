@@ -2,7 +2,8 @@
 RefundData model for storing normalized refund information
 """
 
-from sqlalchemy import Column, String, DateTime, Float, Boolean, JSON, Index
+from sqlalchemy import Column, String, Float, Boolean, JSON, Index
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from app.core.database.models.base import BaseModel, ShopMixin
 
@@ -22,7 +23,7 @@ class RefundData(BaseModel, ShopMixin):
     refund_id = Column(String, nullable=False, index=True)  # Normalized refund ID
 
     # Refund details
-    refunded_at = Column(DateTime(timezone=True), nullable=False)
+    refunded_at = Column(TIMESTAMP(timezone=True), nullable=False)
     total_refund_amount = Column(Float, nullable=False)
     currency_code = Column(String, nullable=False, default="USD")
     note = Column(String)

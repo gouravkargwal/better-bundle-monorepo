@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.shared.helpers import now_utc
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalCustomer
 
@@ -34,7 +35,7 @@ class GraphQLCustomerAdapter(BaseAdapter):
         entity_id = _extract_numeric_gid(payload.get("id")) or ""
 
         created_at = (
-            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+            _parse_iso(payload.get("created_at")) or now_utc()
         )  # Updated to snake_case
         updated_at = (
             _parse_iso(payload.get("updated_at")) or created_at

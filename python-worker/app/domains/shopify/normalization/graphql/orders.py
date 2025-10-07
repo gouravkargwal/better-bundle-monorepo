@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
+from app.shared.helpers import now_utc
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalLineItem, CanonicalOrder
 
@@ -155,7 +156,7 @@ class GraphQLOrderAdapter(BaseAdapter):
 
         # Compute canonical timestamps - now using snake_case field names
         created_at = (
-            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+            _parse_iso(payload.get("created_at")) or now_utc()
         )  # Updated to snake_case
         updated_at = (
             _parse_iso(payload.get("updated_at"))  # Updated to snake_case

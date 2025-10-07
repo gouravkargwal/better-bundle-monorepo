@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from app.shared.helpers import now_utc
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalCollection
 
@@ -97,7 +98,7 @@ class GraphQLCollectionAdapter(BaseAdapter):
         created_at = (
             _parse_iso(payload.get("created_at"))  # Updated to snake_case
             or _parse_iso(payload.get("updated_at"))  # Updated to snake_case
-            or datetime.utcnow()
+            or now_utc()
         )
         updated_at = (
             _parse_iso(payload.get("updated_at")) or created_at
