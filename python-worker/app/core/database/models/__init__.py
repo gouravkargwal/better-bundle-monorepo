@@ -63,6 +63,9 @@ from .billing import (
     BillingInvoice,
 )
 
+# Commission models
+from .commission import CommissionRecord
+
 # Trial configuration models
 from .trial_config import TrialConfig
 
@@ -112,6 +115,7 @@ __all__ = [
     # Billing models
     "BillingPlan",
     "BillingInvoice",
+    "CommissionRecord",
     # Trial configuration models
     "TrialConfig",
     # Extension models

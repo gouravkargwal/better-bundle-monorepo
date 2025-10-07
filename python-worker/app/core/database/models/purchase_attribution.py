@@ -47,6 +47,12 @@ class PurchaseAttribution(BaseModel, ShopMixin, CustomerMixin):
     # Relationships
     session = relationship("UserSession", back_populates="attributions")
     shop = relationship("Shop", back_populates="purchase_attributions")
+    commission_record = relationship(
+        "CommissionRecord",
+        back_populates="purchase_attribution",
+        uselist=False,  # One-to-one relationship
+        cascade="all, delete-orphan",
+    )
 
     # Indexes
     __table_args__ = (

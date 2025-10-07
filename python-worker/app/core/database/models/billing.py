@@ -60,6 +60,9 @@ class BillingPlan(BaseModel, ShopMixin):
     )
 
     shop = relationship("Shop", back_populates="billing_plans")
+    commission_records = relationship(
+        "CommissionRecord", back_populates="billing_plan", cascade="all, delete-orphan"
+    )
 
     # Indexes
     __table_args__ = (
@@ -145,6 +148,7 @@ class BillingInvoice(BaseModel, ShopMixin):
     # Relationships
     plan = relationship("BillingPlan", back_populates="invoices")
     shop = relationship("Shop", back_populates="billing_invoices")
+    commission_records = relationship("CommissionRecord", back_populates="invoice")
     # Indexes
     __table_args__ = (
         Index("ix_billing_invoice_shop_id", "shop_id"),

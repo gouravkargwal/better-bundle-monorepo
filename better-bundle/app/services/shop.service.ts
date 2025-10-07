@@ -1,6 +1,5 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
-import { createUsageBasedSubscription } from "./subscription.service";
 import { getTrialThresholdInShopCurrency } from "app/utils/currency-converter";
 
 const getShopInfoFromShopify = async (admin: any) => {
@@ -230,14 +229,14 @@ const deactivateShopBilling = async (
       where: { shop_domain: shopDomain },
       data: {
         status: "inactive",
-        effective_until: new Date(),
+        effective_to: new Date(),
         updated_at: new Date(),
       },
     });
 
     // 3. Create billing event to track the deactivation
-    const billingPlan = await prisma.billing_plans.findFirst({
-      where: { shop_domain: shopDomain },
+    await prisma.billing_plans.findFirst({
+      where: { shop_domain: shopDomain, status: "active" },
       select: { id: true, shop_id: true },
     });
 
@@ -258,109 +257,6 @@ const deactivateShopBilling = async (
     );
   }
 };
-
-const handleTrialCompletion = async (
-  session: Session,
-  admin: any,
-  shopId: string,
-  shopDomain: string,
-  finalRevenue: number,
-  currencyCode: string = "USD",
-) => {
-  try {
-    console.log(
-      `🎉 Trial completed for shop ${shopDomain} with revenue $${finalRevenue}`,
-    );
-
-    // 1. Update billing plan to mark trial as completed
-    await prisma.billing_plans.updateMany({
-      where: {
-        shop_id: shopId,
-        status: "active",
-        is_trial_active: true,
-      },
-      data: {
-        is_trial_active: false,
-        trial_revenue: finalRevenue,
-        configuration: {
-          trial_active: false,
-          trial_completed_at: new Date().toISOString(),
-          trial_completion_revenue: finalRevenue,
-          services_stopped: true,
-          consent_required: true,
-          subscription_required: true,
-          billing_suspended: true,
-        },
-      },
-    });
-
-    // 2. Create usage-based subscription
-    console.log(`🔄 Creating usage-based subscription for shop ${shopDomain}`);
-    const subscription = await createUsageBasedSubscription(
-      session,
-      admin,
-      shopId,
-      shopDomain,
-      currencyCode,
-    );
-
-    if (subscription) {
-      console.log(`✅ Usage-based subscription created: ${subscription.id}`);
-
-      // Update billing plan with subscription details
-      await prisma.billing_plans.updateMany({
-        where: {
-          shop_id: shopId,
-          status: "active",
-        },
-        data: {
-          configuration: {
-            subscription_id: subscription.id,
-            subscription_status: "PENDING",
-            subscription_created_at: new Date().toISOString(),
-            usage_based: true,
-            capped_amount: "1000",
-            currency: currencyCode,
-            trial_active: false,
-            trial_completed_at: new Date().toISOString(),
-            trial_completion_revenue: finalRevenue,
-            services_stopped: true,
-            consent_required: true,
-            subscription_required: true,
-            billing_suspended: true,
-          },
-        },
-      });
-
-      return {
-        success: true,
-        subscription_created: true,
-        subscription_id: subscription.id,
-        final_revenue: finalRevenue,
-      };
-    } else {
-      console.error(`❌ Failed to create subscription for shop ${shopDomain}`);
-
-      return {
-        success: false,
-        subscription_created: false,
-        error: "Failed to create subscription",
-        final_revenue: finalRevenue,
-      };
-    }
-  } catch (error) {
-    console.error(
-      `❌ Error handling trial completion for shop ${shopDomain}:`,
-      error,
-    );
-
-    throw new Error(
-      `Failed to handle trial completion: ${error instanceof Error ? error.message : "Unknown error"}`,
-    );
-  }
-};
-
-// In activateTrialBillingPlan function:
 
 const activateTrialBillingPlan = async (
   shopDomain: string,
@@ -453,5 +349,4 @@ export {
   getShopInfoFromShopify,
   markOnboardingCompleted,
   deactivateShopBilling,
-  handleTrialCompletion,
 };

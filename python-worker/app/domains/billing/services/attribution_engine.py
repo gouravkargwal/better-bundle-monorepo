@@ -36,6 +36,8 @@ from ..models.attribution_models import (
     AttributionMetrics,
 )
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
+from app.domains.billing.services.commission_service import CommissionService
+from app.domains.billing.services.billing_service import BillingService
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,8 @@ class AttributionEngine:
         """
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
-
+        self.commission_service = CommissionService(session)
+        self.billing_service = BillingService(session)
         # ✅ SCENARIO 9: Configurable attribution windows
         self.attribution_windows = {
             "default": timedelta(hours=24),  # 24 hours default
@@ -204,6 +207,13 @@ class AttributionEngine:
                 f"${result.total_attributed_revenue} across {len(result.attribution_breakdown)} items"
             )
 
+            # ========================================
+            # 🆕 NEW: Step 5 - CREATE COMMISSION RECORD
+            # ========================================
+            await self._create_commission_for_attribution(
+                attribution_id=result.id, shop_id=context.shop_id
+            )
+
             return result
 
         except Exception as e:
@@ -211,6 +221,108 @@ class AttributionEngine:
                 f"Error calculating attribution for order {context.order_id}: {e}"
             )
             return self._create_error_attribution(context, str(e))
+
+    async def _create_commission_for_attribution(
+        self, attribution_id: str, shop_id: str
+    ) -> None:
+        """
+        Create commission record for a purchase attribution.
+        This is called automatically after attribution is created.
+
+        Args:
+            attribution_id: Purchase attribution ID
+            shop_id: Shop ID
+        """
+        try:
+            logger.info(f"💰 Creating commission for attribution {attribution_id}")
+
+            # Create commission record (handles both trial and paid phases)
+            commission = await self.commission_service.create_commission_record(
+                purchase_attribution_id=attribution_id, shop_id=shop_id
+            )
+
+            if not commission:
+                logger.error(
+                    f"❌ Failed to create commission for attribution {attribution_id}"
+                )
+                return
+
+            logger.info(
+                f"✅ Commission created: ${commission.commission_earned} "
+                f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
+            )
+
+            # Check if we need to handle trial threshold or cap limits
+            await self._handle_post_commission_checks(commission, shop_id)
+
+        except Exception as e:
+            logger.error(f"❌ Error creating commission: {e}")
+            # Don't fail the entire attribution if commission creation fails
+            # Commission can be created later via reconciliation
+
+    async def _handle_post_commission_checks(
+        self, commission: CommissionRecord, shop_id: str
+    ) -> None:
+        """
+        Handle checks after commission is created:
+        - Trial threshold check
+        - Cap limit check
+        - Warnings
+
+        Args:
+            commission: Created commission record
+            shop_id: Shop ID
+        """
+        try:
+
+            if commission.billing_phase == BillingPhase.TRIAL:
+                # Check if trial threshold reached
+                trial_status = (
+                    await self.commission_service.handle_trial_threshold_check(shop_id)
+                )
+
+                if trial_status.get("threshold_reached"):
+                    logger.warning(
+                        f"🎯 Trial threshold reached for shop {shop_id}! "
+                        f"${trial_status.get('total_trial_revenue')} >= "
+                        f"${trial_status.get('trial_threshold')}"
+                    )
+
+                    await self.billing_service._handle_trial_purchase(
+                        shop_id, commission.billing_plan, commission.cycle_usage_after
+                    )
+
+            elif commission.billing_phase == BillingPhase.PAID:
+                # Check usage percentage
+                usage_percentage = (
+                    commission.cycle_usage_after / commission.capped_amount * 100
+                )
+
+                # Warning at 75%
+                if usage_percentage >= 75 and usage_percentage < 90:
+                    logger.warning(
+                        f"⚠️ Usage at {usage_percentage:.1f}% of cap for shop {shop_id}"
+                    )
+                    # TODO: Send notification to merchant
+
+                # Urgent warning at 90%
+                elif usage_percentage >= 90 and usage_percentage < 100:
+                    logger.warning(
+                        f"🚨 Usage at {usage_percentage:.1f}% of cap for shop {shop_id}! "
+                        f"Approaching limit."
+                    )
+                    # TODO: Send urgent notification to merchant
+
+                # Cap reached
+                elif usage_percentage >= 100:
+                    logger.error(
+                        f"🛑 Cap reached for shop {shop_id}! "
+                        f"${commission.cycle_usage_after} >= ${commission.capped_amount}"
+                    )
+                    # TODO: Suspend services or notify merchant
+
+        except Exception as e:
+            logger.error(f"❌ Error in post-commission checks: {e}")
 
     async def _get_relevant_interactions(
         self, context: AttributionContext, attribution_window: timedelta = None

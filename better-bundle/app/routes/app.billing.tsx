@@ -165,6 +165,7 @@ export default function BillingTabsPage() {
         billingPlan={billingPlan}
         billingActions={billingActions}
         billing={billing}
+        shopCurrency={shopCurrency}
       />
     );
   };

@@ -94,6 +94,9 @@ class Shop(BaseModel):
     billing_invoices = relationship(
         "BillingInvoice", back_populates="shop", cascade="all, delete-orphan"
     )
+    commission_records = relationship(
+        "CommissionRecord", back_populates="shop", cascade="all, delete-orphan"
+    )
 
     # Table constraints
     __table_args__ = (UniqueConstraint("shop_domain", name="shop_domain_unique"),)

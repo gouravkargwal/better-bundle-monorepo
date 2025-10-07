@@ -12,9 +12,10 @@ import { formatCurrency } from "app/utils/currency";
 
 interface TrialActiveProps {
   billingPlan: any;
+  shopCurrency: string;
 }
 
-export function TrialActive({ billingPlan }: TrialActiveProps) {
+export function TrialActive({ billingPlan, shopCurrency }: TrialActiveProps) {
   const trialProgress =
     (billingPlan.trial_revenue / billingPlan.trial_threshold) * 100;
   const remainingAmount =
@@ -74,7 +75,7 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                         Revenue:{" "}
                         {formatCurrency(
                           billingPlan.trial_revenue,
-                          billingPlan.currency,
+                          shopCurrency,
                         )}
                       </Text>
                     </BlockStack>
@@ -87,14 +88,14 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                         Trial Progress:{" "}
                         {formatCurrency(
                           billingPlan.trial_revenue,
-                          billingPlan.currency,
+                          shopCurrency,
                         )}
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
                         Goal:{" "}
                         {formatCurrency(
                           billingPlan.trial_threshold,
-                          billingPlan.currency,
+                          shopCurrency,
                         )}
                       </Text>
                     </InlineStack>
@@ -107,7 +108,7 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                     <Text as="p" variant="bodySm" tone="subdued">
                       {trialProgress >= 100
                         ? "Trial threshold reached! Setup billing to continue."
-                        : `${formatCurrency(remainingAmount, billingPlan.currency)} remaining to reach threshold`}
+                        : `${formatCurrency(remainingAmount, shopCurrency)} remaining to reach threshold`}
                     </Text>
                   </BlockStack>
                 </BlockStack>
@@ -127,10 +128,7 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     When you reach{" "}
-                    {formatCurrency(
-                      billingPlan.trial_threshold,
-                      billingPlan.currency,
-                    )}{" "}
+                    {formatCurrency(billingPlan.trial_threshold, shopCurrency)}{" "}
                     in trial revenue, we'll prompt you to set up billing. You'll
                     then pay 3% of attributed revenue.
                   </Text>

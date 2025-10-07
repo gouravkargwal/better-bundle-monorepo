@@ -19,6 +19,7 @@ export function BillingStatusRouter({
   billingPlan,
   billingActions,
   billing,
+  shopCurrency,
 }: BillingStatusRouterProps) {
   console.log(billingPlan, "------------------>");
 
@@ -31,7 +32,9 @@ export function BillingStatusRouter({
     billingPlan.is_trial_active && trialRevenue < trialThreshold;
 
   if (isTrialActive) {
-    return <TrialActive billingPlan={billingPlan} />;
+    return (
+      <TrialActive billingPlan={billingPlan} shopCurrency={shopCurrency} />
+    );
   }
 
   if (billingPlan.subscription_status === "ACTIVE") {
