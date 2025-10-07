@@ -1,14 +1,15 @@
 """
-Billing Scheduler Service
+Enhanced Billing Scheduler Service with Parallel Processing
 
-This service handles scheduled billing calculations and can be triggered by GitHub Actions.
-It processes billing for all active shops and generates invoices.
+This service handles scheduled billing calculations with improved concurrency,
+parallel processing, and robust error handling for GitHub Actions cron jobs.
 """
 
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload
 
@@ -27,18 +28,27 @@ logger = get_logger(__name__)
 
 class BillingSchedulerService:
     """
-    Service for scheduling and executing billing calculations.
+    Enhanced service for scheduling and executing billing calculations with parallel processing.
 
     This service can be triggered by:
     1. GitHub Actions (webhook)
     2. Cron jobs
     3. Manual API calls
     4. Internal scheduling
+
+    Features:
+    - Parallel processing for multiple shops
+    - Concurrency controls to prevent database overload
+    - Robust error handling and retry mechanisms
+    - Progress tracking and detailed logging
     """
 
-    def __init__(self):
+    def __init__(self, max_concurrent_shops: int = 10, max_retries: int = 3):
         self.billing_service = None
         self.billing_repository = None
+        self.max_concurrent_shops = max_concurrent_shops
+        self.max_retries = max_retries
+        self.semaphore = asyncio.Semaphore(max_concurrent_shops)
 
     async def initialize(self):
         """Initialize the billing service and repository"""
@@ -115,34 +125,43 @@ class BillingSchedulerService:
                 "dry_run": dry_run,
             }
 
-            # Process each shop
-            for shop in shops_to_process:
-                try:
-                    shop_result = await self._process_shop_billing(
-                        shop, period, dry_run
-                    )
-                    results["shop_results"].append(shop_result)
-                    results["processed_shops"] += 1
+            # Process shops in parallel with concurrency control
+            logger.info(
+                f"🚀 Starting parallel processing of {len(shops_to_process)} shops"
+            )
 
-                    if shop_result["success"]:
-                        results["successful_shops"] += 1
-                        results["total_revenue"] += shop_result.get(
-                            "attributed_revenue", 0.0
-                        )
-                        results["total_fees"] += shop_result.get("calculated_fee", 0.0)
-                    else:
-                        results["failed_shops"] += 1
-                        results["errors"].append(
-                            {
-                                "shop_id": shop.id,
-                                "error": shop_result.get("error", "Unknown error"),
-                            }
-                        )
+            # Create tasks for parallel processing
+            tasks = [
+                self._process_shop_billing_with_retry(shop, period, dry_run)
+                for shop in shops_to_process
+            ]
 
-                except Exception as e:
-                    logger.error(f"Error processing billing for shop {shop.id}: {e}")
+            # Execute tasks with concurrency control
+            shop_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results
+            for i, result in enumerate(shop_results):
+                shop = shops_to_process[i]
+                results["processed_shops"] += 1
+
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Exception processing shop {shop.id}: {result}")
                     results["failed_shops"] += 1
-                    results["errors"].append({"shop_id": shop.id, "error": str(e)})
+                    results["errors"].append({"shop_id": shop.id, "error": str(result)})
+                elif result.get("success", False):
+                    results["successful_shops"] += 1
+                    results["total_revenue"] += result.get("attributed_revenue", 0.0)
+                    results["total_fees"] += result.get("calculated_fee", 0.0)
+                    results["shop_results"].append(result)
+                else:
+                    results["failed_shops"] += 1
+                    results["errors"].append(
+                        {
+                            "shop_id": shop.id,
+                            "error": result.get("error", "Unknown error"),
+                        }
+                    )
+                    results["shop_results"].append(result)
 
             results["status"] = "completed"
             results["completed_at"] = datetime.utcnow().isoformat()
@@ -283,10 +302,61 @@ class BillingSchedulerService:
             result = await session.execute(query)
             return result.scalars().all()
 
+    async def _process_shop_billing_with_retry(
+        self, shop: Shop, period: BillingPeriod, dry_run: bool
+    ) -> Dict[str, Any]:
+        """Process billing for a single shop with retry mechanism and concurrency control"""
+        async with self.semaphore:  # Concurrency control
+            for attempt in range(self.max_retries):
+                try:
+                    logger.info(
+                        f"🔄 Processing shop {shop.id} (attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    result = await self._process_shop_billing_single(
+                        shop, period, dry_run
+                    )
+
+                    if result.get("success", False):
+                        logger.info(f"✅ Successfully processed shop {shop.id}")
+                        return result
+                    else:
+                        logger.warning(
+                            f"⚠️ Shop {shop.id} processing failed: {result.get('error', 'Unknown error')}"
+                        )
+                        if attempt < self.max_retries - 1:
+                            await asyncio.sleep(2**attempt)  # Exponential backoff
+                        else:
+                            return result
+
+                except Exception as e:
+                    logger.error(
+                        f"❌ Exception processing shop {shop.id} (attempt {attempt + 1}): {e}"
+                    )
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
+                    else:
+                        return {"success": False, "shop_id": shop.id, "error": str(e)}
+
+            return {
+                "success": False,
+                "shop_id": shop.id,
+                "error": "Max retries exceeded",
+            }
+
+    async def _process_shop_billing_single(
+        self, shop: Shop, period: BillingPeriod, dry_run: bool
+    ) -> Dict[str, Any]:
+        """Process billing for a single shop (internal method)"""
+        try:
+            return await self.process_shop_billing(shop.id, period, dry_run)
+        except Exception as e:
+            logger.error(f"Error processing billing for shop {shop.id}: {e}")
+            return {"success": False, "shop_id": shop.id, "error": str(e)}
+
     async def _process_shop_billing(
         self, shop: Shop, period: BillingPeriod, dry_run: bool
     ) -> Dict[str, Any]:
-        """Process billing for a single shop"""
+        """Process billing for a single shop (legacy method for backward compatibility)"""
         try:
             return await self.process_shop_billing(shop.id, period, dry_run)
         except Exception as e:

@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { Page, Tabs } from "@shopify/polaris";
+import { Page, Tabs, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useState } from "react";
 import { BillingStatusRouter } from "../components/Billing/BillingStatusRouter";
@@ -8,26 +8,24 @@ import { InvoicesHistory } from "../components/Billing/InvoiceHistory";
 import { useBillingActions } from "../hooks/useBillingActions";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getTrialRevenueData } from "../utils/trialRevenue";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session, billing } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    // Get shop info for currency
+    // Get shop info
     const shopInfo = await prisma.shops.findUnique({
       where: { shop_domain: shop },
-      select: { currency_code: true },
+      select: { id: true, currency_code: true },
     });
 
     const shopCurrency = shopInfo?.currency_code || "USD";
 
-    // Get billing plan for the shop
+    // Get billing plan
     const billingPlan = await prisma.billing_plans.findFirst({
-      where: {
-        shop_domain: shop, // Use shop_domain instead of shop_id
-        // Remove status filter to get any billing plan
-      },
+      where: { shop_domain: shop },
       orderBy: { created_at: "desc" },
     });
 
@@ -39,59 +37,174 @@ export async function loader({ request }: LoaderFunctionArgs) {
           subscription_id: null,
           usage_count: 0,
           attributed_revenue: 0,
-          trial_threshold: 200, // Default trial threshold
+          trial_threshold: 200,
           currency: shopCurrency,
         },
+        billing,
+        recentInvoices: [],
       });
     }
 
-    // Compute idempotent trial progress from attribution tables
-    const shopRecord = await prisma.shops.findUnique({
-      where: { shop_domain: shop },
-      select: { id: true },
-    });
-    const shopId = shopRecord?.id || billingPlan.shop_id;
+    // ✅ Calculate current cycle metrics (if subscription active)
+    let currentCycleMetrics = null;
 
-    const purchasesAgg = await prisma.purchase_attributions.aggregate({
-      where: { shop_id: shopId },
-      _sum: { total_revenue: true },
-    });
-    const refundsAgg = await prisma.refund_attributions.aggregate({
-      where: { shop_id: shopId },
-      _sum: { total_refunded_revenue: true },
-    });
-    const ordersTracked = await prisma.purchase_attributions.count({
-      where: { shop_id: shopId },
-    });
+    if (billingPlan.subscription_status === "ACTIVE" && shopInfo) {
+      const now = new Date();
 
-    const purchases = Number(purchasesAgg._sum.total_revenue || 0);
-    const refunds = Number(refundsAgg._sum.total_refunded_revenue || 0);
-    const netAttributed = Math.max(0, purchases - refunds);
+      // ✅ NEW: Use trial revenue utility to get accurate trial/post-trial separation
+      const trialData = await getTrialRevenueData(shopInfo.id);
 
-    // Map the billing plan data to the correct field names for the UI
-    const updatedBillingPlan = {
-      ...billingPlan,
-      attributed_revenue: netAttributed,
-      usage_count: ordersTracked,
-      currency: shopCurrency,
-    };
+      // Calculate billing period from trial completion date
+      const billingStartDate =
+        trialData.trialPeriod.end || trialData.trialPeriod.start;
+      const daysSinceTrialCompletion = Math.floor(
+        (now.getTime() - billingStartDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
 
-    return json({ billingPlan: updatedBillingPlan, billing: billing });
+      // ✅ FIXED: Use trial completion date as period start, not calendar month
+      // This ensures we only bill for POST-TRIAL revenue (industry standard)
+      const period_start = billingStartDate;
+      const period_end = now;
+
+      // Use Prisma for simple queries, raw SQL only for complex cross-period logic
+      const [purchasesAgg, refundsData] = await Promise.all([
+        // Simple purchase aggregation with Prisma (type-safe)
+        prisma.purchase_attributions.aggregate({
+          where: {
+            shop_id: shopInfo.id,
+            purchase_at: {
+              gte: period_start,
+              lt: period_end,
+            },
+          },
+          _count: true,
+          _sum: { total_revenue: true },
+        }),
+
+        // ✅ FIXED: Only include POST-TRIAL refunds (industry standard)
+        // This ensures trial period data is completely separated from billing
+        prisma.$queryRaw<
+          Array<{
+            count: number;
+            total: number;
+            same_period_count: number;
+            same_period_total: number;
+            cross_period_count: number;
+            cross_period_total: number;
+          }>
+        >`
+          SELECT 
+            COUNT(*)::int as count,
+            COALESCE(SUM(ra.total_refunded_revenue), 0) as total,
+            COUNT(*) FILTER (
+              WHERE pa.purchase_at >= ${period_start} 
+              AND pa.purchase_at < ${period_end}
+            )::int as same_period_count,
+            COALESCE(SUM(ra.total_refunded_revenue) FILTER (
+              WHERE pa.purchase_at >= ${period_start} 
+              AND pa.purchase_at < ${period_end}
+            ), 0) as same_period_total,
+            COUNT(*) FILTER (
+              WHERE pa.purchase_at < ${period_start} 
+              OR pa.purchase_at >= ${period_end}
+              OR pa.purchase_at IS NULL
+            )::int as cross_period_count,
+            COALESCE(SUM(ra.total_refunded_revenue) FILTER (
+              WHERE pa.purchase_at < ${period_start} 
+              OR pa.purchase_at >= ${period_end}
+              OR pa.purchase_at IS NULL
+            ), 0) as cross_period_total
+          FROM refund_attributions ra
+          LEFT JOIN purchase_attributions pa ON ra.order_id = pa.order_id
+          WHERE ra.shop_id = ${shopInfo.id}
+          AND ra.refunded_at >= ${period_start}
+          AND ra.refunded_at < ${period_end}
+          -- ✅ CRITICAL: Only include refunds for purchases made AFTER trial completion
+          -- This ensures trial period refunds are completely excluded from billing
+          AND pa.purchase_at >= ${period_start}
+        `,
+      ]);
+
+      const purchases = {
+        count: purchasesAgg._count,
+        total: Number(purchasesAgg._sum.total_revenue || 0),
+      };
+
+      const refunds = refundsData[0] || {
+        count: 0,
+        total: 0,
+        same_period_count: 0,
+        same_period_total: 0,
+        cross_period_count: 0,
+        cross_period_total: 0,
+      };
+
+      const purchasesTotal = Number(purchases.total || 0);
+      // Only include refunds from purchases made in the current billing period
+      const refundsTotal = Number(refunds.same_period_total || 0);
+      const net_revenue = purchasesTotal - refundsTotal;
+      const commission = net_revenue * 0.03;
+
+      const capped_amount =
+        (billingPlan.configuration as any)?.capped_amount || 1000;
+      const final_commission = Math.min(commission, capped_amount);
+
+      currentCycleMetrics = {
+        purchases: { count: purchases.count || 0, total: purchasesTotal },
+        refunds: {
+          count: refunds.count || 0,
+          total: refunds.total || 0,
+          same_period_count: refunds.same_period_count || 0,
+          same_period_total: Number(refunds.same_period_total || 0),
+          cross_period_count: refunds.cross_period_count || 0,
+          cross_period_total: Number(refunds.cross_period_total || 0),
+        },
+        net_revenue,
+        commission,
+        final_commission,
+        capped_amount,
+        days_remaining: Math.max(0, 30 - daysSinceTrialCompletion), // 30-day billing cycle from trial completion
+        billing_period_start: period_start,
+        billing_period_end: period_end,
+        trial_completion_date: trialCompletedAt,
+      };
+    }
+
+    // ✅ Fetch recent invoices
+    const recentInvoices = shopInfo
+      ? await prisma.billing_invoices.findMany({
+          where: { shop_id: shopInfo.id },
+          orderBy: { created_at: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            invoice_number: true,
+            status: true,
+            total: true,
+            subtotal: true,
+            currency: true,
+            period_start: true,
+            period_end: true,
+            due_date: true,
+            paid_at: true,
+            created_at: true,
+            shopify_charge_id: true,
+            billing_metadata: true,
+          },
+        })
+      : [];
+
+    return json({
+      billingPlan: {
+        ...billingPlan,
+        currentCycleMetrics,
+      },
+      billing,
+      recentInvoices,
+      shopCurrency,
+    });
   } catch (error) {
     console.error("Error loading billing data:", error);
-
-    // Try to get shop currency even in error case
-    let shopCurrency = "UNKNOWN";
-    try {
-      const shopInfo = await prisma.shops.findUnique({
-        where: { shop_domain: shop },
-        select: { currency_code: true },
-      });
-      shopCurrency = shopInfo?.currency_code || "UNKNOWN";
-    } catch (e) {
-      // Use UNKNOWN as fallback
-    }
-
     return json({
       billingPlan: {
         is_trial_active: true,
@@ -99,16 +212,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
         subscription_id: null,
         usage_count: 0,
         attributed_revenue: 0,
-        trial_threshold: 0, // No default trial threshold
-        currency: shopCurrency,
+        trial_threshold: 200,
+        currency: "USD",
       },
+      billing: null,
+      recentInvoices: [],
+      error: "Failed to load billing data",
     });
   }
 }
 
 export default function BillingTabsPage() {
-  const { billingPlan, billing } = useLoaderData<typeof loader>();
-  const billingActions = useBillingActions(billingPlan.currency);
+  const { billingPlan, billing, recentInvoices, shopCurrency } =
+    useLoaderData<typeof loader>();
+  const billingActions = useBillingActions(
+    shopCurrency || (billingPlan as any).currency || "USD",
+  );
   const [selectedTab, setSelectedTab] = useState(0);
 
   const tabs = [
@@ -125,7 +244,6 @@ export default function BillingTabsPage() {
   ];
 
   const renderOverview = () => {
-    console.log("🔍 Render Overview - Billing Plan:", billingPlan);
     return (
       <BillingStatusRouter
         billingPlan={billingPlan}
@@ -135,26 +253,48 @@ export default function BillingTabsPage() {
     );
   };
 
+  const formatCurrency = (
+    amount: number | string,
+    currency: string = "USD",
+  ) => {
+    const num = typeof amount === "string" ? parseFloat(amount) : amount;
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+    }).format(num);
+  };
+
+  const formatDate = (date: string | Date) => {
+    return new Date(date).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusLower = status.toLowerCase();
+
+    if (statusLower === "paid") {
+      return { tone: "success" as const, children: "Paid" };
+    } else if (statusLower === "pending") {
+      return { tone: "warning" as const, children: "Pending" };
+    } else if (statusLower === "no_charge") {
+      return { tone: "info" as const, children: "No Charge" };
+    } else if (statusLower === "failed") {
+      return { tone: "critical" as const, children: "Failed" };
+    } else if (statusLower === "cancelled") {
+      return { tone: "critical" as const, children: "Cancelled" };
+    }
+
+    return { tone: "info" as const, children: status };
+  };
+
   const renderInvoices = () => {
-    // Create billing data structure for the component
-    const billingData = {
-      recent_invoices: [], // We'll need to fetch this from database
-    };
-
-    const formatDate = (date: string) => new Date(date).toLocaleDateString();
-    const getStatusBadge = (status: string) => {
-      const tone =
-        status === "paid"
-          ? "success"
-          : status === "pending"
-            ? "warning"
-            : "critical";
-      return { tone, children: status.toUpperCase() };
-    };
-
     return (
       <InvoicesHistory
-        billingData={billingData}
+        billingData={{ recent_invoices: recentInvoices }}
+        formatCurrency={formatCurrency}
         formatDate={formatDate}
         getStatusBadge={getStatusBadge}
       />
@@ -177,7 +317,7 @@ export default function BillingTabsPage() {
       <TitleBar title="Billing" />
       <div style={{ padding: "0 20px" }}>
         <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
-          {renderTabContent()}
+          <div style={{ marginTop: "20px" }}>{renderTabContent()}</div>
         </Tabs>
       </div>
     </Page>

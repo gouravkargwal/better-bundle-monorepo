@@ -530,7 +530,7 @@ class BillingCalculator:
         self, shop_id: str, billing_plan, trial_status: Dict[str, Any]
     ) -> None:
         """
-        Handle trial completion by updating billing plan status.
+        Handle trial completion by updating billing plan status and creating trial completion invoice.
 
         Args:
             shop_id: Shop ID
@@ -549,7 +549,13 @@ class BillingCalculator:
                     data={
                         "isTrialActive": False,
                         "trialRevenue": trial_status["current_revenue"],
+                        "trialCompletedAt": datetime.utcnow(),
                     },
+                )
+
+                # Create trial completion invoice (zero amount)
+                await self._create_trial_completion_invoice(
+                    shop_id, billing_plan, trial_status
                 )
 
                 logger.info(
@@ -558,6 +564,43 @@ class BillingCalculator:
 
         except Exception as e:
             logger.error(f"Error handling trial completion for shop {shop_id}: {e}")
+
+    async def _create_trial_completion_invoice(
+        self, shop_id: str, billing_plan, trial_status: Dict[str, Any]
+    ) -> None:
+        """Create a trial completion invoice to mark the transition"""
+        try:
+            from ..repositories.billing_repository import BillingPeriod
+
+            # Create trial completion period
+            trial_start = billing_plan.createdAt
+            trial_end = datetime.utcnow()
+
+            period = BillingPeriod(
+                start_date=trial_start, end_date=trial_end, cycle="trial_completion"
+            )
+
+            # Create zero-amount invoice to mark trial completion
+            await self.billing_repository.create_billing_invoice(
+                shop_id=shop_id,
+                plan_id=billing_plan.id,
+                metrics_id="trial_completion",
+                period=period,
+                invoice_data={
+                    "subtotal": 0.0,
+                    "taxes": 0.0,
+                    "discounts": 0.0,
+                    "total": 0.0,
+                    "currency": "USD",
+                },
+            )
+
+            logger.info(f"Created trial completion invoice for shop {shop_id}")
+
+        except Exception as e:
+            logger.error(
+                f"Error creating trial completion invoice for shop {shop_id}: {e}"
+            )
 
     def _create_trial_billing_result(
         self,

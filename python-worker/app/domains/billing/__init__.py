@@ -1,25 +1,30 @@
 """
 Billing Domain Package
 
-This package contains all billing-related functionality including:
-- Attribution Engine
-- Billing Calculator
-- Billing Service
-- Monthly Billing Jobs
+Simplified billing system with all functionality organized in one place.
 """
 
+# Core Services
 from .services.billing_service import BillingService
-from .services.attribution_engine import AttributionEngine
+from .services.billing_scheduler_service import BillingSchedulerService
 from .services.billing_calculator import BillingCalculator
-from .services.shopify_billing_service import ShopifyBillingService
-from .repositories.billing_repository import BillingRepository
-from .jobs.monthly_billing_job import MonthlyBillingJob
+
+# Repositories
+from .repositories.billing_repository import BillingRepository, BillingPeriod
+
+# API
+from .api.billing_api import router as billing_api_router
+from .api.settlement_api import router as settlement_api_router
 
 __all__ = [
+    # Services
     "BillingService",
-    "AttributionEngine",
+    "BillingSchedulerService",
     "BillingCalculator",
-    "ShopifyBillingService",
+    # Repositories
     "BillingRepository",
-    "MonthlyBillingJob",
+    "BillingPeriod",
+    # API
+    "billing_api_router",
+    "settlement_api_router",
 ]

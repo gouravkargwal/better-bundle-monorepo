@@ -6,8 +6,9 @@ import {
   Badge,
   ProgressBar,
   Icon,
+  Divider,
 } from "@shopify/polaris";
-import { CheckCircleIcon, CalendarIcon } from "@shopify/polaris-icons";
+import { CheckCircleIcon } from "@shopify/polaris-icons";
 import { BillingLayout } from "./BillingLayout";
 import { HeroHeader } from "../UI/HeroHeader";
 import { formatCurrency } from "app/utils/currency";
@@ -17,12 +18,27 @@ interface SubscriptionActiveProps {
 }
 
 export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
+  // ✅ USE NEW DATA - Only post-trial revenue (industry standard)
+  const metrics = billingPlan.currentCycleMetrics || {
+    purchases: { count: 0, total: 0 },
+    refunds: {
+      count: 0,
+      total: 0,
+      same_period_total: 0,
+      cross_period_total: 0,
+    },
+    net_revenue: 0, // Only post-trial revenue
+    commission: 0,
+    final_commission: 0,
+    capped_amount: billingPlan.capped_amount || 1000,
+    days_remaining: 0,
+  };
+
   const usagePercentage =
-    (billingPlan.attributed_revenue / billingPlan.capped_amount) * 100;
-  const remainingAmount =
-    billingPlan.capped_amount - billingPlan.attributed_revenue;
+    (metrics.final_commission / metrics.capped_amount) * 100;
   const isNearLimit = usagePercentage > 80;
   const isOverLimit = usagePercentage > 100;
+  const remainingAmount = metrics.capped_amount - metrics.final_commission;
 
   return (
     <BillingLayout>
@@ -83,245 +99,309 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
             </BlockStack>
           </div>
         </Card>
-
-        {/* Usage Overview Card */}
+        {/* ✅ IMPROVED: Usage Overview Card */}
         <Card>
           <div style={{ padding: "24px" }}>
             <BlockStack gap="400">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: isOverLimit
-                    ? "#FEF2F2"
-                    : isNearLimit
-                      ? "#FEF3C7"
-                      : "#DBEAFE",
-                  borderRadius: "12px",
-                  border: `1px solid ${isOverLimit ? "#FECACA" : isNearLimit ? "#FCD34D" : "#BAE6FD"}`,
-                }}
-              >
+              {/* Header with days remaining */}
+              <InlineStack align="space-between" blockAlign="center">
                 <div
                   style={{
-                    color: isOverLimit
-                      ? "#991B1B"
+                    padding: "16px",
+                    backgroundColor: isOverLimit
+                      ? "#FEF2F2"
                       : isNearLimit
-                        ? "#92400E"
-                        : "#0C4A6E",
+                        ? "#FEF3C7"
+                        : "#DBEAFE",
+                    borderRadius: "12px",
+                    border: `1px solid ${isOverLimit ? "#FECACA" : isNearLimit ? "#FCD34D" : "#BAE6FD"}`,
+                    flex: 1,
                   }}
                 >
                   <Text as="h3" variant="headingMd" fontWeight="bold">
-                    📊 Current Billing Cycle Usage
+                    📊 Current Billing Cycle
                   </Text>
+                </div>
+                {metrics.days_remaining > 0 && (
+                  <Badge tone="info" size="large">
+                    {metrics.days_remaining} days left
+                  </Badge>
+                )}
+              </InlineStack>
+
+              {/* ✅ NEW: Revenue & Commission Side by Side */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+                  gap: "16px",
+                }}
+              >
+                {/* Attributed Revenue Card */}
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#F0F9FF",
+                    borderRadius: "12px",
+                    border: "1px solid #BAE6FD",
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" tone="subdued">
+                      Attributed Revenue
+                    </Text>
+                    <Text variant="heading2xl" fontWeight="bold">
+                      {formatCurrency(
+                        metrics.net_revenue,
+                        billingPlan.currency,
+                      )}
+                    </Text>
+                    <BlockStack gap="100">
+                      <InlineStack align="space-between">
+                        <Text variant="bodySm" tone="subdued">
+                          Sales:
+                        </Text>
+                        <Text variant="bodySm">
+                          {formatCurrency(
+                            metrics.purchases.total,
+                            billingPlan.currency,
+                          )}{" "}
+                          ({metrics.purchases.count})
+                        </Text>
+                      </InlineStack>
+                      {metrics.refunds.count > 0 && (
+                        <InlineStack align="space-between">
+                          <Text variant="bodySm" tone="subdued">
+                            Refunds:
+                          </Text>
+                          <Text variant="bodySm" tone="critical">
+                            -
+                            {formatCurrency(
+                              metrics.refunds.total,
+                              billingPlan.currency,
+                            )}{" "}
+                            ({metrics.refunds.count})
+                          </Text>
+                        </InlineStack>
+                      )}
+                    </BlockStack>
+                  </BlockStack>
+                </div>
+
+                {/* ✅ NEW: Your Bill (Commission) */}
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#ECFDF5",
+                    borderRadius: "12px",
+                    border: "2px solid #10B981",
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" tone="subdued">
+                      Your Current Bill
+                    </Text>
+                    <Text
+                      variant="heading2xl"
+                      fontWeight="bold"
+                      tone={isOverLimit ? "critical" : undefined}
+                    >
+                      {formatCurrency(
+                        metrics.final_commission,
+                        billingPlan.currency,
+                      )}
+                    </Text>
+                    <Text variant="bodySm" tone="subdued">
+                      3% of{" "}
+                      {formatCurrency(
+                        metrics.net_revenue,
+                        billingPlan.currency,
+                      )}
+                    </Text>
+                    {isOverLimit && (
+                      <div
+                        style={{
+                          padding: "8px",
+                          backgroundColor: "#FEF2F2",
+                          borderRadius: "6px",
+                        }}
+                      >
+                        <Text variant="bodySm" tone="critical">
+                          ⚠️ Capped at{" "}
+                          {formatCurrency(
+                            metrics.capped_amount,
+                            billingPlan.currency,
+                          )}
+                        </Text>
+                      </div>
+                    )}
+                  </BlockStack>
                 </div>
               </div>
 
+              {/* ✅ EXISTING: Progress Bar - Keep but update values */}
+              <BlockStack gap="200">
+                <ProgressBar
+                  progress={Math.min(usagePercentage, 100)}
+                  tone={
+                    isOverLimit
+                      ? "critical"
+                      : isNearLimit
+                        ? "warning"
+                        : "success"
+                  }
+                  size="large"
+                />
+                <InlineStack align="space-between">
+                  <Text variant="bodySm" fontWeight="semibold">
+                    {usagePercentage.toFixed(1)}% of cap used
+                  </Text>
+                  <Text variant="bodySm" tone="subdued">
+                    {formatCurrency(
+                      metrics.final_commission,
+                      billingPlan.currency,
+                    )}{" "}
+                    /{" "}
+                    {formatCurrency(
+                      metrics.capped_amount,
+                      billingPlan.currency,
+                    )}
+                  </Text>
+                </InlineStack>
+              </BlockStack>
+
+              {/* ✅ EXISTING: Warnings - Keep as is */}
+              {isNearLimit && !isOverLimit && (
+                <div
+                  style={{
+                    padding: "12px",
+                    backgroundColor: "#FEF3C7",
+                    borderRadius: "8px",
+                    border: "1px solid #FCD34D",
+                  }}
+                >
+                  <Text variant="bodySm">
+                    ⚠️ You're approaching your spending cap.
+                  </Text>
+                </div>
+              )}
+            </BlockStack>
+          </div>
+        </Card>
+
+        {/* ✅ Post-Trial Billing Info */}
+        {metrics.purchases.count === 0 && metrics.refunds.count === 0 && (
+          <Card>
+            <div
+              style={{
+                padding: "20px",
+                backgroundColor: "#F0F9FF",
+                borderRadius: "12px",
+                border: "1px solid #BAE6FD",
+              }}
+            >
               <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Attributed Revenue This Cycle
-                    </Text>
-                    <Text as="h2" variant="headingLg" fontWeight="bold">
-                      {formatCurrency(
-                        billingPlan.attributed_revenue,
-                        billingPlan.currency,
-                      )}
-                    </Text>
-                  </BlockStack>
-                  <BlockStack gap="100">
-                    <Text
-                      as="p"
-                      variant="bodySm"
-                      tone="subdued"
-                      alignment="end"
-                    >
-                      Monthly Cap
-                    </Text>
-                    <Text
-                      as="p"
-                      variant="headingMd"
-                      fontWeight="semibold"
-                      alignment="end"
-                    >
-                      {formatCurrency(
-                        billingPlan.capped_amount,
-                        billingPlan.currency,
-                      )}
-                    </Text>
-                  </BlockStack>
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="span" variant="heading2xl">
+                    🎯
+                  </Text>
+                  <Text variant="headingMd" fontWeight="bold">
+                    Fresh Start Billing
+                  </Text>
                 </InlineStack>
 
-                <BlockStack gap="200">
-                  <ProgressBar
-                    progress={Math.min(usagePercentage, 100)}
-                    tone={
-                      isOverLimit
-                        ? "critical"
-                        : isNearLimit
-                          ? "critical"
-                          : "success"
-                    }
-                    size="large"
-                  />
-
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" fontWeight="semibold">
-                      {usagePercentage.toFixed(1)}% of cap used
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {isOverLimit
-                        ? `Over limit by ${formatCurrency(billingPlan.attributed_revenue - billingPlan.capped_amount, billingPlan.currency)}`
-                        : `${formatCurrency(remainingAmount, billingPlan.currency)} remaining`}
-                    </Text>
-                  </InlineStack>
-                </BlockStack>
-
-                {isNearLimit && !isOverLimit && (
-                  <div
-                    style={{
-                      padding: "12px",
-                      backgroundColor: "#FEF3C7",
-                      borderRadius: "8px",
-                      border: "1px solid #FCD34D",
-                    }}
-                  >
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      ⚠️ You're approaching your spending cap. Consider
-                      increasing it if your bundles are performing well.
-                    </Text>
-                  </div>
-                )}
-
-                {isOverLimit && (
-                  <div
-                    style={{
-                      padding: "12px",
-                      backgroundColor: "#FEF2F2",
-                      borderRadius: "8px",
-                      border: "1px solid #FECACA",
-                    }}
-                  >
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      🔴 You've reached your spending cap. Services continue
-                      normally, but you may want to increase your cap for next
-                      cycle.
-                    </Text>
-                  </div>
-                )}
-              </BlockStack>
-            </BlockStack>
-          </div>
-        </Card>
-
-        {/* Billing Details Card */}
-        <Card>
-          <div style={{ padding: "24px" }}>
-            <BlockStack gap="400">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#F8FAFC",
-                  borderRadius: "12px",
-                  border: "1px solid #E2E8F0",
-                }}
-              >
-                <Text as="h3" variant="headingMd" fontWeight="bold">
-                  💳 Billing Details
+                <Text variant="bodyMd" tone="subdued">
+                  Your billing cycle started fresh after trial completion.
+                  You'll only be charged for new sales made through Better
+                  Bundle.
                 </Text>
-              </div>
+              </BlockStack>
+            </div>
+          </Card>
+        )}
 
-              <div
-                style={{
-                  padding: "20px",
-                  backgroundColor: "#FFFFFF",
-                  borderRadius: "8px",
-                  border: "1px solid #E2E8F0",
-                }}
-              >
-                <BlockStack gap="200">
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Billing Rate:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      3% of attributed revenue
-                    </Text>
-                  </InlineStack>
+        {/* ✅ Cross-Period Refunds Alert */}
+        {metrics.refunds.cross_period_count > 0 && (
+          <Card>
+            <div
+              style={{
+                padding: "20px",
+                backgroundColor: "#FEF3C7",
+                borderRadius: "12px",
+              }}
+            >
+              <BlockStack gap="300">
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="span" variant="heading2xl">
+                    💡
+                  </Text>
+                  <Text variant="headingMd" fontWeight="bold">
+                    Credits from Prior Periods
+                  </Text>
+                </InlineStack>
 
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Monthly Spending Cap:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      {formatCurrency(
-                        billingPlan.capped_amount,
-                        billingPlan.currency,
-                      )}
-                    </Text>
-                  </InlineStack>
+                <Text variant="bodyMd" tone="subdued">
+                  {metrics.refunds.cross_period_count} refund(s) from previous
+                  billing periods have been automatically credited to your
+                  current bill.
+                </Text>
 
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Billing Cycle:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      Every 30 Days
-                    </Text>
-                  </InlineStack>
-
-                  <div
-                    style={{
-                      height: "1px",
-                      backgroundColor: "#E2E8F0",
-                      margin: "8px 0",
-                    }}
-                  />
-
-                  <InlineStack align="space-between" blockAlign="center">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Icon source={CalendarIcon} tone="base" />
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Next Billing Date:
+                <div
+                  style={{
+                    padding: "12px",
+                    backgroundColor: "#FFFFFF",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <BlockStack gap="100">
+                    <InlineStack align="space-between">
+                      <Text variant="bodySm">Same-period refunds:</Text>
+                      <Text variant="bodySm" fontWeight="medium">
+                        -
+                        {formatCurrency(
+                          metrics.refunds.same_period_total,
+                          billingPlan.currency,
+                        )}
+                        ({metrics.refunds.same_period_count})
                       </Text>
                     </InlineStack>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      {new Date(
-                        Date.now() + 30 * 24 * 60 * 60 * 1000,
-                      ).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </Text>
-                  </InlineStack>
-                </BlockStack>
-              </div>
 
-              <div
-                style={{
-                  padding: "12px",
-                  backgroundColor: "#DBEAFE",
-                  borderRadius: "8px",
-                  border: "1px solid #BAE6FD",
-                }}
-              >
-                <Text as="p" variant="bodySm" tone="subdued">
-                  💡 Your actual charge will be 3% of{" "}
-                  {formatCurrency(
-                    billingPlan.attributed_revenue,
-                    billingPlan.currency,
-                  )}{" "}
-                  ={" "}
-                  {formatCurrency(
-                    billingPlan.attributed_revenue * 0.03,
-                    billingPlan.currency,
-                  )}{" "}
-                  for this cycle (unless it exceeds your cap).
-                </Text>
-              </div>
-            </BlockStack>
-          </div>
-        </Card>
+                    <InlineStack align="space-between">
+                      <Text variant="bodySm">Credits (prior periods):</Text>
+                      <Text
+                        variant="bodySm"
+                        fontWeight="semibold"
+                        tone="success"
+                      >
+                        -
+                        {formatCurrency(
+                          metrics.refunds.cross_period_total,
+                          billingPlan.currency,
+                        )}
+                        ({metrics.refunds.cross_period_count})
+                      </Text>
+                    </InlineStack>
+
+                    <Divider />
+
+                    <InlineStack align="space-between">
+                      <Text variant="bodySm" fontWeight="bold">
+                        Total refunds this cycle:
+                      </Text>
+                      <Text variant="bodySm" fontWeight="bold">
+                        -
+                        {formatCurrency(
+                          metrics.refunds.total,
+                          billingPlan.currency,
+                        )}
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+              </BlockStack>
+            </div>
+          </Card>
+        )}
 
         {/* Help Cards */}
         <div
