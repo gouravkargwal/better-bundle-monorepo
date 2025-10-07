@@ -7,31 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model billing_events {
-  plan_id          String        @db.VarChar
-  type             String        @db.VarChar
-  data             Json          @db.Json
-  billing_metadata Json          @db.Json
-  occurred_at      DateTime      @db.Timestamptz(6)
-  processed_at     DateTime      @db.Timestamptz(6)
-  id               String        @id @default(cuid()) @db.VarChar
-  created_at       DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
-  shop_id          String        @db.VarChar
-  billing_plans    billing_plans @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops            shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([occurred_at], map: "ix_billing_event_occurred_at")
-  @@index([processed_at], map: "ix_billing_event_processed_at")
-  @@index([shop_id], map: "ix_billing_event_shop_id")
-  @@index([type], map: "ix_billing_event_type")
-  @@index([occurred_at], map: "ix_billing_events_occurred_at")
-  @@index([plan_id], map: "ix_billing_events_plan_id")
-  @@index([processed_at], map: "ix_billing_events_processed_at")
-  @@index([shop_id], map: "ix_billing_events_shop_id")
-  @@index([type], map: "ix_billing_events_type")
-}
-
 model billing_invoices {
   plan_id           String        @db.VarChar
   invoice_number    String        @unique @db.VarChar(100)
@@ -51,8 +26,8 @@ model billing_invoices {
   payment_reference String?       @db.VarChar(255)
   billing_metadata  Json          @db.Json
   id                String        @id @default(cuid()) @db.VarChar
-  created_at        DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
+  created_at        DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at        DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
   shop_id           String        @db.VarChar
   billing_plans     billing_plans @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shops             shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -90,10 +65,9 @@ model billing_plans {
   effective_to                   DateTime?          @db.Timestamptz(6)
   requires_subscription_approval Boolean?
   id                             String             @id @default(cuid()) @db.VarChar
-  created_at                     DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at                     DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  created_at                     DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                     DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
   shop_id                        String             @unique(map: "ix_billing_plan_shop_id") @db.VarChar
-  billing_events                 billing_events[]
   billing_invoices               billing_invoices[]
   shops                          shops              @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -123,8 +97,8 @@ model collection_features {
   is_curated_collection        Boolean
   last_computed_at             DateTime @db.Timestamptz(6)
   id                           String   @id @db.VarChar
-  created_at                   DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                   DateTime @default(now()) @db.Timestamptz(6)
+  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                      String   @db.VarChar
   shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -150,8 +124,8 @@ model customer_behavior_features {
   days_since_last_purchase    Int?
   last_computed_at            DateTime @db.Timestamptz(6)
   id                          String   @id @db.VarChar
-  created_at                  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                  DateTime @default(now()) @db.Timestamptz(6)
+  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                     String   @db.VarChar
   customer_id                 String?  @db.VarChar
   shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -186,8 +160,8 @@ model interaction_features {
   total_interaction_value      Float
   last_computed_at             DateTime @db.Timestamptz(6)
   id                           String   @id @db.VarChar
-  created_at                   DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                   DateTime @default(now()) @db.Timestamptz(6)
+  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                      String   @db.VarChar
   customer_id                  String?  @db.VarChar
   product_id                   String?  @db.VarChar
@@ -220,30 +194,9 @@ model line_item_data {
   variant_data          Json?      @db.Json
   properties            Json?      @db.Json
   id                    String     @id @db.VarChar
-  created_at            DateTime   @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime   @default(now()) @db.Timestamptz(6)
+  created_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   OrderData             order_data @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
-
-model pipeline_watermarks {
-  data_type                 String    @db.VarChar(50)
-  last_collected_at         DateTime? @db.Timestamptz(6)
-  last_normalized_at        DateTime? @db.Timestamptz(6)
-  last_features_computed_at DateTime? @db.Timestamptz(6)
-  last_gorse_synced_at      DateTime? @db.Timestamptz(6)
-  status                    String?   @db.VarChar(20)
-  last_error                String?   @db.VarChar
-  last_session_id           String?   @db.VarChar(100)
-  last_window_start         DateTime? @db.Timestamptz(6)
-  last_window_end           DateTime? @db.Timestamptz(6)
-  updated_at                DateTime  @db.Timestamptz(6)
-  id                        String    @id @db.VarChar
-  shop_id                   String    @db.VarChar
-  created_at                DateTime  @default(now()) @db.Timestamptz(6)
-  shops                     shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, data_type], map: "ix_pipeline_watermark_shop_id_data_type")
-  @@index([shop_id], map: "ix_pipeline_watermarks_shop_id")
 }
 
 model product_features {
@@ -261,8 +214,8 @@ model product_features {
   product_category         String?  @db.VarChar(100)
   last_computed_at         DateTime @db.Timestamptz(6)
   id                       String   @id @db.VarChar
-  created_at               DateTime @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime @default(now()) @db.Timestamptz(6)
+  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                  String   @db.VarChar
   product_id               String?  @db.VarChar
   shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -296,8 +249,8 @@ model product_pair_features {
   cross_sell_potential          Float
   last_computed_at              DateTime @db.Timestamptz(6)
   id                            String   @id @db.VarChar
-  created_at                    DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                    DateTime @default(now()) @db.Timestamptz(6)
+  created_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                       String   @db.VarChar
   product_id                    String?  @db.VarChar
   shops                         shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -334,8 +287,8 @@ model purchase_attributions {
   attribution_algorithm     String        @db.VarChar(50)
   metadata                  Json          @db.Json
   id                        String        @id @db.VarChar
-  created_at                DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at                DateTime      @default(now()) @db.Timestamptz(6)
+  created_at                DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                   String        @db.VarChar
   customer_id               String?       @db.VarChar
   user_sessions             user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -366,8 +319,8 @@ model raw_collections {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_collection_shop_id_format")
@@ -391,8 +344,8 @@ model raw_customers {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_customer_shop_id_format")
@@ -416,8 +369,8 @@ model raw_orders {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_order_shop_id_format")
@@ -441,8 +394,8 @@ model raw_products {
   received_at        DateTime? @db.Timestamptz(6)
   id                 String    @id @db.VarChar
   shop_id            String    @db.VarChar
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([shop_id, format], map: "ix_raw_product_shop_id_format")
@@ -453,68 +406,6 @@ model raw_products {
   @@index([format], map: "ix_raw_products_format")
   @@index([shop_id], map: "ix_raw_products_shop_id")
   @@index([source], map: "ix_raw_products_source")
-}
-
-model refund_attributions {
-  session_id                String?        @db.VarChar(255)
-  order_id                  String         @db.VarChar(255)
-  refund_id                 String         @db.VarChar(255)
-  refunded_at               DateTime       @db.Timestamptz(6)
-  total_refund_amount       Decimal        @db.Decimal(10, 2)
-  currency_code             String         @db.VarChar(10)
-  contributing_extensions   Json           @db.Json
-  attribution_weights       Json           @db.Json
-  total_refunded_revenue    Decimal        @db.Decimal(10, 2)
-  attributed_refund         Json           @db.Json
-  total_interactions        Int
-  interactions_by_extension Json           @db.Json
-  attribution_algorithm     String         @db.VarChar(50)
-  metadata                  Json           @db.Json
-  id                        String         @id @db.VarChar
-  created_at                DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at                DateTime       @default(now()) @db.Timestamptz(6)
-  shop_id                   String         @db.VarChar
-  customer_id               String?        @db.VarChar
-  user_sessions             user_sessions? @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops                     shops          @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, refund_id], map: "ix_refund_attribution_shop_id_refund_id")
-  @@index([session_id], map: "ix_refund_attribution_session_id")
-  @@index([order_id], map: "ix_refund_attribution_order_id")
-  @@index([refund_id], map: "ix_refund_attribution_refund_id")
-  @@index([customer_id], map: "ix_refund_attribution_customer_id")
-  @@index([shop_id], map: "ix_refund_attribution_shop_id")
-  @@index([refunded_at], map: "ix_refund_attribution_refunded_at")
-  @@index([shop_id, refunded_at], map: "ix_refund_attribution_shop_id_refunded_at")
-  @@index([shop_id, customer_id, refunded_at], map: "ix_refund_attribution_shop_id_customer_id_refunded_at")
-  @@index([customer_id], map: "ix_refund_attributions_customer_id")
-  @@index([order_id], map: "ix_refund_attributions_order_id")
-  @@index([refund_id], map: "ix_refund_attributions_refund_id")
-  @@index([refunded_at], map: "ix_refund_attributions_refunded_at")
-  @@index([shop_id], map: "ix_refund_attributions_shop_id")
-}
-
-model refund_data {
-  order_id            String   @db.VarChar
-  refund_id           String   @db.VarChar
-  refunded_at         DateTime @db.Timestamptz(6)
-  total_refund_amount Float
-  currency_code       String   @db.VarChar
-  note                String?  @db.VarChar
-  restock             Boolean?
-  refund_line_items   Json?    @db.Json
-  id                  String   @id @default(cuid()) @db.VarChar
-  created_at          DateTime @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
-  shop_id             String   @db.VarChar
-  shops               shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([refunded_at], map: "idx_refund_data_refunded_at")
-  @@index([shop_id, order_id], map: "idx_refund_data_shop_order")
-  @@index([shop_id, refund_id], map: "idx_refund_data_shop_refund")
-  @@index([order_id], map: "ix_refund_data_order_id")
-  @@index([refund_id], map: "ix_refund_data_refund_id")
-  @@index([shop_id], map: "ix_refund_data_shop_id")
 }
 
 model search_product_features {
@@ -530,8 +421,8 @@ model search_product_features {
   search_intent_alignment            String   @db.VarChar(100)
   last_computed_at                   DateTime @db.Timestamptz(6)
   id                                 String   @id @db.VarChar
-  created_at                         DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                         DateTime @default(now()) @db.Timestamptz(6)
+  created_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                            String   @db.VarChar
   product_id                         String?  @db.VarChar
   shops                              shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -562,8 +453,8 @@ model session_features {
   returning_visitor        Boolean
   last_computed_at         DateTime @db.Timestamptz(6)
   id                       String   @id @db.VarChar
-  created_at               DateTime @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime @default(now()) @db.Timestamptz(6)
+  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                  String   @db.VarChar
   customer_id              String?  @db.VarChar
   shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -580,7 +471,7 @@ model sessions {
   state         String    @db.VarChar
   isOnline      Boolean   @map("is_online")
   scope         String?   @db.VarChar(500)
-  expires       DateTime? @db.Timestamp(6)
+  expires       DateTime? @db.Timestamptz(6)
   accessToken   String    @map("access_token") @db.VarChar(1000)
   userId        BigInt?   @map("user_id")
   firstName     String?   @map("first_name") @db.VarChar(100)
@@ -590,8 +481,8 @@ model sessions {
   locale        String?   @db.VarChar(10)
   collaborator  Boolean?
   emailVerified Boolean?  @map("email_verified")
-  created_at    DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  created_at    DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at    DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
 
   @@index([expires], map: "ix_sessions_expires")
   @@index([shop], map: "ix_sessions_shop")
@@ -612,9 +503,8 @@ model shops {
   email                      String?                      @db.VarChar(255)
   last_analysis_at           DateTime?                    @db.Timestamptz(6)
   id                         String                       @id @default(cuid()) @db.VarChar
-  created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
-  updated_at                 DateTime                     @default(now()) @updatedAt @db.Timestamptz(6)
-  billing_events             billing_events[]
+  created_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
   billing_invoices           billing_invoices[]
   billing_plans              billing_plans?
   collection_data            collection_data[]
@@ -623,7 +513,6 @@ model shops {
   customer_data              customer_data[]
   interaction_features       interaction_features[]
   order_data                 order_data[]
-  pipeline_watermarks        pipeline_watermarks[]
   product_data               product_data[]
   product_features           product_features[]
   product_pair_features      product_pair_features[]
@@ -632,8 +521,6 @@ model shops {
   raw_customers              raw_customers[]
   raw_orders                 raw_orders[]
   raw_products               raw_products[]
-  refund_attributions        refund_attributions[]
-  refund_data                refund_data[]
   search_product_features    search_product_features[]
   session_features           session_features[]
   user_features              user_features[]
@@ -663,8 +550,8 @@ model user_features {
   churn_risk_score            Float
   last_computed_at            DateTime @db.Timestamptz(6)
   id                          String   @id @db.VarChar
-  created_at                  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                  DateTime @default(now()) @db.Timestamptz(6)
+  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                     String   @db.VarChar
   customer_id                 String?  @db.VarChar
   shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -680,8 +567,8 @@ model user_identity_links {
   customer_id     String   @db.VarChar
   linked_at       DateTime @db.Timestamptz(6)
   id              String   @id @db.VarChar
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  created_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id         String   @db.VarChar
   shops           shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -703,8 +590,8 @@ model user_interactions {
   interaction_type     String        @db.VarChar(50)
   interaction_metadata Json          @db.Json
   id                   String        @id @db.VarChar
-  created_at           DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime      @default(now()) @db.Timestamptz(6)
+  created_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id              String        @db.VarChar
   customer_id          String?       @db.VarChar
   user_sessions        user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -737,12 +624,11 @@ model user_sessions {
   extensions_used       Json                    @db.Json
   total_interactions    Int
   id                    String                  @id @db.VarChar
-  created_at            DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  created_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id               String                  @db.VarChar
   customer_id           String?                 @db.VarChar
   purchase_attributions purchase_attributions[]
-  refund_attributions   refund_attributions[]
   user_interactions     user_interactions[]
   shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -799,7 +685,7 @@ model customer_data {
   last_name       String?   @db.VarChar(100)
   total_spent     Float
   order_count     Int
-  last_order_date DateTime? @db.Timestamp(6)
+  last_order_date DateTime? @db.Timestamptz(6)
   last_order_id   String?   @db.VarChar(100)
   verified_email  Boolean
   tax_exempt      Boolean
@@ -908,8 +794,8 @@ model product_data {
   extras           Json?    @db.Json
   is_active        Boolean
   id               String   @id @db.VarChar
-  created_at       DateTime @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+  created_at       DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at       DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id          String   @db.VarChar
   shops            shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -931,41 +817,13 @@ model trial_configs {
   market_description  String?  @db.VarChar(100)
   is_active           Boolean
   id                  String   @id @db.VarChar
-  created_at          DateTime @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+  created_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
 
   @@index([is_active], map: "ix_trial_config_active")
   @@index([currency_code], map: "ix_trial_config_currency")
   @@index([market_tier], map: "ix_trial_config_tier")
   @@index([is_active], map: "ix_trial_configs_is_active")
-}
-
-model feedback {
-  feedback_type String   @db.VarChar(256)
-  user_id       String   @db.VarChar(256)
-  item_id       String   @db.VarChar(256)
-  time_stamp    DateTime @db.Timestamptz(6)
-  comment       String   @default("")
-
-  @@id([feedback_type, user_id, item_id])
-  @@index([item_id], map: "item_id_index")
-  @@index([user_id], map: "user_id_index")
-}
-
-model items {
-  item_id    String   @id @db.VarChar(256)
-  is_hidden  Boolean  @default(false)
-  categories Json     @default("[]") @db.Json
-  time_stamp DateTime @db.Timestamptz(6)
-  labels     Json     @default("[]") @db.Json
-  comment    String   @default("")
-}
-
-model users {
-  user_id   String @id @db.VarChar(256)
-  labels    Json   @default("[]") @db.Json
-  subscribe Json   @default("[]") @db.Json
-  comment   String @default("")
 }
 
 enum AppBlockTarget {

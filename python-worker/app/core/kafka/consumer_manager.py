@@ -16,9 +16,6 @@ from app.consumers.kafka.data_collection_consumer import DataCollectionKafkaCons
 from app.consumers.kafka.purchase_attribution_consumer import (
     PurchaseAttributionKafkaConsumer,
 )
-from app.consumers.kafka.refund_attribution_consumer import (
-    RefundAttributionKafkaConsumer,
-)
 from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
 from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
 
@@ -53,7 +50,6 @@ class KafkaConsumerManager:
                 "normalization": NormalizationKafkaConsumer(),
                 "feature_computation": FeatureComputationKafkaConsumer(),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
-                "refund_attribution": RefundAttributionKafkaConsumer(),
                 "customer_linking": CustomerLinkingKafkaConsumer(),
                 "billing": BillingKafkaConsumer(),
             }

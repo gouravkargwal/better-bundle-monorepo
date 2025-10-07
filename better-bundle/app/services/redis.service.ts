@@ -178,8 +178,6 @@ export const CacheKeys = {
   ) => `products:${shopId}:${startDate}:${endDate}:${limit}`,
   activity: (shopId: string, startDate: string, endDate: string) =>
     `activity:${shopId}:${startDate}:${endDate}`,
-  refundAttribution: (shopId: string, startDate: string, endDate: string) =>
-    `refundAttribution:${shopId}:${startDate}:${endDate}`,
 };
 
 // Cache TTL constants (in seconds)

@@ -25,7 +25,6 @@ from app.core.database.models import (
     Shop,
     BillingPlan,
     PurchaseAttribution,
-    RefundAttribution,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,18 +159,16 @@ class BillingService:
             # Compute trial net revenue from attribution tables (idempotent)
             trial_threshold = Decimal(str(billing_plan.trial_threshold or 0))
 
-            # Net attributed revenue = purchases - refunds
+            # ✅ NO REFUND COMMISSION POLICY
+            # Commission is calculated on gross attributed revenue only
+            # Customer refunds do not affect commission as service was delivered
+
             sum_purchases_q = select(
                 func.coalesce(func.sum(PurchaseAttribution.total_revenue), 0)
             ).where(PurchaseAttribution.shop_id == shop_id)
-            sum_refunds_q = select(
-                func.coalesce(func.sum(RefundAttribution.total_refunded_revenue), 0)
-            ).where(RefundAttribution.shop_id == shop_id)
 
             purchases_sum = (await self.session.execute(sum_purchases_q)).scalar_one()
-            refunds_sum = (await self.session.execute(sum_refunds_q)).scalar_one()
-
-            new_revenue = Decimal(str(purchases_sum)) - Decimal(str(refunds_sum))
+            new_revenue = Decimal(str(purchases_sum))  # Gross attributed revenue only
             old_revenue = billing_plan.trial_revenue or Decimal("0")
 
             # Do not mutate counters; keep plan fields as metadata if desired

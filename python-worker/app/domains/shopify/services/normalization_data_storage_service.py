@@ -14,7 +14,6 @@ from app.core.database.models import (
     ProductData,
     CustomerData,
     CollectionData,
-    PipelineWatermark,
 )
 from sqlalchemy import select, update, delete, insert
 from app.shared.helpers import now_utc
@@ -335,66 +334,6 @@ class NormalizationDataStorageService:
             await session.commit()
 
         return processed_count
-
-    async def upsert_watermark(
-        self,
-        shop_id: str,
-        data_type: str,
-        iso_time: str,
-        format_type: Optional[str] = None,
-    ):
-        """Persist last normalized time for incremental normalization."""
-        try:
-            last_dt = parse_iso_timestamp(iso_time)
-
-            if format_type == "graphql":
-                async with get_transaction_context() as session:
-                    # Try to find existing watermark
-                    result = await session.execute(
-                        select(PipelineWatermark).where(
-                            (PipelineWatermark.shop_id == shop_id)
-                            & (PipelineWatermark.data_type == data_type)
-                        )
-                    )
-                    existing = result.scalar_one_or_none()
-
-                    if existing:
-                        existing.last_normalized_at = last_dt
-                        existing.last_window_end = last_dt
-                    else:
-                        wm = PipelineWatermark(
-                            shop_id=shop_id,
-                            data_type=data_type,
-                            last_normalized_at=last_dt,
-                            last_window_end=last_dt,
-                        )
-                        session.add(wm)
-                    await session.commit()
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to upsert normalization watermark: {e}",
-                shop_id=shop_id,
-                data_type=data_type,
-            )
-
-    async def get_watermark(
-        self, shop_id: str, data_type: str, format_type: str = "graphql"
-    ) -> Optional[PipelineWatermark]:
-        """Get the watermark for a shop and data type."""
-        try:
-            if format_type == "graphql":
-                async with get_session_context() as session:
-                    result = await session.execute(
-                        select(PipelineWatermark).where(
-                            (PipelineWatermark.shop_id == shop_id)
-                            & (PipelineWatermark.data_type == data_type)
-                        )
-                    )
-                    return result.scalar_one_or_none()
-        except Exception as e:
-            self.logger.error(f"Failed to get watermark: {e}")
-            return None
 
     def _get_model_class(self, data_type: str):
         """Get the appropriate model class for data type."""

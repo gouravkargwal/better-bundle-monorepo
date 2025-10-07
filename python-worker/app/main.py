@@ -277,10 +277,7 @@ async def publish_kafka_event(
                 message_id = await publisher.publish_purchase_attribution_event(
                     event_with_metadata
                 )
-            elif topic == "refund-attribution-jobs":
-                message_id = await publisher.publish_refund_attribution_event(
-                    event_with_metadata
-                )
+            # ✅ REFUND ATTRIBUTION REMOVED - No refund commission policy
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown topic: {topic}")
 
@@ -343,8 +340,6 @@ async def get_consumers_status():
             "feature_computation_consumer",
             "customer_linking_consumer",
             "shopify_events_consumer",
-            "refund_normalization_consumer",
-            "refund_attribution_consumer",
         ]
 
         for consumer_type in consumer_types:

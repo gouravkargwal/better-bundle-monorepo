@@ -18,7 +18,6 @@ from app.core.database.models import (
     BillingPlan,
     BillingInvoice,
     PurchaseAttribution,
-    RefundAttribution,
 )
 from sqlalchemy import select, and_, func
 from sqlalchemy.dialects.postgresql import NUMERIC
@@ -285,65 +284,12 @@ async def settle_shop_period(
     purchases_result = await session.execute(purchases_query)
     purchases = purchases_result.one()
 
-    # ✅ Calculate refunds WITH purchase period tracking
-    refunds_query = select(
-        RefundAttribution.id,
-        RefundAttribution.order_id,
-        RefundAttribution.refund_id,
-        RefundAttribution.total_refunded_revenue,
-        RefundAttribution.refunded_at,
-        # Subquery to get original purchase date
-        select(PurchaseAttribution.purchase_at)
-        .where(PurchaseAttribution.order_id == RefundAttribution.order_id)
-        .scalar_subquery()
-        .label("original_purchase_date"),
-    ).where(
-        and_(
-            RefundAttribution.shop_id == shop.id,
-            RefundAttribution.refunded_at >= period_start_dt,
-            RefundAttribution.refunded_at <= period_end_dt,
-        )
-    )
+    # ✅ NO REFUND COMMISSION POLICY
+    # Commission is calculated on gross attributed revenue only
+    # Customer refunds do not affect commission as service was delivered
 
-    refunds_result = await session.execute(refunds_query)
-    all_refunds = refunds_result.all()
-
-    # ✅ Categorize refunds
-    same_period_refunds = []
-    cross_period_refunds = []
-    total_refunds = Decimal("0")
-
-    for refund in all_refunds:
-        refund_amount = Decimal(str(refund.total_refunded_revenue))
-        total_refunds += refund_amount
-
-        refund_data = {
-            "order_id": refund.order_id,
-            "refund_id": refund.refund_id,
-            "amount": float(refund_amount),
-            "refund_date": refund.refunded_at.isoformat(),
-        }
-
-        if refund.original_purchase_date:
-            purchase_date = refund.original_purchase_date.date()
-            refund_data["purchase_date"] = refund.original_purchase_date.isoformat()
-
-            if period_start <= purchase_date <= period_end:
-                same_period_refunds.append(refund_data)
-            else:
-                refund_data["purchase_period"] = purchase_date.strftime("%B %Y")
-                cross_period_refunds.append(refund_data)
-        else:
-            # No purchase found, treat as same period
-            same_period_refunds.append(refund_data)
-
-    same_period_total = sum(Decimal(str(r["amount"])) for r in same_period_refunds)
-    cross_period_total = sum(Decimal(str(r["amount"])) for r in cross_period_refunds)
-
-    # Calculate net - only include refunds from same period
     purchases_total = Decimal(str(purchases.total or 0))
-    net_revenue = purchases_total - same_period_total
-    commission = net_revenue * Decimal("0.03")
+    commission = purchases_total * Decimal("0.03")  # 3% of gross attributed revenue
 
     # Apply cap
     config = billing_plan.configuration or {}
@@ -357,27 +303,17 @@ async def settle_shop_period(
             "success": True,
             "zero_charge": True,
             "shop_id": shop.id,
-            "net_revenue": float(net_revenue),
+            "attributed_revenue": float(purchases_total),
         }
 
-    # ✅ Create enhanced description
+    # ✅ Create simplified description (no refund adjustments)
     period_label = period_start.strftime("%B %Y")
     description = f"Better Bundle - {period_label}\n"
-    description += f"Purchases: ${purchases_total:.2f} ({purchases.count} orders)\n"
-
-    if same_period_refunds:
-        description += f"Refunds (this period): -${same_period_total:.2f} ({len(same_period_refunds)} refunds)\n"
-
-    if cross_period_refunds:
-        description += f"Credits (prior periods): -${cross_period_total:.2f} ({len(cross_period_refunds)} refunds)\n"
-        periods_affected = set(
-            r["purchase_period"] for r in cross_period_refunds if "purchase_period" in r
-        )
-        if periods_affected:
-            description += f"  └─ From: {', '.join(sorted(periods_affected))}\n"
-
-    description += f"Net Revenue: ${net_revenue:.2f}\n"
-    description += f"Commission (3%): ${final_commission:.2f}"
+    description += (
+        f"Attributed Revenue: ${purchases_total:.2f} ({purchases.count} orders)\n"
+    )
+    description += f"Commission (3%): ${final_commission:.2f}\n"
+    description += f"Note: Commission based on attributed revenue at time of purchase. Customer refunds do not affect commission as our recommendation service was successfully delivered."
 
     if dry_run:
         logger.info(f"🧪 DRY RUN: Would charge ${final_commission} to {shop.id}")
@@ -385,11 +321,9 @@ async def settle_shop_period(
             "success": True,
             "dry_run": True,
             "shop_id": shop.id,
-            "net_revenue": float(net_revenue),
+            "attributed_revenue": float(purchases_total),
             "commission": float(final_commission),
             "description": description,
-            "cross_period_refunds_count": len(cross_period_refunds),
-            "cross_period_refunds_total": float(cross_period_total),
         }
 
     # Create Shopify usage record
@@ -412,26 +346,15 @@ async def settle_shop_period(
         logger.error(f"❌ Failed to create Shopify charge for {shop.id}")
         return {"success": False, "shop_id": shop.id, "error": "shopify_charge_failed"}
 
-    # ✅ Create invoice with enhanced metadata
+    # ✅ Create invoice with simplified metadata (no refund tracking)
     invoice_metadata = {
         "purchases_count": purchases.count,
-        "purchases_total": float(purchases_total),
-        "refunds_count": len(all_refunds),
-        "refunds_total": float(total_refunds),
-        "same_period_refunds": {
-            "count": len(same_period_refunds),
-            "total": float(same_period_total),
-            "details": same_period_refunds,
-        },
-        "cross_period_refunds": {
-            "count": len(cross_period_refunds),
-            "total": float(cross_period_total),
-            "details": cross_period_refunds,
-        },
-        "net_revenue": float(net_revenue),
+        "attributed_revenue": float(purchases_total),
         "commission_rate": 0.03,
         "final_commission": float(final_commission),
         "capped": commission > capped_amount,
+        "refund_policy": "no_commission_refunds",
+        "policy_note": "Commission based on attributed revenue at time of purchase. Customer refunds do not affect commission as our recommendation service was successfully delivered.",
     }
 
     invoice = BillingInvoice(
@@ -464,9 +387,8 @@ async def settle_shop_period(
         "shop_id": shop.id,
         "invoice_id": invoice.id,
         "shopify_charge_id": usage_record.id,
-        "net_revenue": float(net_revenue),
+        "attributed_revenue": float(purchases_total),
         "commission": float(final_commission),
         "period": f"{period_start} to {period_end}",
-        "cross_period_refunds_count": len(cross_period_refunds),
-        "cross_period_refunds_total": float(cross_period_total),
+        "refund_policy": "no_commission_refunds",
     }

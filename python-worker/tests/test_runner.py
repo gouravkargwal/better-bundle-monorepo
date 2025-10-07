@@ -32,9 +32,6 @@ from app.domains.analytics.services.cross_session_linking_service import (
     CrossSessionLinkingService,
 )
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
-from app.consumers.kafka.refund_attribution_consumer import (
-    RefundAttributionKafkaConsumer,
-)
 
 
 class AttributionScenarioTester:
@@ -44,7 +41,6 @@ class AttributionScenarioTester:
         self.attribution_engine = AttributionEngine()
         self.linking_service = CrossSessionLinkingService()
         self.session_service = UnifiedSessionService()
-        self.refund_consumer = RefundAttributionKafkaConsumer()
         self.test_results = {}
 
     def create_mock_context(self, scenario_name: str, **kwargs) -> AttributionContext:

@@ -394,20 +394,7 @@ export function RevenueKPICards({ data, attributedMetrics }: KPICardsProps) {
           color="#3B82F6"
           description="% attributed to extensions"
         />
-        <KPICard
-          title="Net Revenue"
-          value={formatCurrencyAmount(attributedMetrics.net_attributed_revenue)}
-          icon={<Icon source={StarFilledIcon} tone="base" />}
-          color="#059669"
-          description="After refunds"
-        />
-        <KPICard
-          title="Attributed Refunds"
-          value={formatCurrencyAmount(attributedMetrics.attributed_refunds)}
-          icon={<Icon source={ArrowDownIcon} tone="base" />}
-          color="#EF4444"
-          description="Refunds from extensions"
-        />
+        {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
         <KPICard
           title="Average Order Value"
           value={formatCurrencyAmount(data.average_order_value)}

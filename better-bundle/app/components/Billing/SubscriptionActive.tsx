@@ -169,21 +169,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                           ({metrics.purchases.count})
                         </Text>
                       </InlineStack>
-                      {metrics.refunds.count > 0 && (
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm" tone="subdued">
-                            Refunds:
-                          </Text>
-                          <Text variant="bodySm" tone="critical">
-                            -
-                            {formatCurrency(
-                              metrics.refunds.total,
-                              billingPlan.currency,
-                            )}{" "}
-                            ({metrics.refunds.count})
-                          </Text>
-                        </InlineStack>
-                      )}
+                      {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
                     </BlockStack>
                   </BlockStack>
                 </div>
@@ -290,7 +276,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
         </Card>
 
         {/* ✅ Post-Trial Billing Info */}
-        {metrics.purchases.count === 0 && metrics.refunds.count === 0 && (
+        {metrics.purchases.count === 0 && (
           <Card>
             <div
               style={{
@@ -320,88 +306,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
           </Card>
         )}
 
-        {/* ✅ Cross-Period Refunds Alert */}
-        {metrics.refunds.cross_period_count > 0 && (
-          <Card>
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#FEF3C7",
-                borderRadius: "12px",
-              }}
-            >
-              <BlockStack gap="300">
-                <InlineStack gap="200" blockAlign="center">
-                  <Text as="span" variant="heading2xl">
-                    💡
-                  </Text>
-                  <Text variant="headingMd" fontWeight="bold">
-                    Credits from Prior Periods
-                  </Text>
-                </InlineStack>
-
-                <Text variant="bodyMd" tone="subdued">
-                  {metrics.refunds.cross_period_count} refund(s) from previous
-                  billing periods have been automatically credited to your
-                  current bill.
-                </Text>
-
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <BlockStack gap="100">
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">Same-period refunds:</Text>
-                      <Text variant="bodySm" fontWeight="medium">
-                        -
-                        {formatCurrency(
-                          metrics.refunds.same_period_total,
-                          billingPlan.currency,
-                        )}
-                        ({metrics.refunds.same_period_count})
-                      </Text>
-                    </InlineStack>
-
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">Credits (prior periods):</Text>
-                      <Text
-                        variant="bodySm"
-                        fontWeight="semibold"
-                        tone="success"
-                      >
-                        -
-                        {formatCurrency(
-                          metrics.refunds.cross_period_total,
-                          billingPlan.currency,
-                        )}
-                        ({metrics.refunds.cross_period_count})
-                      </Text>
-                    </InlineStack>
-
-                    <Divider />
-
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm" fontWeight="bold">
-                        Total refunds this cycle:
-                      </Text>
-                      <Text variant="bodySm" fontWeight="bold">
-                        -
-                        {formatCurrency(
-                          metrics.refunds.total,
-                          billingPlan.currency,
-                        )}
-                      </Text>
-                    </InlineStack>
-                  </BlockStack>
-                </div>
-              </BlockStack>
-            </div>
-          </Card>
-        )}
+        {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
 
         {/* Help Cards */}
         <div

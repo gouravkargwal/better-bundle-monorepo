@@ -20,22 +20,22 @@ export function BillingStatusRouter({
   billingActions,
   billing,
 }: BillingStatusRouterProps) {
+  console.log(billingPlan, "------------------>");
+
+  const trialRevenue =
+    (billingPlan as any)?.trial_revenue ??
+    (billingPlan as any)?.attributed_revenue ??
+    0;
+  const trialThreshold = (billingPlan as any)?.trial_threshold ?? 0;
   const isTrialActive =
-    billingPlan.is_trial_active &&
-    billingPlan.attributed_revenue < billingPlan.trial_threshold;
+    billingPlan.is_trial_active && trialRevenue < trialThreshold;
 
   if (isTrialActive) {
     return <TrialActive billingPlan={billingPlan} />;
   }
 
   if (billingPlan.subscription_status === "ACTIVE") {
-    return (
-      <SubscriptionActive
-        billingPlan={billingPlan}
-        handleCancelSubscription={billingActions.handleCancelSubscription}
-        isLoading={billingActions.isLoading}
-      />
-    );
+    return <SubscriptionActive billingPlan={billingPlan} />;
   }
 
   if (

@@ -40,30 +40,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let message: string;
 
     if (billingPlan.is_trial_active) {
-      // Compute idempotent trial progress from attribution tables - FIXED: Use same-period refunds
+      // ✅ NO REFUND COMMISSION POLICY - Only calculate gross attributed revenue
       const purchasesAgg = await prisma.purchase_attributions.aggregate({
         where: { shop_id: shopRecord.id },
         _sum: { total_revenue: true },
       });
 
-      // Get refunds with purchase period tracking
-      const refundsData = await prisma.$queryRaw<
-        Array<{ same_period_total: number; total: number }>
-      >`
-        SELECT 
-          COALESCE(SUM(ra.total_refunded_revenue) FILTER (
-            WHERE pa.purchase_at >= ra.refunded_at - INTERVAL '30 days'
-            AND pa.purchase_at <= ra.refunded_at
-          ), 0) as same_period_total,
-          COALESCE(SUM(ra.total_refunded_revenue), 0) as total
-        FROM refund_attributions ra
-        LEFT JOIN purchase_attributions pa ON ra.order_id = pa.order_id
-        WHERE ra.shop_id = ${shopRecord.id}
-      `;
-
-      const purchases = Number(purchasesAgg._sum.total_revenue || 0);
-      const samePeriodRefunds = Number(refundsData[0]?.same_period_total || 0);
-      const currentRevenue = Math.max(0, purchases - samePeriodRefunds);
+      const currentRevenue = Number(purchasesAgg._sum.total_revenue || 0);
       const threshold = billingPlan.trial_threshold || 200;
 
       status = "trial_active";

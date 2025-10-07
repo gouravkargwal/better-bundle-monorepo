@@ -482,37 +482,6 @@ class EventPublisher:
             logger.error(f"Failed to publish purchase attribution event: {e}")
             raise
 
-    async def publish_refund_attribution_event(
-        self, attribution_data: Dict[str, Any]
-    ) -> str:
-        """Publish refund attribution event"""
-        if not self._initialized:
-            await self.initialize()
-
-        # Add metadata
-        attribution_with_metadata = {
-            **attribution_data,
-            "timestamp": int(time.time() * 1000),
-            "worker_id": self.config.get("worker_id", "unknown"),
-            "source": "refund_attribution",
-        }
-
-        key = attribution_data.get("shop_id")
-
-        try:
-            message_id = await self._producer.send(
-                "refund-attribution-jobs", attribution_with_metadata, key
-            )
-
-            logger.info(
-                f"Refund attribution event published: {attribution_data.get('event_type')} for shop {attribution_data.get('shop_id')}"
-            )
-            return message_id
-
-        except Exception as e:
-            logger.error(f"Failed to publish refund attribution event: {e}")
-            raise
-
     async def publish_batch(self, events: List[Dict[str, Any]]) -> List[str]:
         """Publish multiple events"""
         if not self._initialized:

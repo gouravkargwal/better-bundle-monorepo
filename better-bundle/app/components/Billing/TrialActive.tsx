@@ -16,9 +16,9 @@ interface TrialActiveProps {
 
 export function TrialActive({ billingPlan }: TrialActiveProps) {
   const trialProgress =
-    (billingPlan.attributed_revenue / billingPlan.trial_threshold) * 100;
+    (billingPlan.trial_revenue / billingPlan.trial_threshold) * 100;
   const remainingAmount =
-    billingPlan.trial_threshold - billingPlan.attributed_revenue;
+    billingPlan.trial_threshold - billingPlan.trial_revenue;
 
   return (
     <BlockStack gap="500">
@@ -73,7 +73,7 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                       <Text as="p" variant="bodySm" tone="subdued">
                         Revenue:{" "}
                         {formatCurrency(
-                          billingPlan.attributed_revenue,
+                          billingPlan.trial_revenue,
                           billingPlan.currency,
                         )}
                       </Text>
@@ -86,7 +86,7 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                       <Text as="p" variant="bodySm">
                         Trial Progress:{" "}
                         {formatCurrency(
-                          billingPlan.attributed_revenue,
+                          billingPlan.trial_revenue,
                           billingPlan.currency,
                         )}
                       </Text>
@@ -131,8 +131,8 @@ export function TrialActive({ billingPlan }: TrialActiveProps) {
                       billingPlan.trial_threshold,
                       billingPlan.currency,
                     )}{" "}
-                    in attributed revenue, we'll prompt you to set up billing.
-                    You'll then pay 3% of attributed revenue.
+                    in trial revenue, we'll prompt you to set up billing. You'll
+                    then pay 3% of attributed revenue.
                   </Text>
                 </BlockStack>
               </div>

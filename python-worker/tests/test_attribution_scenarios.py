@@ -7,11 +7,9 @@ and scenarios.
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, Any, List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from app.domains.billing.services.attribution_engine import (
     AttributionEngine,
@@ -21,9 +19,6 @@ from app.domains.analytics.services.cross_session_linking_service import (
     CrossSessionLinkingService,
 )
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
-from app.consumers.kafka.refund_attribution_consumer import (
-    RefundAttributionKafkaConsumer,
-)
 
 
 class TestAttributionScenarios:
@@ -269,73 +264,6 @@ class TestAttributionScenarios:
             assert result["total_interactions"] == 5
 
     # ============================================================================
-    # SCENARIO 11: Refund Attribution
-    # ============================================================================
-
-    @pytest.mark.asyncio
-    async def test_scenario_11_refund_attribution(self):
-        """Test Scenario 11: Refund attribution processing"""
-
-        refund_consumer = RefundAttributionKafkaConsumer()
-
-        # Mock refund data
-        mock_refund_obj = {
-            "id": "refund_123",
-            "total_refund_amount": "50.00",
-            "created_at": datetime.now().isoformat(),
-            "currency_code": "USD",
-        }
-
-        mock_order = MagicMock()
-        mock_order.customer_id = "customer_789"
-
-        # Mock original attribution
-        mock_original_attribution = MagicMock()
-        mock_original_attribution.total_revenue = 100.00
-        mock_original_attribution.attribution_weights = {"phoenix": 0.7, "venus": 0.3}
-        mock_original_attribution.contributing_extensions = ["phoenix", "venus"]
-        mock_original_attribution.total_interactions = 3
-        mock_original_attribution.interactions_by_extension = {"phoenix": 2, "venus": 1}
-
-        # Test proportional refund calculation
-        result = await refund_consumer._calculate_proportional_refund_attribution(
-            mock_original_attribution, mock_refund_obj, mock_order
-        )
-
-        assert result["contributing_extensions"] == ["phoenix", "venus"]
-        assert "attribution_weights" in result
-        assert "attributed_refund" in result
-        assert result["metadata"]["scenario"] == "proportional_refund_attribution"
-
-    # ============================================================================
-    # SCENARIO 12: Partial Refund Attribution
-    # ============================================================================
-
-    @pytest.mark.asyncio
-    async def test_scenario_12_partial_refund_attribution(self):
-        """Test Scenario 12: Partial refund attribution"""
-
-        refund_consumer = RefundAttributionKafkaConsumer()
-
-        # Mock partial refund scenario
-        mock_refund_obj = {
-            "total_refund_amount": "30.00"  # Partial refund of $100 purchase
-        }
-
-        mock_original_attribution = MagicMock()
-        mock_original_attribution.total_revenue = 100.00
-        mock_original_attribution.attribution_weights = {"phoenix": 0.6, "venus": 0.4}
-
-        result = await refund_consumer._calculate_proportional_refund_attribution(
-            mock_original_attribution, mock_refund_obj, MagicMock()
-        )
-
-        # Should detect partial refund
-        assert result["metadata"]["is_partial_refund"] is True
-        assert result["metadata"]["remaining_revenue"] == 70.00
-        assert result["metadata"]["refund_percentage"] == 30.0
-
-    # ============================================================================
     # SCENARIO 14: Payment Failure Attribution
     # ============================================================================
 
@@ -395,33 +323,6 @@ class TestAttributionScenarios:
         )
         assert result.attribution_algorithm == "subscription_cancelled"
         assert result.attributed_revenue == Decimal("0.00")
-
-    # ============================================================================
-    # SCENARIO 16: Enhanced Partial Refund Attribution
-    # ============================================================================
-
-    @pytest.mark.asyncio
-    async def test_scenario_16_enhanced_partial_refund(self):
-        """Test Scenario 16: Enhanced partial refund attribution"""
-
-        refund_consumer = RefundAttributionKafkaConsumer()
-
-        # Test multiple partial refunds scenario
-        mock_refund_obj = {"total_refund_amount": "25.00"}  # 25% refund
-
-        mock_original_attribution = MagicMock()
-        mock_original_attribution.total_revenue = 100.00
-        mock_original_attribution.attribution_weights = {"phoenix": 0.8, "venus": 0.2}
-
-        result = await refund_consumer._calculate_proportional_refund_attribution(
-            mock_original_attribution, mock_refund_obj, MagicMock()
-        )
-
-        # Verify enhanced partial refund metadata
-        assert result["metadata"]["is_partial_refund"] is True
-        assert result["metadata"]["remaining_revenue"] == 75.00
-        assert result["metadata"]["refund_percentage"] == 25.0
-        assert "partial_refund_details" in result["metadata"]
 
     # ============================================================================
     # SCENARIO 17: Cross-Shop Attribution

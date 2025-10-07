@@ -12,6 +12,7 @@ import {
   ClockIcon,
   CheckCircleIcon,
 } from "@shopify/polaris-icons";
+import { formatCurrency } from "app/utils/currency";
 
 interface Invoice {
   id: string;
@@ -33,14 +34,12 @@ interface InvoicesHistoryProps {
   billingData: {
     recent_invoices: Invoice[];
   };
-  formatCurrency: (amount: number | string, currency: string) => string;
   formatDate: (date: string | Date) => string;
   getStatusBadge: (status: string) => { tone: any; children: string };
 }
 
 export function InvoicesHistory({
   billingData,
-  formatCurrency,
   formatDate,
   getStatusBadge,
 }: InvoicesHistoryProps) {
@@ -194,22 +193,6 @@ export function InvoicesHistory({
                           </Text>
                         </InlineStack>
 
-                        {metadata.refunds_count > 0 && (
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm" tone="subdued">
-                              Total Refunds:
-                            </Text>
-                            <Text variant="bodySm" tone="critical">
-                              -
-                              {formatCurrency(
-                                metadata.refunds_total || 0,
-                                invoice.currency,
-                              )}{" "}
-                              ({metadata.refunds_count})
-                            </Text>
-                          </InlineStack>
-                        )}
-
                         <Divider />
 
                         <InlineStack align="space-between">
@@ -218,11 +201,13 @@ export function InvoicesHistory({
                             tone="subdued"
                             fontWeight="semibold"
                           >
-                            Net Revenue:
+                            Attributed Revenue:
                           </Text>
                           <Text variant="bodySm" fontWeight="bold">
                             {formatCurrency(
-                              metadata.net_revenue || 0,
+                              metadata.attributed_revenue ||
+                                metadata.purchases_total ||
+                                0,
                               invoice.currency,
                             )}
                           </Text>
@@ -231,128 +216,7 @@ export function InvoicesHistory({
                     </div>
                   )}
 
-                  {/* Cross-Period Refunds Section */}
-                  {metadata.cross_period_refunds &&
-                    metadata.cross_period_refunds.count > 0 && (
-                      <div
-                        style={{
-                          padding: "12px",
-                          backgroundColor: "#FEF3C7",
-                          borderRadius: "8px",
-                          border: "1px solid #FCD34D",
-                        }}
-                      >
-                        <BlockStack gap="200">
-                          <InlineStack gap="100" blockAlign="center">
-                            <Text as="span">💡</Text>
-                            <Text variant="bodySm" fontWeight="semibold">
-                              Credits from Prior Periods
-                            </Text>
-                          </InlineStack>
-
-                          <Text variant="bodySm" tone="subdued">
-                            {metadata.cross_period_refunds.count} refund(s) from
-                            previous billing periods were credited to this
-                            cycle, reducing your bill.
-                          </Text>
-
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm">Total credit applied:</Text>
-                            <Text
-                              variant="bodySm"
-                              fontWeight="medium"
-                              tone="success"
-                            >
-                              -
-                              {formatCurrency(
-                                metadata.cross_period_refunds.total,
-                                invoice.currency,
-                              )}
-                            </Text>
-                          </InlineStack>
-
-                          {/* Show which periods */}
-                          {metadata.cross_period_refunds.details &&
-                            metadata.cross_period_refunds.details.length >
-                              0 && (
-                              <div
-                                style={{
-                                  marginTop: "8px",
-                                  paddingTop: "8px",
-                                  borderTop: "1px solid #FCD34D",
-                                }}
-                              >
-                                <Text
-                                  variant="bodySm"
-                                  tone="subdued"
-                                  fontWeight="medium"
-                                >
-                                  From periods:
-                                </Text>
-                                <BlockStack gap="050">
-                                  {metadata.cross_period_refunds.details
-                                    .slice(0, 3)
-                                    .map((refund: any, idx: number) => (
-                                      <InlineStack
-                                        key={idx}
-                                        gap="100"
-                                        align="space-between"
-                                      >
-                                        <Text variant="bodySm" tone="subdued">
-                                          •{" "}
-                                          {refund.purchase_period ||
-                                            "Previous period"}
-                                        </Text>
-                                        <Text variant="bodySm" tone="subdued">
-                                          -
-                                          {formatCurrency(
-                                            refund.amount,
-                                            invoice.currency,
-                                          )}
-                                        </Text>
-                                      </InlineStack>
-                                    ))}
-                                  {metadata.cross_period_refunds.details
-                                    .length > 3 && (
-                                    <Text variant="bodySm" tone="subdued">
-                                      ... and{" "}
-                                      {metadata.cross_period_refunds.details
-                                        .length - 3}{" "}
-                                      more
-                                    </Text>
-                                  )}
-                                </BlockStack>
-                              </div>
-                            )}
-                        </BlockStack>
-                      </div>
-                    )}
-
-                  {/* Same Period Refunds Info */}
-                  {metadata.same_period_refunds &&
-                    metadata.same_period_refunds.count > 0 && (
-                      <div
-                        style={{
-                          padding: "10px",
-                          backgroundColor: "#F8FAFC",
-                          borderRadius: "6px",
-                        }}
-                      >
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm" tone="subdued">
-                            Same-period refunds:
-                          </Text>
-                          <Text variant="bodySm" tone="subdued">
-                            -
-                            {formatCurrency(
-                              metadata.same_period_refunds.total,
-                              invoice.currency,
-                            )}
-                            ({metadata.same_period_refunds.count})
-                          </Text>
-                        </InlineStack>
-                      </div>
-                    )}
+                  {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
 
                   {/* Status Info */}
                   <div
@@ -379,7 +243,7 @@ export function InvoicesHistory({
                           : invoice.status === "pending"
                             ? `Due by ${formatDate(invoice.due_date)}`
                             : invoice.status === "no_charge"
-                              ? "No charge (refunds exceeded sales)"
+                              ? "No charge (no attributed revenue)"
                               : "Status: " + invoice.status}
                       </Text>
                     </InlineStack>

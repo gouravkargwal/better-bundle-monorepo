@@ -399,7 +399,7 @@ async function getMetricsForPeriod(
   startDate: Date,
   endDate: Date,
 ) {
-  const [viewCount, clickCount, purchasesAgg, refundsAgg, customerCount] =
+  const [viewCount, clickCount, purchasesAgg, customerCount] =
     await Promise.all([
       // Count views from recommendation_viewed and product_viewed events
       prisma.user_interactions.count({
@@ -429,13 +429,6 @@ async function getMetricsForPeriod(
         _sum: { total_revenue: true },
         _avg: { total_revenue: true },
       }),
-      prisma.refund_attributions.aggregate({
-        where: {
-          shop_id: shopId,
-          refunded_at: { gte: startDate, lte: endDate },
-        },
-        _sum: { total_refunded_revenue: true },
-      }),
       prisma.user_sessions
         .groupBy({
           by: ["customer_id"],
@@ -448,8 +441,8 @@ async function getMetricsForPeriod(
         .then((result) => result.length),
     ]);
   const purchases = safeNumber(purchasesAgg._sum.total_revenue);
-  const refunds = safeNumber(refundsAgg._sum.total_refunded_revenue);
-  const netRevenue = Math.max(0, purchases - refunds);
+  // ✅ NO REFUND COMMISSION POLICY - Net revenue equals gross revenue
+  const netRevenue = purchases;
   return {
     views: viewCount,
     clicks: clickCount,
@@ -688,57 +681,49 @@ async function getActivityMetrics(
   startDate: Date,
   endDate: Date,
 ): Promise<ActivityMetrics> {
-  const [recommendations, clicks, purchasesAgg, refundsAgg, customers] =
-    await Promise.all([
-      // Count recommendations viewed (phoenix and atlas)
-      prisma.user_interactions.count({
+  const [recommendations, clicks, purchasesAgg, customers] = await Promise.all([
+    // Count recommendations viewed (phoenix and atlas)
+    prisma.user_interactions.count({
+      where: {
+        shop_id: shopId,
+        created_at: { gte: startDate, lte: endDate },
+        interaction_type: {
+          in: ["recommendation_viewed", "product_viewed"],
+        },
+      },
+    }),
+    // Count clicks and add to cart events
+    prisma.user_interactions.count({
+      where: {
+        shop_id: shopId,
+        created_at: { gte: startDate, lte: endDate },
+        interaction_type: {
+          in: ["recommendation_add_to_cart", "product_added_to_cart"],
+        },
+      },
+    }),
+    prisma.purchase_attributions.aggregate({
+      where: {
+        shop_id: shopId,
+        purchase_at: { gte: startDate, lte: endDate },
+      },
+      _sum: { total_revenue: true },
+    }),
+    prisma.user_sessions
+      .groupBy({
+        by: ["customer_id"],
         where: {
           shop_id: shopId,
           created_at: { gte: startDate, lte: endDate },
-          interaction_type: {
-            in: ["recommendation_viewed", "product_viewed"],
-          },
+          customer_id: { not: null },
         },
-      }),
-      // Count clicks and add to cart events
-      prisma.user_interactions.count({
-        where: {
-          shop_id: shopId,
-          created_at: { gte: startDate, lte: endDate },
-          interaction_type: {
-            in: ["recommendation_add_to_cart", "product_added_to_cart"],
-          },
-        },
-      }),
-      prisma.purchase_attributions.aggregate({
-        where: {
-          shop_id: shopId,
-          purchase_at: { gte: startDate, lte: endDate },
-        },
-        _sum: { total_revenue: true },
-      }),
-      prisma.refund_attributions.aggregate({
-        where: {
-          shop_id: shopId,
-          refunded_at: { gte: startDate, lte: endDate },
-        },
-        _sum: { total_refunded_revenue: true },
-      }),
-      prisma.user_sessions
-        .groupBy({
-          by: ["customer_id"],
-          where: {
-            shop_id: shopId,
-            created_at: { gte: startDate, lte: endDate },
-            customer_id: { not: null },
-          },
-        })
-        .then((result) => result.length),
-    ]);
+      })
+      .then((result) => result.length),
+  ]);
 
   const purchases = safeNumber(purchasesAgg._sum.total_revenue);
-  const refunds = safeNumber(refundsAgg._sum.total_refunded_revenue);
-  const netRevenue = Math.max(0, purchases - refunds);
+  // ✅ NO REFUND COMMISSION POLICY - Net revenue equals gross revenue
+  const netRevenue = purchases;
 
   return {
     recommendations,
@@ -775,17 +760,7 @@ async function getAttributedMetrics(
       _sum: { total_revenue: true },
     });
 
-    // FIXED: Get attributed refunds from refund_attributions table (NOT purchase_attributions)
-    const attributedRefundsData = await prisma.refund_attributions.aggregate({
-      where: {
-        shop_id: correctShopId, // Use the correct shop_id
-        refunded_at: { gte: startDate, lte: endDate },
-      },
-      _sum: {
-        total_refund_amount: true,
-        total_refunded_revenue: true,
-      },
-    });
+    // ✅ NO REFUND COMMISSION POLICY - Only calculate attributed revenue
 
     // Get total revenue for attribution rate from order_data table
     const totalRevenueData = await prisma.order_data.aggregate({
@@ -800,16 +775,15 @@ async function getAttributedMetrics(
       attributedRevenueData._sum.total_revenue,
     );
 
-    // Use total_refunded_revenue which is the attributed portion of refunds
-    const attributedRefunds = safeNumber(
-      attributedRefundsData._sum.total_refunded_revenue,
-    );
+    // ✅ NO REFUND COMMISSION POLICY - Commission on gross attributed revenue only
+    const attributedRefunds = 0; // No refund adjustments
 
     const totalRevenue = safeNumber(totalRevenueData._sum.total_amount);
-    const netAttributedRevenue = attributedRevenue - attributedRefunds;
+    // ✅ NO REFUND COMMISSION POLICY - Net revenue equals gross revenue
+    const netAttributedRevenue = attributedRevenue;
 
     const attributionRate = safeDivision(attributedRevenue, totalRevenue) * 100;
-    const refundRate = safeDivision(attributedRefunds, attributedRevenue) * 100;
+    const refundRate = 0; // No refund adjustments
 
     return {
       attributed_revenue: attributedRevenue,

@@ -12,9 +12,7 @@ from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
 from ..interfaces.permission_service import IShopifyPermissionService
 from .data_storage import ShopifyDataStorageService
-from app.repository.PipelineWatermarkRepository import (
-    PipelineWatermarkRepository,
-)
+
 from app.repository.RawDataRepository import RawDataRepository
 
 logger = get_logger(__name__)
@@ -28,13 +26,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         api_client: IShopifyAPIClient,
         permission_service: IShopifyPermissionService,
         data_storage: ShopifyDataStorageService = None,
-        pipeline_watermark_repository: PipelineWatermarkRepository = None,
     ):
         self.api_client = api_client
         self.permission_service = permission_service
-        self.pipeline_watermark_repository = (
-            pipeline_watermark_repository or PipelineWatermarkRepository()
-        )
 
         # Inject storage service or create default
         self.data_storage = data_storage or ShopifyDataStorageService()
