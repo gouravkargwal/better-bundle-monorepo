@@ -167,25 +167,41 @@ export async function action({ request }: ActionFunctionArgs) {
 
     console.log(`✅ Subscription created: ${subscription.id}`);
 
-    // Update billing plan
-    await prisma.billing_plans.updateMany({
-      where: { id: billingPlan.id },
+    // Create NEW usage-based billing plan (don't update trial plan)
+    const newBillingPlan = await prisma.billing_plans.create({
       data: {
+        shop_id: shopRecord.id,
+        shop_domain: shop,
+        name: "Usage-Based Paid Plan",
+        type: "usage_based",
+        status: "pending", // New plan starts as pending
         subscription_id: subscription.id,
         subscription_status: "PENDING",
         subscription_line_item_id: subscription.lineItems[0].id,
         subscription_confirmation_url: confirmationUrl,
         requires_subscription_approval: true,
+        is_trial_active: false, // This is a paid plan
+        trial_threshold: 0,
+        trial_revenue: 0,
+        trial_usage_records_count: 0,
+        effective_from: new Date(),
         configuration: {
-          ...(billingPlan.configuration as any),
+          pattern: "usage_based_paid",
           subscription_id: subscription.id,
           subscription_status: "PENDING",
           subscription_created_at: new Date().toISOString(),
           capped_amount: cappedAmount,
           currency: currency,
+          revenue_share_rate: 0.03,
+          monthly_cap: cappedAmount,
+          plan_type: "usage_based",
         },
       },
     });
+
+    console.log(
+      `✅ New usage-based billing plan created: ${newBillingPlan.id}`,
+    );
 
     console.log(`✅ Billing setup complete for shop ${shop}`);
 

@@ -62,7 +62,10 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
         },
       }),
       prisma.billing_plans.findFirst({
-        where: { shop_id: shopId, status: { in: ["active", "suspended"] } },
+        where: {
+          shop_id: shopId,
+          status: { in: ["active", "suspended", "pending"] },
+        },
         orderBy: { created_at: "desc" },
       }),
     ]);
@@ -87,6 +90,7 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
         reason: reason,
         requiresBillingSetup:
           reason === "trial_completed_subscription_required",
+        requiresCapIncrease: reason === "monthly_cap_reached",
         trialCompleted: !billingPlan.is_trial_active,
         subscriptionActive: false,
         subscriptionPending: billingPlan.subscription_status === "PENDING",

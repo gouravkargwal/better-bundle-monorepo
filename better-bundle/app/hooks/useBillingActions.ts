@@ -57,11 +57,40 @@ export function useBillingActions(currency: string = "USD") {
     }
   };
 
+  const handleIncreaseCap = async (newCap: number) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/billing/increase-cap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spendingLimit: newCap }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log("Cap increased successfully");
+        // Revalidate current route data in Remix SPA instead of full reload
+        revalidator.revalidate();
+        return { success: true, message: result.message };
+      } else {
+        console.error("Failed to increase cap:", result.error);
+        return { success: false, error: result.error };
+      }
+    } catch (error) {
+      console.error("Error increasing cap:", error);
+      return { success: false, error: "Network error" };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return {
     isLoading,
     spendingLimit,
     setSpendingLimit,
     handleSetupBilling,
     handleCancelSubscription,
+    handleIncreaseCap,
   };
 }

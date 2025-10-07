@@ -6,7 +6,7 @@ import {
   InlineStack,
   Text,
   Icon,
-  RangeSlider,
+  TextField,
 } from "@shopify/polaris";
 import { AlertTriangleIcon, CreditCardIcon } from "@shopify/polaris-icons";
 import { BillingLayout } from "./BillingLayout";
@@ -19,6 +19,7 @@ interface BillingSetupProps {
   setSpendingLimit: (value: string) => void;
   onSetupBilling: () => void;
   isLoading?: boolean;
+  shopCurrency: string;
 }
 
 export function BillingSetup({
@@ -27,34 +28,11 @@ export function BillingSetup({
   setSpendingLimit,
   onSetupBilling,
   isLoading = false,
+  shopCurrency,
 }: BillingSetupProps) {
-  const currency = billingPlan.currency || "USD";
-
-  // Slider configuration
-  const sliderMultiplier = currency === "INR" ? 80 : 1;
-  const sliderMin = 100 * sliderMultiplier;
-  const sliderMax = 10000 * sliderMultiplier;
-  const sliderStep = 50 * sliderMultiplier;
-  const defaultValue = 1000 * sliderMultiplier;
-
+  const currency = shopCurrency;
   const currentValue = parseFloat(spendingLimit);
-  const displayValue =
-    Number.isFinite(currentValue) && currentValue >= sliderMin
-      ? currentValue
-      : defaultValue;
-
-  // Initialize with proper default on mount
-  useEffect(() => {
-    const needsDefault =
-      !Number.isFinite(currentValue) ||
-      currentValue < sliderMin ||
-      (currency === "INR" && currentValue === 1000);
-
-    if (needsDefault) {
-      setSpendingLimit(defaultValue.toString());
-    }
-  }, [currency, currentValue, sliderMin, defaultValue, setSpendingLimit]);
-
+  const displayValue = Number.isFinite(currentValue) ? currentValue : 1000;
   const revenueCapacity = Math.round(displayValue / 0.03);
 
   return (
@@ -70,13 +48,17 @@ export function BillingSetup({
         <Card>
           <div style={{ padding: "24px" }}>
             <BlockStack gap="400">
-              {/* Warning Banner */}
+              {/* Status Banner */}
               <div
                 style={{
                   padding: "20px",
-                  backgroundColor: "#FEF3C7",
+                  backgroundColor:
+                    billingPlan.status === "pending" ? "#EFF6FF" : "#FEF3C7",
                   borderRadius: "12px",
-                  border: "1px solid #FCD34D",
+                  border:
+                    billingPlan.status === "pending"
+                      ? "1px solid #93C5FD"
+                      : "1px solid #FCD34D",
                 }}
               >
                 <InlineStack gap="300" align="start" blockAlign="center">
@@ -88,22 +70,45 @@ export function BillingSetup({
                       minWidth: "40px",
                       minHeight: "40px",
                       padding: "12px",
-                      backgroundColor: "#F59E0B15",
+                      backgroundColor:
+                        billingPlan.status === "pending"
+                          ? "#3B82F615"
+                          : "#F59E0B15",
                       borderRadius: "16px",
-                      border: "2px solid #F59E0B30",
+                      border:
+                        billingPlan.status === "pending"
+                          ? "2px solid #3B82F630"
+                          : "2px solid #F59E0B30",
                     }}
                   >
-                    <Icon source={AlertTriangleIcon} tone="base" />
+                    <Icon
+                      source={
+                        billingPlan.status === "pending"
+                          ? CreditCardIcon
+                          : AlertTriangleIcon
+                      }
+                      tone="base"
+                    />
                   </div>
                   <BlockStack gap="100">
-                    <div style={{ color: "#92400E" }}>
+                    <div
+                      style={{
+                        color:
+                          billingPlan.status === "pending"
+                            ? "#1E40AF"
+                            : "#92400E",
+                      }}
+                    >
                       <Text as="h3" variant="headingMd" fontWeight="bold">
-                        Services Currently Paused
+                        {billingPlan.status === "pending"
+                          ? "Awaiting Shopify Approval"
+                          : "Services Currently Paused"}
                       </Text>
                     </div>
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      Your Better Bundle features are paused until billing is
-                      configured. Setup takes less than 2 minutes.
+                      {billingPlan.status === "pending"
+                        ? "Your subscription is created and waiting for approval. Complete the process in Shopify to activate services."
+                        : "Your Better Bundle features are paused until billing is configured. Setup takes less than 2 minutes."}
                     </Text>
                   </BlockStack>
                 </InlineStack>
@@ -222,15 +227,19 @@ export function BillingSetup({
                     </Text>
                   </div>
 
-                  <RangeSlider
+                  <TextField
                     label="Monthly Spending Cap"
-                    labelHidden
-                    min={sliderMin}
-                    max={sliderMax}
-                    step={sliderStep}
-                    value={displayValue}
-                    onChange={(value) => setSpendingLimit(value.toString())}
-                    output
+                    type="number"
+                    value={displayValue.toString()}
+                    onChange={(value) => {
+                      const numValue = parseFloat(value);
+                      if (!isNaN(numValue) && numValue > 0) {
+                        setSpendingLimit(value);
+                      }
+                    }}
+                    suffix={currency}
+                    helpText="Enter your monthly spending limit"
+                    autoComplete="off"
                   />
 
                   <div

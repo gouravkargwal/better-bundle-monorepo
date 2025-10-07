@@ -327,13 +327,14 @@ class AttributionEngine:
                     )
                     # TODO: Send urgent notification to merchant
 
-                # Cap reached
+                # Cap reached - log warning (suspension handled by billing service)
                 elif usage_percentage >= 100:
                     logger.error(
                         f"🛑 Cap reached for shop {shop_id}! "
                         f"${commission.cycle_usage_after} >= ${commission.capped_amount}"
                     )
-                    # TODO: Suspend services or notify merchant
+                    # Note: Service suspension will be handled by the billing service
+                    # when it processes the commission with CAPPED status
 
         except Exception as e:
             logger.error(f"❌ Error in post-commission checks: {e}")

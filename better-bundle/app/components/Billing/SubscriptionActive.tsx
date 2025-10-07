@@ -6,12 +6,16 @@ import {
   Badge,
   ProgressBar,
   Icon,
-  Divider,
+  Button,
+  Modal,
+  RangeSlider,
 } from "@shopify/polaris";
 import { CheckCircleIcon } from "@shopify/polaris-icons";
 import { BillingLayout } from "./BillingLayout";
 import { HeroHeader } from "../UI/HeroHeader";
 import { formatCurrency } from "app/utils/currency";
+import { useState } from "react";
+import { useBillingActions } from "../../hooks/useBillingActions";
 
 interface SubscriptionActiveProps {
   billingPlan: any;
@@ -21,12 +25,7 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
   // ✅ USE NEW DATA - Only post-trial revenue (industry standard)
   const metrics = billingPlan.currentCycleMetrics || {
     purchases: { count: 0, total: 0 },
-    refunds: {
-      count: 0,
-      total: 0,
-      same_period_total: 0,
-      cross_period_total: 0,
-    },
+
     net_revenue: 0, // Only post-trial revenue
     commission: 0,
     final_commission: 0,
@@ -38,7 +37,27 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
     (metrics.final_commission / metrics.capped_amount) * 100;
   const isNearLimit = usagePercentage > 80;
   const isOverLimit = usagePercentage > 100;
-  const remainingAmount = metrics.capped_amount - metrics.final_commission;
+
+  const [showCapIncreaseModal, setShowCapIncreaseModal] = useState(false);
+  const [newCapAmount, setNewCapAmount] = useState(0);
+  const { handleIncreaseCap, isLoading } = useBillingActions(
+    billingPlan.currency,
+  );
+
+  const handleCapIncrease = async () => {
+    if (newCapAmount <= metrics.capped_amount) {
+      alert("New cap must be higher than current cap");
+      return;
+    }
+
+    const result = await handleIncreaseCap(newCapAmount);
+    if (result.success) {
+      setShowCapIncreaseModal(false);
+      alert("Cap increased successfully! Services will resume.");
+    } else {
+      alert(`Failed to increase cap: ${result.error}`);
+    }
+  };
 
   return (
     <BillingLayout>
@@ -271,6 +290,83 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
                   </Text>
                 </div>
               )}
+
+              {/* ✅ NEW: Capped State Warning */}
+              {isOverLimit && (
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#FEF2F2",
+                    borderRadius: "12px",
+                    border: "1px solid #FECACA",
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <InlineStack gap="200" align="start" blockAlign="center">
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: "32px",
+                          minHeight: "32px",
+                          padding: "8px",
+                          backgroundColor: "#EF444415",
+                          borderRadius: "12px",
+                          border: "2px solid #EF444430",
+                        }}
+                      >
+                        <Text as="span" variant="headingMd">
+                          🚫
+                        </Text>
+                      </div>
+                      <BlockStack gap="100">
+                        <div style={{ color: "#DC2626" }}>
+                          <Text as="h4" variant="headingMd" fontWeight="bold">
+                            Monthly Cap Reached
+                          </Text>
+                        </div>
+                        <Text variant="bodySm" tone="subdued">
+                          You've reached your monthly spending cap of{" "}
+                          {formatCurrency(
+                            metrics.capped_amount,
+                            billingPlan.currency,
+                          )}
+                          . New commissions will be tracked but not charged
+                          until next billing cycle.
+                        </Text>
+                      </BlockStack>
+                    </InlineStack>
+
+                    <div
+                      style={{
+                        padding: "12px",
+                        backgroundColor: "#FEF3C7",
+                        borderRadius: "8px",
+                        border: "1px solid #FCD34D",
+                      }}
+                    >
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodySm">
+                          💡 Your billing cycle resets in{" "}
+                          {metrics.days_remaining} days. You can also increase
+                          your monthly cap anytime.
+                        </Text>
+                        <Button
+                          variant="primary"
+                          size="slim"
+                          onClick={() => {
+                            setNewCapAmount(metrics.capped_amount * 1.5); // 50% increase as default
+                            setShowCapIncreaseModal(true);
+                          }}
+                        >
+                          Increase Monthly Cap
+                        </Button>
+                      </BlockStack>
+                    </div>
+                  </BlockStack>
+                </div>
+              )}
             </BlockStack>
           </div>
         </Card>
@@ -393,6 +489,66 @@ export function SubscriptionActive({ billingPlan }: SubscriptionActiveProps) {
           </Card>
         </div>
       </BlockStack>
+
+      {/* Cap Increase Modal */}
+      <Modal
+        open={showCapIncreaseModal}
+        onClose={() => setShowCapIncreaseModal(false)}
+        title="Increase Monthly Cap"
+        primaryAction={{
+          content: "Increase Cap",
+          onAction: handleCapIncrease,
+          loading: isLoading,
+        }}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setShowCapIncreaseModal(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <Text as="p" variant="bodyMd">
+              Increase your monthly spending cap to continue using Better Bundle
+              services.
+            </Text>
+
+            <div>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Current Cap:{" "}
+                {formatCurrency(metrics.capped_amount, billingPlan.currency)}
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                New Cap: {formatCurrency(newCapAmount, billingPlan.currency)}
+              </Text>
+            </div>
+
+            <RangeSlider
+              label="New Monthly Cap"
+              min={metrics.capped_amount * 1.1} // 10% higher than current
+              max={metrics.capped_amount * 5} // 5x current cap
+              step={50}
+              value={newCapAmount}
+              onChange={setNewCapAmount}
+              output
+            />
+
+            <div
+              style={{
+                padding: "12px",
+                backgroundColor: "#F0F9FF",
+                borderRadius: "8px",
+                border: "1px solid #BAE6FD",
+              }}
+            >
+              <Text as="p" variant="bodySm">
+                💡 Services will resume immediately after cap increase.
+              </Text>
+            </div>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
     </BillingLayout>
   );
 }

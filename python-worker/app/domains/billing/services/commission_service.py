@@ -320,6 +320,9 @@ class CommissionService:
                 commission.notes = "Cap reached before this commission"
                 await self.session.flush()
 
+                # Suspend shop services when cap is reached
+                await self._suspend_shop_for_cap_reached(commission.shop_id)
+
                 return {
                     "success": False,
                     "error": "cap_reached",
@@ -859,3 +862,37 @@ class CommissionService:
             raise ValueError("Commission rate must be between 0 and 1")
         if capped_amount <= 0:
             raise ValueError("Capped amount must be positive")
+
+    async def _suspend_shop_for_cap_reached(self, shop_id: str) -> None:
+        """
+        Suspend shop services when monthly cap is reached.
+
+        Args:
+            shop_id: Shop ID
+        """
+        try:
+            from sqlalchemy import update
+            from app.core.database.models import Shop
+            from app.shared.helpers import now_utc
+
+            # Suspend shop services
+            shop_stmt = (
+                update(Shop)
+                .where(Shop.id == shop_id)
+                .values(
+                    is_active=False,
+                    suspended_at=now_utc(),
+                    suspension_reason="monthly_cap_reached",
+                    service_impact="suspended",
+                    updated_at=now_utc(),
+                )
+            )
+
+            await self.session.execute(shop_stmt)
+            await self.session.commit()
+
+            logger.warning(f"🛑 Shop {shop_id} services suspended due to cap reached")
+
+        except Exception as e:
+            await self.session.rollback()
+            logger.error(f"❌ Error suspending shop {shop_id} for cap reached: {e}")
