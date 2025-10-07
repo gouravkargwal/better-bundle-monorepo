@@ -13,6 +13,7 @@ import {
   CheckCircleIcon,
 } from "@shopify/polaris-icons";
 import { formatCurrency } from "app/utils/currency";
+import { formatDate } from "app/utils/datetime";
 
 interface Invoice {
   id: string;
@@ -34,15 +35,23 @@ interface InvoicesHistoryProps {
   billingData: {
     recent_invoices: Invoice[];
   };
-  formatDate: (date: string | Date) => string;
-  getStatusBadge: (status: string) => { tone: any; children: string };
 }
 
-export function InvoicesHistory({
-  billingData,
-  formatDate,
-  getStatusBadge,
-}: InvoicesHistoryProps) {
+const getStatusBadge = (status: string) => {
+  const statusLower = status.toLowerCase();
+  if (statusLower === "paid")
+    return { tone: "success" as const, children: "Paid" };
+  if (statusLower === "pending")
+    return { tone: "warning" as const, children: "Pending" };
+  if (statusLower === "no_charge")
+    return { tone: "info" as const, children: "No Charge" };
+  if (statusLower === "failed")
+    return { tone: "critical" as const, children: "Failed" };
+  if (statusLower === "cancelled")
+    return { tone: "critical" as const, children: "Cancelled" };
+  return { tone: "info" as const, children: status };
+};
+export function InvoicesHistory({ billingData }: InvoicesHistoryProps) {
   const invoices = billingData?.recent_invoices || [];
 
   if (invoices.length === 0) {

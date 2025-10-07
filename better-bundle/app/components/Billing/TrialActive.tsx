@@ -72,9 +72,16 @@ export function TrialActive({ billingPlan, shopCurrency }: TrialActiveProps) {
                         {billingPlan.usage_count} orders tracked
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
-                        Revenue:{" "}
+                        Attributed Revenue:{" "}
                         {formatCurrency(
                           billingPlan.trial_revenue,
+                          shopCurrency,
+                        )}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Commission (3%):{" "}
+                        {formatCurrency(
+                          billingPlan.trial_commission || 0,
                           shopCurrency,
                         )}
                       </Text>

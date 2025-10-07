@@ -209,9 +209,13 @@ class AttributionEngine:
             # ========================================
             # 🆕 NEW: Step 5 - CREATE COMMISSION RECORD
             # ========================================
-            await self._create_commission_for_attribution(
-                attribution_id=result.id, shop_id=context.shop_id
-            )
+            # Store returns created attribution id (or existing one)
+            attribution_id = await self._store_attribution_result(result)
+
+            if attribution_id:
+                await self._create_commission_for_attribution(
+                    attribution_id=attribution_id, shop_id=context.shop_id
+                )
 
             return result
 
@@ -1439,7 +1443,9 @@ class AttributionEngine:
 
         return total_score
 
-    async def _store_attribution_result(self, result: AttributionResult) -> None:
+    async def _store_attribution_result(
+        self, result: AttributionResult
+    ) -> Optional[str]:
         """
         Store attribution result in database.
 
@@ -1475,7 +1481,7 @@ class AttributionEngine:
 
             # Use provided session or create new context
             if self.session:
-                await self._save_attribution(
+                return await self._save_attribution(
                     self.session,
                     result,
                     contributing_extensions,
@@ -1485,7 +1491,7 @@ class AttributionEngine:
                 )
             else:
                 async with get_session_context() as session:
-                    await self._save_attribution(
+                    return await self._save_attribution(
                         session,
                         result,
                         contributing_extensions,
@@ -1493,8 +1499,6 @@ class AttributionEngine:
                         attributed_revenue,
                         interactions_by_extension,
                     )
-
-            logger.info(f"Stored attribution result for order {result.order_id}")
 
         except Exception as e:
             if (
@@ -1504,7 +1508,19 @@ class AttributionEngine:
                 logger.info(
                     f"Attribution already exists for order {result.order_id}, skipping storage"
                 )
-                return
+                # Try to fetch existing attribution id for returning
+                try:
+                    if self.session:
+                        session = self.session
+                        # fallthrough to fetch below
+                    else:
+                        async with get_session_context() as session_ctx:
+                            return await self._get_existing_attribution_id(
+                                session_ctx, result
+                            )
+                    return await self._get_existing_attribution_id(session, result)
+                except Exception:
+                    return None
             logger.error(
                 f"Error storing attribution result for order {result.order_id}: {e}"
             )
@@ -1518,8 +1534,11 @@ class AttributionEngine:
         attribution_weights: Dict,
         attributed_revenue: Dict,
         interactions_by_extension: Dict,
-    ) -> None:
-        """Save attribution to database using provided session."""
+    ) -> Optional[str]:
+        """Save attribution to database using provided session.
+
+        Returns the created attribution id, or existing id if found.
+        """
         # Check if attribution already exists
         stmt = select(PurchaseAttribution).where(
             and_(
@@ -1534,7 +1553,7 @@ class AttributionEngine:
             logger.info(
                 f"Attribution already exists for order {result.order_id}, skipping storage"
             )
-            return
+            return str(existing_attribution.id)
 
         # Create new attribution record
         attribution = PurchaseAttribution(
@@ -1555,6 +1574,21 @@ class AttributionEngine:
 
         session.add(attribution)
         await session.commit()
+        return str(attribution.id)
+
+    async def _get_existing_attribution_id(
+        self, session: AsyncSession, result: AttributionResult
+    ) -> Optional[str]:
+        """Helper to fetch an existing attribution id for a given result."""
+        stmt = select(PurchaseAttribution.id).where(
+            and_(
+                PurchaseAttribution.shop_id == result.shop_id,
+                PurchaseAttribution.order_id == str(result.order_id),
+            )
+        )
+        res = await session.execute(stmt)
+        existing_id = res.scalar_one_or_none()
+        return str(existing_id) if existing_id is not None else None
 
     def _create_empty_attribution(
         self, context: AttributionContext

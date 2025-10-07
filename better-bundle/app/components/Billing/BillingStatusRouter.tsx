@@ -12,13 +12,12 @@ interface BillingStatusRouterProps {
     handleSetupBilling: () => void;
     handleCancelSubscription: () => void;
   };
-  billing: any;
+  shopCurrency: string;
 }
 
 export function BillingStatusRouter({
   billingPlan,
   billingActions,
-  billing,
   shopCurrency,
 }: BillingStatusRouterProps) {
   console.log(billingPlan, "------------------>");

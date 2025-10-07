@@ -6,10 +6,12 @@ for both trial and paid billing phases.
 """
 
 import logging
+import asyncio
 from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from sqlalchemy import select, func, and_, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database.models import (
     CommissionRecord,
@@ -76,8 +78,8 @@ class CommissionService:
                 )
                 return None
 
-            # Get billing plan
-            billing_plan = await self._get_active_billing_plan(shop_id)
+            # Get billing plan with row-level lock to prevent concurrent updates
+            billing_plan = await self._get_active_billing_plan_locked(shop_id)
             if not billing_plan:
                 logger.error(f"❌ No active billing plan for shop {shop_id}")
                 return None
@@ -91,14 +93,21 @@ class CommissionService:
                 logger.error(f"❌ Shop {shop_id} not found")
                 return None
 
-            # Calculate commission
+            # Calculate commission using Decimals only
             attributed_revenue = Decimal(str(purchase_attr.total_revenue))
             commission_rate = Decimal("0.03")  # 3%
             commission_earned = attributed_revenue * commission_rate
 
-            # Get capped amount from billing plan
+            # Get capped amount configuration (used only in PAID phase)
             config = billing_plan.configuration or {}
-            capped_amount = Decimal(str(config.get("capped_amount", 1000)))
+            computed_capped_amount = Decimal(str(config.get("capped_amount", 1000)))
+
+            # Validate key inputs
+            self._validate_commission_data(
+                commission_earned=commission_earned,
+                commission_rate=commission_rate,
+                capped_amount=computed_capped_amount,
+            )
 
             # Determine billing phase and cycle
             if billing_plan.is_trial_active:
@@ -120,6 +129,8 @@ class CommissionService:
                 billing_cycle_end = None
                 cycle_usage_before = Decimal("0")
                 cycle_usage_after = Decimal("0")
+                # During trial there is no cap; store 0 for clarity
+                capped_amount_for_record = Decimal("0")
 
             else:
                 # PAID PHASE
@@ -145,12 +156,20 @@ class CommissionService:
                 )
                 billing_cycle_end = billing_cycle_start + timedelta(days=30)
 
+                # Validate billing cycle window
+                if billing_cycle_start >= billing_cycle_end:
+                    logger.error("❌ Invalid billing cycle window computed")
+                    return None
+
                 # Get current cycle usage BEFORE this commission
+                # Get current cycle usage BEFORE this commission
+                # Using locked plan to minimize race; usage sums are from recorded charges
                 cycle_usage_before = await self._get_cycle_usage(
                     shop_id, billing_cycle_start, billing_cycle_end
                 )
 
                 cycle_usage_after = cycle_usage_before + commission_earned
+                capped_amount_for_record = computed_capped_amount
 
             # Create commission record
             commission = CommissionRecord(
@@ -168,7 +187,7 @@ class CommissionService:
                 billing_cycle_end=billing_cycle_end,
                 cycle_usage_before=cycle_usage_before,
                 cycle_usage_after=cycle_usage_after,
-                capped_amount=capped_amount,
+                capped_amount=capped_amount_for_record,
                 trial_accumulated=trial_accumulated,
                 billing_phase=billing_phase,
                 status=status,
@@ -177,7 +196,17 @@ class CommissionService:
             )
 
             self.session.add(commission)
-            await self.session.flush()
+            try:
+                await self.session.flush()
+            except IntegrityError as e:
+                # Handle race where another worker created the same commission concurrently
+                if "uq_commission_purchase_attribution" in str(e):
+                    logger.warning(
+                        f"Race condition detected for {purchase_attribution_id}, fetching existing"
+                    )
+                    await self.session.rollback()
+                    return await self._get_existing_commission(purchase_attribution_id)
+                raise
 
             logger.info(
                 f"✅ Created commission record: ${commission_earned} "
@@ -186,9 +215,12 @@ class CommissionService:
 
             if billing_phase == BillingPhase.PAID:
                 logger.info(
-                    f"📊 Cycle usage: ${cycle_usage_after} / ${capped_amount} "
-                    f"({(cycle_usage_after / capped_amount * 100):.1f}%)"
+                    f"📊 Cycle usage: ${cycle_usage_after} / ${capped_amount_for_record} "
+                    f"({(cycle_usage_after / capped_amount_for_record * Decimal('100')):.1f}%)"
                 )
+
+            # Persist the new commission
+            await self.session.commit()
 
             return commission
 
@@ -213,6 +245,7 @@ class CommissionService:
         Returns:
             Result dictionary with success status and details
         """
+        commission = None
         try:
             # Get commission record
             commission_query = select(CommissionRecord).where(
@@ -309,31 +342,40 @@ class CommissionService:
             else:
                 charge_type = ChargeType.FULL
 
-            # Record to Shopify
+            # Record to Shopify with retry and backoff
             logger.info(f"📤 Recording ${actual_charge} to Shopify...")
 
-            usage_record = await shopify_billing_service.record_usage(
-                shop_id=shop.id,
-                shop_domain=shop.shop_domain,
-                access_token=shop.access_token,
-                subscription_line_item_id=billing_plan.subscription_line_item_id,
-                description=f"Better Bundle - Order {commission.order_id}",
-                amount=actual_charge,
-                currency=commission.currency,
-            )
+            max_retries = 3
+            backoff_base_seconds = 0.5
+            usage_record = None
+            last_error_message = None
+            for attempt in range(1, max_retries + 1):
+                usage_record = await shopify_billing_service.record_usage(
+                    shop_id=shop.id,
+                    shop_domain=shop.shop_domain,
+                    access_token=shop.access_token,
+                    subscription_line_item_id=billing_plan.subscription_line_item_id,
+                    description=f"Better Bundle - Order {commission.order_id}",
+                    amount=actual_charge,
+                    currency=commission.currency,
+                )
+                if usage_record:
+                    break
+                last_error_message = "Failed to create Shopify usage record"
+                sleep_seconds = backoff_base_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    f"Retry {attempt}/{max_retries} after failure recording to Shopify; sleeping {sleep_seconds:.2f}s"
+                )
+                await asyncio.sleep(sleep_seconds)
 
             if not usage_record:
-                logger.error(f"❌ Failed to record to Shopify")
-                commission.status = CommissionStatus.FAILED
-                commission.error_count += 1
-                commission.last_error = "Failed to create Shopify usage record"
-                commission.last_error_at = now_utc()
-                await self.session.flush()
-
+                logger.error("❌ Failed to record to Shopify after retries")
+                # Do not persist partial failure state if caller expects transactional rollback
+                await self.session.rollback()
                 return {
                     "success": False,
                     "error": "shopify_api_failed",
-                    "error_count": commission.error_count,
+                    "error_message": last_error_message,
                 }
 
             # Update commission record with success
@@ -363,7 +405,12 @@ class CommissionService:
 
             # Check if we should warn about approaching cap
             new_cycle_usage = commission.cycle_usage_before + actual_charge
-            usage_percentage = (new_cycle_usage / commission.capped_amount) * 100
+            usage_percentage_dec = (
+                (new_cycle_usage / commission.capped_amount) * Decimal("100")
+                if commission.capped_amount > 0
+                else Decimal("0")
+            )
+            usage_percentage = float(usage_percentage_dec)
 
             if usage_percentage >= 90:
                 logger.warning(
@@ -388,11 +435,8 @@ class CommissionService:
 
             # Update error tracking
             if commission:
-                commission.status = CommissionStatus.FAILED
-                commission.error_count += 1
-                commission.last_error = str(e)
-                commission.last_error_at = now_utc()
-                await self.session.flush()
+                # Roll back the transaction to avoid partial state if caller expects atomicity
+                await self.session.rollback()
 
             return {"success": False, "error": str(e)}
 
@@ -737,6 +781,30 @@ class CommissionService:
             logger.error(f"❌ Error getting billing plan: {e}")
             return None
 
+    async def _get_active_billing_plan_locked(
+        self, shop_id: str
+    ) -> Optional[BillingPlan]:
+        """Get active billing plan with row-level lock for concurrency safety"""
+        try:
+            query = (
+                select(BillingPlan)
+                .where(
+                    and_(
+                        BillingPlan.shop_id == shop_id,
+                        BillingPlan.status.in_(["active", "suspended"]),
+                    )
+                )
+                .order_by(BillingPlan.created_at.desc())
+                .with_for_update()
+            )
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            logger.error(f"❌ Error getting locked billing plan: {e}")
+            return None
+
     async def _get_cycle_usage(
         self, shop_id: str, cycle_start: datetime, cycle_end: datetime
     ) -> Decimal:
@@ -767,3 +835,27 @@ class CommissionService:
         except Exception as e:
             logger.error(f"❌ Error getting cycle usage: {e}")
             return Decimal("0")
+
+    async def _get_existing_commission(
+        self, purchase_attribution_id: str
+    ) -> Optional[CommissionRecord]:
+        """Fetch existing commission by purchase attribution id"""
+        query = select(CommissionRecord).where(
+            CommissionRecord.purchase_attribution_id == purchase_attribution_id
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    def _validate_commission_data(
+        self,
+        *,
+        commission_earned: Decimal,
+        commission_rate: Decimal,
+        capped_amount: Decimal,
+    ) -> None:
+        if commission_earned < 0:
+            raise ValueError("Commission earned cannot be negative")
+        if commission_rate < Decimal("0") or commission_rate > Decimal("1"):
+            raise ValueError("Commission rate must be between 0 and 1")
+        if capped_amount <= 0:
+            raise ValueError("Capped amount must be positive")
