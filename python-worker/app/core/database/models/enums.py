@@ -80,3 +80,38 @@ class AppBlockTarget(str, Enum):
     CHECKOUT_POST_PURCHASE = "checkout_post_purchase"
     THEME_APP_EXTENSION = "theme_app_extension"
     WEB_PIXEL_EXTENSION = "web_pixel_extension"
+
+
+class BillingPhase(str, Enum):
+    """Billing phase enum"""
+
+    TRIAL = "trial"
+    PAID = "paid"
+
+
+class CommissionStatus(str, Enum):
+    """Commission record status"""
+
+    # Trial phase statuses
+    TRIAL_PENDING = "trial_pending"  # Tracked during trial, not charged
+    TRIAL_COMPLETED = "trial_completed"  # Trial ended, moved to paid phase
+
+    # Paid phase statuses
+    PENDING = "pending"  # Ready to be sent to Shopify
+    RECORDED = "recorded"  # Successfully sent to Shopify
+    INVOICED = "invoiced"  # Included in monthly invoice
+
+    # Error/rejection statuses
+    REJECTED = "rejected"  # Cap reached, couldn't charge
+    FAILED = "failed"  # Failed to send to Shopify
+    CAPPED = "capped"  # Partial charge due to cap
+
+
+class ChargeType(str, Enum):
+    """Type of charge"""
+
+    FULL = "full"  # Full commission charged
+    PARTIAL = "partial"  # Partial due to cap
+    OVERFLOW_ONLY = "overflow_only"  # Only overflow tracked
+    TRIAL = "trial"  # During trial period
+    REJECTED = "rejected"  # Not charged

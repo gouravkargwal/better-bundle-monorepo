@@ -13,14 +13,13 @@ from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database.models import (
     CommissionRecord,
-    BillingPhase,
-    CommissionStatus,
-    ChargeType,
 )
 from app.core.database.models import BillingPlan
 from app.core.database.models import PurchaseAttribution
 from app.core.database.models import Shop
 from app.shared.helpers import now_utc
+from app.core.database.models.enums import BillingPhase, CommissionStatus, ChargeType
+
 
 logger = logging.getLogger(__name__)
 

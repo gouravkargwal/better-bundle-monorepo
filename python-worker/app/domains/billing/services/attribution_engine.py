@@ -37,7 +37,7 @@ from ..models.attribution_models import (
 )
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from app.domains.billing.services.commission_service import CommissionService
-from app.domains.billing.services.billing_service import BillingService
+from app.core.database.models.enums import BillingPhase
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,6 @@ class AttributionEngine:
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
         self.commission_service = CommissionService(session)
-        self.billing_service = BillingService(session)
         # ✅ SCENARIO 9: Configurable attribution windows
         self.attribution_windows = {
             "default": timedelta(hours=24),  # 24 hours default
@@ -260,9 +259,7 @@ class AttributionEngine:
             # Don't fail the entire attribution if commission creation fails
             # Commission can be created later via reconciliation
 
-    async def _handle_post_commission_checks(
-        self, commission: CommissionRecord, shop_id: str
-    ) -> None:
+    async def _handle_post_commission_checks(self, commission, shop_id: str) -> None:
         """
         Handle checks after commission is created:
         - Trial threshold check
@@ -288,8 +285,21 @@ class AttributionEngine:
                         f"${trial_status.get('trial_threshold')}"
                     )
 
-                    await self.billing_service._handle_trial_purchase(
-                        shop_id, commission.billing_plan, commission.cycle_usage_after
+                    # Lazy import to avoid circular dependency with BillingService
+                    from app.domains.billing.services.billing_service import (
+                        BillingService,
+                    )
+
+                    billing_service = BillingService(self.session)
+                    # Note: _handle_trial_purchase signature expects
+                    # (shop_id, billing_plan, attributed_revenue, purchase_event)
+                    # We pass attributed_revenue using commission.cycle_usage_after and
+                    # no purchase_event context is available here.
+                    await billing_service._handle_trial_purchase(  # type: ignore[attr-defined]
+                        shop_id,
+                        commission.billing_plan,
+                        commission.cycle_usage_after,
+                        None,
                     )
 
             elif commission.billing_phase == BillingPhase.PAID:

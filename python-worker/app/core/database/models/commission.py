@@ -8,14 +8,13 @@ paid phase (commission charged to Shopify).
 
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from sqlalchemy import (
     Column,
     Integer,
     String,
     Numeric,
     DateTime,
-    Boolean,
     JSON,
     Index,
     UniqueConstraint,
@@ -26,43 +25,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
-import enum
 from .base import Base
-
-
-class BillingPhase(str, enum.Enum):
-    """Billing phase enum"""
-
-    TRIAL = "trial"
-    PAID = "paid"
-
-
-class CommissionStatus(str, enum.Enum):
-    """Commission record status"""
-
-    # Trial phase statuses
-    TRIAL_PENDING = "trial_pending"  # Tracked during trial, not charged
-    TRIAL_COMPLETED = "trial_completed"  # Trial ended, moved to paid phase
-
-    # Paid phase statuses
-    PENDING = "pending"  # Ready to be sent to Shopify
-    RECORDED = "recorded"  # Successfully sent to Shopify
-    INVOICED = "invoiced"  # Included in monthly invoice
-
-    # Error/rejection statuses
-    REJECTED = "rejected"  # Cap reached, couldn't charge
-    FAILED = "failed"  # Failed to send to Shopify
-    CAPPED = "capped"  # Partial charge due to cap
-
-
-class ChargeType(str, enum.Enum):
-    """Type of charge"""
-
-    FULL = "full"  # Full commission charged
-    PARTIAL = "partial"  # Partial due to cap
-    OVERFLOW_ONLY = "overflow_only"  # Only overflow tracked
-    TRIAL = "trial"  # During trial period
-    REJECTED = "rejected"  # Not charged
+from .enums import BillingPhase, CommissionStatus, ChargeType
 
 
 class CommissionRecord(Base):
@@ -249,7 +213,9 @@ class CommissionRecord(Base):
     # Additional info
     notes = Column(Text, nullable=True, comment="Additional notes or reasons")
 
-    metadata = Column(JSON, nullable=True, default=dict, comment="Additional metadata")
+    commission_metadata = Column(
+        JSON, nullable=True, default=dict, comment="Additional metadata"
+    )
 
     # Error tracking
     error_count = Column(
@@ -390,7 +356,7 @@ class CommissionRecord(Base):
             "invoiced_at": self.invoiced_at.isoformat() if self.invoiced_at else None,
             "currency": self.currency,
             "notes": self.notes,
-            "metadata": self.metadata,
+            "commission_metadata": self.commission_metadata,
             "error_count": self.error_count,
             "last_error": self.last_error,
             "created_at": self.created_at.isoformat(),
