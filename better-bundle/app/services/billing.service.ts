@@ -117,7 +117,7 @@ export async function getUsageRevenueData(
         shop_id: shopId,
         billing_cycle_id: currentCycle.id,
         billing_phase: "PAID",
-        status: "recorded",
+        status: "RECORDED",
       },
       _sum: {
         attributed_revenue: true,
@@ -176,7 +176,7 @@ export async function getCurrentCycleMetrics(
 
     // Calculate metrics
     const purchases = commissionRecords.filter(
-      (r) => r.status === "recorded" || r.status === "invoiced",
+      (r) => r.status === "RECORDED" || r.status === "INVOICED",
     );
 
     const purchasesCount = purchases.length;
@@ -403,7 +403,7 @@ export async function completeTrialAndCreateCycle(
     await prisma.subscription_trials.update({
       where: { id: shopSubscription.subscription_trials!.id },
       data: {
-        status: "completed",
+        status: "COMPLETED",
         completed_at: new Date(),
       },
     });
@@ -412,7 +412,7 @@ export async function completeTrialAndCreateCycle(
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "pending_approval",
+        status: "PENDING_APPROVAL",
       },
     });
 
@@ -497,6 +497,9 @@ export async function activateSubscription(
       },
     });
 
+    // Reactivate shop services
+    await reactivateShopIfSuspended(shopId);
+
     return {
       success: true,
       shopify_subscription: shopifySubscription,
@@ -563,6 +566,45 @@ export async function increaseBillingCycleCap(
     };
   } catch (error) {
     console.error(`Error increasing cap for shop ${shopId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Reactivate shop services if suspended
+ */
+export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
+  try {
+    // Get shop record
+    const shop = await prisma.shops.findUnique({
+      where: { id: shopId },
+      select: { id: true, shop_domain: true, is_active: true },
+    });
+
+    if (!shop) {
+      console.log(`⚠️ Shop not found for ID: ${shopId}`);
+      return;
+    }
+
+    // Only reactivate if currently suspended
+    if (!shop.is_active) {
+      await prisma.shops.update({
+        where: { id: shopId },
+        data: {
+          is_active: true,
+          suspended_at: null,
+          suspension_reason: null,
+          service_impact: null,
+          updated_at: new Date(),
+        },
+      });
+
+      console.log(`✅ Shop reactivated: ${shop.shop_domain}`);
+    } else {
+      console.log(`ℹ️ Shop already active: ${shop.shop_domain}`);
+    }
+  } catch (error) {
+    console.error(`Error reactivating shop ${shopId}:`, error);
     throw error;
   }
 }

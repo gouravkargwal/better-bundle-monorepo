@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import {
   activateSubscription,
   increaseBillingCycleCap,
+  reactivateShopIfSuspended,
 } from "../services/billing.service";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -156,29 +157,4 @@ async function handleRejectedSubscription(
   });
 
   console.log(`❌ Subscription rejected for shop ${shopRecord.shop_domain}`);
-}
-
-async function reactivateShopIfSuspended(shopId: string) {
-  const currentShopRecord = await prisma.shops.findUnique({
-    where: { id: shopId },
-    select: { suspension_reason: true, is_active: true },
-  });
-
-  if (
-    currentShopRecord?.suspension_reason === "monthly_cap_reached" &&
-    !currentShopRecord.is_active
-  ) {
-    await prisma.shops.update({
-      where: { id: shopId },
-      data: {
-        is_active: true,
-        suspended_at: null,
-        suspension_reason: null,
-        service_impact: null,
-        updated_at: new Date(),
-      },
-    });
-
-    console.log(`🚀 Shop services reactivated after cap increase!`);
-  }
 }
