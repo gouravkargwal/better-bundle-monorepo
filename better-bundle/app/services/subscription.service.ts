@@ -17,7 +17,7 @@ export async function hasActiveSubscription(shopId: string): Promise<boolean> {
     }
 
     const config = billingPlan.configuration as any;
-    return config.subscription_id && config.subscription_status === "ACTIVE";
+    return config.subscription_id && config.subscription_status === "active";
   } catch (error) {
     console.error("❌ Error checking subscription status:", error);
     return false;

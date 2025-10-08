@@ -318,6 +318,17 @@ class BillingRepositoryV2:
                 trial.status = TrialStatus.COMPLETED
                 trial.completed_at = now_utc()
 
+                # Also update the shop subscription status to TRIAL_COMPLETED
+                shop_subscription = await self.get_shop_subscription_by_id(
+                    shop_subscription_id
+                )
+                if shop_subscription:
+                    shop_subscription.status = SubscriptionStatus.TRIAL_COMPLETED
+                    logger.info(
+                        f"✅ Trial completed for shop {shop_subscription.shop_id}. "
+                        f"Awaiting user to setup billing with cap."
+                    )
+
             await self.session.flush()
             return True
 

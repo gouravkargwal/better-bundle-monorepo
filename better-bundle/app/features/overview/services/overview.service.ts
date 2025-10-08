@@ -1,4 +1,3 @@
-// features/overview/services/overview.service.ts
 import prisma from "../../../db.server";
 
 export class OverviewService {
@@ -67,29 +66,80 @@ export class OverviewService {
   }
 
   private async getOverviewMetrics(shopId: string, currencyCode: string) {
-    // Get attributed revenue from commission records
-    const attributedRevenue = await prisma.commission_records.aggregate({
+    // First, check if shop is in trial or paid phase
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopId,
-        status: "RECORDED",
+        is_active: true,
       },
-      _sum: {
-        attributed_revenue: true,
+      select: {
+        status: true,
+        id: true,
       },
     });
+
+    const isTrialPhase =
+      shopSubscription?.status === "TRIAL" ||
+      shopSubscription?.status === "TRIAL_COMPLETED";
+
+    // Get attributed revenue based on phase
+    let attributedRevenue;
+    let attributedOrders;
+
+    if (isTrialPhase) {
+      // TRIAL PHASE: Show trial commission data (tracked but not charged)
+      attributedRevenue = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopId,
+          billing_phase: "TRIAL",
+          status: {
+            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+          },
+        },
+        _sum: {
+          attributed_revenue: true,
+        },
+      });
+
+      attributedOrders = await prisma.commission_records.count({
+        where: {
+          shop_id: shopId,
+          billing_phase: "TRIAL",
+          status: {
+            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+          },
+        },
+      });
+    } else {
+      // PAID PHASE: Show actual charged commission data
+      attributedRevenue = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopId,
+          billing_phase: "PAID",
+          status: {
+            in: ["RECORDED", "INVOICED"],
+          },
+        },
+        _sum: {
+          commission_charged: true, // Use actual charged amount, not attributed revenue
+        },
+      });
+
+      attributedOrders = await prisma.commission_records.count({
+        where: {
+          shop_id: shopId,
+          billing_phase: "PAID",
+          status: {
+            in: ["RECORDED", "INVOICED"],
+          },
+        },
+      });
+    }
 
     // Get total orders count for conversion rate calculation
     const totalOrders = await prisma.order_data.count({
       where: {
         shop_id: shopId,
-      },
-    });
-
-    // Get attributed orders count
-    const attributedOrders = await prisma.commission_records.count({
-      where: {
-        shop_id: shopId,
-        status: "RECORDED",
       },
     });
 
@@ -122,11 +172,21 @@ export class OverviewService {
     });
 
     return {
-      totalRevenue: attributedRevenue._sum.attributed_revenue || 0,
+      totalRevenue: isTrialPhase
+        ? (attributedRevenue._sum as any).attributed_revenue || 0
+        : (attributedRevenue._sum as any).commission_charged || 0,
       currency: currencyCode,
       conversionRate: Math.round(conversionRate * 100) / 100, // Round to 2 decimal places
       revenueChange: null, // TODO: Calculate period-over-period change
       conversionRateChange: null, // TODO: Calculate period-over-period change
+      // Phase information
+      isTrialPhase,
+      phaseLabel: isTrialPhase ? "Trial Revenue" : "Total Revenue",
+      phaseDescription: isTrialPhase
+        ? shopSubscription?.status === "TRIAL_COMPLETED"
+          ? "Trial completed - commission tracked (not charged yet)"
+          : "Commission tracked during trial (not charged yet)"
+        : "Commission charged to Shopify",
       // Additional data for future use
       totalOrders,
       attributedOrders,

@@ -25,11 +25,11 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
-from .base import Base
+from .base import Base, TimestampMixin
 from .enums import BillingPhase, CommissionStatus, ChargeType
 
 
-class CommissionRecord(Base):
+class CommissionRecord(Base, TimestampMixin):
     """
     Commission Record
 
@@ -223,18 +223,7 @@ class CommissionRecord(Base):
         DateTime(timezone=True), nullable=True, comment="When the last error occurred"
     )
 
-    # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True
-    )
-
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        index=True,
-    )
+    # Timestamps are provided by TimestampMixin
 
     # Soft delete
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)

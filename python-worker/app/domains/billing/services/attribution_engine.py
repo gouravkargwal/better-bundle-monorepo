@@ -7,7 +7,7 @@ with recommendations across different extensions.
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -254,7 +254,15 @@ class AttributionEngine:
             # by checking if it was created very recently (within last 5 seconds)
             from app.shared.helpers import now_utc
 
-            time_diff = (now_utc() - commission.created_at).total_seconds()
+            # Ensure both datetimes are timezone-aware for comparison
+            now = now_utc()
+            created_at = commission.created_at
+
+            # If created_at is timezone-naive, assume it's UTC
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+
+            time_diff = (now - created_at).total_seconds()
 
             if time_diff < 5:  # Newly created
                 logger.info(
@@ -301,22 +309,9 @@ class AttributionEngine:
                         f"${trial_status.get('trial_threshold')}"
                     )
 
-                    # Lazy import to avoid circular dependency with BillingServiceV2
-                    from app.domains.billing.services.billing_service_v2 import (
-                        BillingServiceV2,
-                    )
-
-                    billing_service = BillingServiceV2(self.session)
-                    # Note: _handle_trial_purchase signature expects
-                    # (shop_id, billing_plan, attributed_revenue, purchase_event)
-                    # We pass attributed_revenue using commission.cycle_usage_after and
-                    # no purchase_event context is available here.
-                    await billing_service._handle_trial_purchase(  # type: ignore[attr-defined]
-                        shop_id,
-                        commission.billing_plan,
-                        commission.cycle_usage_after,
-                        None,
-                    )
+                    # Note: Trial threshold completion is handled by the billing service
+                    # in the main attribution flow, not here in post-commission checks.
+                    # This is just a warning/logging mechanism.
 
             elif commission.billing_phase == BillingPhase.PAID:
                 # Check usage percentage

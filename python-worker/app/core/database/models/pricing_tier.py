@@ -67,10 +67,9 @@ class PricingTier(BaseModel):
         String(1000), nullable=True
     )  # JSON string for additional config
 
-    # Timestamps
-    effective_from = Column(
-        TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
-    )
+    # Timestamps are provided by BaseModel (TimestampMixin)
+    # Additional business timestamps
+    effective_from = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
     effective_to = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     # Relationships

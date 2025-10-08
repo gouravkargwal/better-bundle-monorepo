@@ -136,6 +136,7 @@ class SubscriptionStatus(str, Enum):
     PENDING_APPROVAL = (
         "pending_approval"  # Trial ended, waiting for subscription approval
     )
+    TRIAL_COMPLETED = "trial_completed"  # Trial done, awaiting user setup
     ACTIVE = "active"  # Active subscription
     SUSPENDED = "suspended"  # Suspended (payment issues, etc.)
     CANCELLED = "cancelled"  # Cancelled by user
@@ -163,11 +164,11 @@ class TrialStatus(str, Enum):
 class ShopifySubscriptionStatus(str, Enum):
     """Shopify subscription status"""
 
-    PENDING = "PENDING"  # Awaiting merchant approval
-    ACTIVE = "ACTIVE"  # Active and billing
-    DECLINED = "DECLINED"  # Merchant declined
-    CANCELLED = "CANCELLED"  # Cancelled
-    EXPIRED = "EXPIRED"  # Expired
+    PENDING = "pending"  # Awaiting merchant approval
+    ACTIVE = "active"  # Active and billing
+    DECLINED = "declined"  # Merchant declined
+    CANCELLED = "cancelled"  # Cancelled
+    EXPIRED = "expired"  # Expired
 
 
 class AdjustmentReason(str, Enum):

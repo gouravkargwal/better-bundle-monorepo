@@ -107,9 +107,32 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
     // Check subscription status
     const subscriptionActive = shopSubscription.status === "ACTIVE";
     const subscriptionPending = shopSubscription.status === "PENDING_APPROVAL";
-    const trialCompleted = shopSubscription.status !== "TRIAL";
 
-    // If subscription is pending, services are suspended
+    // ✅ Trial active - services active
+    if (shopSubscription.status === "TRIAL") {
+      return {
+        isSuspended: false,
+        reason: "trial_active",
+        requiresBillingSetup: false,
+        trialCompleted: false,
+        subscriptionActive: false,
+        subscriptionPending: false,
+      };
+    }
+
+    // ✅ NEW: Trial completed - services SUSPENDED until user sets up billing
+    if (shopSubscription.status === "TRIAL_COMPLETED") {
+      return {
+        isSuspended: true,
+        reason: "trial_completed_awaiting_setup",
+        requiresBillingSetup: true,
+        trialCompleted: true,
+        subscriptionActive: false,
+        subscriptionPending: false,
+      };
+    }
+
+    // ✅ Subscription pending approval - services SUSPENDED
     if (subscriptionPending) {
       return {
         isSuspended: true,
@@ -121,13 +144,25 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
       };
     }
 
-    // Services are active
+    // ✅ Subscription active - services ACTIVE
+    if (subscriptionActive) {
+      return {
+        isSuspended: false,
+        reason: "active",
+        requiresBillingSetup: false,
+        trialCompleted: true,
+        subscriptionActive: true,
+        subscriptionPending: false,
+      };
+    }
+
+    // ✅ Suspended/Cancelled - services SUSPENDED
     return {
-      isSuspended: false,
-      reason: "active",
-      requiresBillingSetup: false,
-      trialCompleted: trialCompleted,
-      subscriptionActive: subscriptionActive,
+      isSuspended: true,
+      reason: `subscription_${shopSubscription.status.toLowerCase()}`,
+      requiresBillingSetup: shopSubscription.status === "SUSPENDED",
+      trialCompleted: true,
+      subscriptionActive: false,
       subscriptionPending: false,
     };
   } catch (error) {

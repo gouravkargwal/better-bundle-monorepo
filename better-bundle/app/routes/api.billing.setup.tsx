@@ -1,19 +1,15 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import {
-  createShopSubscription,
-  completeTrialAndCreateCycle,
-} from "../services/billing.service";
+// Removed unused imports
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    // Parse request body to get spending limit and monthly cap
+    // Parse request body to get monthly cap
     const body = await request.json();
-    const spendingLimit = body.spendingLimit;
     const monthlyCap = body.monthlyCap;
 
     // Validate monthly cap
@@ -53,32 +49,24 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Check if shop has a trial subscription that needs to be completed
-    const trialSubscription = await prisma.shop_subscriptions.findFirst({
+    // ✅ Get shop subscription - only allow if trial is completed
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: "trial",
         is_active: true,
-      },
-      include: {
-        subscription_trials: true,
+        // ✅ Only allow if trial is completed
+        status: "TRIAL_COMPLETED",
       },
     });
 
-    if (trialSubscription && trialSubscription.subscription_trials) {
-      // Check if trial threshold is reached
-      if (
-        trialSubscription.subscription_trials.accumulated_revenue >=
-        trialSubscription.subscription_trials.threshold_amount
-      ) {
-        // Complete trial and create first billing cycle
-        await completeTrialAndCreateCycle(shopRecord.id);
-      } else {
-        return json(
-          { success: false, error: "Trial threshold not reached yet" },
-          { status: 400 },
-        );
-      }
+    if (!shopSubscription) {
+      return json(
+        {
+          success: false,
+          error: "No completed trial found. Please complete your trial first.",
+        },
+        { status: 400 },
+      );
     }
 
     // Get default subscription plan and pricing tier
@@ -99,7 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const defaultPricingTier = await prisma.pricing_tiers.findFirst({
       where: {
         subscription_plan_id: defaultPlan.id,
-        currency: shopRecord.currency_code,
+        currency: shopRecord.currency_code || "USD",
         is_active: true,
         is_default: true,
       },
@@ -212,33 +200,30 @@ export async function action({ request }: ActionFunctionArgs) {
 
     console.log(`✅ Subscription created: ${subscription.id}`);
 
-    // Create shop subscription using new schema
-    const shopSubscription = await prisma.shop_subscriptions.create({
+    // ✅ UPDATE: Change status from TRIAL_COMPLETED to PENDING_APPROVAL
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
       data: {
-        shop_id: shopRecord.id,
-        subscription_plan_id: defaultPlan.id,
-        pricing_tier_id: defaultPricingTier.id,
-        status: "pending_approval",
-        start_date: new Date(),
-        is_active: true,
-        auto_renew: true,
+        status: "pending_approval", // ✅ NOW we set PENDING_APPROVAL
         user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
+        updated_at: new Date(),
       },
     });
 
     // Create Shopify subscription record
-    const shopifySubscription = await prisma.shopify_subscriptions.create({
+    await prisma.shopify_subscriptions.create({
       data: {
         shop_subscription_id: shopSubscription.id,
         shopify_subscription_id: subscription.id,
         shopify_line_item_id: subscription.lineItems[0].id,
         confirmation_url: confirmationUrl,
-        status: "PENDING",
+        status: "pending",
         created_at: new Date(),
+        error_count: "0", // Required field
       },
     });
 
-    console.log(`✅ New shop subscription created: ${shopSubscription.id}`);
+    console.log(`✅ Shop subscription updated: ${shopSubscription.id}`);
 
     console.log(`✅ Billing setup complete for shop ${shop}`);
 

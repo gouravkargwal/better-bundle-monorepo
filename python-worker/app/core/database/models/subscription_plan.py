@@ -16,7 +16,7 @@ from .enums import SubscriptionPlanType
 class SubscriptionPlan(BaseModel):
     """
     Subscription Plan Template
-    
+
     Master table defining available subscription plans.
     These are templates that shops can subscribe to.
     """
@@ -29,32 +29,30 @@ class SubscriptionPlan(BaseModel):
     plan_type = Column(
         SQLEnum(SubscriptionPlanType, name="subscription_plan_type_enum"),
         nullable=False,
-        index=True
+        index=True,
     )
-    
+
     # Plan configuration
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_default = Column(Boolean, default=False, nullable=False, index=True)
-    
+
     # Commission settings (defaults, can be overridden by pricing tiers)
     default_commission_rate = Column(String(10), nullable=True)  # e.g., "0.03" for 3%
-    
+
     # Metadata
     plan_metadata = Column(Text, nullable=True)  # JSON string for additional config
-    
-    # Timestamps
-    effective_from = Column(TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Timestamps are provided by BaseModel (TimestampMixin)
+    # Additional business timestamps
+    effective_from = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
     effective_to = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-    
+
     # Relationships
     pricing_tiers = relationship(
-        "PricingTier", 
-        back_populates="subscription_plan", 
-        cascade="all, delete-orphan"
+        "PricingTier", back_populates="subscription_plan", cascade="all, delete-orphan"
     )
     shop_subscriptions = relationship(
-        "ShopSubscription", 
-        back_populates="subscription_plan"
+        "ShopSubscription", back_populates="subscription_plan"
     )
 
     # Indexes
@@ -74,7 +72,7 @@ class SubscriptionPlan(BaseModel):
         """Check if plan is currently active (not expired)"""
         now = datetime.utcnow()
         return (
-            self.is_active 
-            and self.effective_from <= now 
+            self.is_active
+            and self.effective_from <= now
             and (self.effective_to is None or self.effective_to > now)
         )

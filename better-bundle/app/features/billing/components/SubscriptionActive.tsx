@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Card,
   BlockStack,
@@ -8,59 +9,63 @@ import {
   Button,
   Modal,
   RangeSlider,
+  Banner,
 } from "@shopify/polaris";
-import { BillingLayout } from "./BillingLayout";
-import { HeroHeader } from "../UI/HeroHeader";
-import { formatCurrency } from "app/utils/currency";
-import { useState } from "react";
-import { useBillingActions } from "../../hooks/useBillingActions";
+import { HeroHeader } from "../../../components/UI/HeroHeader";
+import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionActiveProps {
-  billingPlan: any;
+  subscriptionData: SubscriptionData;
   shopCurrency: string;
+  onIncreaseCap: (
+    newLimit: number,
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function SubscriptionActive({
-  billingPlan,
+  subscriptionData,
   shopCurrency,
+  onIncreaseCap,
 }: SubscriptionActiveProps) {
-  // ✅ USE NEW DATA - Only post-trial revenue (industry standard)
-  const metrics = billingPlan.currentCycleMetrics || {
-    purchases: { count: 0, total: 0 },
-
-    net_revenue: 0, // Only post-trial revenue
-    commission: 0,
-    final_commission: 0,
-    capped_amount: billingPlan.capped_amount || 1000,
-    days_remaining: 0,
-  };
-
-  const usagePercentage =
-    (metrics.final_commission / metrics.capped_amount) * 100;
-  const isNearLimit = usagePercentage > 80;
-  const isOverLimit = usagePercentage > 100;
-
   const [showCapIncreaseModal, setShowCapIncreaseModal] = useState(false);
   const [newCapAmount, setNewCapAmount] = useState(0);
-  const { handleIncreaseCap, isLoading } = useBillingActions(shopCurrency);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: shopCurrency,
+    }).format(amount);
+  };
+
+  const usagePercentage = subscriptionData.usagePercentage;
+  const isNearCap = usagePercentage > 80;
+  const isAtCap = usagePercentage >= 100;
 
   const handleCapIncrease = async () => {
-    if (newCapAmount <= metrics.capped_amount) {
+    if (newCapAmount <= subscriptionData.spendingLimit) {
       alert("New cap must be higher than current cap");
       return;
     }
 
-    const result = await handleIncreaseCap(newCapAmount);
-    if (result.success) {
-      setShowCapIncreaseModal(false);
-      alert("Cap increased successfully! Services will resume.");
-    } else {
-      alert(`Failed to increase cap: ${result.error}`);
+    setIsLoading(true);
+    try {
+      const result = await onIncreaseCap(newCapAmount);
+      if (result.success) {
+        setShowCapIncreaseModal(false);
+        alert("Cap increased successfully! Services will resume.");
+      } else {
+        alert(`Failed to increase cap: ${result.error}`);
+      }
+    } catch (error) {
+      alert("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <BillingLayout>
+    <>
       <BlockStack gap="500">
         <HeroHeader
           badge="✅ Active"
@@ -69,22 +74,22 @@ export function SubscriptionActive({
           gradient="green"
         />
 
-        {/* ✅ IMPROVED: Usage Overview Card */}
+        {/* Usage Overview Card */}
         <Card>
           <div style={{ padding: "24px" }}>
             <BlockStack gap="400">
-              {/* Header with days remaining */}
+              {/* Header with status */}
               <InlineStack align="space-between" blockAlign="center">
                 <div
                   style={{
                     padding: "16px",
-                    backgroundColor: isOverLimit
+                    backgroundColor: isAtCap
                       ? "#FEF2F2"
-                      : isNearLimit
+                      : isNearCap
                         ? "#FEF3C7"
                         : "#DBEAFE",
                     borderRadius: "12px",
-                    border: `1px solid ${isOverLimit ? "#FECACA" : isNearLimit ? "#FCD34D" : "#BAE6FD"}`,
+                    border: `1px solid ${isAtCap ? "#FECACA" : isNearCap ? "#FCD34D" : "#BAE6FD"}`,
                     flex: 1,
                   }}
                 >
@@ -92,14 +97,12 @@ export function SubscriptionActive({
                     📊 Current Billing Cycle
                   </Text>
                 </div>
-                {metrics.days_remaining > 0 && (
-                  <Badge tone="info" size="large">
-                    {`${metrics.days_remaining} days left`}
-                  </Badge>
-                )}
+                <Badge tone="success" size="large">
+                  Active
+                </Badge>
               </InlineStack>
 
-              {/* ✅ NEW: Revenue & Commission Side by Side */}
+              {/* Revenue & Commission Side by Side */}
               <div
                 style={{
                   display: "grid",
@@ -126,29 +129,16 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(metrics.net_revenue, shopCurrency)}
+                      {formatCurrency(subscriptionData.currentUsage)}
                     </Text>
                     <BlockStack gap="100">
-                      <InlineStack align="space-between">
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          Sales:
-                        </Text>
-                        <Text as="span" variant="bodySm">
-                          {formatCurrency(
-                            metrics.purchases.total,
-                            shopCurrency,
-                          )}{" "}
-                          ({metrics.purchases.count})
-                        </Text>
-                      </InlineStack>
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" tone="subdued">
                           Max Revenue:
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           {formatCurrency(
-                            metrics.capped_amount / 0.03,
-                            shopCurrency,
+                            subscriptionData.spendingLimit / 0.03,
                           )}{" "}
                           (before cap)
                         </Text>
@@ -157,22 +147,18 @@ export function SubscriptionActive({
                   </BlockStack>
                 </div>
 
-                {/* ✅ ENHANCED: Your Bill (Commission) */}
+                {/* Your Bill (Commission) */}
                 <div
                   style={{
                     padding: "20px",
-                    backgroundColor: isOverLimit
+                    backgroundColor: isAtCap
                       ? "#FEF2F2"
-                      : isNearLimit
+                      : isNearCap
                         ? "#FEF3C7"
                         : "#ECFDF5",
                     borderRadius: "12px",
                     border: `2px solid ${
-                      isOverLimit
-                        ? "#EF4444"
-                        : isNearLimit
-                          ? "#F59E0B"
-                          : "#10B981"
+                      isAtCap ? "#EF4444" : isNearCap ? "#F59E0B" : "#10B981"
                     }`,
                   }}
                 >
@@ -189,12 +175,12 @@ export function SubscriptionActive({
                       as="h3"
                       variant="heading2xl"
                       fontWeight="bold"
-                      tone={isOverLimit ? "critical" : undefined}
+                      tone={isAtCap ? "critical" : undefined}
                     >
-                      {formatCurrency(metrics.final_commission, shopCurrency)}
+                      {formatCurrency(subscriptionData.currentUsage * 0.03)}
                     </Text>
                     <Text as="span" variant="bodySm" tone="subdued">
-                      3% of {formatCurrency(metrics.net_revenue, shopCurrency)}
+                      3% of {formatCurrency(subscriptionData.currentUsage)}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -205,22 +191,14 @@ export function SubscriptionActive({
                           {formatCurrency(
                             Math.max(
                               0,
-                              metrics.capped_amount - metrics.final_commission,
+                              subscriptionData.spendingLimit -
+                                subscriptionData.currentUsage * 0.03,
                             ),
-                            shopCurrency,
                           )}
                         </Text>
                       </InlineStack>
-                      <InlineStack align="space-between">
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          Reset in:
-                        </Text>
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          {metrics.days_remaining} days
-                        </Text>
-                      </InlineStack>
                     </BlockStack>
-                    {isOverLimit && (
+                    {isAtCap && (
                       <div
                         style={{
                           padding: "8px",
@@ -230,7 +208,7 @@ export function SubscriptionActive({
                       >
                         <Text as="span" variant="bodySm" tone="critical">
                           ⚠️ Capped at{" "}
-                          {formatCurrency(metrics.capped_amount, shopCurrency)}
+                          {formatCurrency(subscriptionData.spendingLimit)}
                         </Text>
                       </div>
                     )}
@@ -238,7 +216,7 @@ export function SubscriptionActive({
                 </div>
               </div>
 
-              {/* ✅ NEW: Dual Progress Bars */}
+              {/* Dual Progress Bars */}
               <div
                 style={{
                   display: "grid",
@@ -268,8 +246,8 @@ export function SubscriptionActive({
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           {Math.round(
-                            (metrics.net_revenue /
-                              (metrics.capped_amount / 0.03)) *
+                            (subscriptionData.currentUsage /
+                              (subscriptionData.spendingLimit / 0.03)) *
                               100,
                           )}
                           % of max
@@ -277,8 +255,8 @@ export function SubscriptionActive({
                       </InlineStack>
                       <ProgressBar
                         progress={Math.min(
-                          (metrics.net_revenue /
-                            (metrics.capped_amount / 0.03)) *
+                          (subscriptionData.currentUsage /
+                            (subscriptionData.spendingLimit / 0.03)) *
                             100,
                           100,
                         )}
@@ -287,13 +265,12 @@ export function SubscriptionActive({
                       />
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" fontWeight="semibold">
-                          {formatCurrency(metrics.net_revenue, shopCurrency)}
+                          {formatCurrency(subscriptionData.currentUsage)}
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           /{" "}
                           {formatCurrency(
-                            metrics.capped_amount / 0.03,
-                            shopCurrency,
+                            subscriptionData.spendingLimit / 0.03,
                           )}{" "}
                           max
                         </Text>
@@ -307,18 +284,14 @@ export function SubscriptionActive({
                   <div
                     style={{
                       padding: "16px",
-                      backgroundColor: isOverLimit
+                      backgroundColor: isAtCap
                         ? "#FEF2F2"
-                        : isNearLimit
+                        : isNearCap
                           ? "#FEF3C7"
                           : "#F0F9FF",
                       borderRadius: "12px",
                       border: `1px solid ${
-                        isOverLimit
-                          ? "#FECACA"
-                          : isNearLimit
-                            ? "#FCD34D"
-                            : "#BAE6FD"
+                        isAtCap ? "#FECACA" : isNearCap ? "#FCD34D" : "#BAE6FD"
                       }`,
                     }}
                   >
@@ -338,19 +311,15 @@ export function SubscriptionActive({
                       </InlineStack>
                       <ProgressBar
                         progress={Math.min(usagePercentage, 100)}
-                        tone={isOverLimit ? "critical" : "success"}
+                        tone={isAtCap ? "critical" : "success"}
                         size="large"
                       />
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" fontWeight="semibold">
-                          {formatCurrency(
-                            metrics.final_commission,
-                            shopCurrency,
-                          )}
+                          {formatCurrency(subscriptionData.currentUsage * 0.03)}
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
-                          /{" "}
-                          {formatCurrency(metrics.capped_amount, shopCurrency)}
+                          / {formatCurrency(subscriptionData.spendingLimit)}
                         </Text>
                       </InlineStack>
                     </BlockStack>
@@ -358,24 +327,18 @@ export function SubscriptionActive({
                 </BlockStack>
               </div>
 
-              {/* ✅ EXISTING: Warnings - Keep as is */}
-              {isNearLimit && !isOverLimit && (
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#FEF3C7",
-                    borderRadius: "8px",
-                    border: "1px solid #FCD34D",
-                  }}
-                >
-                  <Text as="span" variant="bodySm">
-                    ⚠️ You're approaching your spending cap.
+              {/* Warnings */}
+              {isNearCap && !isAtCap && (
+                <Banner tone="info">
+                  <Text as="p">
+                    You're approaching your monthly spending cap (
+                    {subscriptionData.usagePercentage}% used).
                   </Text>
-                </div>
+                </Banner>
               )}
 
-              {/* ✅ NEW: Capped State Warning */}
-              {isOverLimit && (
+              {/* Capped State Warning */}
+              {isAtCap && (
                 <div
                   style={{
                     padding: "16px",
@@ -411,9 +374,9 @@ export function SubscriptionActive({
                         </div>
                         <Text as="span" variant="bodySm" tone="subdued">
                           You've reached your monthly spending cap of{" "}
-                          {formatCurrency(metrics.capped_amount, shopCurrency)}.
-                          New commissions will be tracked but not charged until
-                          next billing cycle.
+                          {formatCurrency(subscriptionData.spendingLimit)}. New
+                          commissions will be tracked but not charged until next
+                          billing cycle.
                         </Text>
                       </BlockStack>
                     </InlineStack>
@@ -428,15 +391,16 @@ export function SubscriptionActive({
                     >
                       <BlockStack gap="200">
                         <Text as="p" variant="bodySm">
-                          💡 Your billing cycle resets in{" "}
-                          {metrics.days_remaining} days. You can also increase
-                          your monthly cap anytime.
+                          💡 Your billing cycle resets in 30 days. You can also
+                          increase your monthly cap anytime.
                         </Text>
                         <Button
                           variant="primary"
                           size="slim"
                           onClick={() => {
-                            setNewCapAmount(metrics.capped_amount * 1.5); // 50% increase as default
+                            setNewCapAmount(
+                              subscriptionData.spendingLimit * 1.5,
+                            ); // 50% increase as default
                             setShowCapIncreaseModal(true);
                           }}
                         >
@@ -537,7 +501,6 @@ export function SubscriptionActive({
         </div>
       </BlockStack>
 
-      {/* Cap Increase Modal */}
       <Modal
         open={showCapIncreaseModal}
         onClose={() => setShowCapIncreaseModal(false)}
@@ -563,18 +526,17 @@ export function SubscriptionActive({
 
             <div>
               <Text as="p" variant="bodySm" tone="subdued">
-                Current Cap:{" "}
-                {formatCurrency(metrics.capped_amount, shopCurrency)}
+                Current Cap: {formatCurrency(subscriptionData.spendingLimit)}
               </Text>
               <Text as="p" variant="bodySm" tone="subdued">
-                New Cap: {formatCurrency(newCapAmount, shopCurrency)}
+                New Cap: {formatCurrency(newCapAmount)}
               </Text>
             </div>
 
             <RangeSlider
               label="New Monthly Cap"
-              min={metrics.capped_amount * 1.1} // 10% higher than current
-              max={metrics.capped_amount * 5} // 5x current cap
+              min={subscriptionData.spendingLimit * 1.1} // 10% higher than current
+              max={subscriptionData.spendingLimit * 5} // 5x current cap
               step={50}
               value={newCapAmount}
               onChange={(value) =>
@@ -598,6 +560,6 @@ export function SubscriptionActive({
           </BlockStack>
         </Modal.Section>
       </Modal>
-    </BillingLayout>
+    </>
   );
 }

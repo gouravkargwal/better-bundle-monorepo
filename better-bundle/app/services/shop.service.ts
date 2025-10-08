@@ -226,7 +226,7 @@ const deactivateShopBilling = async (
     const updatedSubscriptions = await prisma.shop_subscriptions.updateMany({
       where: { shop_id: updatedShops.id, status: "ACTIVE" },
       data: {
-        status: "inactive",
+        status: "CANCELLED",
         effective_to: new Date(),
         updated_at: new Date(),
       },
@@ -256,88 +256,11 @@ const deactivateShopBilling = async (
   }
 };
 
-const activateTrialBillingPlan = async (
-  shopDomain: string,
-  shopRecord: any,
-  tx?: any,
-) => {
-  try {
-    const db = tx || prisma;
-
-    // 1. Get default subscription plan (template)
-    const defaultPlan = await db.subscription_plans.findFirst({
-      where: {
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!defaultPlan) {
-      throw new Error("No default subscription plan found");
-    }
-
-    // 2. Get pricing tier for shop's currency
-    const pricingTier = await db.pricing_tiers.findFirst({
-      where: {
-        subscription_plan_id: defaultPlan.id,
-        currency: shopRecord.currency_code,
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!pricingTier) {
-      throw new Error(
-        `No pricing tier found for currency: ${shopRecord.currency_code}`,
-      );
-    }
-
-    // 3. Create shop subscription (TRIAL status)
-    const shopSubscription = await db.shop_subscriptions.create({
-      data: {
-        shop_id: shopRecord.id,
-        subscription_plan_id: defaultPlan.id, // ✅ Template from subscription_plans
-        pricing_tier_id: pricingTier.id, // ✅ Currency-specific pricing
-        status: "trial", // ✅ Start as trial
-        start_date: new Date(),
-        is_active: true,
-        auto_renew: true,
-      },
-    });
-
-    // 4. Create subscription trial (trial tracking)
-    const subscriptionTrial = await db.subscription_trials.create({
-      data: {
-        shop_subscription_id: shopSubscription.id,
-        threshold_amount: pricingTier.trial_threshold_amount, // ✅ From pricing tier
-        status: "active",
-        started_at: new Date(),
-        accumulated_revenue: 0.0,
-        commission_saved: 0.0,
-      },
-    });
-
-    console.log(`✅ Trial activated for ${shopDomain}:`);
-    console.log(`   - Plan: ${defaultPlan.name}`);
-    console.log(`   - Currency: ${shopRecord.currency_code}`);
-    console.log(`   - Threshold: ${pricingTier.trial_threshold_amount}`);
-
-    return {
-      shop_subscription: shopSubscription,
-      subscription_trial: subscriptionTrial,
-    };
-  } catch (error) {
-    console.error(`❌ Error activating trial:`, error);
-    throw error;
-  }
-};
-
 export {
   getShop,
   getShopOnboardingCompleted,
   createShopAndSetOnboardingCompleted,
   getShopSubscription,
-  activateTrialBillingPlan,
   activateAtlasWebPixel,
   getShopInfoFromShopify,
   markOnboardingCompleted,

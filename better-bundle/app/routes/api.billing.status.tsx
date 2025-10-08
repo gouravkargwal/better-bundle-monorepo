@@ -51,13 +51,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
       status = "trial_active";
       message = `Trial active - $${currentRevenue} / $${threshold} revenue`;
-    } else if (billingPlan.subscription_status === "ACTIVE") {
+    } else if (billingPlan.subscription_status === "active") {
       status = "subscription_active";
       message = "Subscription active";
-    } else if (billingPlan.subscription_status === "PENDING") {
+    } else if (billingPlan.subscription_status === "pending") {
       status = "subscription_pending";
       message = "Subscription pending approval";
-    } else if (billingPlan.subscription_status === "DECLINED") {
+    } else if (billingPlan.subscription_status === "declined") {
       status = "subscription_declined";
       message = "Subscription declined";
     } else {

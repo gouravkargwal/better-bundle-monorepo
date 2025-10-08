@@ -77,7 +77,7 @@ async function handleActiveSubscription(
     where: { shop_id: shopRecord.id, is_active: true },
     include: {
       billing_cycles: {
-        where: { status: "ACTIVE" },
+        where: { status: "active" },
         orderBy: { cycle_number: "desc" },
         take: 1,
       },

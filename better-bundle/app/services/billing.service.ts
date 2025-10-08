@@ -100,7 +100,7 @@ export async function getUsageRevenueData(
           shop_id: shopId,
           is_active: true,
         },
-        status: "ACTIVE",
+        status: "active",
       },
     });
 
@@ -117,7 +117,7 @@ export async function getUsageRevenueData(
         shop_id: shopId,
         billing_cycle_id: currentCycle.id,
         billing_phase: "PAID",
-        status: "RECORDED",
+        status: "recorded",
       },
       _sum: {
         attributed_revenue: true,
@@ -150,7 +150,7 @@ export async function getCurrentCycleMetrics(
     const currentCycle = await prisma.billing_cycles.findFirst({
       where: {
         shop_subscription_id: shopSubscription.id,
-        status: "ACTIVE",
+        status: "active",
       },
     });
 
@@ -176,7 +176,7 @@ export async function getCurrentCycleMetrics(
 
     // Calculate metrics
     const purchases = commissionRecords.filter(
-      (r) => r.status === "RECORDED" || r.status === "INVOICED",
+      (r) => r.status === "recorded" || r.status === "invoiced",
     );
 
     const purchasesCount = purchases.length;
@@ -243,7 +243,7 @@ export async function getBillingSummary(
         pricing_tiers: true,
         subscription_trials: true,
         billing_cycles: {
-          where: { status: "ACTIVE" },
+          where: { status: "active" },
           orderBy: { cycle_number: "desc" },
           take: 1,
         },
@@ -358,7 +358,7 @@ export async function createShopSubscription(
         threshold_amount: defaultPricingTier.trial_threshold_amount,
         accumulated_revenue: 0,
         commission_saved: 0,
-        status: "ACTIVE",
+        status: "active",
         started_at: new Date(),
       },
     });
@@ -403,7 +403,7 @@ export async function completeTrialAndCreateCycle(
     await prisma.subscription_trials.update({
       where: { id: shopSubscription.subscription_trials!.id },
       data: {
-        status: "COMPLETED",
+        status: "completed",
         completed_at: new Date(),
       },
     });
@@ -412,7 +412,7 @@ export async function completeTrialAndCreateCycle(
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "PENDING_APPROVAL",
+        status: "pending_approval",
       },
     });
 
@@ -456,7 +456,7 @@ export async function activateSubscription(
       data: {
         shop_subscription_id: shopSubscription.id,
         shopify_subscription_id: shopifySubscriptionId,
-        status: "ACTIVE",
+        status: "active",
         created_at: new Date(),
         activated_at: new Date(),
         error_count: "0",
@@ -467,7 +467,7 @@ export async function activateSubscription(
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "ACTIVE",
+        status: "active",
         activated_at: new Date(),
       },
     });
@@ -484,7 +484,7 @@ export async function activateSubscription(
         current_cap_amount: userChosenCap,
         usage_amount: 0,
         commission_count: 0,
-        status: "ACTIVE",
+        status: "active",
         activated_at: new Date(),
       },
     });
@@ -516,7 +516,7 @@ export async function increaseBillingCycleCap(
           shop_id: shopId,
           is_active: true,
         },
-        status: "ACTIVE",
+        status: "active",
       },
     });
 

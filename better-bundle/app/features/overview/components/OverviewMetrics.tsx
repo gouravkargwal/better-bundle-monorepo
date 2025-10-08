@@ -17,6 +17,9 @@ interface OverviewMetricsProps {
     conversionRate: number;
     revenueChange: number | null;
     conversionRateChange: number | null;
+    isTrialPhase: boolean;
+    phaseLabel: string;
+    phaseDescription: string;
   };
 }
 
@@ -73,7 +76,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     tone="subdued"
                     fontWeight="medium"
                   >
-                    Total Revenue
+                    {overviewData.phaseLabel}
                   </Text>
                 </BlockStack>
                 <div
@@ -84,15 +87,21 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     minWidth: "48px",
                     minHeight: "48px",
                     padding: "12px",
-                    backgroundColor: "#10B98115",
+                    backgroundColor: overviewData.isTrialPhase
+                      ? "#F59E0B15"
+                      : "#10B98115",
                     borderRadius: "12px",
-                    border: "2px solid #10B98130",
+                    border: `2px solid ${overviewData.isTrialPhase ? "#F59E0B30" : "#10B98130"}`,
                   }}
                 >
                   <Icon source={CashDollarIcon} tone="base" />
                 </div>
               </InlineStack>
-              <div style={{ color: "#10B981" }}>
+              <div
+                style={{
+                  color: overviewData.isTrialPhase ? "#F59E0B" : "#10B981",
+                }}
+              >
                 <Text as="p" variant="heading2xl" fontWeight="bold">
                   {formatCurrencyValue(
                     overviewData.totalRevenue,
@@ -100,6 +109,9 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                   )}
                 </Text>
               </div>
+              <Text as="p" variant="bodySm" tone="subdued">
+                {overviewData.phaseDescription}
+              </Text>
               {overviewData.revenueChange !== null && (
                 <div>{getChangeBadge(overviewData.revenueChange)}</div>
               )}
