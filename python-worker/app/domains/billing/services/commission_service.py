@@ -61,7 +61,8 @@ class CommissionService:
 
             if existing:
                 logger.info(
-                    f"✅ Commission already exists for purchase {purchase_attribution_id}"
+                    f"✅ Commission already exists for purchase {purchase_attribution_id} "
+                    f"(id: {existing.id}, status: {existing.status.value})"
                 )
                 return existing
 
@@ -171,46 +172,58 @@ class CommissionService:
                 cycle_usage_after = cycle_usage_before + commission_earned
                 capped_amount_for_record = computed_capped_amount
 
-            # Create commission record
-            commission = CommissionRecord(
-                shop_id=shop_id,
-                purchase_attribution_id=purchase_attribution_id,
-                billing_plan_id=billing_plan.id,
-                order_id=str(purchase_attr.order_id),
-                order_date=purchase_attr.purchase_at,
-                attributed_revenue=attributed_revenue,
-                commission_rate=commission_rate,
-                commission_earned=commission_earned,
-                commission_charged=Decimal("0"),  # Not charged yet
-                commission_overflow=Decimal("0"),
-                billing_cycle_start=billing_cycle_start,
-                billing_cycle_end=billing_cycle_end,
-                cycle_usage_before=cycle_usage_before,
-                cycle_usage_after=cycle_usage_after,
-                capped_amount=capped_amount_for_record,
-                trial_accumulated=trial_accumulated,
-                billing_phase=billing_phase,
-                status=status,
-                charge_type=charge_type,
-                currency=shop.currency_code or "USD",
-            )
+            # Use PostgreSQL UPSERT (ON CONFLICT) for proper duplicate handling
+            from sqlalchemy.dialects.postgresql import insert
+            from app.shared.helpers import now_utc
 
-            self.session.add(commission)
-            try:
-                await self.session.flush()
-            except IntegrityError as e:
-                # Handle race where another worker created the same commission concurrently
-                if "uq_commission_purchase_attribution" in str(e):
-                    logger.warning(
-                        f"Race condition detected for {purchase_attribution_id}, fetching existing"
-                    )
-                    await self.session.rollback()
-                    return await self._get_existing_commission(purchase_attribution_id)
-                raise
+            commission_data = {
+                "shop_id": shop_id,
+                "purchase_attribution_id": purchase_attribution_id,
+                "billing_plan_id": billing_plan.id,
+                "order_id": str(purchase_attr.order_id),
+                "order_date": purchase_attr.purchase_at,
+                "attributed_revenue": attributed_revenue,
+                "commission_rate": commission_rate,
+                "commission_earned": commission_earned,
+                "commission_charged": Decimal("0"),  # Not charged yet
+                "commission_overflow": Decimal("0"),
+                "billing_cycle_start": billing_cycle_start,
+                "billing_cycle_end": billing_cycle_end,
+                "cycle_usage_before": cycle_usage_before,
+                "cycle_usage_after": cycle_usage_after,
+                "capped_amount": capped_amount_for_record,
+                "trial_accumulated": trial_accumulated,
+                "billing_phase": billing_phase,
+                "status": status,
+                "charge_type": charge_type,
+                "currency": shop.currency_code or "USD",
+            }
+
+            # Use PostgreSQL UPSERT - insert or update on conflict
+            stmt = insert(CommissionRecord).values(**commission_data)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["purchase_attribution_id"],
+                set_={
+                    "commission_earned": stmt.excluded.commission_earned,
+                    "commission_rate": stmt.excluded.commission_rate,
+                    "billing_phase": stmt.excluded.billing_phase,
+                    "status": stmt.excluded.status,
+                    "billing_cycle_start": stmt.excluded.billing_cycle_start,
+                    "billing_cycle_end": stmt.excluded.billing_cycle_end,
+                    "cycle_usage_before": stmt.excluded.cycle_usage_before,
+                    "cycle_usage_after": stmt.excluded.cycle_usage_after,
+                    "capped_amount": stmt.excluded.capped_amount,
+                    "trial_accumulated": stmt.excluded.trial_accumulated,
+                    "updated_at": now_utc(),
+                },
+            ).returning(CommissionRecord)
+
+            result = await self.session.execute(stmt)
+            commission = result.scalar_one()
 
             logger.info(
-                f"✅ Created commission record: ${commission_earned} "
-                f"(phase={billing_phase.value}, status={status.value})"
+                f"✅ Upserted commission record: ${commission.commission_earned} "
+                f"(phase={commission.billing_phase.value}, status={commission.status.value})"
             )
 
             if billing_phase == BillingPhase.PAID:
@@ -345,6 +358,11 @@ class CommissionService:
             else:
                 charge_type = ChargeType.FULL
 
+            # Generate idempotency key for this specific commission (outside retry loop)
+            idempotency_key = (
+                f"{commission.shop_id}-{commission.id}-{commission.order_id}"
+            )
+
             # Record to Shopify with retry and backoff
             logger.info(f"📤 Recording ${actual_charge} to Shopify...")
 
@@ -353,6 +371,7 @@ class CommissionService:
             usage_record = None
             last_error_message = None
             for attempt in range(1, max_retries + 1):
+
                 usage_record = await shopify_billing_service.record_usage(
                     shop_id=shop.id,
                     shop_domain=shop.shop_domain,
@@ -361,6 +380,20 @@ class CommissionService:
                     description=f"Better Bundle - Order {commission.order_id}",
                     amount=actual_charge,
                     currency=commission.currency,
+                    idempotency_key=idempotency_key,
+                    commission_ids=[commission.id],
+                    billing_period={
+                        "start": (
+                            commission.billing_cycle_start.isoformat()
+                            if commission.billing_cycle_start
+                            else None
+                        ),
+                        "end": (
+                            commission.billing_cycle_end.isoformat()
+                            if commission.billing_cycle_end
+                            else None
+                        ),
+                    },
                 )
                 if usage_record:
                     break
@@ -391,7 +424,12 @@ class CommissionService:
                     "amount": str(usage_record.price["amount"]),
                     "currency": usage_record.price["currencyCode"],
                 },
+                "idempotency_key": idempotency_key,
             }
+
+            logger.info(
+                f"🔗 Updated commission {commission.id} with Shopify response: {commission.shopify_response}"
+            )
             commission.commission_charged = actual_charge
             commission.commission_overflow = overflow
             commission.charge_type = charge_type
@@ -399,6 +437,7 @@ class CommissionService:
             commission.updated_at = now_utc()
 
             await self.session.flush()
+            await self.session.commit()
 
             logger.info(
                 f"✅ Recorded commission to Shopify: {usage_record.id} "
@@ -896,3 +935,82 @@ class CommissionService:
         except Exception as e:
             await self.session.rollback()
             logger.error(f"❌ Error suspending shop {shop_id} for cap reached: {e}")
+
+    async def get_commission_by_idempotency_key(
+        self, idempotency_key: str
+    ) -> Optional[CommissionRecord]:
+        """
+        Get commission record by idempotency key for tracking and syncing.
+
+        Args:
+            idempotency_key: The idempotency key used when creating the usage record
+
+        Returns:
+            Commission record or None if not found
+        """
+        try:
+            # Query commission by idempotency key in shopify_response
+            stmt = select(CommissionRecord).where(
+                CommissionRecord.shopify_response["idempotency_key"].astext
+                == idempotency_key
+            )
+            result = await self.session.execute(stmt)
+            commission = result.scalar_one_or_none()
+
+            if not commission:
+                logger.info(
+                    f"No commission found for idempotency key: {idempotency_key}"
+                )
+                return None
+
+            return commission
+
+        except Exception as e:
+            logger.error(
+                f"Error getting commission by idempotency key {idempotency_key}: {e}"
+            )
+            return None
+
+    async def get_commissions_for_shop_period(
+        self, shop_id: str, start_date: str, end_date: str
+    ) -> List[CommissionRecord]:
+        """
+        Get all commission records for a shop within a date range for syncing.
+
+        Args:
+            shop_id: Shop ID
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+
+        Returns:
+            List of commission records
+        """
+        try:
+            from datetime import datetime
+
+            # Parse dates
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+            # Query commission records for the shop and date range
+            stmt = select(CommissionRecord).where(
+                and_(
+                    CommissionRecord.shop_id == shop_id,
+                    CommissionRecord.shopify_usage_record_id.isnot(
+                        None
+                    ),  # Only charged commissions
+                    CommissionRecord.created_at >= start_dt,
+                    CommissionRecord.created_at <= end_dt,
+                )
+            )
+            result = await self.session.execute(stmt)
+            commissions = result.scalars().all()
+
+            logger.info(
+                f"Found {len(commissions)} commission records for shop {shop_id}"
+            )
+            return commissions
+
+        except Exception as e:
+            logger.error(f"Error getting commission records for shop {shop_id}: {e}")
+            return []

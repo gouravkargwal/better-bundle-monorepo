@@ -309,6 +309,9 @@ class ShopifyUsageBillingService:
         description: str,
         amount: Decimal,
         currency: str,
+        idempotency_key: str = None,
+        commission_ids: List[str] = None,
+        billing_period: Dict[str, str] = None,
     ) -> Optional[UsageRecord]:
         """
         Record usage for a subscription line item.
@@ -321,6 +324,7 @@ class ShopifyUsageBillingService:
             description: Description of the usage
             amount: Amount to charge
             currency: Currency code
+            idempotency_key: Unique identifier to prevent duplicate charges and enable tracking
 
         Returns:
             Created usage record or None if failed
@@ -328,11 +332,12 @@ class ShopifyUsageBillingService:
         try:
             # GraphQL mutation for recording usage
             mutation = """
-            mutation appUsageRecordCreate($subscriptionLineItemId: ID!, $description: String!, $price: MoneyInput!) {
+            mutation appUsageRecordCreate($subscriptionLineItemId: ID!, $description: String!, $price: MoneyInput!, $idempotencyKey: String) {
                 appUsageRecordCreate(
                     subscriptionLineItemId: $subscriptionLineItemId,
                     description: $description,
-                    price: $price
+                    price: $price,
+                    idempotencyKey: $idempotencyKey
                 ) {
                     userErrors {
                         field
@@ -351,6 +356,7 @@ class ShopifyUsageBillingService:
                 "subscriptionLineItemId": subscription_line_item_id,
                 "description": description,
                 "price": {"amount": float(amount), "currencyCode": currency},
+                "idempotencyKey": idempotency_key,
             }
 
             # Make GraphQL request
@@ -375,7 +381,14 @@ class ShopifyUsageBillingService:
 
             # Store usage record in database
             await self._store_usage_record(
-                shop_id, usage_record_data, description, amount, currency
+                shop_id,
+                usage_record_data,
+                description,
+                amount,
+                currency,
+                idempotency_key,
+                commission_ids,
+                billing_period,
             )
 
             logger.info(f"Recorded usage for shop {shop_id}: {usage_record_data['id']}")
@@ -526,16 +539,31 @@ class ShopifyUsageBillingService:
         description: str,
         amount: Decimal,
         currency: str,
+        idempotency_key: str = None,
+        commission_ids: List[str] = None,
+        billing_period: Dict[str, str] = None,
     ) -> None:
         """Store usage record in database"""
         try:
-            # Import the BillingInvoice model
-            from app.core.database.models import BillingInvoice
+            # Import the models
+            from app.core.database.models import BillingInvoice, BillingPlan
+            from sqlalchemy import select
+
+            # Get the billing plan for this shop
+            plan_stmt = select(BillingPlan).where(
+                (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
+            )
+            plan_result = await self.session.execute(plan_stmt)
+            billing_plan = plan_result.scalar_one_or_none()
+
+            if not billing_plan:
+                logger.error(f"No active billing plan found for shop {shop_id}")
+                return
 
             # Create billing invoice for usage record using SQLAlchemy
             invoice = BillingInvoice(
                 shop_id=shop_id,
-                plan_id=None,  # Usage-based doesn't have a plan ID
+                plan_id=billing_plan.id,  # Use the actual plan ID
                 invoice_number=f"USAGE-{now_utc().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
                 subtotal=amount,
                 taxes=Decimal("0.00"),
@@ -552,6 +580,9 @@ class ShopifyUsageBillingService:
                     "description": description,
                     "recorded_at": usage_record_data["createdAt"],
                     "type": "usage_based",
+                    "idempotency_key": idempotency_key,
+                    "commission_ids": commission_ids or [],
+                    "billing_period": billing_period or {},
                 },
             )
 
@@ -562,102 +593,3 @@ class ShopifyUsageBillingService:
             logger.info(f"Stored usage record for shop {shop_id}")
         except Exception as e:
             logger.error(f"Error storing usage record: {e}")
-
-    async def process_monthly_usage_billing(
-        self, shop_id: str, billing_result: Dict[str, Any]
-    ) -> Optional[UsageRecord]:
-        """
-        Process monthly usage billing for a shop.
-
-        Args:
-            shop_id: Shop ID
-            billing_result: Billing calculation result
-
-        Returns:
-            Created usage record or None if failed
-        """
-        try:
-            # Import the models
-            from app.core.database.models import Shop, BillingPlan
-
-            # Get shop information
-            shop_stmt = select(
-                Shop.domain, Shop.access_token, Shop.currency_code
-            ).where(Shop.id == shop_id)
-            shop_result = await self.session.execute(shop_stmt)
-            shop = shop_result.scalar_one_or_none()
-
-            if not shop:
-                logger.error(f"Shop {shop_id} not found")
-                return None
-
-            if not shop.access_token:
-                logger.error(f"No access token for shop {shop_id}")
-                return None
-
-            # Get subscription information
-            billing_plan_stmt = select(BillingPlan).where(
-                (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
-            )
-            billing_plan_result = await self.session.execute(billing_plan_stmt)
-            billing_plan = billing_plan_result.scalar_one_or_none()
-
-            if not billing_plan or not billing_plan.configuration:
-                logger.error(f"No active billing plan found for shop {shop_id}")
-                return None
-
-            subscription_id = billing_plan.configuration.get("subscription_id")
-            line_items = billing_plan.configuration.get("line_items", [])
-
-            if not subscription_id or not line_items:
-                logger.error(f"No subscription data found for shop {shop_id}")
-                return None
-
-            # Get the first line item ID
-            line_item_id = line_items[0]["id"]
-
-            # Calculate usage amount (3% of attributed revenue)
-            attributed_revenue = Decimal(
-                str(billing_result["metrics"]["attributed_revenue"])
-            )
-            usage_amount = attributed_revenue * Decimal("0.03")
-
-            # Skip if no revenue to bill
-            if usage_amount <= 0:
-                logger.info(f"No usage to bill for shop {shop_id}")
-                return None
-
-            # Create usage description
-            currency = shop.currency_code or "USD"
-            currency_symbol = self._get_currency_symbol(currency)
-            description = (
-                f"Better Bundle - {billing_result['period']['start_date'][:7]} "
-                f"({currency_symbol}{attributed_revenue:.2f} attributed revenue)"
-            )
-
-            # Record usage
-            usage_record = await self.record_usage(
-                shop_id=shop_id,
-                shop_domain=shop.domain,
-                access_token=shop.access_token,
-                subscription_line_item_id=line_item_id,
-                description=description,
-                amount=usage_amount,
-                currency=currency,
-            )
-
-            if usage_record:
-                logger.info(
-                    f"Recorded usage for shop {shop_id}: {currency_symbol}{usage_amount} "
-                    f"({currency_symbol}{attributed_revenue} attributed revenue)"
-                )
-                return usage_record
-            else:
-                logger.error(f"Failed to record usage for shop {shop_id}")
-                return None
-
-        except Exception as e:
-            logger.error(
-                f"Error processing monthly usage billing for shop {shop_id}: {e}"
-            )
-            return None

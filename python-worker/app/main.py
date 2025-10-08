@@ -2,6 +2,8 @@
 Main application for BetterBundle Python Worker
 """
 
+import asyncio
+import signal
 import uvicorn
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +28,7 @@ from app.api.v1.unified_gorse import router as unified_gorse_router
 from app.api.v1.attribution_backfill import router as attribution_backfill_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
+from app.api.v1.record_matching import router as record_matching_router
 from app.domains.billing.api.billing_api import router as billing_api_router
 from app.domains.billing.api.settlement_api import router as settlement_api_router
 
@@ -37,6 +40,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
+    logger.info("🚀 Starting BetterBundle Python Worker...")
 
     # Initialize services
     await initialize_services()
@@ -46,9 +50,12 @@ async def lifespan(app: FastAPI):
     if kafka_consumer_manager:
         await kafka_consumer_manager.start_all_consumers()
 
+    logger.info("✅ BetterBundle Python Worker started successfully")
+
     yield
 
     # Shutdown
+    logger.info("🛑 Shutting down BetterBundle Python Worker...")
 
     # Stop Kafka consumers first
     if kafka_consumer_manager:
@@ -60,6 +67,8 @@ async def lifespan(app: FastAPI):
     await topic_manager.close()
 
     await cleanup_services()
+
+    logger.info("✅ BetterBundle Python Worker shutdown completed")
 
 
 # Create FastAPI app
@@ -75,6 +84,7 @@ app.include_router(unified_gorse_router)
 app.include_router(attribution_backfill_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
+app.include_router(record_matching_router)
 app.include_router(billing_api_router)
 app.include_router(settlement_api_router)
 
@@ -150,6 +160,7 @@ async def initialize_services():
 async def cleanup_services():
     """Cleanup all services"""
     try:
+        logger.info("🧹 Starting service cleanup...")
 
         # Kafka consumers are stopped by kafka_consumer_manager in lifespan
 
@@ -163,6 +174,8 @@ async def cleanup_services():
 
         # Clear services dictionary
         services.clear()
+
+        logger.info("✅ Service cleanup completed")
 
     except Exception as e:
         logger.error(f"Failed to cleanup services: {e}")
@@ -394,7 +407,21 @@ async def global_exception_handler(request, exc):
     )
 
 
+def setup_signal_handlers():
+    """Setup signal handlers for graceful shutdown"""
+
+    def signal_handler(signum, frame):
+        logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
+        # The lifespan manager will handle the actual cleanup
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
 if __name__ == "__main__":
+    # Setup signal handlers for graceful shutdown
+    setup_signal_handlers()
+
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,

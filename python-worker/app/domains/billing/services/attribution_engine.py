@@ -250,10 +250,22 @@ class AttributionEngine:
                 )
                 return
 
-            logger.info(
-                f"✅ Commission created: ${commission.commission_earned} "
-                f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
-            )
+            # Check if this is a newly created commission or existing one
+            # by checking if it was created very recently (within last 5 seconds)
+            from app.shared.helpers import now_utc
+
+            time_diff = (now_utc() - commission.created_at).total_seconds()
+
+            if time_diff < 5:  # Newly created
+                logger.info(
+                    f"✅ Commission created: ${commission.commission_earned} "
+                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
+                )
+            else:  # Existing commission
+                logger.info(
+                    f"✅ Commission found existing: ${commission.commission_earned} "
+                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
+                )
 
             # Check if we need to handle trial threshold or cap limits
             await self._handle_post_commission_checks(commission, shop_id)

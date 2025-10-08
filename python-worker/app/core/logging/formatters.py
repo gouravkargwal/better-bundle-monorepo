@@ -106,21 +106,31 @@ class ConsoleFormatter(logging.Formatter):
         super().__init__(fmt, datefmt)
 
     def format(self, record: logging.LogRecord) -> str:
-        # Get color for log level
-        color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
-        reset = self.COLORS["RESET"]
+        try:
+            # Get color for log level
+            color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
+            reset = self.COLORS["RESET"]
 
-        # Format timestamp
-        timestamp = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+            # Format timestamp - handle Python shutdown gracefully
+            try:
+                timestamp = datetime.fromtimestamp(record.created).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except (ImportError, AttributeError):
+                # Handle Python shutdown where sys.meta_path is None
+                timestamp = "SHUTDOWN"
 
-        # Format the message
-        formatted = f"{color}[{timestamp}] {record.levelname:8s} {record.name}: {record.getMessage()}{reset}"
+            # Format the message
+            formatted = f"{color}[{timestamp}] {record.levelname:8s} {record.name}: {record.getMessage()}{reset}"
 
-        # Add exception info if present
-        if record.exc_info:
-            formatted += f"\n{self.formatException(record.exc_info)}"
+            # Add exception info if present
+            if record.exc_info:
+                formatted += f"\n{self.formatException(record.exc_info)}"
 
-        return formatted
+            return formatted
+        except Exception:
+            # Fallback to basic formatting during shutdown
+            return f"[SHUTDOWN] {record.levelname}: {record.getMessage()}"
 
 
 class SimpleFormatter(logging.Formatter):

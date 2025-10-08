@@ -156,6 +156,7 @@ class KafkaConsumerManager:
             for name, consumer in self.consumers.items():
                 try:
                     await asyncio.wait_for(consumer.close(), timeout=10.0)
+                    logger.debug(f"✅ {name} consumer stopped successfully")
                 except asyncio.TimeoutError:
                     logger.warning(f"⚠️ Timeout stopping {name} consumer")
                 except Exception as e:
@@ -163,6 +164,9 @@ class KafkaConsumerManager:
 
         except Exception as e:
             logger.exception(f"Error stopping consumers: {e}")
+        finally:
+            # Ensure all consumers are marked as stopped
+            self._running = False
 
     async def close(self):
         """Close all consumers and cleanup"""

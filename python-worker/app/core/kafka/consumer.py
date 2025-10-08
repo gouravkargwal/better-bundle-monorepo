@@ -283,6 +283,10 @@ class KafkaConsumer:
                     pass
                 self._consumer = None
                 self._is_initialized = False
+            finally:
+                # Ensure consumer is always set to None
+                self._consumer = None
+                self._is_initialized = False
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get consumer metrics"""
