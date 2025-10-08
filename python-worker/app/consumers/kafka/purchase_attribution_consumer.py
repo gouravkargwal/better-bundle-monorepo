@@ -18,7 +18,7 @@ from app.core.database.models import (
     UserSession,
     UserInteraction,
 )
-from app.domains.billing.services.billing_service import BillingService
+from app.domains.billing.services.billing_service_v2 import BillingServiceV2
 from app.domains.billing.models import PurchaseEvent
 from app.core.logging import get_logger
 from app.repository.ShopRepository import ShopRepository
@@ -182,10 +182,23 @@ class PurchaseAttributionKafkaConsumer:
                     user_session = session_result.scalar_one_or_none()
 
                 # PRE-CHECK: Only process if customer has extension interactions
-                if not await self._has_extension_interactions(
+                has_interactions = await self._has_extension_interactions(
                     session, shop_id, customer_id, user_session
-                ):
-                    return
+                )
+
+                logger.info(
+                    f"🔍 Extension interaction check for order {order_id}: "
+                    f"shop_id={shop_id}, customer_id={customer_id}, "
+                    f"has_interactions={has_interactions}"
+                )
+
+                # TEMPORARY: Process all orders for testing (remove this later)
+                if not has_interactions:
+                    logger.warning(
+                        f"⚠️ No extension interactions found for order {order_id}, "
+                        f"but processing anyway for testing"
+                    )
+                    # return  # Commented out for testing
 
                 purchase_event = PurchaseEvent(
                     order_id=order_id,
@@ -203,7 +216,7 @@ class PurchaseAttributionKafkaConsumer:
                 )
 
                 # Process attribution
-                billing = BillingService(session)
+                billing = BillingServiceV2(session)
                 await billing.process_purchase_attribution(purchase_event)
 
         except Exception as e:
@@ -221,6 +234,11 @@ class PurchaseAttributionKafkaConsumer:
             # Check for interactions in the last 30 days
             cutoff_time = now_utc() - timedelta(days=30)
 
+            logger.info(
+                f"🔍 Checking extension interactions: shop_id={shop_id}, "
+                f"customer_id={customer_id}, cutoff_time={cutoff_time}"
+            )
+
             # Build query conditions
             query_conditions = [
                 UserInteraction.shop_id == shop_id,
@@ -237,8 +255,14 @@ class PurchaseAttributionKafkaConsumer:
             # Add customer or session filter
             if customer_id:
                 query_conditions.append(UserInteraction.customer_id == customer_id)
+                logger.info(f"🔍 Filtering by customer_id: {customer_id}")
             elif user_session and hasattr(user_session, "id"):
                 query_conditions.append(UserInteraction.session_id == user_session.id)
+                logger.info(f"🔍 Filtering by session_id: {user_session.id}")
+            else:
+                logger.warning(
+                    "🔍 No customer_id or session_id available for filtering"
+                )
 
             # Check for any interactions from attribution-eligible extensions
             interactions_query = (
@@ -249,6 +273,18 @@ class PurchaseAttributionKafkaConsumer:
             interactions = interactions_result.scalars().all()
 
             has_interactions = len(interactions) > 0
+
+            logger.info(
+                f"🔍 Found {len(interactions)} interactions for shop {shop_id}: "
+                f"has_interactions={has_interactions}"
+            )
+
+            if interactions:
+                for interaction in interactions:
+                    logger.info(
+                        f"🔍 Interaction: {interaction.extension_type} - "
+                        f"{interaction.interaction_type} at {interaction.created_at}"
+                    )
 
             return has_interactions
 

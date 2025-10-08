@@ -16,11 +16,11 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload
 
 from app.core.database.session import get_transaction_context
-from app.core.database.models import Shop, BillingPlan, BillingInvoice
+from app.core.database.models import Shop, ShopSubscription, BillingCycle
 from app.core.logging import get_logger
-from app.domains.billing.services.billing_service import BillingService
-from app.domains.billing.repositories.billing_repository import (
-    BillingRepository,
+from app.domains.billing.services.billing_service_v2 import BillingServiceV2
+from app.domains.billing.repositories.billing_repository_v2 import (
+    BillingRepositoryV2,
     BillingPeriod,
 )
 from app.core.config.settings import settings
@@ -57,8 +57,8 @@ class BillingSchedulerService:
         try:
             # Initialize billing service with SQLAlchemy session
             async with get_transaction_context() as session:
-                self.billing_service = BillingService(session)
-                self.billing_repository = BillingRepository(session)
+                self.billing_service = BillingServiceV2(session)
+                self.billing_repository = BillingRepositoryV2(session)
 
             logger.info("Billing scheduler service initialized")
         except Exception as e:
@@ -246,7 +246,7 @@ class BillingSchedulerService:
                     }
 
                 # Calculate billing
-                billing_service = BillingService(session)
+                billing_service = BillingServiceV2(session)
                 billing_result = await billing_service.calculate_monthly_billing(
                     shop_id, period
                 )
@@ -369,33 +369,18 @@ class BillingSchedulerService:
         self,
         session,
         shop: Shop,
-        billing_plan: BillingPlan,
+        shop_subscription: ShopSubscription,
         billing_result: Dict[str, Any],
         period: BillingPeriod,
-    ) -> BillingInvoice:
+    ):
         """Create a billing invoice for the shop"""
         try:
-            invoice = BillingInvoice(
-                shop_id=shop.id,
-                plan_id=billing_plan.id,
-                amount=float(billing_result.get("final_fee", 0.0)),
-                currency_code=billing_result.get("currency", "USD"),
-                status="PENDING",
-                due_date=now_utc() + timedelta(days=30),
-                period_start=period.start_date,
-                period_end=period.end_date,
-                metadata={
-                    "attributed_revenue": billing_result.get("attributed_revenue", 0.0),
-                    "calculation_breakdown": billing_result.get("breakdown", {}),
-                    "created_by": "billing_scheduler",
-                },
+            # Note: BillingInvoice model has been removed with the old system
+            # Invoices are now handled by Shopify's billing system
+            logger.info(
+                f"Billing invoice creation skipped - using Shopify billing for shop {shop.id}"
             )
-
-            session.add(invoice)
-            await session.flush()
-
-            logger.info(f"Created billing invoice {invoice.id} for shop {shop.id}")
-            return invoice
+            return None
 
         except Exception as e:
             logger.error(f"Error creating billing invoice for shop {shop.id}: {e}")

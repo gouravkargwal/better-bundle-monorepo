@@ -7,648 +7,70 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model billing_invoices {
-  plan_id            String               @db.VarChar
-  invoice_number     String               @unique @db.VarChar(100)
-  status             String               @db.VarChar
-  subtotal           Decimal              @db.Decimal(10, 2)
-  taxes              Decimal              @db.Decimal(10, 2)
-  discounts          Decimal              @db.Decimal(10, 2)
-  total              Decimal              @db.Decimal(10, 2)
-  currency           String               @db.VarChar(3)
-  period_start       DateTime             @db.Timestamptz(6)
-  period_end         DateTime             @db.Timestamptz(6)
-  metrics_id         String               @db.VarChar(255)
-  due_date           DateTime             @db.Timestamptz(6)
-  paid_at            DateTime?            @db.Timestamptz(6)
-  shopify_charge_id  String?              @db.VarChar(255)
-  payment_method     String?              @db.VarChar(50)
-  payment_reference  String?              @db.VarChar(255)
-  billing_metadata   Json                 @db.Json
-  id                 String               @id @default(cuid()) @db.VarChar
-  created_at         DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
-  shop_id            String               @db.VarChar
-  billing_plans      billing_plans        @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops              shops                @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  commission_records commission_records[]
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model billing_cycle_adjustments {
+  billing_cycle_id    String                 @db.VarChar(255)
+  old_cap_amount      Decimal                @db.Decimal(10, 2)
+  new_cap_amount      Decimal                @db.Decimal(10, 2)
+  adjustment_amount   Decimal                @db.Decimal(10, 2)
+  adjustment_reason   adjustment_reason_enum
+  reason_description  String?
+  adjusted_by         String?                @db.VarChar(255)
+  adjusted_by_type    String?                @db.VarChar(50)
+  adjustment_metadata String?                @db.VarChar(1000)
+  adjusted_at         DateTime               @db.Timestamptz(6)
+  id                  String                 @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at          DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at          DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  billing_cycles      billing_cycles         @relation(fields: [billing_cycle_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([created_at], map: "ix_billing_invoice_created_at")
-  @@index([due_date], map: "ix_billing_invoice_due_date")
-  @@index([plan_id], map: "ix_billing_invoice_plan_id")
-  @@index([shop_id], map: "ix_billing_invoice_shop_id")
-  @@index([status], map: "ix_billing_invoice_status")
-  @@index([due_date], map: "ix_billing_invoices_due_date")
-  @@index([shop_id], map: "ix_billing_invoices_shop_id")
-  @@index([status], map: "ix_billing_invoices_status")
-  @@index([shopify_charge_id], map: "ix_billing_invoices_shopify_charge_id")
+  @@index([adjusted_at], map: "ix_billing_cycle_adjustment_at")
+  @@index([adjusted_by], map: "ix_billing_cycle_adjustment_by")
+  @@index([billing_cycle_id], map: "ix_billing_cycle_adjustment_cycle")
+  @@index([adjustment_reason], map: "ix_billing_cycle_adjustment_reason")
+  @@index([adjusted_by_type], map: "ix_billing_cycle_adjustment_type")
+  @@index([adjusted_at], map: "ix_billing_cycle_adjustments_adjusted_at")
+  @@index([adjusted_by], map: "ix_billing_cycle_adjustments_adjusted_by")
+  @@index([adjustment_reason], map: "ix_billing_cycle_adjustments_adjustment_reason")
+  @@index([billing_cycle_id], map: "ix_billing_cycle_adjustments_billing_cycle_id")
 }
 
-model billing_plans {
-  shop_domain                    String               @db.VarChar(255)
-  name                           String               @db.VarChar(100)
-  type                           String               @db.VarChar
-  status                         String               @db.VarChar
-  is_trial_active                Boolean
-  trial_threshold                Decimal              @db.Decimal(10, 2)
-  trial_revenue                  Decimal              @db.Decimal(12, 2)
-  trial_usage_records_count      Int
-  trial_completed_at             DateTime?            @db.Timestamptz(6)
-  subscription_id                String?              @db.VarChar(255)
-  subscription_line_item_id      String?              @db.VarChar(255)
-  subscription_status            String?              @db.VarChar(50)
-  subscription_confirmation_url  String?
-  subscription_created_at        DateTime?            @db.Timestamptz(6)
-  subscription_activated_at      DateTime?            @db.Timestamptz(6)
-  configuration                  Json?                @db.Json
-  billing_metadata               Json?                @db.Json
-  effective_from                 DateTime?            @db.Timestamptz(6)
-  effective_to                   DateTime?            @db.Timestamptz(6)
-  requires_subscription_approval Boolean?
-  id                             String               @id @default(cuid()) @db.VarChar
-  created_at                     DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                     DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
-  shop_id                        String               @unique(map: "ix_billing_plan_shop_id") @db.VarChar
-  billing_invoices               billing_invoices[]
-  shops                          shops                @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  commission_records             commission_records[]
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model billing_cycles {
+  shop_subscription_id      String                      @db.VarChar(255)
+  cycle_number              Int
+  start_date                DateTime                    @db.Timestamptz(6)
+  end_date                  DateTime                    @db.Timestamptz(6)
+  initial_cap_amount        Decimal                     @db.Decimal(10, 2)
+  current_cap_amount        Decimal                     @db.Decimal(10, 2)
+  usage_amount              Decimal                     @db.Decimal(10, 2)
+  commission_count          Int
+  status                    billing_cycle_status_enum
+  activated_at              DateTime?                   @db.Timestamptz(6)
+  completed_at              DateTime?                   @db.Timestamptz(6)
+  cancelled_at              DateTime?                   @db.Timestamptz(6)
+  cycle_metadata            String?                     @db.VarChar(1000)
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  billing_cycle_adjustments billing_cycle_adjustments[]
+  shop_subscriptions        shop_subscriptions          @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  commission_records        commission_records[]
 
-  @@index([effective_from], map: "ix_billing_plan_effective_from")
-  @@index([shop_domain], map: "ix_billing_plan_shop_domain")
-  @@index([status], map: "ix_billing_plan_status")
-  @@index([shop_domain], map: "ix_billing_plans_shop_domain")
-  @@index([shop_id], map: "ix_billing_plans_shop_id")
-  @@index([status], map: "ix_billing_plans_status")
-  @@index([effective_to], map: "ix_billing_plans_effective_to")
-  @@index([is_trial_active], map: "ix_billing_plans_is_trial_active")
-  @@index([requires_subscription_approval], map: "ix_billing_plans_requires_subscription_approval")
-  @@index([subscription_id], map: "ix_billing_plans_subscription_id")
-}
-
-model collection_features {
-  collection_id                String   @db.VarChar
-  collection_engagement_score  Float
-  collection_conversion_rate   Float
-  collection_popularity_score  Float
-  avg_product_value            Float?
-  collection_revenue_potential Float
-  product_diversity_score      Float
-  collection_size_tier         String   @db.VarChar(100)
-  days_since_last_interaction  Int?
-  collection_recency_score     Float
-  is_curated_collection        Boolean
-  last_computed_at             DateTime @db.Timestamptz(6)
-  id                           String   @id @db.VarChar
-  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                      String   @db.VarChar
-  shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, collection_id], map: "ix_collection_features_shop_id_collection_id")
-  @@index([shop_id], map: "ix_collection_features_shop_id")
-  @@index([shop_id, collection_conversion_rate], map: "ix_collection_features_shop_id_collection_conversion_rate")
-  @@index([shop_id, collection_engagement_score], map: "ix_collection_features_shop_id_collection_engagement_score")
-  @@index([shop_id, collection_popularity_score], map: "ix_collection_features_shop_id_collection_popularity_score")
-}
-
-model customer_behavior_features {
-  user_lifecycle_stage        String?  @db.VarChar(100)
-  purchase_frequency_score    Float
-  interaction_diversity_score Float
-  category_diversity          Int
-  primary_category            String?  @db.VarChar(100)
-  conversion_rate             Float
-  avg_order_value             Float
-  lifetime_value              Float
-  recency_score               Float
-  churn_risk_score            Float
-  total_interactions          Int
-  days_since_last_purchase    Int?
-  last_computed_at            DateTime @db.Timestamptz(6)
-  id                          String   @id @db.VarChar
-  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                     String   @db.VarChar
-  customer_id                 String?  @db.VarChar
-  shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, customer_id], map: "ix_cb_features_shop_cust")
-  @@index([customer_id], map: "ix_customer_behavior_features_customer_id")
-  @@index([shop_id], map: "ix_customer_behavior_features_shop_id")
-  @@index([shop_id, avg_order_value], map: "ix_cb_features_shop_avg_order_value")
-  @@index([shop_id, category_diversity], map: "ix_cb_features_shop_category_diversity")
-  @@index([shop_id, churn_risk_score], map: "ix_cb_features_shop_churn_risk_score")
-  @@index([shop_id, conversion_rate], map: "ix_cb_features_shop_conversion_rate")
-  @@index([shop_id, days_since_last_purchase], map: "ix_cb_features_shop_days_since_last_purchase")
-  @@index([shop_id, interaction_diversity_score], map: "ix_cb_features_shop_interaction_diversity_score")
-  @@index([shop_id, lifetime_value], map: "ix_cb_features_shop_lifetime_value")
-  @@index([shop_id, primary_category], map: "ix_cb_features_shop_primary_category")
-  @@index([shop_id, purchase_frequency_score], map: "ix_cb_features_shop_purchase_frequency_score")
-  @@index([shop_id, recency_score], map: "ix_cb_features_shop_recency_score")
-  @@index([shop_id, total_interactions], map: "ix_cb_features_shop_total_interactions")
-  @@index([shop_id, user_lifecycle_stage], map: "ix_cb_features_shop_user_lifecycle_stage")
-}
-
-model interaction_features {
-  interaction_strength_score   Float
-  customer_product_affinity    Float
-  engagement_progression_score Float
-  conversion_likelihood        Float
-  purchase_intent_score        Float
-  interaction_recency_score    Float
-  relationship_maturity        String   @db.VarChar(100)
-  interaction_frequency_score  Float
-  customer_product_loyalty     Float
-  total_interaction_value      Float
-  last_computed_at             DateTime @db.Timestamptz(6)
-  id                           String   @id @db.VarChar
-  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                      String   @db.VarChar
-  customer_id                  String?  @db.VarChar
-  product_id                   String?  @db.VarChar
-  shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, customer_id, product_id], map: "ix_int_features_shop_cust_prod")
-  @@index([customer_id], map: "ix_interaction_features_customer_id")
-  @@index([product_id], map: "ix_interaction_features_product_id")
-  @@index([shop_id], map: "ix_interaction_features_shop_id")
-  @@index([shop_id, customer_id, customer_product_affinity], map: "ix_int_features_shop_cust_affinity")
-  @@index([shop_id, customer_id, conversion_likelihood], map: "ix_int_features_shop_cust_conv_likelihood")
-  @@index([shop_id, customer_id, engagement_progression_score], map: "ix_int_features_shop_cust_engagement")
-  @@index([shop_id, customer_id, interaction_frequency_score], map: "ix_int_features_shop_cust_frequency")
-  @@index([shop_id, customer_id, purchase_intent_score], map: "ix_int_features_shop_cust_intent")
-  @@index([shop_id, customer_id, relationship_maturity], map: "ix_int_features_shop_cust_maturity")
-  @@index([shop_id, customer_id, interaction_recency_score], map: "ix_int_features_shop_cust_recency")
-  @@index([shop_id, customer_id, interaction_strength_score], map: "ix_int_features_shop_cust_strength")
-}
-
-model line_item_data {
-  order_id              String     @db.VarChar
-  product_id            String?    @db.VarChar
-  variant_id            String?    @db.VarChar
-  title                 String?    @db.VarChar
-  quantity              Int
-  price                 Float
-  original_unit_price   Float?
-  discounted_unit_price Float?
-  currency_code         String?    @db.VarChar(10)
-  variant_data          Json?      @db.Json
-  properties            Json?      @db.Json
-  id                    String     @id @db.VarChar
-  created_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  OrderData             order_data @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
-
-model product_features {
-  interaction_volume_score Float
-  purchase_velocity_score  Float
-  engagement_quality_score Float
-  price_tier               String   @db.VarChar(20)
-  revenue_potential_score  Float
-  conversion_efficiency    Float
-  days_since_last_purchase Int?
-  activity_recency_score   Float
-  trending_momentum        Float
-  product_lifecycle_stage  String   @db.VarChar(100)
-  inventory_health_score   Float
-  product_category         String?  @db.VarChar(100)
-  last_computed_at         DateTime @db.Timestamptz(6)
-  id                       String   @id @db.VarChar
-  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                  String   @db.VarChar
-  product_id               String?  @db.VarChar
-  shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, product_id], map: "ix_product_features_shop_id_product_id")
-  @@index([product_id], map: "ix_product_features_product_id")
-  @@index([shop_id], map: "ix_product_features_shop_id")
-  @@index([shop_id, activity_recency_score], map: "ix_product_features_shop_id_activity_recency_score")
-  @@index([shop_id, conversion_efficiency], map: "ix_product_features_shop_id_conversion_efficiency")
-  @@index([shop_id, engagement_quality_score], map: "ix_product_features_shop_id_engagement_quality_score")
-  @@index([shop_id, interaction_volume_score], map: "ix_product_features_shop_id_interaction_volume_score")
-  @@index([shop_id, inventory_health_score], map: "ix_product_features_shop_id_inventory_health_score")
-  @@index([shop_id, price_tier], map: "ix_product_features_shop_id_price_tier")
-  @@index([shop_id, product_lifecycle_stage], map: "ix_product_features_shop_id_product_lifecycle_stage")
-  @@index([shop_id, purchase_velocity_score], map: "ix_product_features_shop_id_purchase_velocity_score")
-  @@index([shop_id, revenue_potential_score], map: "ix_product_features_shop_id_revenue_potential_score")
-  @@index([shop_id, trending_momentum], map: "ix_product_features_shop_id_trending_momentum")
-}
-
-model product_pair_features {
-  product_id1                   String   @db.VarChar
-  product_id2                   String   @db.VarChar
-  co_purchase_strength          Float
-  co_engagement_score           Float
-  pair_affinity_score           Float
-  total_pair_revenue            Float
-  pair_frequency_score          Float
-  days_since_last_co_occurrence Int?
-  pair_recency_score            Float
-  pair_confidence_level         String   @db.VarChar(100)
-  cross_sell_potential          Float
-  last_computed_at              DateTime @db.Timestamptz(6)
-  id                            String   @id @db.VarChar
-  created_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                       String   @db.VarChar
-  product_id                    String?  @db.VarChar
-  shops                         shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, product_id1, product_id2], map: "ix_pp_features_shop_p1_p2")
-  @@index([product_id], map: "ix_product_pair_features_product_id")
-  @@index([product_id1], map: "ix_product_pair_features_product_id1")
-  @@index([product_id2], map: "ix_product_pair_features_product_id2")
-  @@index([shop_id], map: "ix_product_pair_features_shop_id")
-  @@index([shop_id, pair_affinity_score], map: "ix_pp_features_shop_affinity")
-  @@index([shop_id, co_purchase_strength], map: "ix_pp_features_shop_co_purchase")
-  @@index([shop_id, pair_confidence_level], map: "ix_pp_features_shop_confidence")
-  @@index([shop_id, cross_sell_potential], map: "ix_pp_features_shop_cross_sell")
-  @@index([shop_id, days_since_last_co_occurrence], map: "ix_pp_features_shop_days_co_occur")
-  @@index([shop_id, pair_frequency_score], map: "ix_pp_features_shop_frequency")
-  @@index([shop_id, product_id1], map: "ix_pp_features_shop_p1")
-  @@index([shop_id, product_id1, co_purchase_strength], map: "ix_pp_features_shop_p1_co_purchase")
-  @@index([shop_id, product_id2], map: "ix_pp_features_shop_p2")
-  @@index([shop_id, product_id2, co_purchase_strength], map: "ix_pp_features_shop_p2_co_purchase")
-  @@index([shop_id, pair_recency_score], map: "ix_pp_features_shop_recency")
-  @@index([shop_id, total_pair_revenue], map: "ix_pp_features_shop_revenue")
-}
-
-model purchase_attributions {
-  session_id                String              @db.VarChar(255)
-  order_id                  String              @db.VarChar(255)
-  contributing_extensions   Json                @db.Json
-  attribution_weights       Json                @db.Json
-  total_revenue             Decimal             @db.Decimal(10, 2)
-  attributed_revenue        Json                @db.Json
-  total_interactions        Int
-  interactions_by_extension Json                @db.Json
-  purchase_at               DateTime            @db.Timestamptz(6)
-  attribution_algorithm     String              @db.VarChar(50)
-  metadata                  Json                @db.Json
-  id                        String              @id @db.VarChar
-  created_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                   String              @db.VarChar
-  customer_id               String?             @db.VarChar
-  commission_records        commission_records?
-  user_sessions             user_sessions       @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops                     shops               @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, order_id], map: "ix_purchase_attribution_shop_id_order_id")
-  @@index([customer_id], map: "ix_purchase_attribution_customer_id")
-  @@index([order_id], map: "ix_purchase_attribution_order_id")
-  @@index([purchase_at], map: "ix_purchase_attribution_purchase_at")
-  @@index([session_id], map: "ix_purchase_attribution_session_id")
-  @@index([shop_id], map: "ix_purchase_attribution_shop_id")
-  @@index([shop_id, customer_id, purchase_at], map: "ix_purchase_attribution_shop_id_customer_id_purchase_at")
-  @@index([shop_id, purchase_at], map: "ix_purchase_attribution_shop_id_purchase_at")
-  @@index([customer_id], map: "ix_purchase_attributions_customer_id")
-  @@index([order_id], map: "ix_purchase_attributions_order_id")
-  @@index([purchase_at], map: "ix_purchase_attributions_purchase_at")
-  @@index([shop_id], map: "ix_purchase_attributions_shop_id")
-}
-
-model raw_collections {
-  payload            Json      @db.Json
-  extracted_at       DateTime  @db.Timestamptz(6)
-  shopify_id         String?   @db.VarChar(100)
-  shopify_created_at DateTime? @db.Timestamptz(6)
-  shopify_updated_at DateTime? @db.Timestamptz(6)
-  source             String?   @db.VarChar
-  format             String?   @db.VarChar
-  received_at        DateTime? @db.Timestamptz(6)
-  id                 String    @id @db.VarChar
-  shop_id            String    @db.VarChar
-  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([shop_id, format], map: "ix_raw_collection_shop_id_format")
-  @@index([shop_id, shopify_created_at], map: "ix_raw_collection_shop_id_shopify_created_at")
-  @@index([shop_id, shopify_id], map: "ix_raw_collection_shop_id_shopify_id")
-  @@index([shop_id, shopify_updated_at], map: "ix_raw_collection_shop_id_shopify_updated_at")
-  @@index([shop_id, source], map: "ix_raw_collection_shop_id_source")
-  @@index([format], map: "ix_raw_collections_format")
-  @@index([shop_id], map: "ix_raw_collections_shop_id")
-  @@index([source], map: "ix_raw_collections_source")
-}
-
-model raw_customers {
-  payload            Json      @db.Json
-  extracted_at       DateTime  @db.Timestamptz(6)
-  shopify_id         String?   @db.VarChar(100)
-  shopify_created_at DateTime? @db.Timestamptz(6)
-  shopify_updated_at DateTime? @db.Timestamptz(6)
-  source             String?   @db.VarChar
-  format             String?   @db.VarChar
-  received_at        DateTime? @db.Timestamptz(6)
-  id                 String    @id @db.VarChar
-  shop_id            String    @db.VarChar
-  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([shop_id, format], map: "ix_raw_customer_shop_id_format")
-  @@index([shop_id, shopify_created_at], map: "ix_raw_customer_shop_id_shopify_created_at")
-  @@index([shop_id, shopify_id], map: "ix_raw_customer_shop_id_shopify_id")
-  @@index([shop_id, shopify_updated_at], map: "ix_raw_customer_shop_id_shopify_updated_at")
-  @@index([shop_id, source], map: "ix_raw_customer_shop_id_source")
-  @@index([format], map: "ix_raw_customers_format")
-  @@index([shop_id], map: "ix_raw_customers_shop_id")
-  @@index([source], map: "ix_raw_customers_source")
-}
-
-model raw_orders {
-  payload            Json      @db.Json
-  extracted_at       DateTime  @db.Timestamptz(6)
-  shopify_id         String?   @db.VarChar(100)
-  shopify_created_at DateTime? @db.Timestamptz(6)
-  shopify_updated_at DateTime? @db.Timestamptz(6)
-  source             String?   @db.VarChar
-  format             String?   @db.VarChar
-  received_at        DateTime? @db.Timestamptz(6)
-  id                 String    @id @db.VarChar
-  shop_id            String    @db.VarChar
-  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([shop_id, format], map: "ix_raw_order_shop_id_format")
-  @@index([shop_id, shopify_created_at], map: "ix_raw_order_shop_id_shopify_created_at")
-  @@index([shop_id, shopify_id], map: "ix_raw_order_shop_id_shopify_id")
-  @@index([shop_id, shopify_updated_at], map: "ix_raw_order_shop_id_shopify_updated_at")
-  @@index([shop_id, source], map: "ix_raw_order_shop_id_source")
-  @@index([format], map: "ix_raw_orders_format")
-  @@index([shop_id], map: "ix_raw_orders_shop_id")
-  @@index([source], map: "ix_raw_orders_source")
-}
-
-model raw_products {
-  payload            Json      @db.Json
-  extracted_at       DateTime  @db.Timestamptz(6)
-  shopify_id         String?   @db.VarChar(100)
-  shopify_created_at DateTime? @db.Timestamptz(6)
-  shopify_updated_at DateTime? @db.Timestamptz(6)
-  source             String?   @db.VarChar
-  format             String?   @db.VarChar
-  received_at        DateTime? @db.Timestamptz(6)
-  id                 String    @id @db.VarChar
-  shop_id            String    @db.VarChar
-  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([shop_id, format], map: "ix_raw_product_shop_id_format")
-  @@index([shop_id, shopify_created_at], map: "ix_raw_product_shop_id_shopify_created_at")
-  @@index([shop_id, shopify_id], map: "ix_raw_product_shop_id_shopify_id")
-  @@index([shop_id, shopify_updated_at], map: "ix_raw_product_shop_id_shopify_updated_at")
-  @@index([shop_id, source], map: "ix_raw_product_shop_id_source")
-  @@index([format], map: "ix_raw_products_format")
-  @@index([shop_id], map: "ix_raw_products_shop_id")
-  @@index([source], map: "ix_raw_products_source")
-}
-
-model search_product_features {
-  search_query                       String   @db.VarChar(500)
-  search_click_rate                  Float
-  search_conversion_rate             Float
-  search_relevance_score             Float
-  total_search_interactions          Int
-  search_to_purchase_count           Int
-  days_since_last_search_interaction Int?
-  search_recency_score               Float
-  semantic_match_score               Float
-  search_intent_alignment            String   @db.VarChar(100)
-  last_computed_at                   DateTime @db.Timestamptz(6)
-  id                                 String   @id @db.VarChar
-  created_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                            String   @db.VarChar
-  product_id                         String?  @db.VarChar
-  shops                              shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, search_query, product_id], map: "ix_sp_features_shop_query_prod")
-  @@index([product_id], map: "ix_search_product_features_product_id")
-  @@index([search_query], map: "ix_search_product_features_search_query")
-  @@index([shop_id], map: "ix_search_product_features_shop_id")
-  @@index([shop_id, search_click_rate], map: "ix_sp_features_shop_click_rate")
-  @@index([shop_id, product_id], map: "ix_sp_features_shop_prod")
-  @@index([shop_id, search_query], map: "ix_sp_features_shop_query")
-  @@index([shop_id, search_query, search_click_rate], map: "ix_sp_features_shop_query_click")
-}
-
-model session_features {
-  session_id               String   @unique(map: "ix_session_features_session_id") @db.VarChar
-  session_duration_minutes Int
-  interaction_count        Int
-  interaction_intensity    Float
-  unique_products_viewed   Int
-  browse_depth_score       Float
-  conversion_funnel_stage  String   @db.VarChar(100)
-  purchase_intent_score    Float
-  session_value            Float
-  session_type             String   @db.VarChar(100)
-  bounce_session           Boolean
-  traffic_source           String   @db.VarChar(100)
-  returning_visitor        Boolean
-  last_computed_at         DateTime @db.Timestamptz(6)
-  id                       String   @id @db.VarChar
-  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                  String   @db.VarChar
-  customer_id              String?  @db.VarChar
-  shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, session_id], map: "ix_session_features_shop_id_session_id")
-  @@index([customer_id], map: "ix_session_features_customer_id")
-  @@index([shop_id], map: "ix_session_features_shop_id")
-  @@index([shop_id, customer_id], map: "ix_session_features_shop_cust")
-}
-
-model sessions {
-  id            String    @id @db.VarChar
-  shop          String    @db.VarChar
-  state         String    @db.VarChar
-  isOnline      Boolean   @map("is_online")
-  scope         String?   @db.VarChar(500)
-  expires       DateTime? @db.Timestamptz(6)
-  accessToken   String    @map("access_token") @db.VarChar(1000)
-  userId        BigInt?   @map("user_id")
-  firstName     String?   @map("first_name") @db.VarChar(100)
-  lastName      String?   @map("last_name") @db.VarChar(100)
-  email         String?   @db.VarChar(255)
-  accountOwner  Boolean   @map("account_owner")
-  locale        String?   @db.VarChar(10)
-  collaborator  Boolean?
-  emailVerified Boolean?  @map("email_verified")
-  created_at    DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at    DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
-
-  @@index([expires], map: "ix_sessions_expires")
-  @@index([shop], map: "ix_sessions_shop")
-}
-
-model shops {
-  shop_domain                String                       @unique(map: "shop_domain_unique") @db.VarChar(255)
-  custom_domain              String?                      @db.VarChar(255)
-  access_token               String                       @db.VarChar(1000)
-  plan_type                  String                       @db.VarChar(50)
-  currency_code              String?                      @db.VarChar(10)
-  money_format               String?                      @db.VarChar(100)
-  is_active                  Boolean
-  onboarding_completed       Boolean
-  suspended_at               DateTime?                    @db.Timestamptz(6)
-  suspension_reason          String?                      @db.VarChar(255)
-  service_impact             String?                      @db.VarChar(50)
-  email                      String?                      @db.VarChar(255)
-  last_analysis_at           DateTime?                    @db.Timestamptz(6)
-  id                         String                       @id @default(cuid()) @db.VarChar
-  created_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @updatedAt @db.Timestamptz(6)
-  billing_invoices           billing_invoices[]
-  billing_plans              billing_plans?
-  collection_data            collection_data[]
-  collection_features        collection_features[]
-  commission_records         commission_records[]
-  customer_behavior_features customer_behavior_features[]
-  customer_data              customer_data[]
-  interaction_features       interaction_features[]
-  order_data                 order_data[]
-  product_data               product_data[]
-  product_features           product_features[]
-  product_pair_features      product_pair_features[]
-  purchase_attributions      purchase_attributions[]
-  raw_collections            raw_collections[]
-  raw_customers              raw_customers[]
-  raw_orders                 raw_orders[]
-  raw_products               raw_products[]
-  search_product_features    search_product_features[]
-  session_features           session_features[]
-  user_features              user_features[]
-  user_identity_links        user_identity_links[]
-  user_interactions          user_interactions[]
-  user_sessions              user_sessions[]
-
-  @@index([is_active], map: "ix_shops_is_active")
-  @@index([last_analysis_at], map: "ix_shops_last_analysis_at")
-  @@index([plan_type], map: "ix_shops_plan_type")
-  @@index([shop_domain], map: "ix_shops_shop_domain")
-}
-
-model user_features {
-  total_purchases             Int
-  total_interactions          Int
-  lifetime_value              Float
-  avg_order_value             Float
-  purchase_frequency_score    Float
-  interaction_diversity_score Float
-  days_since_last_purchase    Int?
-  recency_score               Float
-  conversion_rate             Float
-  primary_category            String?  @db.VarChar(100)
-  category_diversity          Int
-  user_lifecycle_stage        String?  @db.VarChar(100)
-  churn_risk_score            Float
-  last_computed_at            DateTime @db.Timestamptz(6)
-  id                          String   @id @db.VarChar
-  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                     String   @db.VarChar
-  customer_id                 String?  @db.VarChar
-  shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, customer_id], map: "ix_user_features_shop_id_customer_id")
-  @@index([customer_id], map: "ix_user_features_customer_id")
-  @@index([shop_id], map: "ix_user_features_shop_id")
-}
-
-model user_identity_links {
-  identifier      String   @db.VarChar
-  identifier_type String   @db.VarChar
-  customer_id     String   @db.VarChar
-  linked_at       DateTime @db.Timestamptz(6)
-  id              String   @id @db.VarChar
-  created_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id         String   @db.VarChar
-  shops           shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, identifier, customer_id], map: "ix_user_identity_link_shop_id_identifier_customer_id")
-  @@index([shop_id, customer_id], map: "ix_user_identity_link_shop_id_customer_id")
-  @@index([customer_id], map: "ix_user_identity_links_customer_id")
-  @@index([shop_id], map: "ix_user_identity_links_shop_id")
-  @@index([customer_id], map: "ix_user_identity_link_customer_id")
-  @@index([identifier], map: "ix_user_identity_link_identifier")
-  @@index([identifier_type], map: "ix_user_identity_link_identifier_type")
-  @@index([shop_id, identifier], map: "ix_user_identity_link_shop_id_identifier")
-  @@index([identifier], map: "ix_user_identity_links_identifier")
-  @@index([identifier_type], map: "ix_user_identity_links_identifier_type")
-}
-
-model user_interactions {
-  session_id           String        @db.VarChar(255)
-  extension_type       String        @db.VarChar(50)
-  interaction_type     String        @db.VarChar(50)
-  interaction_metadata Json          @db.Json
-  id                   String        @id @db.VarChar
-  created_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id              String        @db.VarChar
-  customer_id          String?       @db.VarChar
-  user_sessions        user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops                shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([created_at], map: "ix_user_interaction_created_at")
-  @@index([customer_id], map: "ix_user_interaction_customer_id")
-  @@index([extension_type], map: "ix_user_interaction_extension_type")
-  @@index([interaction_type], map: "ix_user_interaction_interaction_type")
-  @@index([session_id], map: "ix_user_interaction_session_id")
-  @@index([shop_id], map: "ix_user_interaction_shop_id")
-  @@index([shop_id, customer_id, created_at], map: "ix_user_interaction_shop_id_customer_id_created_at")
-  @@index([shop_id, extension_type], map: "ix_user_interaction_shop_id_extension_type")
-  @@index([shop_id, interaction_type], map: "ix_user_interaction_shop_id_interaction_type")
-  @@index([customer_id], map: "ix_user_interactions_customer_id")
-  @@index([extension_type], map: "ix_user_interactions_extension_type")
-  @@index([interaction_type], map: "ix_user_interactions_interaction_type")
-  @@index([shop_id], map: "ix_user_interactions_shop_id")
-}
-
-model user_sessions {
-  browser_session_id    String                  @db.VarChar(255)
-  status                String                  @db.VarChar(50)
-  client_id             String?                 @db.VarChar
-  last_active           DateTime                @db.Timestamptz(6)
-  expires_at            DateTime?               @db.Timestamptz(6)
-  user_agent            String?                 @db.VarChar
-  ip_address            String?                 @db.VarChar(45)
-  referrer              String?                 @db.VarChar
-  extensions_used       Json                    @db.Json
-  total_interactions    Int
-  id                    String                  @id @db.VarChar
-  created_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id               String                  @db.VarChar
-  customer_id           String?                 @db.VarChar
-  purchase_attributions purchase_attributions[]
-  user_interactions     user_interactions[]
-  shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, customer_id, browser_session_id], map: "ix_user_session_shop_id_customer_id_browser_session_id")
-  @@index([customer_id], map: "ix_user_session_customer_id")
-  @@index([expires_at], map: "ix_user_session_expires_at")
-  @@index([shop_id], map: "ix_user_session_shop_id")
-  @@index([shop_id, customer_id, status], map: "ix_user_session_shop_id_customer_id_status")
-  @@index([shop_id, status], map: "ix_user_session_shop_id_status")
-  @@index([status], map: "ix_user_session_status")
-  @@index([customer_id], map: "ix_user_sessions_customer_id")
-  @@index([expires_at], map: "ix_user_sessions_expires_at")
-  @@index([shop_id], map: "ix_user_sessions_shop_id")
-  @@index([status], map: "ix_user_sessions_status")
-  @@index([client_id], map: "ix_user_sessions_client_id")
-  @@index([shop_id, client_id], map: "ix_user_sessions_shop_id_client_id")
+  @@unique([shop_subscription_id, status], map: "ix_billing_cycle_unique_active")
+  @@index([shop_subscription_id, status], map: "ix_billing_cycle_active")
+  @@index([start_date, end_date], map: "ix_billing_cycle_dates")
+  @@index([cycle_number], map: "ix_billing_cycle_number")
+  @@index([status], map: "ix_billing_cycle_status")
+  @@index([shop_subscription_id], map: "ix_billing_cycle_subscription")
+  @@index([activated_at], map: "ix_billing_cycles_activated_at")
+  @@index([cancelled_at], map: "ix_billing_cycles_cancelled_at")
+  @@index([completed_at], map: "ix_billing_cycles_completed_at")
+  @@index([cycle_number], map: "ix_billing_cycles_cycle_number")
+  @@index([end_date], map: "ix_billing_cycles_end_date")
+  @@index([shop_subscription_id], map: "ix_billing_cycles_shop_subscription_id")
+  @@index([start_date], map: "ix_billing_cycles_start_date")
+  @@index([status], map: "ix_billing_cycles_status")
 }
 
 model collection_data {
@@ -669,7 +91,7 @@ model collection_data {
   extras          Json?     @db.Json
   created_at      DateTime? @db.Timestamptz(6)
   updated_at      DateTime? @db.Timestamptz(6)
-  id              String    @id @db.VarChar
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   shop_id         String    @db.VarChar
   shops           shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -681,6 +103,125 @@ model collection_data {
   @@index([shop_id], map: "ix_collection_data_shop_id")
   @@index([title], map: "ix_collection_data_title")
   @@index([updated_at], map: "ix_collection_data_updated_at")
+}
+
+model collection_features {
+  collection_id                String   @db.VarChar
+  collection_engagement_score  Float
+  collection_conversion_rate   Float
+  collection_popularity_score  Float
+  avg_product_value            Float?
+  collection_revenue_potential Float
+  product_diversity_score      Float
+  collection_size_tier         String   @db.VarChar(100)
+  days_since_last_interaction  Int?
+  collection_recency_score     Float
+  is_curated_collection        Boolean
+  last_computed_at             DateTime @db.Timestamptz(6)
+  id                           String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                      String   @db.VarChar
+  shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, collection_id], map: "ix_collection_features_shop_id_collection_id")
+  @@index([shop_id], map: "ix_collection_features_shop_id")
+  @@index([shop_id, collection_conversion_rate], map: "ix_collection_features_shop_id_collection_conversion_rate")
+  @@index([shop_id, collection_engagement_score], map: "ix_collection_features_shop_id_collection_engagement_score")
+  @@index([shop_id, collection_popularity_score], map: "ix_collection_features_shop_id_collection_popularity_score")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model commission_records {
+  id                      String                 @id @db.VarChar(255)
+  shop_id                 String                 @db.VarChar(255)
+  purchase_attribution_id String                 @unique(map: "ix_commission_records_purchase_attribution_id") @db.VarChar(255)
+  billing_cycle_id        String?                @db.VarChar(255)
+  order_id                String                 @db.VarChar(255)
+  order_date              DateTime               @db.Timestamptz(6)
+  attributed_revenue      Decimal                @db.Decimal(10, 2)
+  commission_rate         Decimal                @db.Decimal(5, 4)
+  commission_earned       Decimal                @db.Decimal(10, 2)
+  commission_charged      Decimal                @db.Decimal(10, 2)
+  commission_overflow     Decimal                @db.Decimal(10, 2)
+  billing_cycle_start     DateTime?              @db.Timestamptz(6)
+  billing_cycle_end       DateTime?              @db.Timestamptz(6)
+  cycle_usage_before      Decimal                @db.Decimal(10, 2)
+  cycle_usage_after       Decimal                @db.Decimal(10, 2)
+  capped_amount           Decimal                @db.Decimal(10, 2)
+  trial_accumulated       Decimal                @db.Decimal(10, 2)
+  billing_phase           billing_phase_enum
+  status                  commission_status_enum
+  charge_type             charge_type_enum
+  shopify_usage_record_id String?                @unique(map: "ix_commission_records_shopify_usage_record_id") @db.VarChar(255)
+  shopify_recorded_at     DateTime?              @db.Timestamptz(6)
+  shopify_response        Json?                  @db.Json
+  currency                String                 @db.VarChar(3)
+  notes                   String?
+  commission_metadata     Json?                  @db.Json
+  error_count             Int
+  last_error              String?
+  last_error_at           DateTime?              @db.Timestamptz(6)
+  created_at              DateTime               @db.Timestamptz(6)
+  updated_at              DateTime               @db.Timestamptz(6)
+  deleted_at              DateTime?              @db.Timestamptz(6)
+  billing_cycles          billing_cycles?        @relation(fields: [billing_cycle_id], references: [id], onUpdate: NoAction)
+  purchase_attributions   purchase_attributions  @relation(fields: [purchase_attribution_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shops                   shops                  @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shop_id, billing_cycle_start, billing_cycle_end], map: "idx_commission_shop_cycle")
+  @@index([shop_id, billing_phase, status], map: "idx_commission_shop_phase_status")
+  @@index([shopify_usage_record_id], map: "idx_commission_shopify_record")
+  @@index([status, created_at], map: "idx_commission_status_created")
+  @@index([billing_cycle_end], map: "ix_commission_records_billing_cycle_end")
+  @@index([billing_cycle_id], map: "ix_commission_records_billing_cycle_id")
+  @@index([billing_cycle_start], map: "ix_commission_records_billing_cycle_start")
+  @@index([billing_phase], map: "ix_commission_records_billing_phase")
+  @@index([created_at], map: "ix_commission_records_created_at")
+  @@index([deleted_at], map: "ix_commission_records_deleted_at")
+  @@index([order_date], map: "ix_commission_records_order_date")
+  @@index([order_id], map: "ix_commission_records_order_id")
+  @@index([shop_id], map: "ix_commission_records_shop_id")
+  @@index([status], map: "ix_commission_records_status")
+  @@index([updated_at], map: "ix_commission_records_updated_at")
+}
+
+model customer_behavior_features {
+  user_lifecycle_stage        String?  @db.VarChar(100)
+  purchase_frequency_score    Float
+  interaction_diversity_score Float
+  category_diversity          Int
+  primary_category            String?  @db.VarChar(100)
+  conversion_rate             Float
+  avg_order_value             Float
+  lifetime_value              Float
+  recency_score               Float
+  churn_risk_score            Float
+  total_interactions          Int
+  days_since_last_purchase    Int?
+  last_computed_at            DateTime @db.Timestamptz(6)
+  id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                     String   @db.VarChar
+  customer_id                 String?  @db.VarChar
+  shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, customer_id], map: "ix_cb_features_shop_cust")
+  @@index([shop_id, avg_order_value], map: "ix_cb_features_shop_avg_order_value")
+  @@index([shop_id, category_diversity], map: "ix_cb_features_shop_category_diversity")
+  @@index([shop_id, churn_risk_score], map: "ix_cb_features_shop_churn_risk_score")
+  @@index([shop_id, conversion_rate], map: "ix_cb_features_shop_conversion_rate")
+  @@index([shop_id, days_since_last_purchase], map: "ix_cb_features_shop_days_since_last_purchase")
+  @@index([shop_id, interaction_diversity_score], map: "ix_cb_features_shop_interaction_diversity_score")
+  @@index([shop_id, lifetime_value], map: "ix_cb_features_shop_lifetime_value")
+  @@index([shop_id, primary_category], map: "ix_cb_features_shop_primary_category")
+  @@index([shop_id, purchase_frequency_score], map: "ix_cb_features_shop_purchase_frequency_score")
+  @@index([shop_id, recency_score], map: "ix_cb_features_shop_recency_score")
+  @@index([shop_id, total_interactions], map: "ix_cb_features_shop_total_interactions")
+  @@index([shop_id, user_lifecycle_stage], map: "ix_cb_features_shop_user_lifecycle_stage")
+  @@index([customer_id], map: "ix_customer_behavior_features_customer_id")
+  @@index([shop_id], map: "ix_customer_behavior_features_shop_id")
 }
 
 model customer_data {
@@ -701,7 +242,7 @@ model customer_data {
   created_at      DateTime? @db.Timestamptz(6)
   updated_at      DateTime? @db.Timestamptz(6)
   extras          Json?     @db.Json
-  id              String    @id @db.VarChar
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   shop_id         String    @db.VarChar
   shops           shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -713,6 +254,58 @@ model customer_data {
   @@index([total_spent], map: "ix_customer_data_total_spent")
   @@index([updated_at], map: "ix_customer_data_updated_at")
   @@index([verified_email], map: "ix_customer_data_verified_email")
+}
+
+model interaction_features {
+  interaction_strength_score   Float
+  customer_product_affinity    Float
+  engagement_progression_score Float
+  conversion_likelihood        Float
+  purchase_intent_score        Float
+  interaction_recency_score    Float
+  relationship_maturity        String   @db.VarChar(100)
+  interaction_frequency_score  Float
+  customer_product_loyalty     Float
+  total_interaction_value      Float
+  last_computed_at             DateTime @db.Timestamptz(6)
+  id                           String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                   DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                      String   @db.VarChar
+  customer_id                  String?  @db.VarChar
+  product_id                   String?  @db.VarChar
+  shops                        shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, customer_id, product_id], map: "ix_int_features_shop_cust_prod")
+  @@index([shop_id, customer_id, customer_product_affinity], map: "ix_int_features_shop_cust_affinity")
+  @@index([shop_id, customer_id, conversion_likelihood], map: "ix_int_features_shop_cust_conv_likelihood")
+  @@index([shop_id, customer_id, engagement_progression_score], map: "ix_int_features_shop_cust_engagement")
+  @@index([shop_id, customer_id, interaction_frequency_score], map: "ix_int_features_shop_cust_frequency")
+  @@index([shop_id, customer_id, purchase_intent_score], map: "ix_int_features_shop_cust_intent")
+  @@index([shop_id, customer_id, relationship_maturity], map: "ix_int_features_shop_cust_maturity")
+  @@index([shop_id, customer_id, interaction_recency_score], map: "ix_int_features_shop_cust_recency")
+  @@index([shop_id, customer_id, interaction_strength_score], map: "ix_int_features_shop_cust_strength")
+  @@index([customer_id], map: "ix_interaction_features_customer_id")
+  @@index([product_id], map: "ix_interaction_features_product_id")
+  @@index([shop_id], map: "ix_interaction_features_shop_id")
+}
+
+model line_item_data {
+  order_id              String     @db.VarChar
+  product_id            String?    @db.VarChar
+  variant_id            String?    @db.VarChar
+  title                 String?    @db.VarChar
+  quantity              Int
+  price                 Float
+  original_unit_price   Float?
+  discounted_unit_price Float?
+  currency_code         String?    @db.VarChar(10)
+  variant_data          Json?      @db.Json
+  properties            Json?      @db.Json
+  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at            DateTime   @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  order_data            order_data @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model order_data {
@@ -754,7 +347,7 @@ model order_data {
   extras                    Json?            @db.Json
   created_at                DateTime?        @db.Timestamptz(6)
   updated_at                DateTime?        @db.Timestamptz(6)
-  id                        String           @id @db.VarChar
+  id                        String           @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   shop_id                   String           @db.VarChar
   line_item_data            line_item_data[]
   shops                     shops            @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -771,6 +364,38 @@ model order_data {
   @@index([shop_id], map: "ix_order_data_shop_id")
   @@index([total_amount], map: "ix_order_data_total_amount")
   @@index([updated_at], map: "ix_order_data_updated_at")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model pricing_tiers {
+  subscription_plan_id   String               @db.VarChar(255)
+  currency               String               @db.VarChar(3)
+  trial_threshold_amount Decimal              @db.Decimal(10, 2)
+  commission_rate        Decimal              @db.Decimal(5, 4)
+  is_active              Boolean
+  is_default             Boolean
+  minimum_charge         Decimal?             @db.Decimal(10, 2)
+  proration_enabled      Boolean
+  tier_metadata          String?              @db.VarChar(1000)
+  effective_from         DateTime             @db.Timestamptz(6)
+  effective_to           DateTime?            @db.Timestamptz(6)
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at             DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at             DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  subscription_plans     subscription_plans   @relation(fields: [subscription_plan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  shop_subscriptions     shop_subscriptions[]
+
+  @@unique([subscription_plan_id, currency, is_default], map: "ix_pricing_tier_unique_default")
+  @@index([is_active], map: "ix_pricing_tier_active")
+  @@index([currency], map: "ix_pricing_tier_currency")
+  @@index([is_default], map: "ix_pricing_tier_default")
+  @@index([effective_from, effective_to], map: "ix_pricing_tier_effective")
+  @@index([subscription_plan_id, currency], map: "ix_pricing_tier_plan_currency")
+  @@index([currency], map: "ix_pricing_tiers_currency")
+  @@index([effective_to], map: "ix_pricing_tiers_effective_to")
+  @@index([is_active], map: "ix_pricing_tiers_is_active")
+  @@index([is_default], map: "ix_pricing_tiers_is_default")
+  @@index([subscription_plan_id], map: "ix_pricing_tiers_subscription_plan_id")
 }
 
 model product_data {
@@ -797,7 +422,7 @@ model product_data {
   metafields       Json?    @db.Json
   extras           Json?    @db.Json
   is_active        Boolean
-  id               String   @id @db.VarChar
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   created_at       DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at       DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id          String   @db.VarChar
@@ -813,109 +438,584 @@ model product_data {
   @@index([vendor], map: "ix_product_data_vendor")
 }
 
-model trial_configs {
-  currency_code       String   @unique(map: "ix_trial_configs_currency_code") @db.VarChar(3)
-  currency_symbol     String   @db.VarChar(10)
-  trial_threshold_usd Decimal  @db.Decimal(10, 2)
-  market_tier         String   @db.VarChar(20)
-  market_description  String?  @db.VarChar(100)
-  is_active           Boolean
-  id                  String   @id @db.VarChar
-  created_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+model product_features {
+  interaction_volume_score Float
+  purchase_velocity_score  Float
+  engagement_quality_score Float
+  price_tier               String   @db.VarChar(20)
+  revenue_potential_score  Float
+  conversion_efficiency    Float
+  days_since_last_purchase Int?
+  activity_recency_score   Float
+  trending_momentum        Float
+  product_lifecycle_stage  String   @db.VarChar(100)
+  inventory_health_score   Float
+  product_category         String?  @db.VarChar(100)
+  last_computed_at         DateTime @db.Timestamptz(6)
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                  String   @db.VarChar
+  product_id               String?  @db.VarChar
+  shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([is_active], map: "ix_trial_config_active")
-  @@index([currency_code], map: "ix_trial_config_currency")
-  @@index([market_tier], map: "ix_trial_config_tier")
-  @@index([is_active], map: "ix_trial_configs_is_active")
+  @@unique([shop_id, product_id], map: "ix_product_features_shop_id_product_id")
+  @@index([product_id], map: "ix_product_features_product_id")
+  @@index([shop_id], map: "ix_product_features_shop_id")
+  @@index([shop_id, activity_recency_score], map: "ix_product_features_shop_id_activity_recency_score")
+  @@index([shop_id, conversion_efficiency], map: "ix_product_features_shop_id_conversion_efficiency")
+  @@index([shop_id, engagement_quality_score], map: "ix_product_features_shop_id_engagement_quality_score")
+  @@index([shop_id, interaction_volume_score], map: "ix_product_features_shop_id_interaction_volume_score")
+  @@index([shop_id, inventory_health_score], map: "ix_product_features_shop_id_inventory_health_score")
+  @@index([shop_id, price_tier], map: "ix_product_features_shop_id_price_tier")
+  @@index([shop_id, product_lifecycle_stage], map: "ix_product_features_shop_id_product_lifecycle_stage")
+  @@index([shop_id, purchase_velocity_score], map: "ix_product_features_shop_id_purchase_velocity_score")
+  @@index([shop_id, revenue_potential_score], map: "ix_product_features_shop_id_revenue_potential_score")
+  @@index([shop_id, trending_momentum], map: "ix_product_features_shop_id_trending_momentum")
+}
+
+model product_pair_features {
+  product_id1                   String   @db.VarChar
+  product_id2                   String   @db.VarChar
+  co_purchase_strength          Float
+  co_engagement_score           Float
+  pair_affinity_score           Float
+  total_pair_revenue            Float
+  pair_frequency_score          Float
+  days_since_last_co_occurrence Int?
+  pair_recency_score            Float
+  pair_confidence_level         String   @db.VarChar(100)
+  cross_sell_potential          Float
+  last_computed_at              DateTime @db.Timestamptz(6)
+  id                            String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                    DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                       String   @db.VarChar
+  product_id                    String?  @db.VarChar
+  shops                         shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, product_id1, product_id2], map: "ix_pp_features_shop_p1_p2")
+  @@index([shop_id, pair_affinity_score], map: "ix_pp_features_shop_affinity")
+  @@index([shop_id, co_purchase_strength], map: "ix_pp_features_shop_co_purchase")
+  @@index([shop_id, pair_confidence_level], map: "ix_pp_features_shop_confidence")
+  @@index([shop_id, cross_sell_potential], map: "ix_pp_features_shop_cross_sell")
+  @@index([shop_id, days_since_last_co_occurrence], map: "ix_pp_features_shop_days_co_occur")
+  @@index([shop_id, pair_frequency_score], map: "ix_pp_features_shop_frequency")
+  @@index([shop_id, product_id1], map: "ix_pp_features_shop_p1")
+  @@index([shop_id, product_id1, co_purchase_strength], map: "ix_pp_features_shop_p1_co_purchase")
+  @@index([shop_id, product_id2], map: "ix_pp_features_shop_p2")
+  @@index([shop_id, product_id2, co_purchase_strength], map: "ix_pp_features_shop_p2_co_purchase")
+  @@index([shop_id, pair_recency_score], map: "ix_pp_features_shop_recency")
+  @@index([shop_id, total_pair_revenue], map: "ix_pp_features_shop_revenue")
+  @@index([product_id], map: "ix_product_pair_features_product_id")
+  @@index([product_id1], map: "ix_product_pair_features_product_id1")
+  @@index([product_id2], map: "ix_product_pair_features_product_id2")
+  @@index([shop_id], map: "ix_product_pair_features_shop_id")
+}
+
+model purchase_attributions {
+  session_id                String              @db.VarChar(255)
+  order_id                  String              @db.VarChar(255)
+  contributing_extensions   Json                @db.Json
+  attribution_weights       Json                @db.Json
+  total_revenue             Decimal             @db.Decimal(10, 2)
+  attributed_revenue        Json                @db.Json
+  total_interactions        Int
+  interactions_by_extension Json                @db.Json
+  purchase_at               DateTime            @db.Timestamptz(6)
+  attribution_algorithm     String              @db.VarChar(50)
+  metadata                  Json                @db.Json
+  id                        String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                   String              @db.VarChar
+  customer_id               String?             @db.VarChar
+  commission_records        commission_records?
+  user_sessions             user_sessions       @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shops                     shops               @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, order_id], map: "ix_purchase_attribution_shop_id_order_id")
+  @@index([customer_id], map: "ix_purchase_attribution_customer_id")
+  @@index([order_id], map: "ix_purchase_attribution_order_id")
+  @@index([purchase_at], map: "ix_purchase_attribution_purchase_at")
+  @@index([session_id], map: "ix_purchase_attribution_session_id")
+  @@index([shop_id], map: "ix_purchase_attribution_shop_id")
+  @@index([shop_id, customer_id, purchase_at], map: "ix_purchase_attribution_shop_id_customer_id_purchase_at")
+  @@index([shop_id, purchase_at], map: "ix_purchase_attribution_shop_id_purchase_at")
+  @@index([customer_id], map: "ix_purchase_attributions_customer_id")
+  @@index([order_id], map: "ix_purchase_attributions_order_id")
+  @@index([purchase_at], map: "ix_purchase_attributions_purchase_at")
+  @@index([shop_id], map: "ix_purchase_attributions_shop_id")
+}
+
+model raw_collections {
+  payload            Json      @db.Json
+  extracted_at       DateTime  @db.Timestamptz(6)
+  shopify_id         String?   @db.VarChar(100)
+  shopify_created_at DateTime? @db.Timestamptz(6)
+  shopify_updated_at DateTime? @db.Timestamptz(6)
+  source             String?   @db.VarChar
+  format             String?   @db.VarChar
+  received_at        DateTime? @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id            String    @db.VarChar
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([shop_id, format], map: "ix_raw_collection_shop_id_format")
+  @@index([shop_id, shopify_created_at], map: "ix_raw_collection_shop_id_shopify_created_at")
+  @@index([shop_id, shopify_id], map: "ix_raw_collection_shop_id_shopify_id")
+  @@index([shop_id, shopify_updated_at], map: "ix_raw_collection_shop_id_shopify_updated_at")
+  @@index([shop_id, source], map: "ix_raw_collection_shop_id_source")
+  @@index([format], map: "ix_raw_collections_format")
+  @@index([shop_id], map: "ix_raw_collections_shop_id")
+  @@index([source], map: "ix_raw_collections_source")
+}
+
+model raw_customers {
+  payload            Json      @db.Json
+  extracted_at       DateTime  @db.Timestamptz(6)
+  shopify_id         String?   @db.VarChar(100)
+  shopify_created_at DateTime? @db.Timestamptz(6)
+  shopify_updated_at DateTime? @db.Timestamptz(6)
+  source             String?   @db.VarChar
+  format             String?   @db.VarChar
+  received_at        DateTime? @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id            String    @db.VarChar
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([shop_id, format], map: "ix_raw_customer_shop_id_format")
+  @@index([shop_id, shopify_created_at], map: "ix_raw_customer_shop_id_shopify_created_at")
+  @@index([shop_id, shopify_id], map: "ix_raw_customer_shop_id_shopify_id")
+  @@index([shop_id, shopify_updated_at], map: "ix_raw_customer_shop_id_shopify_updated_at")
+  @@index([shop_id, source], map: "ix_raw_customer_shop_id_source")
+  @@index([format], map: "ix_raw_customers_format")
+  @@index([shop_id], map: "ix_raw_customers_shop_id")
+  @@index([source], map: "ix_raw_customers_source")
+}
+
+model raw_orders {
+  payload            Json      @db.Json
+  extracted_at       DateTime  @db.Timestamptz(6)
+  shopify_id         String?   @db.VarChar(100)
+  shopify_created_at DateTime? @db.Timestamptz(6)
+  shopify_updated_at DateTime? @db.Timestamptz(6)
+  source             String?   @db.VarChar
+  format             String?   @db.VarChar
+  received_at        DateTime? @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id            String    @db.VarChar
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([shop_id, format], map: "ix_raw_order_shop_id_format")
+  @@index([shop_id, shopify_created_at], map: "ix_raw_order_shop_id_shopify_created_at")
+  @@index([shop_id, shopify_id], map: "ix_raw_order_shop_id_shopify_id")
+  @@index([shop_id, shopify_updated_at], map: "ix_raw_order_shop_id_shopify_updated_at")
+  @@index([shop_id, source], map: "ix_raw_order_shop_id_source")
+  @@index([format], map: "ix_raw_orders_format")
+  @@index([shop_id], map: "ix_raw_orders_shop_id")
+  @@index([source], map: "ix_raw_orders_source")
+}
+
+model raw_products {
+  payload            Json      @db.Json
+  extracted_at       DateTime  @db.Timestamptz(6)
+  shopify_id         String?   @db.VarChar(100)
+  shopify_created_at DateTime? @db.Timestamptz(6)
+  shopify_updated_at DateTime? @db.Timestamptz(6)
+  source             String?   @db.VarChar
+  format             String?   @db.VarChar
+  received_at        DateTime? @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id            String    @db.VarChar
+  created_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([shop_id, format], map: "ix_raw_product_shop_id_format")
+  @@index([shop_id, shopify_created_at], map: "ix_raw_product_shop_id_shopify_created_at")
+  @@index([shop_id, shopify_id], map: "ix_raw_product_shop_id_shopify_id")
+  @@index([shop_id, shopify_updated_at], map: "ix_raw_product_shop_id_shopify_updated_at")
+  @@index([shop_id, source], map: "ix_raw_product_shop_id_source")
+  @@index([format], map: "ix_raw_products_format")
+  @@index([shop_id], map: "ix_raw_products_shop_id")
+  @@index([source], map: "ix_raw_products_source")
+}
+
+model search_product_features {
+  search_query                       String   @db.VarChar(500)
+  search_click_rate                  Float
+  search_conversion_rate             Float
+  search_relevance_score             Float
+  total_search_interactions          Int
+  search_to_purchase_count           Int
+  days_since_last_search_interaction Int?
+  search_recency_score               Float
+  semantic_match_score               Float
+  search_intent_alignment            String   @db.VarChar(100)
+  last_computed_at                   DateTime @db.Timestamptz(6)
+  id                                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                         DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                            String   @db.VarChar
+  product_id                         String?  @db.VarChar
+  shops                              shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, search_query, product_id], map: "ix_sp_features_shop_query_prod")
+  @@index([product_id], map: "ix_search_product_features_product_id")
+  @@index([search_query], map: "ix_search_product_features_search_query")
+  @@index([shop_id], map: "ix_search_product_features_shop_id")
+  @@index([shop_id, search_click_rate], map: "ix_sp_features_shop_click_rate")
+  @@index([shop_id, product_id], map: "ix_sp_features_shop_prod")
+  @@index([shop_id, search_query], map: "ix_sp_features_shop_query")
+  @@index([shop_id, search_query, search_click_rate], map: "ix_sp_features_shop_query_click")
+}
+
+model session_features {
+  session_id               String   @unique(map: "ix_session_features_session_id") @db.VarChar
+  session_duration_minutes Int
+  interaction_count        Int
+  interaction_intensity    Float
+  unique_products_viewed   Int
+  browse_depth_score       Float
+  conversion_funnel_stage  String   @db.VarChar(100)
+  purchase_intent_score    Float
+  session_value            Float
+  session_type             String   @db.VarChar(100)
+  bounce_session           Boolean
+  traffic_source           String   @db.VarChar(100)
+  returning_visitor        Boolean
+  last_computed_at         DateTime @db.Timestamptz(6)
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                  String   @db.VarChar
+  customer_id              String?  @db.VarChar
+  shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, session_id], map: "ix_session_features_shop_id_session_id")
+  @@index([customer_id], map: "ix_session_features_customer_id")
+  @@index([shop_id, customer_id], map: "ix_session_features_shop_cust")
+  @@index([shop_id], map: "ix_session_features_shop_id")
+}
+
+model sessions {
+  id            String    @id @db.VarChar
+  shop          String    @db.VarChar
+  state         String    @db.VarChar
+  isOnline      Boolean
+  scope         String?   @db.VarChar(500)
+  expires       DateTime? @db.Timestamptz(6)
+  accessToken   String    @db.VarChar(1000)
+  userId        BigInt?
+  firstName     String?   @db.VarChar(100)
+  lastName      String?   @db.VarChar(100)
+  email         String?   @db.VarChar(255)
+  accountOwner  Boolean
+  locale        String?   @db.VarChar(10)
+  collaborator  Boolean?
+  emailVerified Boolean?
+  createdAt     DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updatedAt     DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+
+  @@index([expires], map: "ix_sessions_expires")
+  @@index([shop], map: "ix_sessions_shop")
+}
+
+model shop_subscriptions {
+  subscription_plan_id   String                   @db.VarChar(255)
+  pricing_tier_id        String                   @db.VarChar(255)
+  status                 subscription_status_enum
+  start_date             DateTime                 @db.Timestamptz(6)
+  end_date               DateTime?                @db.Timestamptz(6)
+  is_active              Boolean
+  auto_renew             Boolean
+  subscription_metadata  String?                  @db.VarChar(2000)
+  user_chosen_cap_amount Decimal?                 @db.Decimal(10, 2)
+  activated_at           DateTime?                @db.Timestamptz(6)
+  suspended_at           DateTime?                @db.Timestamptz(6)
+  cancelled_at           DateTime?                @db.Timestamptz(6)
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at             DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                String                   @unique(map: "uq_shop_subscription_active") @db.VarChar
+  billing_cycles         billing_cycles[]
+  pricing_tiers          pricing_tiers            @relation(fields: [pricing_tier_id], references: [id], onUpdate: NoAction)
+  shops                  shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscription_plans     subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
+  shopify_subscriptions  shopify_subscriptions?
+  subscription_trials    subscription_trials?
+
+  @@index([is_active], map: "ix_shop_subscription_active")
+  @@index([start_date, end_date], map: "ix_shop_subscription_dates")
+  @@index([subscription_plan_id], map: "ix_shop_subscription_plan")
+  @@index([shop_id], map: "ix_shop_subscription_shop")
+  @@index([status], map: "ix_shop_subscription_status")
+  @@index([pricing_tier_id], map: "ix_shop_subscription_tier")
+  @@index([activated_at], map: "ix_shop_subscriptions_activated_at")
+  @@index([cancelled_at], map: "ix_shop_subscriptions_cancelled_at")
+  @@index([end_date], map: "ix_shop_subscriptions_end_date")
+  @@index([is_active], map: "ix_shop_subscriptions_is_active")
+  @@index([pricing_tier_id], map: "ix_shop_subscriptions_pricing_tier_id")
+  @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
+  @@index([start_date], map: "ix_shop_subscriptions_start_date")
+  @@index([status], map: "ix_shop_subscriptions_status")
+  @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
+  @@index([suspended_at], map: "ix_shop_subscriptions_suspended_at")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model commission_records {
-  id                      String                 @id @db.VarChar(255)
-  shop_id                 String                 @db.VarChar(255)
-  purchase_attribution_id String                 @unique(map: "ix_commission_records_purchase_attribution_id") @db.VarChar(255)
-  billing_plan_id         String?                @db.VarChar(255)
-  order_id                String                 @db.VarChar(255)
-  order_date              DateTime               @db.Timestamptz(6)
-  attributed_revenue      Decimal                @db.Decimal(10, 2)
-  commission_rate         Decimal                @db.Decimal(5, 4)
-  commission_earned       Decimal                @db.Decimal(10, 2)
-  commission_charged      Decimal                @db.Decimal(10, 2)
-  commission_overflow     Decimal                @db.Decimal(10, 2)
-  billing_cycle_start     DateTime?              @db.Timestamptz(6)
-  billing_cycle_end       DateTime?              @db.Timestamptz(6)
-  cycle_usage_before      Decimal                @db.Decimal(10, 2)
-  cycle_usage_after       Decimal                @db.Decimal(10, 2)
-  capped_amount           Decimal                @db.Decimal(10, 2)
-  trial_accumulated       Decimal                @db.Decimal(10, 2)
-  billing_phase           billing_phase_enum
-  status                  commission_status_enum
-  charge_type             charge_type_enum
-  shopify_usage_record_id String?                @unique(map: "ix_commission_records_shopify_usage_record_id") @db.VarChar(255)
-  shopify_recorded_at     DateTime?              @db.Timestamptz(6)
-  shopify_response        Json?                  @db.Json
-  invoice_id              String?                @db.VarChar(255)
-  invoiced_at             DateTime?              @db.Timestamptz(6)
-  currency                String                 @db.VarChar(3)
-  notes                   String?
-  commission_metadata     Json?                  @db.Json
-  error_count             Int
+model shopify_subscriptions {
+  shop_subscription_id    String                           @unique(map: "ix_shopify_subscriptions_shop_subscription_id") @db.VarChar(255)
+  shopify_subscription_id String                           @unique(map: "ix_shopify_subscriptions_shopify_subscription_id") @db.VarChar(255)
+  shopify_line_item_id    String?                          @db.VarChar(255)
+  status                  shopify_subscription_status_enum
+  confirmation_url        String?
+  return_url              String?
+  created_at              DateTime?                        @db.Timestamptz(6)
+  activated_at            DateTime?                        @db.Timestamptz(6)
+  cancelled_at            DateTime?                        @db.Timestamptz(6)
+  shopify_response        String?
+  shopify_metadata        String?
   last_error              String?
-  last_error_at           DateTime?              @db.Timestamptz(6)
-  created_at              DateTime               @db.Timestamptz(6)
-  updated_at              DateTime               @db.Timestamptz(6)
-  deleted_at              DateTime?              @db.Timestamptz(6)
-  billing_plans           billing_plans?         @relation(fields: [billing_plan_id], references: [id], onUpdate: NoAction)
-  billing_invoices        billing_invoices?      @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
-  purchase_attributions   purchase_attributions  @relation(fields: [purchase_attribution_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  shops                   shops                  @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  last_error_at           DateTime?                        @db.Timestamptz(6)
+  error_count             String                           @db.VarChar(10)
+  id                      String                           @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  updated_at              DateTime                         @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions      shop_subscriptions               @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([invoice_id, status], map: "idx_commission_invoice")
-  @@index([shop_id, billing_cycle_start, billing_cycle_end], map: "idx_commission_shop_cycle")
-  @@index([shop_id, billing_phase, status], map: "idx_commission_shop_phase_status")
-  @@index([shopify_usage_record_id], map: "idx_commission_shopify_record")
-  @@index([status, created_at], map: "idx_commission_status_created")
-  @@index([billing_cycle_end], map: "ix_commission_records_billing_cycle_end")
-  @@index([billing_cycle_start], map: "ix_commission_records_billing_cycle_start")
-  @@index([billing_phase], map: "ix_commission_records_billing_phase")
-  @@index([billing_plan_id], map: "ix_commission_records_billing_plan_id")
-  @@index([created_at], map: "ix_commission_records_created_at")
-  @@index([deleted_at], map: "ix_commission_records_deleted_at")
-  @@index([invoice_id], map: "ix_commission_records_invoice_id")
-  @@index([order_date], map: "ix_commission_records_order_date")
-  @@index([order_id], map: "ix_commission_records_order_id")
-  @@index([shop_id], map: "ix_commission_records_shop_id")
-  @@index([status], map: "ix_commission_records_status")
-  @@index([updated_at], map: "ix_commission_records_updated_at")
+  @@index([activated_at], map: "ix_shopify_subscription_activated")
+  @@index([cancelled_at], map: "ix_shopify_subscription_cancelled")
+  @@index([created_at], map: "ix_shopify_subscription_created")
+  @@index([last_error_at], map: "ix_shopify_subscription_error")
+  @@index([shopify_subscription_id], map: "ix_shopify_subscription_shopify_id")
+  @@index([status], map: "ix_shopify_subscription_status")
+  @@index([shop_subscription_id], map: "ix_shopify_subscription_subscription")
+  @@index([activated_at], map: "ix_shopify_subscriptions_activated_at")
+  @@index([cancelled_at], map: "ix_shopify_subscriptions_cancelled_at")
+  @@index([created_at], map: "ix_shopify_subscriptions_created_at")
+  @@index([last_error_at], map: "ix_shopify_subscriptions_last_error_at")
+  @@index([shopify_line_item_id], map: "ix_shopify_subscriptions_shopify_line_item_id")
+  @@index([status], map: "ix_shopify_subscriptions_status")
 }
 
-model feedback {
-  feedback_type String   @db.VarChar(256)
-  user_id       String   @db.VarChar(256)
-  item_id       String   @db.VarChar(256)
-  time_stamp    DateTime @db.Timestamptz(6)
-  comment       String   @default("")
+model shops {
+  shop_domain                String                       @unique(map: "shop_domain_unique") @db.VarChar(255)
+  custom_domain              String?                      @db.VarChar(255)
+  access_token               String                       @db.VarChar(1000)
+  plan_type                  String                       @db.VarChar(50)
+  currency_code              String?                      @db.VarChar(10)
+  money_format               String?                      @db.VarChar(100)
+  is_active                  Boolean
+  onboarding_completed       Boolean
+  suspended_at               DateTime?                    @db.Timestamptz(6)
+  suspension_reason          String?                      @db.VarChar(255)
+  service_impact             String?                      @db.VarChar(50)
+  email                      String?                      @db.VarChar(255)
+  last_analysis_at           DateTime?                    @db.Timestamptz(6)
+  id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  collection_data            collection_data[]
+  collection_features        collection_features[]
+  commission_records         commission_records[]
+  customer_behavior_features customer_behavior_features[]
+  customer_data              customer_data[]
+  interaction_features       interaction_features[]
+  order_data                 order_data[]
+  product_data               product_data[]
+  product_features           product_features[]
+  product_pair_features      product_pair_features[]
+  purchase_attributions      purchase_attributions[]
+  raw_collections            raw_collections[]
+  raw_customers              raw_customers[]
+  raw_orders                 raw_orders[]
+  raw_products               raw_products[]
+  search_product_features    search_product_features[]
+  session_features           session_features[]
+  shop_subscriptions         shop_subscriptions?
+  user_features              user_features[]
+  user_identity_links        user_identity_links[]
+  user_interactions          user_interactions[]
+  user_sessions              user_sessions[]
 
-  @@id([feedback_type, user_id, item_id])
-  @@index([item_id], map: "item_id_index")
-  @@index([user_id], map: "user_id_index")
+  @@index([is_active], map: "ix_shops_is_active")
+  @@index([last_analysis_at], map: "ix_shops_last_analysis_at")
+  @@index([plan_type], map: "ix_shops_plan_type")
+  @@index([shop_domain], map: "ix_shops_shop_domain")
 }
 
-model items {
-  item_id    String   @id @db.VarChar(256)
-  is_hidden  Boolean  @default(false)
-  categories Json     @default("[]") @db.Json
-  time_stamp DateTime @db.Timestamptz(6)
-  labels     Json     @default("[]") @db.Json
-  comment    String   @default("")
+model subscription_plans {
+  name                    String                      @unique(map: "ix_subscription_plans_name") @db.VarChar(100)
+  description             String?
+  plan_type               subscription_plan_type_enum
+  is_active               Boolean
+  is_default              Boolean
+  default_commission_rate String?                     @db.VarChar(10)
+  plan_metadata           String?
+  effective_from          DateTime                    @db.Timestamptz(6)
+  effective_to            DateTime?                   @db.Timestamptz(6)
+  id                      String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  pricing_tiers           pricing_tiers[]
+  shop_subscriptions      shop_subscriptions[]
+
+  @@index([is_active], map: "ix_subscription_plan_active")
+  @@index([is_default], map: "ix_subscription_plan_default")
+  @@index([effective_from, effective_to], map: "ix_subscription_plan_effective")
+  @@index([name], map: "ix_subscription_plan_name")
+  @@index([plan_type], map: "ix_subscription_plan_type")
+  @@index([effective_to], map: "ix_subscription_plans_effective_to")
+  @@index([is_active], map: "ix_subscription_plans_is_active")
+  @@index([is_default], map: "ix_subscription_plans_is_default")
+  @@index([plan_type], map: "ix_subscription_plans_plan_type")
 }
 
-model users {
-  user_id   String @id @db.VarChar(256)
-  labels    Json   @default("[]") @db.Json
-  subscribe Json   @default("[]") @db.Json
-  comment   String @default("")
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model subscription_trials {
+  shop_subscription_id String             @unique(map: "ix_subscription_trials_shop_subscription_id") @db.VarChar(255)
+  threshold_amount     Decimal            @db.Decimal(10, 2)
+  trial_duration_days  String?            @db.VarChar(10)
+  accumulated_revenue  Decimal            @db.Decimal(12, 2)
+  commission_saved     Decimal            @db.Decimal(10, 2)
+  status               trial_status_enum
+  started_at           DateTime           @db.Timestamptz(6)
+  completed_at         DateTime?          @db.Timestamptz(6)
+  expired_at           DateTime?          @db.Timestamptz(6)
+  trial_metadata       String?            @db.VarChar(1000)
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at           DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at           DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions   shop_subscriptions @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([completed_at], map: "ix_subscription_trial_completed")
+  @@index([started_at], map: "ix_subscription_trial_started")
+  @@index([status], map: "ix_subscription_trial_status")
+  @@index([shop_subscription_id], map: "ix_subscription_trial_subscription")
+  @@index([completed_at], map: "ix_subscription_trials_completed_at")
+  @@index([expired_at], map: "ix_subscription_trials_expired_at")
+  @@index([started_at], map: "ix_subscription_trials_started_at")
+  @@index([status], map: "ix_subscription_trials_status")
+}
+
+model user_features {
+  total_purchases             Int
+  total_interactions          Int
+  lifetime_value              Float
+  avg_order_value             Float
+  purchase_frequency_score    Float
+  interaction_diversity_score Float
+  days_since_last_purchase    Int?
+  recency_score               Float
+  conversion_rate             Float
+  primary_category            String?  @db.VarChar(100)
+  category_diversity          Int
+  user_lifecycle_stage        String?  @db.VarChar(100)
+  churn_risk_score            Float
+  last_computed_at            DateTime @db.Timestamptz(6)
+  id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                     String   @db.VarChar
+  customer_id                 String?  @db.VarChar
+  shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, customer_id], map: "ix_user_features_shop_id_customer_id")
+  @@index([customer_id], map: "ix_user_features_customer_id")
+  @@index([shop_id], map: "ix_user_features_shop_id")
+}
+
+model user_identity_links {
+  identifier      String   @db.VarChar
+  identifier_type String   @db.VarChar
+  customer_id     String   @db.VarChar
+  linked_at       DateTime @db.Timestamptz(6)
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at      DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id         String   @db.VarChar
+  shops           shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, identifier, customer_id], map: "ix_user_identity_link_shop_id_identifier_customer_id")
+  @@index([customer_id], map: "ix_user_identity_link_customer_id")
+  @@index([identifier], map: "ix_user_identity_link_identifier")
+  @@index([identifier_type], map: "ix_user_identity_link_identifier_type")
+  @@index([shop_id, customer_id], map: "ix_user_identity_link_shop_id_customer_id")
+  @@index([shop_id, identifier], map: "ix_user_identity_link_shop_id_identifier")
+  @@index([customer_id], map: "ix_user_identity_links_customer_id")
+  @@index([identifier], map: "ix_user_identity_links_identifier")
+  @@index([identifier_type], map: "ix_user_identity_links_identifier_type")
+  @@index([shop_id], map: "ix_user_identity_links_shop_id")
+}
+
+model user_interactions {
+  session_id           String        @db.VarChar(255)
+  extension_type       String        @db.VarChar(50)
+  interaction_type     String        @db.VarChar(50)
+  interaction_metadata Json          @db.Json
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id              String        @db.VarChar
+  customer_id          String?       @db.VarChar
+  user_sessions        user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shops                shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "ix_user_interaction_created_at")
+  @@index([customer_id], map: "ix_user_interaction_customer_id")
+  @@index([extension_type], map: "ix_user_interaction_extension_type")
+  @@index([interaction_type], map: "ix_user_interaction_interaction_type")
+  @@index([session_id], map: "ix_user_interaction_session_id")
+  @@index([shop_id], map: "ix_user_interaction_shop_id")
+  @@index([shop_id, customer_id, created_at], map: "ix_user_interaction_shop_id_customer_id_created_at")
+  @@index([shop_id, extension_type], map: "ix_user_interaction_shop_id_extension_type")
+  @@index([shop_id, interaction_type], map: "ix_user_interaction_shop_id_interaction_type")
+  @@index([customer_id], map: "ix_user_interactions_customer_id")
+  @@index([extension_type], map: "ix_user_interactions_extension_type")
+  @@index([interaction_type], map: "ix_user_interactions_interaction_type")
+  @@index([shop_id], map: "ix_user_interactions_shop_id")
+}
+
+model user_sessions {
+  browser_session_id    String                  @db.VarChar(255)
+  status                String                  @db.VarChar(50)
+  client_id             String?                 @db.VarChar
+  last_active           DateTime                @db.Timestamptz(6)
+  expires_at            DateTime?               @db.Timestamptz(6)
+  user_agent            String?                 @db.VarChar
+  ip_address            String?                 @db.VarChar(45)
+  referrer              String?                 @db.VarChar
+  extensions_used       Json                    @db.Json
+  total_interactions    Int
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id               String                  @db.VarChar
+  customer_id           String?                 @db.VarChar
+  purchase_attributions purchase_attributions[]
+  user_interactions     user_interactions[]
+  shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, customer_id, browser_session_id], map: "ix_user_session_shop_id_customer_id_browser_session_id")
+  @@index([customer_id], map: "ix_user_session_customer_id")
+  @@index([expires_at], map: "ix_user_session_expires_at")
+  @@index([shop_id], map: "ix_user_session_shop_id")
+  @@index([shop_id, customer_id, status], map: "ix_user_session_shop_id_customer_id_status")
+  @@index([shop_id, status], map: "ix_user_session_shop_id_status")
+  @@index([status], map: "ix_user_session_status")
+  @@index([client_id], map: "ix_user_sessions_client_id")
+  @@index([customer_id], map: "ix_user_sessions_customer_id")
+  @@index([expires_at], map: "ix_user_sessions_expires_at")
+  @@index([shop_id], map: "ix_user_sessions_shop_id")
+  @@index([shop_id, client_id], map: "ix_user_sessions_shop_id_client_id")
+  @@index([status], map: "ix_user_sessions_status")
 }
 
 enum AppBlockTarget {
@@ -985,6 +1085,21 @@ enum RawSourceType {
   backfill
 }
 
+enum adjustment_reason_enum {
+  CAP_INCREASE
+  PLAN_UPGRADE
+  ADMIN_ADJUSTMENT
+  PROMOTION
+  DISPUTE_RESOLUTION
+}
+
+enum billing_cycle_status_enum {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  SUSPENDED
+}
+
 enum billing_phase_enum {
   TRIAL
   PAID
@@ -1007,4 +1122,35 @@ enum commission_status_enum {
   REJECTED
   FAILED
   CAPPED
+}
+
+enum shopify_subscription_status_enum {
+  PENDING
+  ACTIVE
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum subscription_plan_type_enum {
+  USAGE_BASED
+  TIERED
+  FLAT_RATE
+  HYBRID
+}
+
+enum subscription_status_enum {
+  TRIAL
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum trial_status_enum {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+  CANCELLED
 }

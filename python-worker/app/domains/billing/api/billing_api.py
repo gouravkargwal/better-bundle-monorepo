@@ -14,16 +14,14 @@ from app.shared.helpers.datetime_utils import now_utc
 from app.core.database.session import get_session_context
 from app.core.database.models import (
     Shop,
-    BillingPlan,
-    BillingInvoice,
     PurchaseAttribution,
     CommissionRecord,
 )
 from sqlalchemy import select, and_
 from app.core.logging import get_logger
 from ..services.billing_scheduler_service import BillingSchedulerService
-from ..repositories.billing_repository import BillingPeriod
-from ..services.commission_service import CommissionService
+from ..repositories.billing_repository_v2 import BillingPeriod
+from ..services.commission_service_v2 import CommissionServiceV2
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
@@ -107,37 +105,6 @@ async def process_billing(request: BillingProcessRequest):
 
     except Exception as e:
         logger.error(f"Error processing billing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/settle", response_model=BillingProcessResponse)
-async def settle_daily(
-    dry_run: bool = False, authorized: bool = Depends(verify_cron_secret)
-):
-    """
-    Daily settlement (automated trigger from GitHub Actions)
-    """
-    try:
-        logger.info(f"Starting daily settlement - dry_run={dry_run}")
-
-        # Import settlement logic from existing file
-        from .settlement_api import settle_daily_periods
-
-        # Call existing settlement logic
-        result = await settle_daily_periods(dry_run, authorized)
-
-        return BillingProcessResponse(
-            success=result.get("success", False),
-            processed_shops=result.get("total_shops_checked", 0),
-            successful_shops=result.get("shops_settled", 0),
-            failed_shops=result.get("shops_failed", 0),
-            total_revenue=result.get("total_revenue", 0.0),
-            total_fees=result.get("total_commission", 0.0),
-            errors=result.get("errors", []),
-        )
-
-    except Exception as e:
-        logger.error(f"Error in daily settlement: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -289,7 +256,7 @@ async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest
                 f"[commission-backfill] Existing: {len(existing_ids)}, Missing: {len(to_create)}"
             )
 
-            service = CommissionService(session)
+            service = CommissionServiceV2(session)
             created = 0
             errors: List[Dict] = []
             for pid in to_create:

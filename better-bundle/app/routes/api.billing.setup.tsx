@@ -1,15 +1,31 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  createShopSubscription,
+  completeTrialAndCreateCycle,
+} from "../services/billing.service";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    // Parse request body to get spending limit
+    // Parse request body to get spending limit and monthly cap
     const body = await request.json();
     const spendingLimit = body.spendingLimit;
+    const monthlyCap = body.monthlyCap;
+
+    // Validate monthly cap
+    if (!monthlyCap || monthlyCap <= 0) {
+      return json(
+        {
+          success: false,
+          error: "Monthly cap is required and must be greater than 0",
+        },
+        { status: 400 },
+      );
+    }
 
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
@@ -21,51 +37,84 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get billing plan
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Check if shop already has an active subscription
+    const existingSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: { in: ["active", "suspended", "pending"] },
+        is_active: true,
       },
     });
 
-    if (!billingPlan) {
-      return json(
-        { success: false, error: "No billing plan found" },
-        { status: 404 },
-      );
+    if (existingSubscription) {
+      return json({
+        success: false,
+        error: "Active subscription already exists",
+        existingSubscription: existingSubscription,
+      });
     }
 
-    // Check if trial is completed
-    if (billingPlan.is_trial_active) {
-      return json(
-        { success: false, error: "Trial still active" },
-        { status: 400 },
-      );
-    }
+    // Check if shop has a trial subscription that needs to be completed
+    const trialSubscription = await prisma.shop_subscriptions.findFirst({
+      where: {
+        shop_id: shopRecord.id,
+        status: "trial",
+        is_active: true,
+      },
+      include: {
+        subscription_trials: true,
+      },
+    });
 
-    // Check if subscription already exists
-    if (billingPlan.subscription_id) {
-      // Already has subscription, check status
-      if (billingPlan.subscription_status === "ACTIVE") {
-        return json({
-          success: true,
-          message: "Subscription already active",
-          subscription_id: billingPlan.subscription_id,
-        });
-      } else if (billingPlan.subscription_status === "PENDING") {
-        return json({
-          success: true,
-          message: "Subscription pending approval",
-          subscription_id: billingPlan.subscription_id,
-          confirmation_url: billingPlan.subscription_confirmation_url,
-        });
+    if (trialSubscription && trialSubscription.subscription_trials) {
+      // Check if trial threshold is reached
+      if (
+        trialSubscription.subscription_trials.accumulated_revenue >=
+        trialSubscription.subscription_trials.threshold_amount
+      ) {
+        // Complete trial and create first billing cycle
+        await completeTrialAndCreateCycle(shopRecord.id);
+      } else {
+        return json(
+          { success: false, error: "Trial threshold not reached yet" },
+          { status: 400 },
+        );
       }
+    }
+
+    // Get default subscription plan and pricing tier
+    const defaultPlan = await prisma.subscription_plans.findFirst({
+      where: {
+        is_active: true,
+        is_default: true,
+      },
+    });
+
+    if (!defaultPlan) {
+      return json(
+        { success: false, error: "No default subscription plan found" },
+        { status: 500 },
+      );
+    }
+
+    const defaultPricingTier = await prisma.pricing_tiers.findFirst({
+      where: {
+        subscription_plan_id: defaultPlan.id,
+        currency: shopRecord.currency_code,
+        is_active: true,
+        is_default: true,
+      },
+    });
+
+    if (!defaultPricingTier) {
+      return json(
+        { success: false, error: "No pricing tier found for currency" },
+        { status: 500 },
+      );
     }
 
     // Create Shopify subscription using GraphQL
     const currency = shopRecord.currency_code;
-    const cappedAmount = spendingLimit; // User-selected monthly cap
+    const cappedAmount = monthlyCap; // User-selected monthly cap
 
     const mutation = `
       mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!) {
@@ -163,40 +212,33 @@ export async function action({ request }: ActionFunctionArgs) {
 
     console.log(`✅ Subscription created: ${subscription.id}`);
 
-    // Create NEW usage-based billing plan (don't update trial plan)
-    const newBillingPlan = await prisma.billing_plans.update({
-      where: { id: billingPlan.id },
+    // Create shop subscription using new schema
+    const shopSubscription = await prisma.shop_subscriptions.create({
       data: {
-        name: "Usage-Based Paid Plan",
-        type: "usage_based",
-        status: "pending", // New plan starts as pending
-        subscription_id: subscription.id,
-        subscription_status: "PENDING",
-        subscription_line_item_id: subscription.lineItems[0].id,
-        subscription_confirmation_url: confirmationUrl,
-        requires_subscription_approval: true,
-        is_trial_active: false, // This is a paid plan
-        trial_threshold: 0,
-        trial_revenue: 0,
-        trial_usage_records_count: 0,
-        effective_from: new Date(),
-        configuration: {
-          pattern: "usage_based_paid",
-          subscription_id: subscription.id,
-          subscription_status: "PENDING",
-          subscription_created_at: new Date().toISOString(),
-          capped_amount: cappedAmount,
-          currency: currency,
-          revenue_share_rate: 0.03,
-          monthly_cap: cappedAmount,
-          plan_type: "usage_based",
-        },
+        shop_id: shopRecord.id,
+        subscription_plan_id: defaultPlan.id,
+        pricing_tier_id: defaultPricingTier.id,
+        status: "pending_approval",
+        start_date: new Date(),
+        is_active: true,
+        auto_renew: true,
+        user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
       },
     });
 
-    console.log(
-      `✅ New usage-based billing plan created: ${newBillingPlan.id}`,
-    );
+    // Create Shopify subscription record
+    const shopifySubscription = await prisma.shopify_subscriptions.create({
+      data: {
+        shop_subscription_id: shopSubscription.id,
+        shopify_subscription_id: subscription.id,
+        shopify_line_item_id: subscription.lineItems[0].id,
+        confirmation_url: confirmationUrl,
+        status: "PENDING",
+        created_at: new Date(),
+      },
+    });
+
+    console.log(`✅ New shop subscription created: ${shopSubscription.id}`);
 
     console.log(`✅ Billing setup complete for shop ${shop}`);
 

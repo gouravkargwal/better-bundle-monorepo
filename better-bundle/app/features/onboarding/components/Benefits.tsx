@@ -43,7 +43,7 @@ export const Benefits = () => {
   return (
     <div
       style={{
-        padding: "48px 32px",
+        padding: "clamp(24px, 4vw, 48px) clamp(16px, 3vw, 32px)",
         background: "linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)",
         borderRadius: "20px",
         border: "1px solid #E2E8F0",
@@ -132,8 +132,8 @@ export const Benefits = () => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "24px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "clamp(16px, 3vw, 24px)",
               alignItems: "stretch",
             }}
           >
@@ -141,7 +141,7 @@ export const Benefits = () => {
               <div
                 key={index}
                 style={{
-                  padding: "24px",
+                  padding: "clamp(16px, 3vw, 24px)",
                   backgroundColor: "white",
                   borderRadius: "16px",
                   border: "1px solid #E5E7EB",
@@ -186,7 +186,7 @@ export const Benefits = () => {
                   style={{
                     display: "flex",
                     alignItems: "flex-start",
-                    gap: "16px",
+                    gap: "clamp(12px, 2vw, 16px)",
                     flex: 1,
                   }}
                 >
@@ -195,13 +195,13 @@ export const Benefits = () => {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      width: "48px",
-                      height: "48px",
+                      width: "clamp(40px, 6vw, 48px)",
+                      height: "clamp(40px, 6vw, 48px)",
                       background:
                         "linear-gradient(135deg, #10B981 0%, #059669 100%)",
                       borderRadius: "14px",
                       flexShrink: 0,
-                      fontSize: "24px",
+                      fontSize: "clamp(18px, 3vw, 24px)",
                       boxShadow: "0 4px 14px 0 rgba(16, 185, 129, 0.39)",
                     }}
                   >

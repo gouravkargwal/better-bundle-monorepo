@@ -7,49 +7,45 @@ export async function action({ request }: ActionFunctionArgs) {
   const { shop } = session;
 
   try {
-    // Get the current billing plan
-    const billingPlan = await prisma.billing_plans.findFirst({
-      where: {
-        shops: {
-          shop_domain: shop,
-        },
-      },
-      orderBy: { created_at: "desc" },
+    // Get shop record
+    const shopRecord = await prisma.shops.findUnique({
+      where: { shop_domain: shop },
+      select: { id: true },
     });
 
-    if (!billingPlan) {
+    if (!shopRecord) {
+      return json({ success: false, error: "Shop not found" }, { status: 404 });
+    }
+
+    // Get shop subscription
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: {
+        shop_id: shopRecord.id,
+        is_active: true,
+      },
+      include: {
+        shopify_subscription: true,
+      },
+    });
+
+    if (!shopSubscription) {
       return json(
-        { success: false, error: "No billing plan found" },
+        { success: false, error: "No active subscription found" },
         { status: 404 },
       );
     }
 
-    // Determine subscription id from either top-level columns or configuration blob
-    const configuration = (billingPlan.configuration as any) || {};
-    const subscriptionId: string | null =
-      (billingPlan as any).subscription_id ||
-      configuration.subscription_id ||
-      null;
+    const subscriptionId =
+      shopSubscription.shopify_subscription?.shopify_subscription_id;
 
     // HANDLE PENDING SUBSCRIPTIONS: clear local state and guide merchant to Shopify billing
-    if (
-      billingPlan.subscription_status === "PENDING" ||
-      configuration.subscription_status === "PENDING"
-    ) {
-      await prisma.billing_plans.update({
-        where: { id: billingPlan.id },
+    if (shopSubscription.status === "pending_approval") {
+      await prisma.shop_subscriptions.update({
+        where: { id: shopSubscription.id },
         data: {
-          subscription_id: null,
-          subscription_line_item_id: null,
-          subscription_status: null,
-          subscription_confirmation_url: null,
-          subscription_created_at: null,
-          configuration: {
-            ...configuration,
-            subscription_id: null,
-            subscription_status: null,
-            subscription_created_at: null,
-          },
+          status: "cancelled",
+          cancelled_at: new Date(),
+          updated_at: new Date(),
         },
       });
 
@@ -79,22 +75,27 @@ export async function action({ request }: ActionFunctionArgs) {
     // Use Shopify's billing client as requested
     await billing.cancel({ subscriptionId: gid });
 
-    // Update billing plan
-    const configurationAfter = (billingPlan.configuration as any) || {};
-    const now = new Date();
-
-    await prisma.billing_plans.update({
-      where: { id: billingPlan.id },
+    // Update shop subscription
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
       data: {
-        subscription_status: "CANCELLED",
-        configuration: {
-          ...configurationAfter,
-          subscription_status: "CANCELLED",
-          subscription_cancelled_at: now.toISOString(),
-          cancellation_reason: "Cancelled by merchant",
-        },
+        status: "cancelled",
+        cancelled_at: new Date(),
+        updated_at: new Date(),
       },
     });
+
+    // Update Shopify subscription record
+    if (shopSubscription.shopify_subscription) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscription.id },
+        data: {
+          status: "CANCELLED",
+          cancelled_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
 
     console.log(`✅ Successfully cancelled subscription for shop ${shop}`);
 

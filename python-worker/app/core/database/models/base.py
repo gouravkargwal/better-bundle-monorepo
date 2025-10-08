@@ -42,7 +42,12 @@ class IDMixin:
 
     @declared_attr
     def id(cls):
-        return Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+        return Column(
+            String,
+            primary_key=True,
+            default=lambda: str(uuid.uuid4()),
+            server_default=func.gen_random_uuid(),
+        )
 
 
 class BaseModel(Base, IDMixin, TimestampMixin):
@@ -56,6 +61,12 @@ class BaseModel(Base, IDMixin, TimestampMixin):
     """
 
     __abstract__ = True
+
+    def __init__(self, **kwargs):
+        # Generate ID if not provided
+        if "id" not in kwargs or kwargs["id"] is None:
+            kwargs["id"] = str(uuid.uuid4())
+        super().__init__(**kwargs)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary"""

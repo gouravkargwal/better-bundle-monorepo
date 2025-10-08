@@ -543,16 +543,26 @@ class OrderNormalizationService:
     async def _publish_order_events(self, shop_id: str, order_id: str):
         """Publish events after successful order processing."""
         try:
+            self.logger.info(
+                f"🚀 Publishing purchase attribution event for order {order_id} in shop {shop_id}"
+            )
+
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
             try:
-                await publisher.publish_purchase_attribution_event(
-                    {
-                        "event_type": "purchase_ready_for_attribution",
-                        "shop_id": shop_id,
-                        "order_id": order_id,
-                        "timestamp": now_utc().isoformat(),
-                    }
+                event_data = {
+                    "event_type": "purchase_ready_for_attribution",
+                    "shop_id": shop_id,
+                    "order_id": order_id,
+                    "timestamp": now_utc().isoformat(),
+                }
+
+                self.logger.info(f"📤 Publishing event: {event_data}")
+
+                await publisher.publish_purchase_attribution_event(event_data)
+
+                self.logger.info(
+                    f"✅ Purchase attribution event published successfully for order {order_id}"
                 )
             finally:
                 await publisher.close()

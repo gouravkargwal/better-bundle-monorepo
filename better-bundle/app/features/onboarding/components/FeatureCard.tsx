@@ -1,4 +1,4 @@
-import { Badge, BlockStack, Card, Icon, Text } from "@shopify/polaris";
+import { Badge, BlockStack, Icon, Text } from "@shopify/polaris";
 import React from "react";
 import {
   CashDollarIcon,
@@ -10,22 +10,21 @@ import {
 } from "@shopify/polaris-icons";
 
 interface FeatureCardProps {
-  trialConfig?: {
+  pricingTier?: {
     symbol: string;
-    trial_threshold_usd: number;
+    threshold_amount: number;
   } | null;
-  convertedAmount?: number;
 }
 
-const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
+const FeatureCard = ({ pricingTier }: FeatureCardProps) => {
   const features = [
     {
       icon: CreditCardIcon,
       title: "Pay-As-Performance",
-      description: `Only pay when you see results! Start with ${trialConfig && convertedAmount ? `${trialConfig.symbol}${Math.round(convertedAmount).toLocaleString()}` : "$200"} free credits, then pay only for actual revenue generated`,
+      description: `Only pay when you see results! Start with ${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits, then pay only for actual revenue generated`,
       color: "#F59E0B",
       badge: "Risk-free trial",
-      stats: `${trialConfig && convertedAmount ? `${trialConfig.symbol}${Math.round(convertedAmount).toLocaleString()}` : "$200"} free credits included`,
+      stats: `${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits included`,
       highlight: "No upfront costs",
       gradient: "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
     },
@@ -89,7 +88,7 @@ const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
   return (
     <div
       style={{
-        padding: "32px 24px",
+        padding: "clamp(24px, 4vw, 48px) clamp(16px, 3vw, 32px)",
         background: "linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%)",
         borderRadius: "20px",
         border: "1px solid #E2E8F0",
@@ -178,8 +177,8 @@ const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "20px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "clamp(16px, 3vw, 24px)",
               alignItems: "stretch",
             }}
           >
@@ -220,7 +219,7 @@ const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
                 >
                   <div
                     style={{
-                      padding: "20px",
+                      padding: "clamp(16px, 3vw, 20px)",
                       display: "flex",
                       flexDirection: "column",
                       height: "100%",
@@ -255,8 +254,8 @@ const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          width: "48px",
-                          height: "48px",
+                          width: "clamp(40px, 6vw, 48px)",
+                          height: "clamp(40px, 6vw, 48px)",
                           background: feature.gradient,
                           borderRadius: "14px",
                           boxShadow: `0 4px 14px 0 ${feature.color}39`,
@@ -338,7 +337,7 @@ const FeatureCard = ({ trialConfig, convertedAmount }: FeatureCardProps) => {
                       {/* Stats section */}
                       <div
                         style={{
-                          padding: "12px",
+                          padding: "clamp(10px, 2.5vw, 12px)",
                           background: `${feature.color}08`,
                           borderRadius: "10px",
                           border: `1px solid ${feature.color}20`,

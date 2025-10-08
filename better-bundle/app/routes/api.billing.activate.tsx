@@ -27,37 +27,45 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get billing plan with the subscription
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Get shop subscription with the subscription
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
-        subscription_id: subscriptionId,
+        is_active: true,
+      },
+      include: {
+        shopify_subscription: true,
       },
     });
 
-    if (!billingPlan) {
+    if (!shopSubscription) {
       return json(
-        { success: false, error: "Billing plan not found for subscription" },
+        { success: false, error: "Shop subscription not found" },
         { status: 404 },
       );
     }
 
-    // Update billing plan status
-    await prisma.billing_plans.updateMany({
-      where: { id: billingPlan.id },
+    // Update shop subscription status
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
       data: {
-        subscription_status: "ACTIVE",
         status: "active",
-        requires_subscription_approval: false,
-        subscription_activated_at: new Date(),
-        configuration: {
-          ...(billingPlan.configuration as any),
-          subscription_status: "ACTIVE",
-          subscription_activated_at: new Date().toISOString(),
-          services_suspended: false,
-        },
+        activated_at: new Date(),
+        updated_at: new Date(),
       },
     });
+
+    // Update Shopify subscription record
+    if (shopSubscription.shopify_subscription) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscription.id },
+        data: {
+          status: "ACTIVE",
+          activated_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
 
     // Reactivate shop services
     await prisma.shops.updateMany({

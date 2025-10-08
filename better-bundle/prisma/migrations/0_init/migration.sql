@@ -1,3 +1,0 @@
--- This is a baseline migration for an existing database
--- The database schema is managed by SQLAlchemy, not Prisma
--- This migration file exists only to satisfy Prisma's migration system

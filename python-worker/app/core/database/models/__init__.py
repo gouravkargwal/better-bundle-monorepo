@@ -17,6 +17,16 @@ from .enums import (
     InvoiceStatus,
     ExtensionType,
     AppBlockTarget,
+    # New enums for redesigned billing system
+    SubscriptionPlanType,
+    SubscriptionStatus,
+    BillingCycleStatus,
+    TrialStatus,
+    ShopifySubscriptionStatus,
+    AdjustmentReason,
+    BillingPhase,
+    CommissionStatus,
+    ChargeType,
 )
 
 # Core business models
@@ -57,17 +67,22 @@ from .user_interaction import UserInteraction
 from .purchase_attribution import PurchaseAttribution
 
 
-# Billing models
-from .billing import (
-    BillingPlan,
-    BillingInvoice,
-)
+# Billing models (legacy - removed)
+# Old billing models have been replaced with new subscription system
+
+# New redesigned billing models
+from .subscription_plan import SubscriptionPlan
+from .pricing_tier import PricingTier
+from .shop_subscription import ShopSubscription
+from .subscription_trial import SubscriptionTrial
+from .billing_cycle import BillingCycle
+from .billing_cycle_adjustment import BillingCycleAdjustment
+from .shopify_subscription import ShopifySubscription
 
 # Commission models
 from .commission import CommissionRecord
 
 # Trial configuration models
-from .trial_config import TrialConfig
 
 # Extension models
 
@@ -84,6 +99,16 @@ __all__ = [
     "InvoiceStatus",
     "ExtensionType",
     "AppBlockTarget",
+    # New enums for redesigned billing system
+    "SubscriptionPlanType",
+    "SubscriptionStatus",
+    "BillingCycleStatus",
+    "TrialStatus",
+    "ShopifySubscriptionStatus",
+    "AdjustmentReason",
+    "BillingPhase",
+    "CommissionStatus",
+    "ChargeType",
     # Core models
     "Shop",
     "Session",
@@ -112,11 +137,15 @@ __all__ = [
     "UserSession",
     "UserInteraction",
     "PurchaseAttribution",
-    # Billing models
-    "BillingPlan",
-    "BillingInvoice",
+    # New redesigned billing models
+    "SubscriptionPlan",
+    "PricingTier",
+    "ShopSubscription",
+    "SubscriptionTrial",
+    "BillingCycle",
+    "BillingCycleAdjustment",
+    "ShopifySubscription",
     "CommissionRecord",
     # Trial configuration models
-    "TrialConfig",
     # Extension models
 ]

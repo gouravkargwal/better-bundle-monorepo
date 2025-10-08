@@ -1,8 +1,8 @@
 """
-Shopify Usage-Based Billing Service
+Shopify Usage-Based Billing Service V2
 
-This service handles integration with Shopify's Usage-Based Subscriptions API
-for creating subscriptions, recording usage, and managing billing.
+Updated service to work with the new redesigned billing system.
+Uses shopify_subscriptions table instead of billing_plans.
 """
 
 import logging
@@ -13,16 +13,22 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from app.shared.helpers import now_utc
-
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from ..repositories.billing_repository import BillingRepository, BillingPeriod
+from ..repositories.billing_repository_v2 import BillingRepositoryV2
+from app.core.database.models import (
+    ShopSubscription,
+    ShopifySubscription,
+    BillingCycle,
+    SubscriptionStatus,
+    ShopifySubscriptionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
-# Currency symbols mapping
+# Currency symbols mapping (same as original)
 CURRENCY_SYMBOLS = {
     "USD": "$",
     "EUR": "€",
@@ -168,10 +174,10 @@ class UsageRecord:
     created_at: str
 
 
-class ShopifyUsageBillingService:
-    """Service for managing Shopify usage-based billing"""
+class ShopifyUsageBillingServiceV2:
+    """Updated service for managing Shopify usage-based billing with new system"""
 
-    def __init__(self, session: AsyncSession, billing_repository: BillingRepository):
+    def __init__(self, session: AsyncSession, billing_repository: BillingRepositoryV2):
         self.session = session
         self.billing_repository = billing_repository
         self.base_url = "https://{shop_domain}/admin/api/2024-01/graphql.json"
@@ -280,8 +286,8 @@ class ShopifyUsageBillingService:
                 logger.error("No subscription data returned")
                 return None
 
-            # Store subscription in database
-            await self._store_subscription(shop_id, subscription_data)
+            # Store subscription in database using new system
+            await self._store_shopify_subscription(shop_id, subscription_data)
 
             logger.info(
                 f"Created usage subscription for shop {shop_id}: {subscription_data['id']}"
@@ -324,7 +330,7 @@ class ShopifyUsageBillingService:
             description: Description of the usage
             amount: Amount to charge
             currency: Currency code
-            idempotency_key: Unique identifier to prevent duplicate charges and enable tracking
+            idempotency_key: Unique identifier to prevent duplicate charges
 
         Returns:
             Created usage record or None if failed
@@ -379,7 +385,7 @@ class ShopifyUsageBillingService:
                 logger.error("No usage record data returned")
                 return None
 
-            # Store usage record in database
+            # Store usage record in database using new system
             await self._store_usage_record(
                 shop_id,
                 usage_record_data,
@@ -495,42 +501,45 @@ class ShopifyUsageBillingService:
             response.raise_for_status()
             return response.json()
 
-    async def _store_subscription(
+    async def _store_shopify_subscription(
         self, shop_id: str, subscription_data: Dict[str, Any]
     ) -> None:
-        """Store subscription data in database"""
+        """Store Shopify subscription data in database using new system"""
         try:
-            # Import the BillingPlan model
-            from app.core.database.models import BillingPlan
+            # Get shop subscription
+            shop_subscription = await self.billing_repository.get_shop_subscription(
+                shop_id
+            )
+            if not shop_subscription:
+                logger.error(f"No shop subscription found for shop {shop_id}")
+                return
 
-            # Update billing plan with subscription data
-            stmt = (
-                update(BillingPlan)
-                .where(
-                    (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
-                )
-                .values(
-                    configuration={
-                        "subscription_id": subscription_data["id"],
-                        "subscription_status": subscription_data["status"],
-                        "line_items": subscription_data["lineItems"],
-                        "usage_based": True,
-                        "capped_amount": subscription_data["lineItems"][0]["plan"][
-                            "pricingDetails"
-                        ]["cappedAmount"]["amount"],
-                        "currency": subscription_data["lineItems"][0]["plan"][
-                            "pricingDetails"
-                        ]["cappedAmount"]["currencyCode"],
-                    }
-                )
+            # Create Shopify subscription record
+            shopify_sub = await self.billing_repository.create_shopify_subscription(
+                shop_subscription_id=shop_subscription.id,
+                shopify_subscription_id=subscription_data["id"],
+                shopify_line_item_id=(
+                    subscription_data["lineItems"][0]["id"]
+                    if subscription_data["lineItems"]
+                    else None
+                ),
+                confirmation_url=f"https://your-app.com/billing/return?shop={shop_id}",
             )
 
-            await self.session.execute(stmt)
-            await self.session.flush()
+            if shopify_sub:
+                # Update shop subscription status
+                await self.billing_repository.update_shop_subscription_status(
+                    shop_subscription.id, SubscriptionStatus.PENDING_APPROVAL
+                )
 
-            logger.info(f"Stored subscription data for shop {shop_id}")
+                logger.info(f"Stored Shopify subscription data for shop {shop_id}")
+            else:
+                logger.error(
+                    f"Failed to create Shopify subscription record for shop {shop_id}"
+                )
+
         except Exception as e:
-            logger.error(f"Error storing subscription data: {e}")
+            logger.error(f"Error storing Shopify subscription data: {e}")
 
     async def _store_usage_record(
         self,
@@ -543,39 +552,30 @@ class ShopifyUsageBillingService:
         commission_ids: List[str] = None,
         billing_period: Dict[str, str] = None,
     ) -> None:
-        """Store usage record in database"""
+        """Store usage record in database using new system"""
         try:
-            # Import the models
-            from app.core.database.models import BillingInvoice, BillingPlan
-            from sqlalchemy import select
-
-            # Get the billing plan for this shop
-            plan_stmt = select(BillingPlan).where(
-                (BillingPlan.shop_id == shop_id) & (BillingPlan.status == "active")
+            # Get shop subscription
+            shop_subscription = await self.billing_repository.get_shop_subscription(
+                shop_id
             )
-            plan_result = await self.session.execute(plan_stmt)
-            billing_plan = plan_result.scalar_one_or_none()
-
-            if not billing_plan:
-                logger.error(f"No active billing plan found for shop {shop_id}")
+            if not shop_subscription:
+                logger.error(f"No shop subscription found for shop {shop_id}")
                 return
 
-            # Create billing invoice for usage record using SQLAlchemy
-            invoice = BillingInvoice(
-                shop_id=shop_id,
-                plan_id=billing_plan.id,  # Use the actual plan ID
-                invoice_number=f"USAGE-{now_utc().strftime('%Y%m%d%H%M%S')}-{shop_id[:5]}",
-                subtotal=amount,
-                taxes=Decimal("0.00"),
-                discounts=Decimal("0.00"),
-                total=amount,
-                currency=currency,
-                status="pending",
-                period_start=now_utc(),
-                period_end=now_utc(),
-                metrics_id=f"usage-{usage_record_data['id']}",
-                due_date=now_utc(),
-                billing_metadata={
+            # Get current billing cycle
+            current_cycle = await self.billing_repository.get_current_billing_cycle(
+                shop_subscription.id
+            )
+            if not current_cycle:
+                logger.error(f"No active billing cycle found for shop {shop_id}")
+                return
+
+            # Update billing cycle with usage amount
+            # Shopify handles the actual billing, we just track usage
+            await self.billing_repository.update_billing_cycle_usage(
+                current_cycle.id,
+                amount,
+                {
                     "usage_record_id": usage_record_data["id"],
                     "description": description,
                     "recorded_at": usage_record_data["createdAt"],
@@ -586,10 +586,8 @@ class ShopifyUsageBillingService:
                 },
             )
 
-            # Add to session and commit
-            self.session.add(invoice)
-            await self.session.flush()
-
-            logger.info(f"Stored usage record for shop {shop_id}")
+            logger.info(
+                f"Stored usage record for shop {shop_id} in cycle {current_cycle.id}"
+            )
         except Exception as e:
             logger.error(f"Error storing usage record: {e}")

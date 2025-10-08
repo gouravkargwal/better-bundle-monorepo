@@ -88,11 +88,10 @@ class Shop(BaseModel):
     user_sessions = relationship(
         "UserSession", back_populates="shop", cascade="all, delete-orphan"
     )
-    billing_plans = relationship(
-        "BillingPlan", back_populates="shop", cascade="all, delete-orphan"
-    )
-    billing_invoices = relationship(
-        "BillingInvoice", back_populates="shop", cascade="all, delete-orphan"
+    # Legacy billing_plans relationship removed - using new subscription system
+    # billing_invoices = relationship("BillingInvoice", back_populates="shop", cascade="all, delete-orphan")  # REMOVED
+    shop_subscriptions = relationship(
+        "ShopSubscription", back_populates="shop", cascade="all, delete-orphan"
     )
     commission_records = relationship(
         "CommissionRecord", back_populates="shop", cascade="all, delete-orphan"

@@ -1,6 +1,5 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
-import { getTrialThresholdInShopCurrency } from "app/utils/currency-converter";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -43,7 +42,6 @@ const getShop = async (shopDomain: string) => {
 
 const getShopOnboardingCompleted = async (shopDomain: string) => {
   try {
-    console.log("🔍 Checking shop onboarding status for:", shopDomain);
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
     });
@@ -112,9 +110,9 @@ const createShopAndSetOnboardingCompleted = async (
   return shop;
 };
 
-const getBillingPlan = async (shopDomain: string) => {
-  const billingPlan = await prisma.billing_plans.findFirst({
-    where: { shop_domain: shopDomain, status: "active" },
+const getShopSubscription = async (shopDomain: string) => {
+  const billingPlan = await prisma.shop_subscriptions.findFirst({
+    where: { shop_domain: shopDomain, status: "ACTIVE" },
   });
   return billingPlan;
 };
@@ -216,7 +214,7 @@ const deactivateShopBilling = async (
     console.log(`🔄 Deactivating billing for shop: ${shopDomain}`);
 
     // 1. Mark shop as inactive
-    await prisma.shops.updateMany({
+    const updatedShops = await prisma.shops.update({
       where: { shop_domain: shopDomain },
       data: {
         is_active: false,
@@ -225,8 +223,8 @@ const deactivateShopBilling = async (
     });
 
     // 2. Deactivate all billing plans for this shop
-    const updatedPlans = await prisma.billing_plans.updateMany({
-      where: { shop_domain: shopDomain },
+    const updatedSubscriptions = await prisma.shop_subscriptions.updateMany({
+      where: { shop_id: updatedShops.id, status: "ACTIVE" },
       data: {
         status: "inactive",
         effective_to: new Date(),
@@ -235,19 +233,19 @@ const deactivateShopBilling = async (
     });
 
     // 3. Create billing event to track the deactivation
-    await prisma.billing_plans.findFirst({
-      where: { shop_domain: shopDomain, status: "active" },
+    await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: updatedShops.id, status: "ACTIVE" },
       select: { id: true, shop_id: true },
     });
 
     console.log(`✅ Successfully deactivated billing for ${shopDomain}:`);
     console.log(`   - Marked shop as inactive`);
-    console.log(`   - Deactivated ${updatedPlans.count} billing plans`);
+    console.log(`   - Deactivated ${updatedSubscriptions.count} billing plans`);
     console.log(`   - Created billing event`);
 
     return {
       success: true,
-      plans_deactivated_count: updatedPlans.count,
+      plans_deactivated_count: updatedSubscriptions.count,
       reason,
     };
   } catch (error) {
@@ -263,87 +261,82 @@ const activateTrialBillingPlan = async (
   shopRecord: any,
   tx?: any,
 ) => {
-  const db = tx || prisma;
+  try {
+    const db = tx || prisma;
 
-  // Get trial config for the shop's currency
-  const { getTrialConfig } = await import("../services/trial-config.service");
-  const trialConfig = await getTrialConfig(
-    shopDomain,
-    shopRecord.currency_code,
-  );
+    // 1. Get default subscription plan (template)
+    const defaultPlan = await db.subscription_plans.findFirst({
+      where: {
+        is_active: true,
+        is_default: true,
+      },
+    });
 
-  // Use trial config USD threshold, throw error if not found
-  if (!trialConfig?.threshold_usd) {
-    throw new Error(
-      `No trial threshold configured for currency: ${shopRecord.currency_code}`,
-    );
+    if (!defaultPlan) {
+      throw new Error("No default subscription plan found");
+    }
+
+    // 2. Get pricing tier for shop's currency
+    const pricingTier = await db.pricing_tiers.findFirst({
+      where: {
+        subscription_plan_id: defaultPlan.id,
+        currency: shopRecord.currency_code,
+        is_active: true,
+        is_default: true,
+      },
+    });
+
+    if (!pricingTier) {
+      throw new Error(
+        `No pricing tier found for currency: ${shopRecord.currency_code}`,
+      );
+    }
+
+    // 3. Create shop subscription (TRIAL status)
+    const shopSubscription = await db.shop_subscriptions.create({
+      data: {
+        shop_id: shopRecord.id,
+        subscription_plan_id: defaultPlan.id, // ✅ Template from subscription_plans
+        pricing_tier_id: pricingTier.id, // ✅ Currency-specific pricing
+        status: "trial", // ✅ Start as trial
+        start_date: new Date(),
+        is_active: true,
+        auto_renew: true,
+      },
+    });
+
+    // 4. Create subscription trial (trial tracking)
+    const subscriptionTrial = await db.subscription_trials.create({
+      data: {
+        shop_subscription_id: shopSubscription.id,
+        threshold_amount: pricingTier.trial_threshold_amount, // ✅ From pricing tier
+        status: "active",
+        started_at: new Date(),
+        accumulated_revenue: 0.0,
+        commission_saved: 0.0,
+      },
+    });
+
+    console.log(`✅ Trial activated for ${shopDomain}:`);
+    console.log(`   - Plan: ${defaultPlan.name}`);
+    console.log(`   - Currency: ${shopRecord.currency_code}`);
+    console.log(`   - Threshold: ${pricingTier.trial_threshold_amount}`);
+
+    return {
+      shop_subscription: shopSubscription,
+      subscription_trial: subscriptionTrial,
+    };
+  } catch (error) {
+    console.error(`❌ Error activating trial:`, error);
+    throw error;
   }
-  const TRIAL_THRESHOLD_USD = trialConfig.threshold_usd;
-
-  const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
-    shopRecord.currency_code,
-    TRIAL_THRESHOLD_USD,
-  );
-
-  const billingPlan = await db.billing_plans.upsert({
-    where: { shop_id: shopRecord.id },
-    update: {
-      status: "active",
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-      trial_usage_records_count: 0,
-      configuration: {
-        pattern: "trial_without_consent", // ✅ Pattern 1
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        post_trial_capped_amount: 1000.0,
-        subscription_required_after_trial: true, // ✅ Key flag
-      },
-    },
-    create: {
-      shop_id: shopRecord.id,
-      shop_domain: shopDomain,
-      name: "Free Trial (Usage-Based)",
-      type: "trial",
-      status: "active",
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-      trial_usage_records_count: 0,
-      effective_from: new Date(),
-      configuration: {
-        pattern: "trial_without_consent",
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        post_trial_capped_amount: 1000.0,
-        subscription_required_after_trial: true,
-      },
-    },
-  });
-
-  console.log(`✅ Pattern 1 trial activated for ${shopDomain}:`);
-  console.log(`   - NO upfront subscription required`);
-  console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
-  console.log(`   - Services active immediately`);
-  console.log(`   - Subscription required after trial`);
-
-  return billingPlan;
 };
 
 export {
   getShop,
   getShopOnboardingCompleted,
   createShopAndSetOnboardingCompleted,
-  getBillingPlan,
+  getShopSubscription,
   activateTrialBillingPlan,
   activateAtlasWebPixel,
   getShopInfoFromShopify,

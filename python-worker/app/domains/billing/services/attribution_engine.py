@@ -36,7 +36,7 @@ from ..models.attribution_models import (
     AttributionMetrics,
 )
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
-from app.domains.billing.services.commission_service import CommissionService
+from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
 from app.core.database.models.enums import BillingPhase
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class AttributionEngine:
         """
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
-        self.commission_service = CommissionService(session)
+        self.commission_service = CommissionServiceV2(session)
         # ✅ SCENARIO 9: Configurable attribution windows
         self.attribution_windows = {
             "default": timedelta(hours=24),  # 24 hours default
@@ -301,12 +301,12 @@ class AttributionEngine:
                         f"${trial_status.get('trial_threshold')}"
                     )
 
-                    # Lazy import to avoid circular dependency with BillingService
-                    from app.domains.billing.services.billing_service import (
-                        BillingService,
+                    # Lazy import to avoid circular dependency with BillingServiceV2
+                    from app.domains.billing.services.billing_service_v2 import (
+                        BillingServiceV2,
                     )
 
-                    billing_service = BillingService(self.session)
+                    billing_service = BillingServiceV2(self.session)
                     # Note: _handle_trial_purchase signature expects
                     # (shop_id, billing_plan, attributed_revenue, purchase_event)
                     # We pass attributed_revenue using commission.cycle_usage_after and
@@ -1568,9 +1568,16 @@ class AttributionEngine:
             )
             return str(existing_attribution.id)
 
+        # Skip attribution if no session_id (we didn't influence this purchase)
+        if not result.session_id:
+            logger.info(
+                f"No session_id for order {result.order_id} - we didn't influence this purchase, skipping attribution"
+            )
+            return None
+
         # Create new attribution record
         attribution = PurchaseAttribution(
-            session_id=result.session_id or "",
+            session_id=result.session_id,
             order_id=str(result.order_id),
             customer_id=result.customer_id,
             shop_id=result.shop_id,

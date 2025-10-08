@@ -5,62 +5,76 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { BillingStatusRouter } from "../components/Billing/BillingStatusRouter";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import {
-  getTrialRevenueData,
-  getCurrentCycleMetrics,
-} from "../services/billing.service";
+import { getBillingSummary } from "../services/billing.service";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    // Get the latest billing plan (could be trial, pending, or active)
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Get shop record
+    const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
-      include: { shops: true },
-      orderBy: { created_at: "desc" },
+      select: { id: true, currency_code: true },
     });
 
-    if (!billingPlan) {
-      throw new Error("Billing plan not found");
+    if (!shopRecord) {
+      throw new Error("Shop not found");
     }
 
-    let trialPlanAggregates: any = null;
-    let currentCycleMetrics: any = null;
+    // Get comprehensive billing summary using new schema
+    const billingSummary = await getBillingSummary(shopRecord.id);
 
-    if (billingPlan.is_trial_active && billingPlan.type == "trial") {
-      trialPlanAggregates = await getTrialRevenueData(billingPlan.shop_id);
-    } else if (
-      billingPlan.status === "active" &&
-      billingPlan.subscription_status === "ACTIVE"
-    ) {
-      // Get current cycle metrics for active subscription
-      currentCycleMetrics = await getCurrentCycleMetrics(
-        billingPlan.shop_id,
-        billingPlan,
-      );
+    if (!billingSummary) {
+      throw new Error("No billing data found");
     }
 
-    const trialPlanData = trialPlanAggregates
+    // Format data for frontend compatibility
+    const trialPlanData = billingSummary.trial
       ? {
-          attributedRevenue: trialPlanAggregates.attributedRevenue,
-          commissionEarned: trialPlanAggregates.commissionEarned,
-          isTrialActive: billingPlan.is_trial_active,
-          trialThreshold: billingPlan.trial_threshold,
+          attributedRevenue: Number(billingSummary.trial.accumulated_revenue),
+          commissionEarned:
+            Number(billingSummary.trial.accumulated_revenue) * 0.03, // 3% commission
+          isTrialActive: billingSummary.subscription.status === "TRIAL",
+          trialThreshold: Number(billingSummary.trial.threshold),
         }
       : null;
 
-    // Add current cycle metrics to billing plan
-    const billingPlanWithMetrics = {
-      ...billingPlan,
+    const currentCycleMetrics = billingSummary.current_cycle
+      ? {
+          purchases: { count: 0, total: 0 }, // Will be calculated from commission records
+          net_revenue: Number(billingSummary.current_cycle.usage_amount),
+          commission: Number(billingSummary.current_cycle.usage_amount) * 0.03,
+          final_commission:
+            Number(billingSummary.current_cycle.usage_amount) * 0.03,
+          capped_amount: Number(billingSummary.current_cycle.current_cap),
+          days_remaining: billingSummary.current_cycle.days_remaining || 0,
+        }
+      : null;
+
+    // Create billing plan object for frontend compatibility
+    const billingPlan = {
+      id: billingSummary.subscription.id,
+      status: billingSummary.subscription.status.toLowerCase(),
+      type:
+        billingSummary.subscription.status === "TRIAL"
+          ? "trial"
+          : "usage_based",
+      is_trial_active: billingSummary.subscription.status === "TRIAL",
+      trial_threshold: billingSummary.trial?.threshold || 0,
+      subscription_status:
+        billingSummary.shopify_subscription?.status || "PENDING",
+      configuration: {
+        currency: billingSummary.pricing_tier.currency,
+        revenue_share_rate: Number(billingSummary.pricing_tier.commission_rate),
+      },
       currentCycleMetrics,
     };
 
     return json({
       trialPlanData: trialPlanData,
-      billingPlan: billingPlanWithMetrics,
-      shopCurrency: billingPlan.shops?.currency_code,
+      billingPlan: billingPlan,
+      shopCurrency: shopRecord.currency_code,
     });
   } catch (error) {
     console.log(error, "------------------>");

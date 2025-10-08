@@ -50,8 +50,8 @@ export async function checkServiceSuspensionMiddleware(
 
 export async function checkServiceSuspension(shopId: string): Promise<any> {
   try {
-    // Get shop and billing plan
-    const [shop, billingPlan] = await Promise.all([
+    // Get shop and subscription
+    const [shop, shopSubscription] = await Promise.all([
       prisma.shops.findUnique({
         where: { id: shopId },
         select: {
@@ -61,16 +61,23 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
           suspension_reason: true,
         },
       }),
-      prisma.billing_plans.findFirst({
+      prisma.shop_subscriptions.findFirst({
         where: {
           shop_id: shopId,
-          status: { in: ["active", "suspended", "pending"] },
+          is_active: true,
         },
-        orderBy: { created_at: "desc" },
+        include: {
+          subscription_trials: true,
+          billing_cycles: {
+            where: { status: "ACTIVE" },
+            orderBy: { cycle_number: "desc" },
+            take: 1,
+          },
+        },
       }),
     ]);
 
-    if (!shop || !billingPlan) {
+    if (!shop || !shopSubscription) {
       return {
         isSuspended: true,
         reason: "shop_not_found",
@@ -91,16 +98,16 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
         requiresBillingSetup:
           reason === "trial_completed_subscription_required",
         requiresCapIncrease: reason === "monthly_cap_reached",
-        trialCompleted: !billingPlan.is_trial_active,
+        trialCompleted: shopSubscription.status !== "TRIAL",
         subscriptionActive: false,
-        subscriptionPending: billingPlan.subscription_status === "PENDING",
+        subscriptionPending: shopSubscription.status === "PENDING_APPROVAL",
       };
     }
 
     // Check subscription status
-    const subscriptionActive = billingPlan.subscription_status === "ACTIVE";
-    const subscriptionPending = billingPlan.subscription_status === "PENDING";
-    const trialCompleted = !billingPlan.is_trial_active;
+    const subscriptionActive = shopSubscription.status === "ACTIVE";
+    const subscriptionPending = shopSubscription.status === "PENDING_APPROVAL";
+    const trialCompleted = shopSubscription.status !== "TRIAL";
 
     // If subscription is pending, services are suspended
     if (subscriptionPending) {

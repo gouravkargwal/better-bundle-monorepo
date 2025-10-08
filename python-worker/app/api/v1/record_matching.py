@@ -8,19 +8,15 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
 from app.core.database.session import get_session_context
-from app.core.database.models import (
-    Shop,
-    BillingPlan,
-    CommissionRecord,
-    BillingInvoice,
-)
-from app.core.logging import get_logger
-from app.domains.billing.services.commission_service import CommissionService
-from app.domains.billing.services.shopify_usage_billing_service import (
-    ShopifyUsageBillingService,
-)
-from app.domains.billing.repositories.billing_repository import BillingRepository
 
+from app.core.logging import get_logger
+from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
+from app.domains.billing.services.shopify_usage_billing_service_v2 import (
+    ShopifyUsageBillingServiceV2,
+)
+from app.domains.billing.repositories.billing_repository_v2 import (
+    BillingRepositoryV2,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/record-matching", tags=["record-matching"])
@@ -43,7 +39,9 @@ async def get_shopify_usage_records(
     """
     try:
         async with get_session_context() as session:
-            from app.core.database.models import Shop, BillingPlan
+            from app.core.database.models import Shop
+
+            # BillingPlan removed - using new subscription system
             from sqlalchemy import select, and_
             from datetime import datetime, timedelta
 
@@ -71,21 +69,26 @@ async def get_shopify_usage_records(
                     status_code=400, detail=f"Shop {shop_id} has no access token"
                 )
 
-            # Get billing plan
-            billing_plan_stmt = select(BillingPlan).where(
-                and_(BillingPlan.shop_id == shop_id, BillingPlan.status == "active")
-            )
-            billing_plan_result = await session.execute(billing_plan_stmt)
-            billing_plan = billing_plan_result.scalar_one_or_none()
+            # Get shop subscription (new system)
+            from app.core.database.models import ShopSubscription
 
-            if not billing_plan:
+            shop_subscription_stmt = select(ShopSubscription).where(
+                and_(
+                    ShopSubscription.shop_id == shop_id,
+                    ShopSubscription.is_active == True,
+                )
+            )
+            shop_subscription_result = await session.execute(shop_subscription_stmt)
+            shop_subscription = shop_subscription_result.scalar_one_or_none()
+
+            if not shop_subscription:
                 raise HTTPException(
-                    status_code=404, detail=f"No active billing plan for shop {shop_id}"
+                    status_code=404, detail=f"No active subscription for shop {shop_id}"
                 )
 
             # Initialize services
-            billing_repository = BillingRepository(session)
-            usage_billing_service = ShopifyUsageBillingService(
+            billing_repository = BillingRepositoryV2(session)
+            usage_billing_service = ShopifyUsageBillingServiceV2(
                 session, billing_repository
             )
 
@@ -94,14 +97,23 @@ async def get_shopify_usage_records(
 
             try:
                 # Get subscription status to see current usage
-                if billing_plan.configuration and billing_plan.configuration.get(
-                    "subscription_id"
-                ):
+                # Get Shopify subscription from new system
+                from app.core.database.models import ShopifySubscription
+
+                shopify_subscription_stmt = select(ShopifySubscription).where(
+                    ShopifySubscription.shop_subscription_id == shop_subscription.id
+                )
+                shopify_subscription_result = await session.execute(
+                    shopify_subscription_stmt
+                )
+                shopify_subscription = shopify_subscription_result.scalar_one_or_none()
+
+                if shopify_subscription:
                     subscription_status = (
                         await usage_billing_service.get_subscription_status(
                             shop.shop_domain,
                             shop.access_token,
-                            billing_plan.configuration["subscription_id"],
+                            shopify_subscription.shopify_subscription_id,
                         )
                     )
 
@@ -109,9 +121,7 @@ async def get_shopify_usage_records(
                         shopify_usage_records.append(
                             {
                                 "type": "subscription_status",
-                                "subscription_id": billing_plan.configuration[
-                                    "subscription_id"
-                                ],
+                                "subscription_id": shopify_subscription.shopify_subscription_id,
                                 "data": subscription_status,
                                 "fetched_at": datetime.now().isoformat(),
                             }

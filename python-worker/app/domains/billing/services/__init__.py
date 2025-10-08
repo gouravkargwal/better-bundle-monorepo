@@ -2,14 +2,14 @@
 Billing Services Package
 """
 
-from .billing_service import BillingService
+from .billing_service_v2 import BillingServiceV2
 from .billing_calculator import BillingCalculator
-from .commission_service import CommissionService
-from .shopify_usage_billing_service import ShopifyUsageBillingService
+from .commission_service_v2 import CommissionServiceV2
+from .shopify_usage_billing_service_v2 import ShopifyUsageBillingServiceV2
 
 __all__ = [
-    "BillingService",
+    "BillingServiceV2",
     "BillingCalculator",
-    "CommissionService",
-    "ShopifyUsageBillingService",
+    "CommissionServiceV2",
+    "ShopifyUsageBillingServiceV2",
 ]

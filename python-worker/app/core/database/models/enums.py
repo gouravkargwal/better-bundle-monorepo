@@ -115,3 +115,66 @@ class ChargeType(str, Enum):
     OVERFLOW_ONLY = "overflow_only"  # Only overflow tracked
     TRIAL = "trial"  # During trial period
     REJECTED = "rejected"  # Not charged
+
+
+# ============= NEW ENUMS FOR REDESIGNED BILLING SYSTEM =============
+
+
+class SubscriptionPlanType(str, Enum):
+    """Subscription plan types"""
+
+    USAGE_BASED = "usage_based"
+    TIERED = "tiered"
+    FLAT_RATE = "flat_rate"
+    HYBRID = "hybrid"
+
+
+class SubscriptionStatus(str, Enum):
+    """Shop subscription status"""
+
+    TRIAL = "trial"  # In trial period
+    PENDING_APPROVAL = (
+        "pending_approval"  # Trial ended, waiting for subscription approval
+    )
+    ACTIVE = "active"  # Active subscription
+    SUSPENDED = "suspended"  # Suspended (payment issues, etc.)
+    CANCELLED = "cancelled"  # Cancelled by user
+    EXPIRED = "expired"  # Expired (end date reached)
+
+
+class BillingCycleStatus(str, Enum):
+    """Billing cycle status"""
+
+    ACTIVE = "active"  # Current billing cycle
+    COMPLETED = "completed"  # Cycle ended normally
+    CANCELLED = "cancelled"  # Cycle cancelled (subscription ended)
+    SUSPENDED = "suspended"  # Cycle suspended
+
+
+class TrialStatus(str, Enum):
+    """Trial status"""
+
+    ACTIVE = "active"  # Trial in progress
+    COMPLETED = "completed"  # Trial completed (threshold reached)
+    EXPIRED = "expired"  # Trial expired (time limit reached)
+    CANCELLED = "cancelled"  # Trial cancelled
+
+
+class ShopifySubscriptionStatus(str, Enum):
+    """Shopify subscription status"""
+
+    PENDING = "PENDING"  # Awaiting merchant approval
+    ACTIVE = "ACTIVE"  # Active and billing
+    DECLINED = "DECLINED"  # Merchant declined
+    CANCELLED = "CANCELLED"  # Cancelled
+    EXPIRED = "EXPIRED"  # Expired
+
+
+class AdjustmentReason(str, Enum):
+    """Billing cycle adjustment reasons"""
+
+    CAP_INCREASE = "cap_increase"  # User requested cap increase
+    PLAN_UPGRADE = "plan_upgrade"  # Upgraded to higher tier
+    ADMIN_ADJUSTMENT = "admin_adjustment"  # Admin adjustment
+    PROMOTION = "promotion"  # Promotional adjustment
+    DISPUTE_RESOLUTION = "dispute_resolution"  # Dispute resolution

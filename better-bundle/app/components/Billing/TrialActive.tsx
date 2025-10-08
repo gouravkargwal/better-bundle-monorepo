@@ -110,47 +110,8 @@ export function TrialActive({ shopCurrency, trialPlanData }: TrialActiveProps) {
                       )}
                     </InlineStack>
                   </BlockStack>
-
-                  {/* Status Message */}
-                  {hasReachedThreshold ? (
-                    <div
-                      style={{
-                        padding: "12px",
-                        backgroundColor: "white",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <InlineStack gap="200" blockAlign="center">
-                        <div style={{ color: "#F59E0B" }}>
-                          <Icon source={StarIcon} tone="warning" />
-                        </div>
-                        <BlockStack gap="100">
-                          <Text as="p" variant="bodyMd" fontWeight="semibold">
-                            Congratulations! You've reached your trial threshold
-                          </Text>
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            Ready to continue? Set up billing to keep using
-                            Better Bundle
-                          </Text>
-                        </BlockStack>
-                      </InlineStack>
-                    </div>
-                  ) : isNearThreshold ? (
-                    <InlineStack gap="200" blockAlign="center">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        You're almost there! Approaching your trial threshold
-                      </Text>
-                    </InlineStack>
-                  ) : null}
                 </BlockStack>
               </div>
-
-              {/* CTA Button for threshold reached */}
-              {hasReachedThreshold && (
-                <Button variant="primary" size="large" fullWidth>
-                  Set Up Billing to Continue
-                </Button>
-              )}
             </BlockStack>
           </Card>
 

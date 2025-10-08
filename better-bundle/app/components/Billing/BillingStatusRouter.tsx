@@ -52,7 +52,7 @@ export function BillingStatusRouter({
   // Subscription is pending approval - show pending state
   if (
     billingPlan &&
-    billingPlan.status === "pending" &&
+    billingPlan.status === "pending_approval" &&
     billingPlan.subscription_status === "PENDING"
   ) {
     return (

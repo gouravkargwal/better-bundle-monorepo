@@ -53,16 +53,8 @@ api_version = "2024-01"
   uri = "/webhooks/orders/paid"
 
   [[webhooks.subscriptions]]
-  topics = [ "app_subscriptions/approaching_capped_amount" ]
-  uri = "/webhooks/billing/charge_failed"
-
-  [[webhooks.subscriptions]]
   topics = [ "refunds/create" ]
   uri = "/webhooks/refunds/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app_subscriptions/update" ]
-  uri = "/webhooks/billing/charge_created"
 
   [[webhooks.subscriptions]]
   topics = [ "products/update" ]
@@ -71,6 +63,23 @@ api_version = "2024-01"
   [[webhooks.subscriptions]]
   topics = [ "inventory_levels/update" ]
   uri = "/webhooks/inventory_levels/update"
+
+
+[[webhooks.subscriptions]]
+topics = [ "app_subscriptions/update" ]
+uri = "/webhooks/billing/subscription_update"
+
+[[webhooks.subscriptions]]
+topics = [ "app_subscriptions/approaching_capped_amount" ]
+uri = "/webhooks/billing/approaching_cap"
+
+#[[webhooks.subscriptions]]
+#topics = [ "subscription_billing_attempts/success" ]
+#uri = "/webhooks/billing/billing_success"
+
+#[[webhooks.subscriptions]]
+#topics = [ "subscription_billing_attempts/failure" ]
+#uri = "/webhooks/billing/billing_failed"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes

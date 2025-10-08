@@ -30,7 +30,6 @@ from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.record_matching import router as record_matching_router
 from app.domains.billing.api.billing_api import router as billing_api_router
-from app.domains.billing.api.settlement_api import router as settlement_api_router
 
 
 logger = get_logger(__name__)
@@ -86,7 +85,6 @@ app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
 app.include_router(record_matching_router)
 app.include_router(billing_api_router)
-app.include_router(settlement_api_router)
 
 # Include unified analytics routers
 from app.domains.analytics.api import (

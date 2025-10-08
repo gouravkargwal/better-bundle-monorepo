@@ -23,24 +23,40 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get current billing plan
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Get current shop subscription and billing cycle
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
+        is_active: true,
         status: "active",
-        subscription_status: "ACTIVE",
+      },
+      include: {
+        billing_cycles: {
+          where: { status: "active" },
+          orderBy: { cycle_number: "desc" },
+          take: 1,
+        },
+        shopify_subscription: true,
       },
     });
 
-    if (!billingPlan) {
+    if (!shopSubscription) {
       return json(
-        { success: false, error: "No active billing plan found" },
+        { success: false, error: "No active subscription found" },
+        { status: 404 },
+      );
+    }
+
+    const currentCycle = shopSubscription.billing_cycles[0];
+    if (!currentCycle) {
+      return json(
+        { success: false, error: "No active billing cycle found" },
         { status: 404 },
       );
     }
 
     // Check if new limit is higher than current
-    const currentCap = Number(billingPlan.configuration?.capped_amount || 1000);
+    const currentCap = Number(currentCycle.current_cap_amount);
     if (newSpendingLimit <= currentCap) {
       return json(
         { success: false, error: "New cap must be higher than current cap" },
@@ -50,7 +66,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Update Shopify subscription with new capped amount
     const currency = shopRecord.currency_code || "USD";
-    const subscriptionId = billingPlan.subscription_id;
+    const subscriptionId =
+      shopSubscription.shopify_subscription?.shopify_subscription_id;
 
     if (!subscriptionId) {
       return json(
@@ -112,15 +129,25 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Update billing plan with new cap
-    await prisma.billing_plans.update({
-      where: { id: billingPlan.id },
+    // Create billing cycle adjustment record
+    await prisma.billing_cycle_adjustments.create({
       data: {
-        configuration: {
-          ...(billingPlan.configuration as any),
-          capped_amount: newSpendingLimit,
-          cap_increased_at: new Date().toISOString(),
-          previous_cap: currentCap,
-        },
+        billing_cycle_id: currentCycle.id,
+        old_cap_amount: currentCap,
+        new_cap_amount: newSpendingLimit,
+        adjustment_amount: newSpendingLimit - currentCap,
+        adjustment_reason: "cap_increase",
+        adjusted_by: "user",
+        adjusted_by_type: "user",
+        adjusted_at: new Date(),
+      },
+    });
+
+    // Update billing cycle cap
+    await prisma.billing_cycles.update({
+      where: { id: currentCycle.id },
+      data: {
+        current_cap_amount: newSpendingLimit,
       },
     });
 

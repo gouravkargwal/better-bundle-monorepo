@@ -16,7 +16,10 @@ export function useBillingActions(currency: string = "USD") {
       const response = await fetch("/api/billing/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spendingLimit: parseFloat(spendingLimit) }),
+        body: JSON.stringify({
+          spendingLimit: parseFloat(spendingLimit),
+          monthlyCap: parseFloat(spendingLimit), // Send monthly cap as well
+        }),
       });
 
       const result = await response.json();

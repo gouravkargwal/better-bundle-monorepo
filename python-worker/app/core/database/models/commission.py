@@ -60,9 +60,12 @@ class CommissionRecord(Base):
         index=True,
     )
 
-    billing_plan_id = Column(
+    # Legacy billing_plan_id removed - using billing_cycle_id instead
+
+    # NEW: Reference to billing cycle
+    billing_cycle_id = Column(
         String(255),
-        ForeignKey("billing_plans.id", ondelete="SET NULL"),
+        ForeignKey("billing_cycles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -190,20 +193,9 @@ class CommissionRecord(Base):
 
     shopify_response = Column(JSON, nullable=True, comment="Response from Shopify API")
 
-    # Invoice tracking
-    invoice_id = Column(
-        String(255),
-        ForeignKey("billing_invoices.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="Invoice this commission was included in",
-    )
-
-    invoiced_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="When this was included in an invoice",
-    )
+    # Invoice tracking - REMOVED: Shopify handles billing directly
+    # invoice_id = Column(...)  # REMOVED
+    # invoiced_at = Column(...)  # REMOVED
 
     # Currency
     currency = Column(
@@ -252,8 +244,9 @@ class CommissionRecord(Base):
     purchase_attribution = relationship(
         "PurchaseAttribution", back_populates="commission_record"
     )
-    billing_plan = relationship("BillingPlan", back_populates="commission_records")
-    invoice = relationship("BillingInvoice", back_populates="commission_records")
+    # Legacy billing_plan relationship removed - using billing_cycle instead
+    billing_cycle = relationship("BillingCycle", back_populates="commission_records")
+    # invoice = relationship("BillingInvoice", back_populates="commission_records")  # REMOVED
 
     # Indexes for common queries
     __table_args__ = (
@@ -267,7 +260,7 @@ class CommissionRecord(Base):
         Index("idx_commission_shop_phase_status", "shop_id", "billing_phase", "status"),
         Index("idx_commission_status_created", "status", "created_at"),
         Index("idx_commission_shopify_record", "shopify_usage_record_id"),
-        Index("idx_commission_invoice", "invoice_id", "status"),
+        # Index("idx_commission_invoice", "invoice_id", "status"),  # REMOVED
         # Unique constraint - one commission per purchase attribution
         UniqueConstraint(
             "purchase_attribution_id", name="uq_commission_purchase_attribution"
@@ -321,8 +314,8 @@ class CommissionRecord(Base):
             "id": str(self.id),
             "shop_id": self.shop_id,
             "purchase_attribution_id": str(self.purchase_attribution_id),
-            "billing_plan_id": (
-                str(self.billing_plan_id) if self.billing_plan_id else None
+            "billing_cycle_id": (
+                str(self.billing_cycle_id) if self.billing_cycle_id else None
             ),
             "order_id": self.order_id,
             "order_date": self.order_date.isoformat() if self.order_date else None,
@@ -352,8 +345,8 @@ class CommissionRecord(Base):
                 if self.shopify_recorded_at
                 else None
             ),
-            "invoice_id": str(self.invoice_id) if self.invoice_id else None,
-            "invoiced_at": self.invoiced_at.isoformat() if self.invoiced_at else None,
+            # "invoice_id": str(self.invoice_id) if self.invoice_id else None,  # REMOVED
+            # "invoiced_at": self.invoiced_at.isoformat() if self.invoiced_at else None,  # REMOVED
             "currency": self.currency,
             "notes": self.notes,
             "commission_metadata": self.commission_metadata,
