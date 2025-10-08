@@ -49,7 +49,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "active",
+        status: "ACTIVE",
         activated_at: new Date(),
         updated_at: new Date(),
       },
@@ -60,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
       await prisma.shopify_subscriptions.update({
         where: { id: shopSubscription.shopify_subscription.id },
         data: {
-          status: "active",
+          status: "ACTIVE",
           activated_at: new Date(),
           updated_at: new Date(),
         },

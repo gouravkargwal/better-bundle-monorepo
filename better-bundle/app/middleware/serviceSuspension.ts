@@ -30,12 +30,24 @@ export async function checkServiceSuspensionMiddleware(
 
     // If services are suspended and billing setup is required, redirect to billing setup
     if (suspensionStatus.isSuspended && suspensionStatus.requiresBillingSetup) {
-      const message = suspensionStatus.message;
+      // Generate appropriate message and action URL based on suspension reason
+      let actionUrl = "";
+      let actionRequired = false;
 
-      if (message.actionRequired && message.actionUrl) {
+      if (suspensionStatus.reason === "trial_completed_awaiting_setup") {
+        actionUrl = "/app/billing";
+        actionRequired = true;
+      } else if (
+        suspensionStatus.reason === "trial_completed_subscription_required"
+      ) {
+        actionUrl = "/app/billing";
+        actionRequired = true;
+      }
+
+      if (actionRequired && actionUrl) {
         return {
           shouldRedirect: true,
-          redirectUrl: message.actionUrl,
+          redirectUrl: actionUrl,
           suspensionStatus,
         };
       }
@@ -121,7 +133,7 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
     }
 
     // ✅ NEW: Trial completed - services SUSPENDED until user sets up billing
-    if (shopSubscription.status === "TRIAL_COMPLETED") {
+    if (shopSubscription.status === ("TRIAL_COMPLETED" as any)) {
       return {
         isSuspended: true,
         reason: "trial_completed_awaiting_setup",

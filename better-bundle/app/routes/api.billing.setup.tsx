@@ -33,31 +33,34 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Check if shop already has an active subscription
-    const existingSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopRecord.id,
-        is_active: true,
-      },
-    });
-
-    if (existingSubscription) {
-      return json({
-        success: false,
-        error: "Active subscription already exists",
-        existingSubscription: existingSubscription,
-      });
-    }
-
     // ✅ Get shop subscription - only allow if trial is completed
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
         is_active: true,
         // ✅ Only allow if trial is completed
-        status: "TRIAL_COMPLETED",
+        status: "TRIAL_COMPLETED" as any,
       },
     });
+
+    // Check if there's already a subscription that's not in TRIAL_COMPLETED status
+    const otherActiveSubscription = await prisma.shop_subscriptions.findFirst({
+      where: {
+        shop_id: shopRecord.id,
+        is_active: true,
+        status: {
+          not: "TRIAL_COMPLETED" as any,
+        },
+      },
+    });
+
+    if (otherActiveSubscription) {
+      return json({
+        success: false,
+        error: "Active subscription already exists",
+        existingSubscription: otherActiveSubscription,
+      });
+    }
 
     if (!shopSubscription) {
       return json(
@@ -204,7 +207,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "pending_approval", // ✅ NOW we set PENDING_APPROVAL
+        status: "PENDING_APPROVAL" as any, // ✅ NOW we set PENDING_APPROVAL
         user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
         updated_at: new Date(),
       },
@@ -217,7 +220,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shopify_subscription_id: subscription.id,
         shopify_line_item_id: subscription.lineItems[0].id,
         confirmation_url: confirmationUrl,
-        status: "pending",
+        status: "PENDING" as any,
         created_at: new Date(),
         error_count: "0", // Required field
       },
@@ -230,7 +233,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({
       success: true,
       subscription_id: subscription.id,
-      confirmation_url: confirmationUrl,
+      confirmationUrl: confirmationUrl, // Use camelCase to match frontend expectation
       message: "Please approve the subscription in Shopify",
     });
   } catch (error) {

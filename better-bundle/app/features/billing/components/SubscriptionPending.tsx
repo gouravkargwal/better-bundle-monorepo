@@ -15,13 +15,11 @@ import type { SubscriptionData } from "../types/billing.types";
 interface SubscriptionPendingProps {
   subscriptionData: SubscriptionData;
   shopCurrency: string;
-  onCancelSubscription: () => Promise<{ success: boolean; error?: string }>;
 }
 
 export function SubscriptionPending({
   subscriptionData,
   shopCurrency,
-  onCancelSubscription,
 }: SubscriptionPendingProps) {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -288,32 +286,6 @@ export function SubscriptionPending({
           </div>
         </Card>
       </div>
-
-      {/* Cancel Section */}
-      <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text as="h3" variant="headingMd" fontWeight="semibold">
-                  Cancel Pending Subscription
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Changed your mind or need to adjust your spending cap? You can
-                  cancel this pending subscription and set it up again.
-                </Text>
-              </BlockStack>
-              <Button
-                variant="primary"
-                tone="critical"
-                onClick={onCancelSubscription}
-              >
-                Cancel Subscription
-              </Button>
-            </InlineStack>
-          </BlockStack>
-        </div>
-      </Card>
     </BlockStack>
   );
 }

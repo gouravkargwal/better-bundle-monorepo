@@ -100,7 +100,7 @@ export async function getUsageRevenueData(
           shop_id: shopId,
           is_active: true,
         },
-        status: "active",
+        status: "ACTIVE",
       },
     });
 
@@ -150,7 +150,7 @@ export async function getCurrentCycleMetrics(
     const currentCycle = await prisma.billing_cycles.findFirst({
       where: {
         shop_subscription_id: shopSubscription.id,
-        status: "active",
+        status: "ACTIVE",
       },
     });
 
@@ -243,7 +243,7 @@ export async function getBillingSummary(
         pricing_tiers: true,
         subscription_trials: true,
         billing_cycles: {
-          where: { status: "active" },
+          where: { status: "ACTIVE" },
           orderBy: { cycle_number: "desc" },
           take: 1,
         },
@@ -358,7 +358,7 @@ export async function createShopSubscription(
         threshold_amount: defaultPricingTier.trial_threshold_amount,
         accumulated_revenue: 0,
         commission_saved: 0,
-        status: "active",
+        status: "ACTIVE",
         started_at: new Date(),
       },
     });
@@ -451,12 +451,20 @@ export async function activateSubscription(
       throw new Error("Shop subscription not found");
     }
 
-    // Create Shopify subscription record
-    const shopifySubscription = await prisma.shopify_subscriptions.create({
-      data: {
+    // Create or update Shopify subscription record
+    const shopifySubscription = await prisma.shopify_subscriptions.upsert({
+      where: {
+        shopify_subscription_id: shopifySubscriptionId,
+      },
+      update: {
+        status: "ACTIVE",
+        activated_at: new Date(),
+        error_count: "0",
+      },
+      create: {
         shop_subscription_id: shopSubscription.id,
         shopify_subscription_id: shopifySubscriptionId,
-        status: "active",
+        status: "ACTIVE",
         created_at: new Date(),
         activated_at: new Date(),
         error_count: "0",
@@ -467,7 +475,7 @@ export async function activateSubscription(
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "active",
+        status: "ACTIVE",
         activated_at: new Date(),
       },
     });
@@ -484,7 +492,7 @@ export async function activateSubscription(
         current_cap_amount: userChosenCap,
         usage_amount: 0,
         commission_count: 0,
-        status: "active",
+        status: "ACTIVE",
         activated_at: new Date(),
       },
     });
@@ -516,7 +524,7 @@ export async function increaseBillingCycleCap(
           shop_id: shopId,
           is_active: true,
         },
-        status: "active",
+        status: "ACTIVE",
       },
     });
 

@@ -77,7 +77,7 @@ async function handleActiveSubscription(
     where: { shop_id: shopRecord.id, is_active: true },
     include: {
       billing_cycles: {
-        where: { status: "active" },
+        where: { status: "ACTIVE" as any },
         orderBy: { cycle_number: "desc" },
         take: 1,
       },
@@ -120,7 +120,7 @@ async function handleCancelledSubscription(
   await prisma.shop_subscriptions.updateMany({
     where: { shop_id: shopRecord.id, is_active: true },
     data: {
-      status: "cancelled",
+      status: "CANCELLED" as any,
       cancelled_at: new Date(),
       updated_at: new Date(),
     },
@@ -133,7 +133,7 @@ async function handleCancelledSubscription(
       is_active: false,
       suspended_at: new Date(),
       suspension_reason: "subscription_cancelled",
-      service_impact: "Services suspended due to subscription cancellation",
+      service_impact: "Services suspended due to cancellation",
       updated_at: new Date(),
     },
   });
@@ -149,8 +149,8 @@ async function handleRejectedSubscription(
   await prisma.shop_subscriptions.updateMany({
     where: { shop_id: shopRecord.id, is_active: true },
     data: {
-      status: "rejected",
-      rejected_at: new Date(),
+      status: "CANCELLED" as any, // Using CANCELLED as there's no REJECTED status in the enum
+      cancelled_at: new Date(),
       updated_at: new Date(),
     },
   });

@@ -279,8 +279,8 @@ class ProductEnrichment:
                                     f"⚠️ No variant ID found in variant: {default_variant}"
                                 )
 
-                    # Determine availability based on overall and per-variant inventory
-                    total_inventory = getattr(product, "total_inventory", None)
+                    # Determine availability based on per-variant inventory
+                    # Check if ANY variant has positive inventory
                     any_variant_instock = False
                     if isinstance(variants, list) and len(variants) > 0:
                         for v in variants:
@@ -293,13 +293,18 @@ class ProductEnrichment:
                                     break
                             except Exception:
                                 pass
-                    is_available = (product.status == "ACTIVE") and (
-                        (isinstance(total_inventory, int) and total_inventory > 0)
-                        or any_variant_instock
-                    )
+
+                    # Product is available only if:
+                    # 1. Status is ACTIVE
+                    # 2. At least one variant has positive inventory
+                    is_available = (product.status == "ACTIVE") and any_variant_instock
 
                     # Skip products that are unavailable (sold out or inactive)
                     if not is_available:
+                        logger.debug(
+                            f"🚫 Skipping unavailable product: {product.title} "
+                            f"(status: {product.status}, any_variant_instock: {any_variant_instock})"
+                        )
                         continue
 
                     # Format for frontend ProductRecommendation interface

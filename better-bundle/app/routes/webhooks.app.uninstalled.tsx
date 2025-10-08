@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
-import prisma from "../db.server";
+import prisma from "app/db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -27,7 +26,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           data: {
             is_active: false,
-            status: "cancelled",
+            status: "CANCELLED" as any,
             cancelled_at: new Date(),
             updated_at: new Date(),
           },
@@ -51,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       // 4. Delete sessions (original functionality)
-      await db.sessions.deleteMany({ where: { shop } });
+      await prisma.sessions.deleteMany({ where: { shop } });
 
       console.log(`   - Deleted sessions`);
     } else {

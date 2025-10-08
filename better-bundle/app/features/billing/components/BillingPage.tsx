@@ -61,8 +61,12 @@ export function BillingPage({
               });
 
               const result = await response.json();
+              console.log("Billing setup response:", result);
               if (result.success && result.confirmationUrl) {
+                console.log("Redirecting to:", result.confirmationUrl);
                 window.top!.location.href = result.confirmationUrl;
+              } else {
+                console.error("No confirmation URL in response:", result);
               }
               return result;
             }}
@@ -74,18 +78,6 @@ export function BillingPage({
           <SubscriptionPending
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
-            onCancelSubscription={async () => {
-              const response = await fetch("/api/billing/cancel", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-              });
-
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              }
-              return result;
-            }}
           />
         );
 

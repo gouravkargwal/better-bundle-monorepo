@@ -50,7 +50,7 @@ export class BillingService {
       };
 
       // Add trial data if trial is active or completed
-      if (status === "TRIAL" || status === "TRIAL_COMPLETED") {
+      if (status === "trial_active" || status === "trial_completed") {
         state.trialData = await this.getTrialData(shopSubscription);
       }
 

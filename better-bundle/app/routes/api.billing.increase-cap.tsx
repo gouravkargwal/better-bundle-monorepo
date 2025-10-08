@@ -28,7 +28,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: {
         shop_id: shopRecord.id,
         is_active: true,
-        status: "active",
+        status: "ACTIVE",
       },
       include: {
         billing_cycles: {
