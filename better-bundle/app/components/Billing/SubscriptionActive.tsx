@@ -5,12 +5,10 @@ import {
   Text,
   Badge,
   ProgressBar,
-  Icon,
   Button,
   Modal,
   RangeSlider,
 } from "@shopify/polaris";
-import { CheckCircleIcon } from "@shopify/polaris-icons";
 import { BillingLayout } from "./BillingLayout";
 import { HeroHeader } from "../UI/HeroHeader";
 import { formatCurrency } from "app/utils/currency";
@@ -96,7 +94,7 @@ export function SubscriptionActive({
                 </div>
                 {metrics.days_remaining > 0 && (
                   <Badge tone="info" size="large">
-                    {metrics.days_remaining} days left
+                    {`${metrics.days_remaining} days left`}
                   </Badge>
                 )}
               </InlineStack>
@@ -119,18 +117,23 @@ export function SubscriptionActive({
                   }}
                 >
                   <BlockStack gap="200">
-                    <Text variant="bodySm" tone="subdued">
-                      Attributed Revenue
-                    </Text>
-                    <Text variant="heading2xl" fontWeight="bold">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Attributed Revenue
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        📈 Revenue Generated
+                      </Text>
+                    </InlineStack>
+                    <Text as="h3" variant="heading2xl" fontWeight="bold">
                       {formatCurrency(metrics.net_revenue, shopCurrency)}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
-                        <Text variant="bodySm" tone="subdued">
+                        <Text as="span" variant="bodySm" tone="subdued">
                           Sales:
                         </Text>
-                        <Text variant="bodySm">
+                        <Text as="span" variant="bodySm">
                           {formatCurrency(
                             metrics.purchases.total,
                             shopCurrency,
@@ -138,34 +141,85 @@ export function SubscriptionActive({
                           ({metrics.purchases.count})
                         </Text>
                       </InlineStack>
-                      {/* ✅ NO REFUND DISPLAY - Commission based on gross attributed revenue only */}
+                      <InlineStack align="space-between">
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          Max Revenue:
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {formatCurrency(
+                            metrics.capped_amount / 0.03,
+                            shopCurrency,
+                          )}{" "}
+                          (before cap)
+                        </Text>
+                      </InlineStack>
                     </BlockStack>
                   </BlockStack>
                 </div>
 
-                {/* ✅ NEW: Your Bill (Commission) */}
+                {/* ✅ ENHANCED: Your Bill (Commission) */}
                 <div
                   style={{
                     padding: "20px",
-                    backgroundColor: "#ECFDF5",
+                    backgroundColor: isOverLimit
+                      ? "#FEF2F2"
+                      : isNearLimit
+                        ? "#FEF3C7"
+                        : "#ECFDF5",
                     borderRadius: "12px",
-                    border: "2px solid #10B981",
+                    border: `2px solid ${
+                      isOverLimit
+                        ? "#EF4444"
+                        : isNearLimit
+                          ? "#F59E0B"
+                          : "#10B981"
+                    }`,
                   }}
                 >
                   <BlockStack gap="200">
-                    <Text variant="bodySm" tone="subdued">
-                      Your Current Bill
-                    </Text>
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Your Current Bill
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        💰 {usagePercentage.toFixed(1)}% of cap
+                      </Text>
+                    </InlineStack>
                     <Text
+                      as="h3"
                       variant="heading2xl"
                       fontWeight="bold"
                       tone={isOverLimit ? "critical" : undefined}
                     >
                       {formatCurrency(metrics.final_commission, shopCurrency)}
                     </Text>
-                    <Text variant="bodySm" tone="subdued">
+                    <Text as="span" variant="bodySm" tone="subdued">
                       3% of {formatCurrency(metrics.net_revenue, shopCurrency)}
                     </Text>
+                    <BlockStack gap="100">
+                      <InlineStack align="space-between">
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          Remaining Cap:
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {formatCurrency(
+                            Math.max(
+                              0,
+                              metrics.capped_amount - metrics.final_commission,
+                            ),
+                            shopCurrency,
+                          )}
+                        </Text>
+                      </InlineStack>
+                      <InlineStack align="space-between">
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          Reset in:
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {metrics.days_remaining} days
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
                     {isOverLimit && (
                       <div
                         style={{
@@ -174,7 +228,7 @@ export function SubscriptionActive({
                           borderRadius: "6px",
                         }}
                       >
-                        <Text variant="bodySm" tone="critical">
+                        <Text as="span" variant="bodySm" tone="critical">
                           ⚠️ Capped at{" "}
                           {formatCurrency(metrics.capped_amount, shopCurrency)}
                         </Text>
@@ -184,29 +238,125 @@ export function SubscriptionActive({
                 </div>
               </div>
 
-              {/* ✅ EXISTING: Progress Bar - Keep but update values */}
-              <BlockStack gap="200">
-                <ProgressBar
-                  progress={Math.min(usagePercentage, 100)}
-                  tone={
-                    isOverLimit
-                      ? "critical"
-                      : isNearLimit
-                        ? "warning"
-                        : "success"
-                  }
-                  size="large"
-                />
-                <InlineStack align="space-between">
-                  <Text variant="bodySm" fontWeight="semibold">
-                    {usagePercentage.toFixed(1)}% of cap used
-                  </Text>
-                  <Text variant="bodySm" tone="subdued">
-                    {formatCurrency(metrics.final_commission, shopCurrency)} /{" "}
-                    {formatCurrency(metrics.capped_amount, shopCurrency)}
-                  </Text>
-                </InlineStack>
-              </BlockStack>
+              {/* ✅ NEW: Dual Progress Bars */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                  gap: "24px",
+                }}
+              >
+                {/* Revenue Progress Bar */}
+                <BlockStack gap="200">
+                  <div
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#F0FDF4",
+                      borderRadius: "12px",
+                      border: "1px solid #BBF7D0",
+                    }}
+                  >
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text
+                          as="span"
+                          variant="bodySm"
+                          fontWeight="semibold"
+                          tone="subdued"
+                        >
+                          📈 Revenue vs Cap
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {Math.round(
+                            (metrics.net_revenue /
+                              (metrics.capped_amount / 0.03)) *
+                              100,
+                          )}
+                          % of max
+                        </Text>
+                      </InlineStack>
+                      <ProgressBar
+                        progress={Math.min(
+                          (metrics.net_revenue /
+                            (metrics.capped_amount / 0.03)) *
+                            100,
+                          100,
+                        )}
+                        tone="success"
+                        size="large"
+                      />
+                      <InlineStack align="space-between">
+                        <Text as="span" variant="bodySm" fontWeight="semibold">
+                          {formatCurrency(metrics.net_revenue, shopCurrency)}
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          /{" "}
+                          {formatCurrency(
+                            metrics.capped_amount / 0.03,
+                            shopCurrency,
+                          )}{" "}
+                          max
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
+                  </div>
+                </BlockStack>
+
+                {/* Commission Cap Progress Bar */}
+                <BlockStack gap="200">
+                  <div
+                    style={{
+                      padding: "16px",
+                      backgroundColor: isOverLimit
+                        ? "#FEF2F2"
+                        : isNearLimit
+                          ? "#FEF3C7"
+                          : "#F0F9FF",
+                      borderRadius: "12px",
+                      border: `1px solid ${
+                        isOverLimit
+                          ? "#FECACA"
+                          : isNearLimit
+                            ? "#FCD34D"
+                            : "#BAE6FD"
+                      }`,
+                    }}
+                  >
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text
+                          as="span"
+                          variant="bodySm"
+                          fontWeight="semibold"
+                          tone="subdued"
+                        >
+                          💰 Commission Cap
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {usagePercentage.toFixed(1)}% used
+                        </Text>
+                      </InlineStack>
+                      <ProgressBar
+                        progress={Math.min(usagePercentage, 100)}
+                        tone={isOverLimit ? "critical" : "success"}
+                        size="large"
+                      />
+                      <InlineStack align="space-between">
+                        <Text as="span" variant="bodySm" fontWeight="semibold">
+                          {formatCurrency(
+                            metrics.final_commission,
+                            shopCurrency,
+                          )}
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          /{" "}
+                          {formatCurrency(metrics.capped_amount, shopCurrency)}
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
+                  </div>
+                </BlockStack>
+              </div>
 
               {/* ✅ EXISTING: Warnings - Keep as is */}
               {isNearLimit && !isOverLimit && (
@@ -218,7 +368,7 @@ export function SubscriptionActive({
                     border: "1px solid #FCD34D",
                   }}
                 >
-                  <Text variant="bodySm">
+                  <Text as="span" variant="bodySm">
                     ⚠️ You're approaching your spending cap.
                   </Text>
                 </div>
@@ -259,7 +409,7 @@ export function SubscriptionActive({
                             Monthly Cap Reached
                           </Text>
                         </div>
-                        <Text variant="bodySm" tone="subdued">
+                        <Text as="span" variant="bodySm" tone="subdued">
                           You've reached your monthly spending cap of{" "}
                           {formatCurrency(metrics.capped_amount, shopCurrency)}.
                           New commissions will be tracked but not charged until
@@ -427,7 +577,9 @@ export function SubscriptionActive({
               max={metrics.capped_amount * 5} // 5x current cap
               step={50}
               value={newCapAmount}
-              onChange={setNewCapAmount}
+              onChange={(value) =>
+                setNewCapAmount(typeof value === "number" ? value : value[0])
+              }
               output
             />
 

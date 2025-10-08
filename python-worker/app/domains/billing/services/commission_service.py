@@ -163,10 +163,12 @@ class CommissionService:
                     return None
 
                 # Get current cycle usage BEFORE this commission
-                # Get current cycle usage BEFORE this commission
-                # Using locked plan to minimize race; usage sums are from recorded charges
-                cycle_usage_before = await self._get_cycle_usage(
-                    shop_id, billing_cycle_start, billing_cycle_end
+                # Calculate usage from all commissions created BEFORE this one in the same cycle
+                cycle_usage_before = await self._get_cycle_usage_before_commission(
+                    shop_id,
+                    billing_cycle_start,
+                    billing_cycle_end,
+                    purchase_attr.purchase_at,
                 )
 
                 cycle_usage_after = cycle_usage_before + commission_earned
@@ -634,18 +636,6 @@ class CommissionService:
 
     # ============= QUERY METHODS =============
 
-    async def get_commission_by_id(
-        self, commission_id: str
-    ) -> Optional[CommissionRecord]:
-        """Get commission record by ID"""
-        try:
-            query = select(CommissionRecord).where(CommissionRecord.id == commission_id)
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"❌ Error getting commission: {e}")
-            return None
-
     async def get_commissions_by_shop(
         self,
         shop_id: str,
@@ -723,30 +713,6 @@ class CommissionService:
 
         except Exception as e:
             logger.error(f"❌ Error getting pending commissions: {e}")
-            return []
-
-    async def get_failed_commissions(
-        self, max_retries: int = 3, limit: int = 100
-    ) -> List[CommissionRecord]:
-        """Get failed commissions that can be retried"""
-        try:
-            query = (
-                select(CommissionRecord)
-                .where(
-                    and_(
-                        CommissionRecord.status == CommissionStatus.FAILED,
-                        CommissionRecord.error_count < max_retries,
-                    )
-                )
-                .order_by(CommissionRecord.last_error_at.asc())
-                .limit(limit)
-            )
-
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
-
-        except Exception as e:
-            logger.error(f"❌ Error getting failed commissions: {e}")
             return []
 
     # ============= STATISTICS =============
@@ -847,6 +813,45 @@ class CommissionService:
             logger.error(f"❌ Error getting locked billing plan: {e}")
             return None
 
+    async def _get_cycle_usage_before_commission(
+        self,
+        shop_id: str,
+        cycle_start: datetime,
+        cycle_end: datetime,
+        current_purchase_time: datetime,
+    ) -> Decimal:
+        """
+        Get cycle usage BEFORE a specific commission creation time.
+        This counts all commissions that were created before the current purchase.
+        """
+        try:
+            # Get all commissions in this cycle that were created BEFORE the current purchase
+            query = select(
+                func.coalesce(func.sum(CommissionRecord.commission_earned), 0)
+            ).where(
+                and_(
+                    CommissionRecord.shop_id == shop_id,
+                    CommissionRecord.billing_cycle_start == cycle_start,
+                    CommissionRecord.billing_cycle_end == cycle_end,
+                    CommissionRecord.billing_phase == BillingPhase.PAID,
+                    CommissionRecord.created_at < current_purchase_time,
+                )
+            )
+
+            result = await self.session.execute(query)
+            usage = Decimal(str(result.scalar_one()))
+
+            logger.info(
+                f"📊 Cycle usage BEFORE commission for shop {shop_id}: ${usage} "
+                f"(before {current_purchase_time})"
+            )
+
+            return usage
+
+        except Exception as e:
+            logger.error(f"❌ Error getting cycle usage before commission: {e}")
+            return Decimal("0")
+
     async def _get_cycle_usage(
         self, shop_id: str, cycle_start: datetime, cycle_end: datetime
     ) -> Decimal:
@@ -855,6 +860,8 @@ class CommissionService:
         Only counts successfully recorded commissions.
         """
         try:
+            # Get all commissions in this cycle that were charged BEFORE the current commission
+            # This includes both RECORDED and INVOICED commissions
             query = select(
                 func.coalesce(func.sum(CommissionRecord.commission_charged), 0)
             ).where(
@@ -868,25 +875,24 @@ class CommissionService:
                             CommissionStatus.INVOICED,
                         ]
                     ),
+                    # Only count commissions that were recorded BEFORE current time
+                    CommissionRecord.shopify_recorded_at.isnot(None),
                 )
             )
 
             result = await self.session.execute(query)
-            return Decimal(str(result.scalar_one()))
+            usage = Decimal(str(result.scalar_one()))
+
+            logger.info(
+                f"📊 Cycle usage for shop {shop_id}: ${usage} "
+                f"(cycle: {cycle_start} to {cycle_end})"
+            )
+
+            return usage
 
         except Exception as e:
             logger.error(f"❌ Error getting cycle usage: {e}")
             return Decimal("0")
-
-    async def _get_existing_commission(
-        self, purchase_attribution_id: str
-    ) -> Optional[CommissionRecord]:
-        """Fetch existing commission by purchase attribution id"""
-        query = select(CommissionRecord).where(
-            CommissionRecord.purchase_attribution_id == purchase_attribution_id
-        )
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
 
     def _validate_commission_data(
         self,
