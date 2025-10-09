@@ -766,6 +766,7 @@ model shop_subscriptions {
   updated_at             DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id                String                   @unique(map: "uq_shop_subscription_active") @db.VarChar
   billing_cycles         billing_cycles[]
+  billing_invoices       billing_invoices[]
   pricing_tiers          pricing_tiers            @relation(fields: [pricing_tier_id], references: [id], onUpdate: NoAction)
   shops                  shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscription_plans     subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
@@ -1046,6 +1047,44 @@ model users {
   comment   String @default("")
 }
 
+model billing_invoices {
+  shop_subscription_id String              @db.VarChar(255)
+  shopify_invoice_id   String              @unique(map: "ix_billing_invoices_shopify_invoice_id") @db.VarChar(255)
+  invoice_number       String?             @db.VarChar(100)
+  amount_due           Decimal             @db.Decimal(10, 2)
+  amount_paid          Decimal             @db.Decimal(10, 2)
+  total_amount         Decimal             @db.Decimal(10, 2)
+  currency             String              @db.VarChar(3)
+  invoice_date         DateTime            @db.Timestamptz(6)
+  due_date             DateTime?           @db.Timestamptz(6)
+  paid_at              DateTime?           @db.Timestamptz(6)
+  status               invoice_status_enum
+  description          String?
+  line_items           Json?               @db.Json
+  shopify_response     Json?               @db.Json
+  payment_method       String?             @db.VarChar(100)
+  payment_reference    String?             @db.VarChar(255)
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions   shop_subscriptions  @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([currency], map: "ix_billing_invoice_currency")
+  @@index([invoice_date], map: "ix_billing_invoice_date")
+  @@index([due_date], map: "ix_billing_invoice_due_date")
+  @@index([paid_at], map: "ix_billing_invoice_paid_at")
+  @@index([shopify_invoice_id], map: "ix_billing_invoice_shopify_id")
+  @@index([status], map: "ix_billing_invoice_status")
+  @@index([shop_subscription_id], map: "ix_billing_invoice_subscription")
+  @@index([currency], map: "ix_billing_invoices_currency")
+  @@index([due_date], map: "ix_billing_invoices_due_date")
+  @@index([invoice_date], map: "ix_billing_invoices_invoice_date")
+  @@index([invoice_number], map: "ix_billing_invoices_invoice_number")
+  @@index([paid_at], map: "ix_billing_invoices_paid_at")
+  @@index([shop_subscription_id], map: "ix_billing_invoices_shop_subscription_id")
+  @@index([status], map: "ix_billing_invoices_status")
+}
+
 enum adjustment_reason_enum {
   CAP_INCREASE
   PLAN_UPGRADE
@@ -1115,4 +1154,13 @@ enum trial_status_enum {
   COMPLETED
   EXPIRED
   CANCELLED
+}
+
+enum invoice_status_enum {
+  DRAFT
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
 }

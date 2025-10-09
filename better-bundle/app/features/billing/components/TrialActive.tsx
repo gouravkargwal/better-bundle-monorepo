@@ -7,7 +7,6 @@ import {
   ProgressBar,
 } from "@shopify/polaris";
 import { CheckCircleIcon } from "@shopify/polaris-icons";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type { TrialData } from "../types/billing.types";
 
 interface TrialActiveProps {
@@ -30,12 +29,25 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
 
   return (
     <BlockStack gap="500">
-      <HeroHeader
-        badge="🚀 Free Trial Active"
-        title="Your Free Trial is Active!"
-        subtitle="Drive sales with Better Bundle - completely free until you reach your threshold"
-        gradient="blue"
-      />
+      {/* Status Header */}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                🚀 Free Trial Active
+              </Text>
+              <Text as="p" tone="subdued">
+                Drive sales with Better Bundle - completely free until you reach
+                your threshold
+              </Text>
+            </BlockStack>
+            <Badge tone="success" size="large">
+              Active
+            </Badge>
+          </InlineStack>
+        </BlockStack>
+      </Card>
 
       <div
         style={{

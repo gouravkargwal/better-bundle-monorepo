@@ -96,6 +96,11 @@ class ShopSubscription(BaseModel, ShopMixin):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    billing_invoices = relationship(
+        "BillingInvoice",
+        back_populates="shop_subscription",
+        cascade="all, delete-orphan",
+    )
 
     # Indexes and constraints
     __table_args__ = (

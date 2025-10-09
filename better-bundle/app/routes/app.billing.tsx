@@ -3,7 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { BillingService } from "../features/billing/services/billing.service";
-import { BillingPage as BillingPageComponent } from "../features/billing/components/BillingPage";
+import { TabbedBillingPage } from "../features/billing/components/TabbedBillingPage";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -50,7 +50,7 @@ export default function BillingPage() {
   const { shopId, shopCurrency, billingState } = loaderData;
 
   return (
-    <BillingPageComponent
+    <TabbedBillingPage
       shopId={shopId}
       shopCurrency={shopCurrency}
       billingState={billingState}

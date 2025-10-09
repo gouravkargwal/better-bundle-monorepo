@@ -5,9 +5,9 @@ import {
   InlineStack,
   Button,
   Banner,
+  Badge,
 } from "@shopify/polaris";
 import { AlertTriangleIcon, RefreshIcon } from "@shopify/polaris-icons";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionSuspendedProps {
@@ -35,12 +35,25 @@ export function SubscriptionSuspended({
 
   return (
     <BlockStack gap="500">
-      <HeroHeader
-        badge="⚠️ Services Suspended"
-        title="Subscription Suspended"
-        subtitle="Your Better Bundle services are currently suspended. Reactivate to continue using all features."
-        gradient="red"
-      />
+      {/* Status Header */}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                ⚠️ Services Suspended
+              </Text>
+              <Text as="p" tone="subdued">
+                Your Better Bundle services are currently suspended. Reactivate
+                to continue using all features.
+              </Text>
+            </BlockStack>
+            <Badge tone="critical" size="large">
+              Suspended
+            </Badge>
+          </InlineStack>
+        </BlockStack>
+      </Card>
 
       <Card>
         <div style={{ padding: "24px" }}>

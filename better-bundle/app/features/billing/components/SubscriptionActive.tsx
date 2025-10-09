@@ -11,7 +11,6 @@ import {
   RangeSlider,
   Banner,
 } from "@shopify/polaris";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionActiveProps {
@@ -67,12 +66,25 @@ export function SubscriptionActive({
   return (
     <>
       <BlockStack gap="500">
-        <HeroHeader
-          badge="✅ Active"
-          title="Subscription Active"
-          subtitle="Your usage-based billing is active and Better Bundle services are running"
-          gradient="green"
-        />
+        {/* Status Header */}
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text variant="headingMd" as="h3">
+                  ✅ Subscription Active
+                </Text>
+                <Text as="p" tone="subdued">
+                  Your usage-based billing is active and Better Bundle services
+                  are running
+                </Text>
+              </BlockStack>
+              <Badge tone="success" size="large">
+                Active
+              </Badge>
+            </InlineStack>
+          </BlockStack>
+        </Card>
 
         {/* Usage Overview Card */}
         <Card>

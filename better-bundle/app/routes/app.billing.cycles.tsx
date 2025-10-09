@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
-import { BillingInvoices } from "../features/billing/components/BillingInvoices";
+import { BillingCycles } from "../features/billing/components/BillingCycles";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -37,26 +37,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ error: "No active subscription found" });
     }
 
-    // Get billing invoices with pagination
-    const [invoices, totalCount] = await Promise.all([
-      prisma.billing_invoices.findMany({
+    // Get billing cycles with pagination
+    const [cycles, totalCount] = await Promise.all([
+      prisma.billing_cycles.findMany({
         where: {
           shop_subscription_id: shopSubscription.id,
         },
-        orderBy: { invoice_date: "desc" },
+        orderBy: { cycle_number: "desc" },
         skip: offset,
         take: limit,
         select: {
           id: true,
-          shopify_invoice_id: true,
-          invoice_number: true,
-          invoice_date: true,
-          total_amount: true,
+          cycle_number: true,
+          start_date: true,
+          end_date: true,
           status: true,
-          description: true,
+          usage_amount: true,
+          current_cap_amount: true,
+          commission_count: true,
         },
       }),
-      prisma.billing_invoices.count({
+      prisma.billing_cycles.count({
         where: {
           shop_subscription_id: shopSubscription.id,
         },
@@ -66,18 +67,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalCount / limit);
 
     // Transform data for frontend
-    const transformedInvoices = invoices.map((invoice) => ({
-      id: invoice.invoice_number || invoice.shopify_invoice_id,
-      date: invoice.invoice_date.toISOString().split("T")[0],
-      amount: Number(invoice.total_amount),
-      status: invoice.status.toLowerCase(),
-      description:
-        invoice.description ||
-        `Invoice ${invoice.invoice_number || invoice.shopify_invoice_id}`,
+    const transformedCycles = cycles.map((cycle) => ({
+      id: cycle.id,
+      cycleNumber: cycle.cycle_number,
+      startDate: cycle.start_date.toISOString().split("T")[0],
+      endDate: cycle.end_date.toISOString().split("T")[0],
+      status: cycle.status.toLowerCase(),
+      usageAmount: Number(cycle.usage_amount),
+      capAmount: Number(cycle.current_cap_amount),
+      commissionCount: cycle.commission_count,
     }));
 
-    const invoicesData = {
-      invoices: transformedInvoices,
+    const cyclesData = {
+      cycles: transformedCycles,
       pagination: {
         page,
         limit,
@@ -90,14 +92,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shopId: shop.id,
     };
 
-    return json(invoicesData);
+    return json(cyclesData);
   } catch (error) {
-    console.error("Billing invoices loader error:", error);
-    return json({ error: "Failed to load invoices data" });
+    console.error("Billing cycles loader error:", error);
+    return json({ error: "Failed to load cycles data" });
   }
 }
 
-export default function BillingInvoicesPage() {
+export default function BillingCyclesPage() {
   const loaderData = useLoaderData<typeof loader>();
 
   if ("error" in loaderData) {
@@ -109,7 +111,7 @@ export default function BillingInvoicesPage() {
   }
 
   return (
-    <BillingInvoices
+    <BillingCycles
       shopId={loaderData.shopId}
       shopCurrency={loaderData.shopCurrency}
       data={loaderData}

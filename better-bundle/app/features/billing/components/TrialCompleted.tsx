@@ -8,9 +8,9 @@ import {
   Icon,
   TextField,
   Banner,
+  Badge,
 } from "@shopify/polaris";
 import { AlertTriangleIcon, CreditCardIcon } from "@shopify/polaris-icons";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type { TrialData, BillingSetupData } from "../types/billing.types";
 
 interface TrialCompletedProps {
@@ -64,12 +64,25 @@ export function TrialCompleted({
 
   return (
     <BlockStack gap="500">
-      <HeroHeader
-        badge="💳 Action Required"
-        title="Setup Billing to Continue"
-        subtitle="Your free trial has ended. Choose your spending limit and activate usage-based billing."
-        gradient="orange"
-      />
+      {/* Status Header */}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                💳 Action Required
+              </Text>
+              <Text as="p" tone="subdued">
+                Your free trial has ended. Choose your spending limit and
+                activate usage-based billing.
+              </Text>
+            </BlockStack>
+            <Badge tone="warning" size="large">
+              Action Required
+            </Badge>
+          </InlineStack>
+        </BlockStack>
+      </Card>
 
       <Card>
         <div style={{ padding: "24px" }}>

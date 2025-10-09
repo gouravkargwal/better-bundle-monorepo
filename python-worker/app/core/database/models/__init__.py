@@ -77,6 +77,7 @@ from .shop_subscription import ShopSubscription
 from .subscription_trial import SubscriptionTrial
 from .billing_cycle import BillingCycle
 from .billing_cycle_adjustment import BillingCycleAdjustment
+from .billing_invoice import BillingInvoice
 from .shopify_subscription import ShopifySubscription
 
 # Commission models

@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
-import { BillingInvoices } from "../features/billing/components/BillingInvoices";
+import { CommissionRecords } from "../features/billing/components/CommissionRecords";
 import prisma from "../db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -24,41 +24,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ error: "Shop not found" });
     }
 
-    // Get shop subscription
-    const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shop.id,
-        is_active: true,
-      },
-      select: { id: true },
-    });
-
-    if (!shopSubscription) {
-      return json({ error: "No active subscription found" });
-    }
-
-    // Get billing invoices with pagination
-    const [invoices, totalCount] = await Promise.all([
-      prisma.billing_invoices.findMany({
+    // Get commission records with pagination
+    const [commissions, totalCount] = await Promise.all([
+      prisma.commission_records.findMany({
         where: {
-          shop_subscription_id: shopSubscription.id,
+          shop_id: shop.id,
+          deleted_at: null, // Only non-deleted records
         },
-        orderBy: { invoice_date: "desc" },
+        orderBy: { order_date: "desc" },
         skip: offset,
         take: limit,
         select: {
           id: true,
-          shopify_invoice_id: true,
-          invoice_number: true,
-          invoice_date: true,
-          total_amount: true,
+          order_id: true,
+          order_date: true,
+          attributed_revenue: true,
+          commission_rate: true,
+          commission_earned: true,
           status: true,
-          description: true,
+          billing_phase: true,
         },
       }),
-      prisma.billing_invoices.count({
+      prisma.commission_records.count({
         where: {
-          shop_subscription_id: shopSubscription.id,
+          shop_id: shop.id,
+          deleted_at: null,
         },
       }),
     ]);
@@ -66,18 +56,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalCount / limit);
 
     // Transform data for frontend
-    const transformedInvoices = invoices.map((invoice) => ({
-      id: invoice.invoice_number || invoice.shopify_invoice_id,
-      date: invoice.invoice_date.toISOString().split("T")[0],
-      amount: Number(invoice.total_amount),
-      status: invoice.status.toLowerCase(),
-      description:
-        invoice.description ||
-        `Invoice ${invoice.invoice_number || invoice.shopify_invoice_id}`,
+    const transformedCommissions = commissions.map((commission) => ({
+      id: commission.id,
+      orderId: commission.order_id,
+      orderDate: commission.order_date.toISOString().split("T")[0],
+      attributedRevenue: Number(commission.attributed_revenue),
+      commissionRate: Number(commission.commission_rate),
+      commissionEarned: Number(commission.commission_earned),
+      status: commission.status.toLowerCase(),
+      billingPhase: commission.billing_phase.toLowerCase(),
     }));
 
-    const invoicesData = {
-      invoices: transformedInvoices,
+    const commissionData = {
+      commissions: transformedCommissions,
       pagination: {
         page,
         limit,
@@ -90,14 +81,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shopId: shop.id,
     };
 
-    return json(invoicesData);
+    return json(commissionData);
   } catch (error) {
-    console.error("Billing invoices loader error:", error);
-    return json({ error: "Failed to load invoices data" });
+    console.error("Billing commissions loader error:", error);
+    return json({ error: "Failed to load commission data" });
   }
 }
 
-export default function BillingInvoicesPage() {
+export default function BillingCommissionsPage() {
   const loaderData = useLoaderData<typeof loader>();
 
   if ("error" in loaderData) {
@@ -109,7 +100,7 @@ export default function BillingInvoicesPage() {
   }
 
   return (
-    <BillingInvoices
+    <CommissionRecords
       shopId={loaderData.shopId}
       shopCurrency={loaderData.shopCurrency}
       data={loaderData}

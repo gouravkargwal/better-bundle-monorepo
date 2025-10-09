@@ -9,7 +9,6 @@ import {
   Badge,
 } from "@shopify/polaris";
 import { ClockIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionPendingProps {
@@ -36,12 +35,25 @@ export function SubscriptionPending({
 
   return (
     <BlockStack gap="500">
-      <HeroHeader
-        badge="🕒 Action Required"
-        title="Subscription Approval Pending"
-        subtitle="Complete the approval process in Shopify to activate your usage-based billing"
-        gradient="orange"
-      />
+      {/* Status Header */}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                🕒 Action Required
+              </Text>
+              <Text as="p" tone="subdued">
+                Complete the approval process in Shopify to activate your
+                usage-based billing
+              </Text>
+            </BlockStack>
+            <Badge tone="warning" size="large">
+              Pending
+            </Badge>
+          </InlineStack>
+        </BlockStack>
+      </Card>
 
       {/* Main Action Card */}
       <Card>
