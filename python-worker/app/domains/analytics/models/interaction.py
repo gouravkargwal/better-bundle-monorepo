@@ -35,6 +35,7 @@ class InteractionType(str, Enum):
 
     # Server-side only events
     RECOMMENDATION_READY = "recommendation_ready"
+    RECOMMENDATION_DECLINED = "recommendation_declined"
 
 
 class UserInteraction(BaseModel):

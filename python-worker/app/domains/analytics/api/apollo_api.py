@@ -33,6 +33,26 @@ analytics_service = AnalyticsTrackingService()
 session_service = UnifiedSessionService()
 
 
+class ApolloInteractionRequest(BaseModel):
+    """Request model for Apollo interactions"""
+
+    session_id: str = Field(..., description="Session identifier")
+    shop_domain: str = Field(..., description="Shop domain")
+    interaction_type: InteractionType = Field(..., description="Type of interaction")
+    customer_id: Optional[str] = Field(None, description="Customer identifier")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Raw interaction data as JSON"
+    )
+
+
+class ApolloResponse(BaseModel):
+    """Response model for Apollo API"""
+
+    success: bool = Field(..., description="Whether the operation was successful")
+    message: str = Field(..., description="Response message")
+    data: Optional[Dict[str, Any]] = Field(None, description="Response data")
+
+
 class ApolloCombinedRequest(BaseModel):
     """Request model for Apollo combined session + recommendations"""
 
@@ -184,4 +204,72 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get session and recommendations: {str(e)}",
+        )
+
+
+@router.post("/track-interaction", response_model=ApolloResponse)
+async def track_apollo_interaction(request: ApolloInteractionRequest):
+    """
+    Track user interaction from Apollo Post-Purchase extension
+
+    This endpoint is called by the Apollo extension to track user interactions
+    in the post-purchase flow (recommendations, add to order, etc.).
+    """
+    try:
+        logger.info(f"Apollo interaction tracking: {request.interaction_type}")
+        logger.info(
+            f"Request data: session_id={request.session_id}, shop_domain={request.shop_domain}"
+        )
+
+        # Resolve shop domain to shop ID if needed
+        logger.info(f"Resolving shop ID for domain: {request.shop_domain}")
+        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
+        if not shop_id:
+            logger.error(f"Could not resolve shop ID for domain: {request.shop_domain}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
+            )
+        logger.info(f"Resolved shop_id: {shop_id}")
+
+        # Add extension type to metadata
+        enhanced_metadata = {
+            **request.metadata,
+            "extension_type": "apollo",
+        }
+
+        # Track the interaction
+        logger.info(
+            f"Calling analytics_service.track_interaction with session_id={request.session_id}"
+        )
+        interaction = await analytics_service.track_interaction(
+            session_id=request.session_id,
+            extension_type=ExtensionType.APOLLO,
+            interaction_type=request.interaction_type,
+            shop_id=shop_id,
+            customer_id=request.customer_id,
+            interaction_metadata=enhanced_metadata,
+        )
+        logger.info(f"Analytics service returned interaction: {interaction}")
+
+        if not interaction:
+            raise HTTPException(status_code=500, detail="Failed to track interaction")
+
+        logger.info(f"Apollo interaction tracked successfully: {interaction.id}")
+
+        return ApolloResponse(
+            success=True,
+            message="Apollo interaction tracked successfully",
+            data={
+                "interaction_id": interaction.id,
+                "session_id": request.session_id,
+                "interaction_type": request.interaction_type,
+                "timestamp": interaction.created_at.isoformat(),
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Error tracking Apollo interaction: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to track interaction: {str(e)}"
         )
