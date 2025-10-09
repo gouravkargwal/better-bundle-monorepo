@@ -7,7 +7,9 @@ interface ProductRecommendationAPI {
     amount: string;
     currency_code: string;
   };
-  image: string | null;
+  image: {
+    url: string;
+  } | null;
   vendor: string;
   product_type: string;
   available: boolean;
@@ -17,6 +19,8 @@ interface ProductRecommendationAPI {
   variants: ProductVariant[];
   options: VariantOption[];
   inventory: number;
+  description?: string;
+  compare_at_price?: number;
 }
 interface VariantOption {
   id: string;

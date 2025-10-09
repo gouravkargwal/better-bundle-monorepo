@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import type { StorageData, ProductRecommendationAPI } from "./types";
 import { isProductEligible, getShopifyErrorMessage } from "./utils/utils";
 import { apolloAnalytics } from "./api/analytics";
@@ -40,7 +40,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     customerId,
     shopDomain,
     purchasedProducts = [],
-    source = "unknown",
   } = initialState;
 
   // Maximum consecutive offers per Shopify guidelines
@@ -276,6 +275,18 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           );
         }
 
+        // Validate variant ID and quantity before creating changeset
+        if (
+          !selectedVariant.variant_id ||
+          isNaN(parseInt(selectedVariant.variant_id))
+        ) {
+          throw new Error("Invalid variant ID");
+        }
+
+        if (!quantity || quantity <= 0 || !Number.isInteger(quantity)) {
+          throw new Error("Invalid quantity");
+        }
+
         // Track recommendation click
         if (shopDomain && sessionId) {
           await apolloAnalytics.trackRecommendationClick(
@@ -299,38 +310,44 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           );
         }
 
-        // Build line item properties for attribution
-        const itemProperties = {
-          _bb_rec_session_id: sessionId || "",
-          _bb_rec_product_id: product.id || "",
-          _bb_rec_extension: "apollo",
-          _bb_rec_context: "post_purchase",
-          _bb_rec_position: String(position || ""),
-          _bb_rec_timestamp: new Date().toISOString(),
-          _bb_rec_source: "betterbundle",
-          _bb_rec_variant_id: selectedVariant.variant_id,
-          _bb_rec_score: String(product.score || ""),
-        };
-
-        // Create changeset with properties
+        // Create changeset - properties are not supported in post-purchase extensions
+        const variantId = parseInt(selectedVariant.variant_id);
         const changeset = {
           changes: [
             {
               type: "add_variant",
-              variantId: parseInt(selectedVariant.variant_id),
+              variantId: variantId,
               quantity: quantity,
-              properties: Object.entries(itemProperties).map(
-                ([key, value]) => ({ key, value }),
-              ),
             },
           ],
         };
 
+        // Final validation - ensure changeset has valid structure
+        if (!changeset.changes || changeset.changes.length === 0) {
+          throw new Error("Invalid changeset: no changes provided");
+        }
+
+        const change = changeset.changes[0];
+        if (!change.type || !change.variantId || !change.quantity) {
+          throw new Error("Invalid changeset: missing required fields");
+        }
+
         console.log(
-          "Apollo: Calculating changeset with properties:",
-          itemProperties,
+          "Apollo: Calculating changeset for variant:",
+          selectedVariant.variant_id,
+          "quantity:",
+          quantity,
+        );
+        console.log(
+          "Apollo: Full changeset object:",
+          JSON.stringify(changeset, null, 2),
         );
         const calculationResult = await calculateChangeset(changeset);
+
+        console.log(
+          "Apollo: CalculateChangeset response:",
+          JSON.stringify(calculationResult, null, 2),
+        );
 
         if (calculationResult.status === "unprocessed") {
           const errorMessages = calculationResult.errors
@@ -339,10 +356,45 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           throw new Error(`Cannot add product: ${errorMessages}`);
         }
 
-        console.log("Apollo: Applying changeset");
-        const applyResult = await applyChangeset(JSON.stringify(changeset), {
+        // Check if calculation was successful
+        if (calculationResult.status !== "processed") {
+          throw new Error("Changeset calculation failed");
+        }
+
+        // Get signed token from backend
+        console.log("Apollo: Requesting signed token from backend");
+        const tokenResponse = await fetch(
+          `https://black-ace-porter-upon.trycloudflare.com/api/sign-changeset`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              referenceId: orderId,
+              changes: changeset.changes,
+            }),
+          },
+        );
+
+        if (!tokenResponse.ok) {
+          throw new Error("Failed to get signed token from backend");
+        }
+
+        const { token } = await tokenResponse.json();
+        if (!token) {
+          throw new Error("No token received from backend");
+        }
+
+        console.log("Apollo: Applying changeset with signed token");
+        const applyResult = await applyChangeset(token, {
           buyerConsentToSubscriptions: false,
         });
+
+        console.log(
+          "Apollo: ApplyChangeset response:",
+          JSON.stringify(applyResult, null, 2),
+        );
 
         if (applyResult.status === "unprocessed") {
           const errorMessages = applyResult.errors

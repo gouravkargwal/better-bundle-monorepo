@@ -38,6 +38,7 @@
     "currency-symbol-map": "^5.1.0",
     "dayjs": "^1.11.18",
     "isbot": "^5.1.0",
+    "jose": "^6.1.0",
     "kafkajs": "^2.2.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
