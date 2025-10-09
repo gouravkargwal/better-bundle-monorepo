@@ -62,7 +62,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ? new Date(billingAttempt.due_date)
         : null,
       paid_at: null, // No payment since it failed
-      status: "failed" as const,
+      status: "FAILED" as const,
       description: `Failed billing invoice for subscription ${subscriptionId} - ${failureReason}`,
       line_items: billingAttempt.line_items || [],
       shopify_response: payload,
@@ -71,35 +71,23 @@ export async function action({ request }: ActionFunctionArgs) {
       failure_reason: failureReason,
     };
 
-    // Check if invoice already exists
-    const existingInvoice = await prisma.billing_invoices.findFirst({
+    // ✅ RACE CONDITION PROTECTION: Use upsert to prevent duplicate processing
+    const upsertResult = await prisma.billing_invoices.upsert({
       where: {
         shopify_invoice_id: invoiceData.shopify_invoice_id,
       },
+      update: {
+        status: "FAILED",
+        failure_reason: failureReason,
+        shopify_response: invoiceData.shopify_response,
+        updated_at: new Date(),
+      },
+      create: invoiceData,
     });
 
-    if (existingInvoice) {
-      // Update existing invoice with failure status
-      await prisma.billing_invoices.update({
-        where: { id: existingInvoice.id },
-        data: {
-          status: "failed",
-          failure_reason: failureReason,
-          shopify_response: invoiceData.shopify_response,
-        },
-      });
-      console.log(
-        `❌ Updated existing billing invoice ${invoiceData.shopify_invoice_id} with failure status`,
-      );
-    } else {
-      // Create new failed invoice
-      await prisma.billing_invoices.create({
-        data: invoiceData,
-      });
-      console.log(
-        `❌ Created new failed billing invoice ${invoiceData.shopify_invoice_id}`,
-      );
-    }
+    console.log(
+      `❌ Billing invoice processed: ${invoiceData.shopify_invoice_id} (${upsertResult.id}) - Status: FAILED`,
+    );
 
     console.log(
       `❌ Billing failed: $${amount} ${currency} - Reason: ${failureReason}`,

@@ -56,6 +56,7 @@ class InvoiceStatus(str, Enum):
     OVERDUE = "overdue"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
+    FAILED = "failed"
 
 
 class ExtensionType(str, Enum):

@@ -73,6 +73,7 @@ class BillingInvoice(BaseModel):
     # Payment tracking
     payment_method = Column(String(100), nullable=True)
     payment_reference = Column(String(255), nullable=True)
+    failure_reason = Column(String(500), nullable=True)
 
     # Relationships
     shop_subscription = relationship(
