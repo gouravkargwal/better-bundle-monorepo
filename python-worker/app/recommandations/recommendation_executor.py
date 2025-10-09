@@ -503,6 +503,13 @@ class RecommendationExecutor:
                 "popular_category",  # Level 3: Popular in same category
                 "latest",  # Level 4: New arrivals
             ],
+            "post_purchase": [
+                "popular_category",  # Level 1: Popular in same category (most relevant)
+                "item_neighbors",  # Level 2: Similar products to purchased items
+                "frequently_bought_together",  # Level 3: Cross-sell (if data available)
+                "user_recommendations",  # Level 4: Personalized based on user history
+                "popular",  # Level 5: General popular items (fallback)
+            ],
             "collection_page": [
                 "popular_category",  # Level 1: Popular in collection category
                 "user_recommendations",  # Level 2: Personalized

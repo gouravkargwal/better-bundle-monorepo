@@ -74,7 +74,12 @@ class ApolloCombinedRequest(BaseModel):
     purchased_products: Optional[list] = Field(
         None, description="List of purchased products"
     )
-    limit: int = Field(default=3, ge=1, le=10, description="Number of recommendations")
+    limit: int = Field(
+        default=3,
+        ge=1,
+        le=3,
+        description="Number of recommendations (max 3 for post-purchase)",
+    )
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional metadata"
     )

@@ -119,7 +119,7 @@ class ApolloRecommendationClient {
    * @param customerId - Customer ID (optional)
    * @param orderId - Order ID for post-purchase context
    * @param purchasedProductIds - Array of product IDs that were just purchased
-   * @param limit - Number of recommendations to return (default: 3, max: 10)
+   * @param limit - Number of recommendations to return (default: 3, max: 3 for post-purchase)
    * @param metadata - Additional metadata to pass to the backend
    */
   async getSessionAndRecommendations(
@@ -156,7 +156,7 @@ class ApolloRecommendationClient {
         // Recommendation fields
         order_id: orderId ? String(orderId) : null, // ✅ Convert to string
         purchased_products: purchasedProductIds || [], // Backend expects product_ids array
-        limit: Math.min(Math.max(limit, 1), 10), // Clamp between 1-10
+        limit: Math.min(Math.max(limit, 1), 3), // Clamp between 1-3 for post-purchase
 
         // Additional metadata
         metadata: {
