@@ -168,6 +168,48 @@ class AnalyticsApiClient {
     }
   }
 
+  private buildRecommendationMetadata(params: {
+    extensionType: "venus";
+    source?: string;
+    cartProductCount?: number;
+    recommendationCount: number;
+    recommendations: { id: string; position: number }[];
+    widget?: string;
+    algorithm?: string;
+    // Any additional fields provided by caller should still be preserved
+    extra?: Record<string, any>;
+  }): Record<string, any> {
+    const {
+      extensionType,
+      source = "venus_theme_extension",
+      cartProductCount,
+      recommendationCount,
+      recommendations,
+      widget = "venus_recommendation",
+      algorithm = "venus_algorithm",
+      extra = {},
+    } = params;
+
+    // Preserve any extra metadata keys but ensure required structure exists
+    return {
+      source,
+      cart_product_count: cartProductCount ?? extra.cart_product_count ?? 0,
+      recommendation_count: recommendationCount,
+      extension_type: extensionType,
+      data: {
+        recommendations: recommendations.map((r) => ({
+          id: String(r.id),
+          position: r.position,
+        })),
+        type: "recommendation",
+        widget: extra.widget ?? widget,
+        algorithm: extra.algorithm ?? algorithm,
+      },
+      // Spread at the end so callers can add bespoke keys without breaking the schema
+      ...extra,
+    };
+  }
+
   /**
    * Track recommendation view (when recommendations are displayed)
    */
@@ -180,6 +222,11 @@ class AnalyticsApiClient {
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
+      const recommendations = (productIds || []).map((id, index) => ({
+        id,
+        position: index + 1,
+      }));
+
       const request: UnifiedInteractionRequest = {
         session_id: sessionId,
         shop_domain: shopDomain,
@@ -188,13 +235,13 @@ class AnalyticsApiClient {
         customer_id: customerId,
         page_url: null,
         referrer: null,
-        metadata: {
-          ...metadata,
-          extension_type: "venus",
-          product_ids: productIds,
-          recommendation_count: productIds?.length || 0,
-          source: "venus_recommendation",
-        },
+        metadata: this.buildRecommendationMetadata({
+          extensionType: "venus",
+          recommendationCount: recommendations.length,
+          recommendations,
+          cartProductCount: metadata?.cart_product_count,
+          extra: metadata,
+        }),
       };
 
       return await this.trackUnifiedInteraction(request);
@@ -227,11 +274,20 @@ class AnalyticsApiClient {
         page_url: null,
         referrer: null,
         metadata: {
-          ...metadata,
+          source: metadata?.source || "venus_recommendation",
+          cart_product_count: metadata?.cart_product_count ?? 0,
+          recommendation_count: 1,
           extension_type: "venus",
-          position,
-          source: "venus_recommendation",
-          interaction_type: "recommendation_clicked",
+          data: {
+            product: {
+              id: productId,
+            },
+            position: position,
+            type: "recommendation",
+            widget: metadata?.widget || "venus_recommendation",
+            algorithm: metadata?.algorithm || "venus_algorithm",
+          },
+          ...metadata,
         },
       };
 
