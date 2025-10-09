@@ -278,10 +278,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
         // Track recommendation click
         if (shopDomain && sessionId) {
-          const cleanShopDomain = shopDomain.replace(".myshopify.com", "");
-
           await apolloAnalytics.trackRecommendationClick(
-            cleanShopDomain,
+            shopDomain,
             sessionId,
             product.id,
             position,
