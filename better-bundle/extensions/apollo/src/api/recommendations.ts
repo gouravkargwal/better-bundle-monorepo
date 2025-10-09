@@ -96,37 +96,86 @@ class ApolloRecommendationClient {
   }
 
   /**
-   * Get post-purchase recommendations based on the completed order
+   * Get session and recommendations in a single optimized API call
+   * This is the recommended method for Apollo post-purchase extensions
    */
-  async getRecommendations(
-    request: RecommendationRequest,
-  ): Promise<RecommendationResponse> {
+  async getSessionAndRecommendations(
+    shopDomain: string,
+    customerId?: string,
+    orderId?: string,
+    purchasedProducts?: Array<{
+      product_id: string;
+      variant_id: string;
+      quantity: number;
+      price: number;
+    }>,
+    limit: number = 3,
+    metadata?: Record<string, any>,
+  ): Promise<{
+    sessionId: string;
+    recommendations: ProductRecommendation[];
+    success: boolean;
+    error?: string;
+  }> {
     try {
-      // Use main recommendation API with post_purchase context
-      const response = await fetch(`${this.baseUrl}/api/v1/recommendations/`, {
+      const url = `${this.baseUrl}/api/apollo/get-session-and-recommendations`;
+
+      const payload = {
+        shop_domain: shopDomain,
+        customer_id: customerId,
+        order_id: orderId,
+        purchased_products: purchasedProducts,
+        limit,
+        metadata: {
+          ...metadata,
+          extension_type: "apollo",
+          source: "apollo_post_purchase",
+        },
+      };
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          shop_domain: request.shop_domain,
-          context: "post_purchase",
-          product_ids: request.purchased_products?.map((p) => p.product_id),
-          user_id: request.customer_id,
-          session_id: request.session_id,
-          limit: request.limit || 3,
-        }),
+        body: JSON.stringify(payload),
+        keepalive: true,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Combined API call failed: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data;
+      const result = await response.json();
+
+      if (
+        result.success &&
+        result.session_data &&
+        result.session_data.session_id
+      ) {
+        console.log(
+          "🚀 Apollo: Session + recommendations retrieved in single call",
+        );
+        console.log(`📊 Recommendations: ${result.recommendation_count} items`);
+
+        return {
+          sessionId: result.session_data.session_id,
+          recommendations: result.recommendations || [],
+          success: true,
+        };
+      } else {
+        throw new Error(
+          result.message || "Failed to get session and recommendations",
+        );
+      }
     } catch (error) {
-      console.error("Failed to fetch post-purchase recommendations:", error);
-      throw error;
+      console.error("💥 Apollo: Combined API call error:", error);
+      return {
+        sessionId: "",
+        recommendations: [],
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
   }
 }

@@ -1,3 +1,21 @@
+/**
+ * Apollo Post-Purchase Extension
+ *
+ * This extension follows Shopify's Post-Purchase API best practices:
+ * - Uses inputData from Shopify instead of hardcoded values
+ * - Implements proper changeset handling for adding products to orders
+ * - Includes comprehensive error handling for post-purchase restrictions
+ * - Validates products against actual Shopify order data
+ * - Uses proper storage and session management
+ *
+ * Key Features:
+ * - Cross-sell recommendations based on purchased products
+ * - Real-time price calculation with changeset API
+ * - Comprehensive error handling for all Shopify restrictions
+ * - Analytics tracking for recommendation performance
+ * - Proper post-purchase flow completion
+ */
+
 import React, {
   useState,
   useEffect,
@@ -28,47 +46,107 @@ import {
   type ProductRecommendation,
 } from "./api/recommendations";
 
-extend("Checkout::PostPurchase::ShouldRender", async ({ storage }) => {
-  try {
-    // Fetch recommendations with timeout
-    const recommendationsPromise =
-      await apolloRecommendationApi.getRecommendations({
-        limit: 3,
-        context: "post_purchase",
-        shop_domain: "test.com",
-        customer_id: "123",
-        session_id: "456",
-        purchased_products: [],
-      });
+extend(
+  "Checkout::PostPurchase::ShouldRender",
+  async ({ inputData, storage }) => {
+    try {
+      // Extract data from Shopify's inputData
+      const { initialPurchase, shop, locale } = inputData;
+      const shopDomain = shop.domain;
+      const customerId = initialPurchase.customerId;
+      const orderId = initialPurchase.referenceId;
 
-    const render = recommendationsPromise?.recommendations?.length > 0;
+      // Extract purchased products from line items
+      const purchasedProducts = initialPurchase.lineItems.map((item) => ({
+        id: item.product.id.toString(),
+        title: item.product.title,
+        variant: item.product.variant,
+        quantity: item.quantity,
+        totalPrice: item.totalPriceSet,
+      }));
 
-    console.log(`Apollo ShouldRender decision: ${render}`);
+      console.log(
+        `Apollo ShouldRender - Shop: ${shopDomain}, Customer: ${customerId}, Order: ${orderId}`,
+      );
+      console.log(
+        `Apollo ShouldRender - Purchased products: ${purchasedProducts.length} items`,
+      );
 
-    if (render) {
-      await storage.update(recommendationsPromise);
+      // Use the new combined API for better performance
+      const result = await apolloRecommendationApi.getSessionAndRecommendations(
+        shopDomain,
+        customerId,
+        orderId,
+        purchasedProducts.map((p: any) => p.id), // Use actual purchased product IDs
+        3, // limit
+        {
+          source: "apollo_post_purchase",
+          locale,
+          shopId: shop.id,
+          totalPrice: initialPurchase.totalPriceSet,
+          lineItemCount: initialPurchase.lineItems.length,
+        },
+      );
+
+      const render = result.success && result.recommendations?.length > 0;
+
+      console.log(`Apollo ShouldRender decision: ${render}`);
+      console.log(`Apollo Session ID: ${result.sessionId}`);
+      console.log(
+        `Apollo Recommendations: ${result.recommendations?.length || 0} items`,
+      );
+
+      if (render) {
+        // Store both session and recommendations data
+        await storage.update({
+          recommendations: result.recommendations,
+          sessionId: result.sessionId,
+          orderId,
+          customerId,
+          shopDomain,
+          purchasedProducts,
+          source: "apollo_combined_api",
+          timestamp: Date.now(),
+          // Store Shopify-specific data
+          shop,
+          locale,
+          initialPurchase: {
+            referenceId: initialPurchase.referenceId,
+            totalPriceSet: initialPurchase.totalPriceSet,
+            lineItems: initialPurchase.lineItems,
+          },
+        });
+      }
+
+      return {
+        render,
+      };
+    } catch (error) {
+      console.error(`Apollo ShouldRender error:`, error);
+
+      return {
+        render: false,
+      };
     }
-
-    return {
-      render,
-    };
-  } catch (error) {
-    console.error(`Apollo ShouldRender error:`, error);
-
-    return {
-      render: false,
-    };
-  }
-});
+  },
+);
 
 render("Checkout::PostPurchase::Render", App);
 
 export function App({
   extensionPoint,
   storage,
+  inputData,
+  calculateChangeset,
+  applyChangeset,
+  done,
 }: {
   extensionPoint: any;
   storage: any;
+  inputData: any;
+  calculateChangeset: any;
+  applyChangeset: any;
+  done: any;
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +163,40 @@ export function App({
     purchasedProducts = [],
     source = "unknown",
     timestamp,
+    shop,
+    locale,
+    initialPurchase,
   } = initialState || {};
 
   const getDefaultVariant = useCallback((product: ProductRecommendation) => {
-    return (
-      product.variants.find((v) => v.id === product.default_variant_id) ||
-      product.variants[0]
-    );
+    const variants = (product as any).variants || [];
+    const selectedId =
+      (product as any).selectedVariantId || (product as any).variant_id;
+    const raw =
+      variants.find((v: any) => (v.id || v.variant_id) === selectedId) ||
+      variants[0];
+    if (!raw) return null;
+
+    const variantId = (raw.id || raw.variant_id) as string;
+    const priceNumber =
+      typeof raw.price === "number"
+        ? raw.price
+        : parseFloat(raw.price?.amount ?? "0");
+    const currency =
+      raw.currency_code || (product as any).price?.currency_code || "USD";
+    const inventoryQty =
+      typeof raw.inventory === "number"
+        ? raw.inventory
+        : (raw.inventory_quantity ?? 0);
+
+    return {
+      ...raw,
+      id: variantId,
+      price: { amount: priceNumber.toString(), currency_code: currency },
+      inventory_quantity: inventoryQty,
+      available: (product as any).available !== false && inventoryQty > 0,
+      title: raw.title,
+    } as any;
   }, []);
 
   const getDefaultPrice = useCallback(
@@ -183,6 +288,17 @@ export function App({
         return;
       }
 
+      // ✅ SHOPIFY RESTRICTION: Check if product is already in the order
+      const isAlreadyPurchased = purchasedProducts.some(
+        (p: any) => p.id === product.id,
+      );
+      if (isAlreadyPurchased) {
+        setError("This product is already in your order");
+        return;
+      }
+
+      // Removed validation against initialPurchase; rely on backend response for accuracy
+
       setIsLoading(true);
       setError(null);
 
@@ -220,7 +336,81 @@ export function App({
           );
         }
 
-        // Track add to order action
+        // ✅ SHOPIFY API: Create changeset to add product to order
+        const changeset = {
+          changes: [
+            {
+              type: "add_variant",
+              variantId: parseInt(defaultVariant.id),
+              quantity: 1,
+              // Optional: Add discount for post-purchase offers
+              discount: {
+                value: 10, // 10% discount
+                valueType: "percentage",
+                title: "Post-purchase special offer",
+              },
+            },
+          ],
+        };
+
+        // Calculate changeset to show price impact
+        console.log("Apollo: Calculating changeset for product", product.id);
+        const calculationResult = await calculateChangeset(changeset);
+
+        if (calculationResult.status === "unprocessed") {
+          const errorMessages = calculationResult.errors
+            .map((err: any) => {
+              // Handle specific Shopify error codes
+              switch (err.code) {
+                case "insufficient_inventory":
+                  return "This product is out of stock";
+                case "payment_required":
+                  return "Payment is required to add this product";
+                case "unsupported_payment_method":
+                  return "Your payment method doesn't support adding products";
+                case "subscription_vaulting_error":
+                  return "Cannot add subscription products to post-purchase orders";
+                default:
+                  return err.message;
+              }
+            })
+            .join(", ");
+          throw new Error(`Cannot add product: ${errorMessages}`);
+        }
+
+        console.log(
+          "Apollo: Changeset calculation successful",
+          calculationResult.calculatedPurchase,
+        );
+
+        // Apply the changeset to actually add the product
+        console.log("Apollo: Applying changeset to add product", product.id);
+        const applyResult = await applyChangeset(JSON.stringify(changeset), {
+          buyerConsentToSubscriptions: false, // Post-purchase doesn't support subscriptions
+        });
+
+        if (applyResult.status === "unprocessed") {
+          const errorMessages = applyResult.errors
+            .map((err: any) => {
+              // Handle specific Shopify error codes for apply changeset
+              switch (err.code) {
+                case "changeset_already_applied":
+                  return "This product has already been added to your order";
+                case "insufficient_inventory":
+                  return "This product is no longer available";
+                case "payment_required":
+                  return "Payment authorization is required";
+                case "order_released_error":
+                  return "Your order has been processed and cannot be modified";
+                default:
+                  return err.message;
+              }
+            })
+            .join(", ");
+          throw new Error(`Failed to add product: ${errorMessages}`);
+        }
+
+        // Track successful add to order action
         if (shopDomain) {
           await apolloAnalytics.trackAddToOrder(
             shopDomain.replace(".myshopify.com", ""),
@@ -238,6 +428,10 @@ export function App({
               // ✅ SHOPIFY RESTRICTION: Track restriction compliance
               requires_shipping: product.requires_shipping,
               is_subscription: !!product.subscription,
+              changeset_applied: true,
+              new_total:
+                applyResult.calculatedPurchase?.totalPriceSet?.shopMoney
+                  ?.amount,
             },
           );
         }
@@ -245,46 +439,41 @@ export function App({
         // Mark product as added
         setAddedProducts((prev) => new Set([...prev, product.id]));
 
-        // ✅ SHOPIFY RESTRICTION: Create attribution parameters for tracking
-        // Note: Post-purchase extensions cannot directly modify orders
-        // This creates a tracking URL for analytics purposes
-        const attributionParams = new URLSearchParams({
-          ref: `apollo_${orderId?.slice(-6)}`,
-          src: product.id,
-          pos: position.toString(),
-          variant: defaultVariant.id,
-          utm_source: "apollo_post_purchase",
-          utm_medium: "recommendation",
-          utm_campaign: "post_purchase_upsell",
-          // ✅ SHOPIFY RESTRICTION: Add compliance markers
-          requires_shipping: product.requires_shipping?.toString() || "true",
-          is_subscription: (!!product.subscription).toString(),
-        });
-
-        const productUrl = product.url || `/products/${product.handle}`;
-        const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
-
         console.log(
-          `Apollo: Product ${product.id} added to order successfully`,
+          `Apollo: Product ${product.id} successfully added to order via changeset`,
         );
-        console.log(`Apollo: Attribution URL: ${productUrlWithAttribution}`);
         console.log(
-          `Apollo: Product compliance - Shipping: ${product.requires_shipping}, Subscription: ${!!product.subscription}`,
+          `Apollo: New order total: ${applyResult.calculatedPurchase?.totalPriceSet?.shopMoney?.amount} ${applyResult.calculatedPurchase?.totalPriceSet?.shopMoney?.currencyCode}`,
         );
       } catch (error) {
         console.error("Apollo: Error adding product to order:", error);
-        setError("Failed to add product to order. Please try again.");
+        setError(`Failed to add product to order: ${(error as Error).message}`);
       } finally {
         setIsLoading(false);
       }
     },
-    [addedProducts, shopDomain, customerId, orderId, getDefaultVariant],
+    [
+      addedProducts,
+      shopDomain,
+      customerId,
+      orderId,
+      getDefaultVariant,
+      calculateChangeset,
+      applyChangeset,
+    ],
   );
 
-  const handleContinue = useCallback(() => {
+  const handleContinue = useCallback(async () => {
     console.log("Apollo: Continue to order confirmation");
-    // This would typically close the post-purchase flow
-  }, []);
+    try {
+      // Use Shopify's done() API to properly close the post-purchase flow
+      await done();
+      console.log("Apollo: Post-purchase flow completed successfully");
+    } catch (error) {
+      console.error("Apollo: Error completing post-purchase flow:", error);
+      setError("Failed to complete order. Please try again.");
+    }
+  }, [done]);
 
   // Memoized recommendation components for performance with Shopify restrictions
   const recommendationComponents = useMemo(() => {

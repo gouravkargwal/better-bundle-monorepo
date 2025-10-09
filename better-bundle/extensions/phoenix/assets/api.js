@@ -124,7 +124,6 @@ class RecommendationAPI {
         ]
       };
 
-      console.log('Cart API payload:', cartPayload);
 
       const response = await fetch('/cart/add.js', {
         method: 'POST',

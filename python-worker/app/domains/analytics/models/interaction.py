@@ -33,6 +33,9 @@ class InteractionType(str, Enum):
     RECOMMENDATION_CLICKED = "recommendation_clicked"
     RECOMMENDATION_ADD_TO_CART = "recommendation_add_to_cart"
 
+    # Server-side only events
+    RECOMMENDATION_READY = "recommendation_ready"
+
 
 class UserInteraction(BaseModel):
     """User interaction model for unified analytics tracking"""
