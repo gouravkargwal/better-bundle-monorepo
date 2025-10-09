@@ -53,6 +53,10 @@ api_version = "2024-01"
   uri = "/webhooks/orders/paid"
 
   [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  [[webhooks.subscriptions]]
   topics = [ "refunds/create" ]
   uri = "/webhooks/refunds/create"
 

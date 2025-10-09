@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { StorageData, ProductRecommendationAPI } from "./types";
 import { isProductEligible, getShopifyErrorMessage } from "./utils/utils";
 import { apolloAnalytics } from "./api/analytics";
@@ -30,6 +30,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     Record<string, Record<string, string>>
   >({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [calculatedPurchase, setCalculatedPurchase] = useState<any>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
 
   // Extract storage data
   const initialState: StorageData = storage.initialData || {};
@@ -110,6 +112,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   // Handle quantity change
   const handleQuantityChange = useCallback(
     (productId: string, quantity: number) => {
+      console.log("Apollo: Quantity changed", { productId, quantity });
       setQuantities((prev) => ({
         ...prev,
         [productId]: Math.max(1, quantity),
@@ -237,6 +240,93 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     done,
   ]);
 
+  // Real-time pricing calculation
+  useEffect(() => {
+    console.log("Apollo: useEffect triggered for pricing calculation", {
+      currentProduct: currentProduct?.id,
+      hasCurrentProduct: !!currentProduct,
+      selectedOptions,
+      quantities,
+      currentQuantity: currentProduct
+        ? getCurrentQuantity(currentProduct.id)
+        : 0,
+    });
+
+    async function calculatePricing() {
+      if (
+        !currentProduct ||
+        !getCurrentVariant(currentProduct) ||
+        getCurrentQuantity(currentProduct.id) <= 0
+      ) {
+        console.log(
+          "Apollo: Skipping pricing calculation - missing requirements",
+        );
+        setCalculatedPurchase(null);
+        return;
+      }
+
+      console.log("Apollo: Starting pricing calculation");
+      setIsCalculating(true);
+
+      try {
+        const product = currentProduct;
+        const currentVariant = getCurrentVariant(product);
+        const currentQuantity = getCurrentQuantity(product.id);
+
+        if (!currentVariant || currentQuantity <= 0) {
+          setCalculatedPurchase(null);
+          return;
+        }
+
+        console.log("Apollo: Calculating real-time pricing for:", {
+          productId: product.id,
+          variantId: currentVariant.variant_id,
+          quantity: currentQuantity,
+        });
+
+        const changeset = {
+          changes: [
+            {
+              type: "add_variant",
+              variantId: parseInt(currentVariant.variant_id),
+              quantity: currentQuantity,
+            },
+          ],
+        };
+
+        const calculationResult = await calculateChangeset(changeset);
+
+        if (calculationResult.status === "processed") {
+          setCalculatedPurchase(calculationResult.calculatedPurchase);
+          console.log(
+            "Apollo: Real-time pricing calculated:",
+            calculationResult.calculatedPurchase,
+          );
+        } else {
+          console.warn(
+            "Apollo: Pricing calculation failed:",
+            calculationResult.errors,
+          );
+          setCalculatedPurchase(null);
+        }
+      } catch (error) {
+        console.error("Apollo: Error calculating real-time pricing:", error);
+        setCalculatedPurchase(null);
+      } finally {
+        setIsCalculating(false);
+      }
+    }
+
+    calculatePricing();
+  }, [
+    currentProduct,
+    selectedOptions,
+    quantities,
+    getCurrentVariant,
+    getCurrentQuantity,
+    calculateChangeset,
+  ]);
+
   // Main add to order handler
   const handleAddToOrder = useCallback(
     async (product: ProductRecommendationAPI, position: number) => {
@@ -360,6 +450,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         if (calculationResult.status !== "processed") {
           throw new Error("Changeset calculation failed");
         }
+
+        // Pricing already calculated in real-time, no need to store again
 
         // Get signed token from backend
         console.log("Apollo: Requesting signed token from backend");
@@ -502,12 +594,80 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   const hasMultipleVariants = (product.variants?.length || 0) > 1;
   const productOptions = selectedOptions[product.id] || {};
 
-  // Calculate price breakdown
+  // Calculate price breakdown using actual Shopify calculations
   const itemPrice = currentVariant ? currentVariant.price * currentQuantity : 0;
-  const shipping = 5.0;
-  const tax = itemPrice * 0.18;
+
+  // Use actual values from calculateChangeset response
+  const shipping = calculatedPurchase?.addedShippingLines?.[0]?.priceSet
+    ?.presentmentMoney?.amount
+    ? parseFloat(
+        calculatedPurchase.addedShippingLines[0].priceSet.presentmentMoney
+          .amount,
+      )
+    : 0;
+
+  const tax =
+    calculatedPurchase?.addedTaxLines?.reduce((total: number, taxLine: any) => {
+      return (
+        total + parseFloat(taxLine.priceSet?.presentmentMoney?.amount || 0)
+      );
+    }, 0) || 0;
+
+  // For post-purchase upsells, use item price for subtotal to show only upsell amount
+  // subtotalPriceSet might include the original order items
   const subtotal = itemPrice;
-  const total = subtotal + shipping + tax;
+
+  // For post-purchase upsells, we want to show only the additional amount
+  // Use totalOutstandingSet which shows what the customer needs to pay for the upsell
+  const total = calculatedPurchase?.totalOutstandingSet?.presentmentMoney
+    ?.amount
+    ? parseFloat(calculatedPurchase.totalOutstandingSet.presentmentMoney.amount)
+    : subtotal + shipping + tax;
+
+  // Debug logging for pricing calculation
+  console.log("Apollo: Pricing calculation debug:", {
+    hasCalculatedPurchase: !!calculatedPurchase,
+    itemPrice,
+    shipping,
+    tax,
+    subtotal,
+    total,
+    currency:
+      calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.currencyCode ||
+      currentVariant?.currency_code,
+    isCalculating,
+    calculatedPurchaseKeys: calculatedPurchase
+      ? Object.keys(calculatedPurchase)
+      : [],
+    totalPriceSet: calculatedPurchase?.totalPriceSet,
+    totalOutstandingSet: calculatedPurchase?.totalOutstandingSet,
+  });
+
+  // Additional detailed logging for total calculation
+  console.log("Apollo: Total calculation details:", {
+    totalOutstandingAmount:
+      calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.amount,
+    totalPriceAmount:
+      calculatedPurchase?.totalPriceSet?.presentmentMoney?.amount,
+    calculatedTotal: total,
+    manualTotal: subtotal + shipping + tax,
+    usingTotalOutstanding:
+      !!calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.amount,
+    usingTotalPrice:
+      !!calculatedPurchase?.totalPriceSet?.presentmentMoney?.amount,
+    updatedLineItems: calculatedPurchase?.updatedLineItems,
+    addedShippingLines: calculatedPurchase?.addedShippingLines,
+    addedTaxLines: calculatedPurchase?.addedTaxLines,
+  });
+
+  // Get currency from calculated purchase or fallback to variant currency
+  const currency =
+    calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.currencyCode ||
+    currentVariant?.currency_code ||
+    "USD";
+
+  // Show fallback pricing if calculation is not available
+  const showFallbackPricing = !calculatedPurchase && !isCalculating;
 
   return (
     // @ts-ignore
@@ -682,6 +842,24 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           {currentVariant && isAvailable && (
             // @ts-ignore
             <BlockStack spacing="tight">
+              {isCalculating && (
+                // @ts-ignore
+                <InlineStack alignment="center" spacing="tight">
+                  {/* @ts-ignore */}
+                  <Spinner size="small" />
+                  {/* @ts-ignore */}
+                  <Text>Calculating pricing...</Text>
+                </InlineStack>
+              )}
+              {showFallbackPricing && (
+                // @ts-ignore
+                <InlineStack alignment="center" spacing="tight">
+                  {/* @ts-ignore */}
+                  <Text emphasis="subdued">
+                    Pricing will be calculated when you add to order
+                  </Text>
+                </InlineStack>
+              )}
               {/* Money Lines */}
               {/* @ts-ignore */}
               <View>
@@ -696,7 +874,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                   <View>
                     {/* @ts-ignore */}
                     <Text alignment="end">
-                      {formatPrice(subtotal, currentVariant.currency_code)}
+                      {formatPrice(subtotal, currency)}
                     </Text>
                   </View>
                 </InlineStack>
@@ -715,7 +893,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                   <View>
                     {/* @ts-ignore */}
                     <Text alignment="end">
-                      {formatPrice(shipping, currentVariant.currency_code)}
+                      {formatPrice(shipping, currency)}
                     </Text>
                   </View>
                 </InlineStack>
@@ -733,9 +911,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                   {/* @ts-ignore */}
                   <View>
                     {/* @ts-ignore */}
-                    <Text alignment="end">
-                      {formatPrice(tax, currentVariant.currency_code)}
-                    </Text>
+                    <Text alignment="end">{formatPrice(tax, currency)}</Text>
                   </View>
                 </InlineStack>
               </View>
@@ -759,7 +935,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                   <View>
                     {/* @ts-ignore */}
                     <Text size="large" emphasis="bold" alignment="end">
-                      {formatPrice(total, currentVariant.currency_code)}
+                      {formatPrice(total, currency)}
                     </Text>
                   </View>
                 </InlineStack>
@@ -795,7 +971,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           >
             {isAdded
               ? "✓ Added to Order"
-              : `Pay now · ${currentVariant ? formatPrice(total, currentVariant.currency_code) : ""}`}
+              : `Pay now · ${formatPrice(total, currency)}`}
           </Button>
 
           {/* 7. DECLINE BUTTON */}
