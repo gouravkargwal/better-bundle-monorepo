@@ -90,6 +90,7 @@ model billing_invoices {
   shopify_response     Json?               @db.Json
   payment_method       String?             @db.VarChar(100)
   payment_reference    String?             @db.VarChar(255)
+  failure_reason       String?             @db.VarChar(500)
   id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   created_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
@@ -1130,6 +1131,7 @@ enum invoice_status_enum {
   OVERDUE
   CANCELLED
   REFUNDED
+  FAILED
 }
 
 enum shopify_subscription_status_enum {
