@@ -571,10 +571,8 @@ class BillingCalculator:
                     f"🎉 Trial completed for shop {shop_id}! Revenue: ${trial_status['current_revenue']}"
                 )
 
-                # Update trial status to completed
-                await self.billing_repository.update_trial_revenue(
-                    shop_subscription.id, Decimal(str(trial_status["current_revenue"]))
-                )
+                # ✅ Trial completion is now handled automatically in commission service
+                # No need to update trial revenue separately - it's calculated dynamically
 
                 # Update shop subscription status to active
                 await self.billing_repository.update_shop_subscription_status(

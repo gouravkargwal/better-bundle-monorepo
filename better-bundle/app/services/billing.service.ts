@@ -29,7 +29,7 @@ export interface BillingSummary {
   trial?: {
     status: string;
     threshold: number;
-    accumulated_revenue: number;
+    // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
     progress_percentage: number;
   };
   current_cycle?: {
@@ -73,8 +73,22 @@ export async function getTrialRevenueData(
 
     const trial = shopSubscription.subscription_trials;
 
+    // ✅ Calculate actual revenue from commission records
+    const actualRevenue = await prisma.commission_records.aggregate({
+      where: {
+        shop_id: shopSubscription.shop_id,
+        billing_phase: "TRIAL",
+        status: {
+          in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+        },
+      },
+      _sum: {
+        attributed_revenue: true,
+      },
+    });
+
     return {
-      attributedRevenue: Number(trial.accumulated_revenue),
+      attributedRevenue: Number(actualRevenue._sum?.attributed_revenue || 0),
       commissionEarned: Number(trial.commission_saved),
     };
   } catch (error) {
@@ -277,8 +291,8 @@ export async function getBillingSummary(
         ? {
             status: trial.status,
             threshold: Number(trial.threshold_amount),
-            accumulated_revenue: Number(trial.accumulated_revenue),
-            progress_percentage: 0, // Calculate based on accumulated_revenue / threshold_amount
+            // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
+            progress_percentage: 0, // Calculate based on actual revenue from commission_records
           }
         : undefined,
       current_cycle: currentCycle
@@ -356,7 +370,7 @@ export async function createShopSubscription(
       data: {
         shop_subscription_id: shopSubscription.id,
         threshold_amount: defaultPricingTier.trial_threshold_amount,
-        accumulated_revenue: 0,
+        // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
         commission_saved: 0,
         status: "ACTIVE",
         started_at: new Date(),

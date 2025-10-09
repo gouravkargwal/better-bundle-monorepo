@@ -47,27 +47,51 @@ class SubscriptionTrialRepository:
             logger.error(f"Error creating subscription trial: {e}")
             raise
 
-    async def update_revenue(
-        self, shop_subscription_id: str, additional_revenue: Decimal
+    async def check_completion(
+        self, shop_subscription_id: str, actual_revenue: Decimal
     ) -> bool:
-        """Update trial accumulated revenue."""
+        """Check if trial should be completed based on actual revenue - IDEMPOTENT."""
         try:
             trial = await self.get_by_subscription_id(shop_subscription_id)
             if not trial:
                 return False
 
-            trial.accumulated_revenue += additional_revenue
-            trial.updated_at = now_utc()
+            # ✅ IDEMPOTENCY: Check if trial can be completed
+            if not trial.can_be_completed():
+                logger.debug(
+                    f"Trial {shop_subscription_id} cannot be completed (status: {trial.status}, completed_at: {trial.completed_at}), skipping"
+                )
+                return True
 
-            # Check if threshold reached
-            if trial.accumulated_revenue >= trial.threshold_amount:
-                trial.status = TrialStatus.COMPLETED
-                trial.completed_at = now_utc()
+            # Check if threshold reached based on actual revenue
+            if trial.is_threshold_reached(actual_revenue):
+                # ✅ ATOMIC: Use database-level update to prevent race conditions
+                from sqlalchemy import update
+
+                # Update trial status atomically
+                trial_update = (
+                    update(SubscriptionTrial)
+                    .where(
+                        SubscriptionTrial.id == trial.id,
+                        SubscriptionTrial.status
+                        == TrialStatus.ACTIVE,  # ✅ Only update if still active
+                    )
+                    .values(status=TrialStatus.COMPLETED, completed_at=now_utc())
+                )
+
+                result = await self.session.execute(trial_update)
+
+                # Check if the update actually happened (prevents race conditions)
+                if result.rowcount == 0:
+                    logger.debug(
+                        f"Trial {shop_subscription_id} was already completed by another process"
+                    )
+                    return True
 
             await self.session.flush()
             return True
         except Exception as e:
-            logger.error(f"Error updating trial revenue: {e}")
+            logger.error(f"Error checking trial completion: {e}")
             return False
 
     async def update(self, trial: SubscriptionTrial) -> SubscriptionTrial:

@@ -505,6 +505,7 @@ class ProductCardManager {
         "_bb_rec_extension": "phoenix",
         "_bb_rec_context": context || "cart",
         "_bb_rec_position": String(position || ""),
+        "_bb_rec_quantity": String(selectedQuantity || 1), // ✅ Add quantity to attributes
         "_bb_rec_timestamp": new Date().toISOString(),
         "_bb_rec_source": "betterbundle",
       };

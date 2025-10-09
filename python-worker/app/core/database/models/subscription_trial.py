@@ -50,13 +50,7 @@ class SubscriptionTrial(BaseModel):
         String(10), nullable=True, comment="Maximum trial duration in days (optional)"
     )
 
-    # Trial progress
-    accumulated_revenue = Column(
-        Numeric(12, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-        comment="Total revenue accumulated during trial",
-    )
+    # ❌ REMOVED: accumulated_revenue - always calculate from commission_records
     commission_saved = Column(
         Numeric(10, 2),
         nullable=False,
@@ -94,7 +88,7 @@ class SubscriptionTrial(BaseModel):
     )
 
     def __repr__(self) -> str:
-        return f"<SubscriptionTrial(subscription_id={self.shop_subscription_id}, status={self.status.value}, revenue={self.accumulated_revenue})>"
+        return f"<SubscriptionTrial(subscription_id={self.shop_subscription_id}, status={self.status.value})>"
 
     @property
     def is_active(self) -> bool:
@@ -111,27 +105,26 @@ class SubscriptionTrial(BaseModel):
         """Check if trial is expired"""
         return self.status == TrialStatus.EXPIRED
 
-    @property
-    def progress_percentage(self) -> float:
-        """Calculate trial progress percentage"""
+    def get_progress_percentage(self, actual_revenue: Decimal) -> float:
+        """Calculate trial progress percentage based on actual revenue"""
         if not self.threshold_amount or self.threshold_amount == 0:
             return 0.0
-        return min(
-            100.0, float((self.accumulated_revenue / self.threshold_amount) * 100)
-        )
+        return min(100.0, float((actual_revenue / self.threshold_amount) * 100))
 
-    @property
-    def remaining_revenue(self) -> Decimal:
-        """Calculate remaining revenue until trial completion"""
+    def get_remaining_revenue(self, actual_revenue: Decimal) -> Decimal:
+        """Calculate remaining revenue until trial completion based on actual revenue"""
         if not self.is_active:
             return Decimal("0.00")
-        remaining = self.threshold_amount - self.accumulated_revenue
+        remaining = self.threshold_amount - actual_revenue
         return max(Decimal("0.00"), remaining)
 
-    @property
-    def threshold_reached(self) -> bool:
-        """Check if trial threshold has been reached"""
-        return self.accumulated_revenue >= self.threshold_amount
+    def is_threshold_reached(self, actual_revenue: Decimal) -> bool:
+        """Check if trial threshold has been reached based on actual revenue"""
+        return actual_revenue >= self.threshold_amount
+
+    def can_be_completed(self) -> bool:
+        """Check if trial can be completed (is active and not already completed)"""
+        return self.status == TrialStatus.ACTIVE and self.completed_at is None
 
     @property
     def days_remaining(self) -> int:

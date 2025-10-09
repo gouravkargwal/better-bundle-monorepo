@@ -97,10 +97,8 @@ class BillingServiceV2:
                 shop_id, shop_subscription, attributed_revenue, purchase_event
             )
 
-            # Update trial revenue
-            await self.billing_repository.update_trial_revenue(
-                shop_subscription.id, attributed_revenue
-            )
+            # ✅ Trial completion is now handled in commission service
+            # No need to update trial revenue separately - it's calculated dynamically
 
             # Log trial progress
             await self._log_trial_progress(shop_id, shop_subscription.id)
@@ -160,11 +158,19 @@ class BillingServiceV2:
     async def _log_trial_progress(self, shop_id: str, subscription_id: str) -> None:
         """Log trial progress and check for completion."""
         trial = await self.billing_repository.get_subscription_trial(subscription_id)
-        logger.info(
-            f"📊 Trial progress: ${trial.accumulated_revenue}/${trial.threshold_amount} (${trial.commission_saved} saved)"
+
+        # Calculate actual revenue from commission records
+        actual_revenue = (
+            await self.purchase_attribution_repository.get_total_revenue_by_shop(
+                shop_id
+            )
         )
 
-        if trial.accumulated_revenue >= trial.threshold_amount:
+        logger.info(
+            f"📊 Trial progress: ${actual_revenue}/${trial.threshold_amount} (${trial.commission_saved} saved)"
+        )
+
+        if trial.is_threshold_reached(actual_revenue):
             logger.info(
                 f"🎉 Trial threshold reached for shop {shop_id}! Transitioning to paid phase..."
             )

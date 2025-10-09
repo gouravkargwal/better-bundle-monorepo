@@ -308,7 +308,9 @@ class AnalyticsApiClient {
             type: "recommendation",
             position: position,
             widget: "phoenix_recommendation",
-            algorithm: "phoenix_algorithm"
+            algorithm: "phoenix_algorithm",
+            // ✅ Add quantity tracking for proper attribution
+            selected_quantity: metadata?.quantity || 1
           }
         },
       };
@@ -325,7 +327,7 @@ class AnalyticsApiClient {
   /**
    * Store attribution data in cart attributes for order processing
    */
-  async storeCartAttribution(sessionId, productId, context, position) {
+  async storeCartAttribution(sessionId, productId, context, position, quantity = 1) {
     try {
       const response = await fetch("/cart/update.js", {
         method: "POST",
@@ -337,6 +339,7 @@ class AnalyticsApiClient {
             bb_recommendation_extension: "phoenix",
             bb_recommendation_context: context,
             bb_recommendation_position: position.toString(),
+            bb_recommendation_quantity: quantity.toString(), // ✅ Add quantity to cart attributes
             bb_recommendation_timestamp: new Date().toISOString(),
             bb_recommendation_source: "betterbundle",
           },

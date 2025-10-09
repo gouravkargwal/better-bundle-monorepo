@@ -42,8 +42,8 @@ export class BillingService {
         };
       }
 
-      // Determine billing status based on subscription status
-      const status = this.mapSubscriptionStatus(shopSubscription.status);
+      // ✅ Determine billing status dynamically based on actual data
+      const status = await this.determineBillingStatus(shopSubscription);
 
       const state: BillingState = {
         status,
@@ -77,14 +77,47 @@ export class BillingService {
   }
 
   /**
-   * Map database subscription status to simplified billing status
+   * ✅ Determine billing status dynamically based on actual data
+   * Never rely on pre-computed database fields
    */
-  private static mapSubscriptionStatus(dbStatus: string): BillingStatus {
-    switch (dbStatus) {
-      case "TRIAL":
-        return "trial_active";
-      case "TRIAL_COMPLETED":
+  private static async determineBillingStatus(
+    shopSubscription: any,
+  ): Promise<BillingStatus> {
+    const dbStatus = shopSubscription.status;
+
+    // For trial-related statuses, check actual revenue data
+    if (dbStatus === "TRIAL" || dbStatus === "TRIAL_COMPLETED") {
+      // Get actual attributed revenue from commission records
+      const actualRevenue = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopSubscription.shop_id,
+          billing_phase: "TRIAL",
+          status: {
+            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+          },
+        },
+        _sum: {
+          attributed_revenue: true,
+        },
+      });
+
+      const actualAccumulatedRevenue = Number(
+        actualRevenue._sum?.attributed_revenue || 0,
+      );
+      const thresholdAmount = Number(
+        shopSubscription.subscription_trials?.threshold_amount || 0,
+      );
+
+      // ✅ Determine status based on ACTUAL data, not stored values
+      if (actualAccumulatedRevenue >= thresholdAmount) {
         return "trial_completed";
+      } else {
+        return "trial_active";
+      }
+    }
+
+    // For other statuses, use the existing mapping
+    switch (dbStatus) {
       case "PENDING_APPROVAL":
         return "subscription_pending";
       case "ACTIVE":
@@ -114,16 +147,36 @@ export class BillingService {
       };
     }
 
+    // ✅ ALWAYS calculate from source data - never use pre-computed values
+    const actualRevenue = await prisma.commission_records.aggregate({
+      where: {
+        shop_id: shopSubscription.shop_id,
+        billing_phase: "TRIAL",
+        status: {
+          in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+        },
+      },
+      _sum: {
+        attributed_revenue: true,
+      },
+    });
+
+    const actualAccumulatedRevenue = Number(
+      actualRevenue._sum?.attributed_revenue || 0,
+    );
+    const thresholdAmount = Number(trial.threshold_amount);
+
+    // ✅ Check if trial should be completed based on ACTUAL data
+    const hasExceededThreshold = actualAccumulatedRevenue >= thresholdAmount;
     const progress = Math.min(
-      (Number(trial.accumulated_revenue) / Number(trial.threshold_amount)) *
-        100,
+      (actualAccumulatedRevenue / thresholdAmount) * 100,
       100,
     );
 
     return {
-      isActive: trial.status === "ACTIVE",
-      thresholdAmount: Number(trial.threshold_amount),
-      accumulatedRevenue: Number(trial.accumulated_revenue),
+      isActive: trial.status === "ACTIVE" && !hasExceededThreshold,
+      thresholdAmount: thresholdAmount,
+      accumulatedRevenue: actualAccumulatedRevenue, // ✅ Always fresh data
       progress: Math.round(progress),
       currency: "USD", // TODO: Get from shop
     };

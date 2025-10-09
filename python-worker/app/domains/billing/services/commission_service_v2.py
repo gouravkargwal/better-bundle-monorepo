@@ -116,8 +116,8 @@ class CommissionServiceV2:
                 )
                 return None
 
-            # Get trial accumulated revenue
-            trial_accumulated = await self._get_trial_accumulated_revenue(shop_id)
+            # Get current trial revenue (calculated dynamically)
+            current_trial_revenue = await self._get_trial_accumulated_revenue(shop_id)
 
             # Create commission record
             commission = self._build_trial_commission(
@@ -127,15 +127,15 @@ class CommissionServiceV2:
                 attributed_revenue,
                 commission_earned,
                 commission_rate,
-                trial_accumulated,
+                current_trial_revenue,
                 shop_subscription,
             )
 
             await self.commission_repository.save(commission)
 
-            # Update trial revenue
-            await self.billing_repository.update_trial_revenue(
-                shop_subscription.id, attributed_revenue
+            # Check if trial should be completed based on actual revenue
+            await self.billing_repository.check_trial_completion(
+                shop_subscription.id, current_trial_revenue + attributed_revenue
             )
 
             return commission

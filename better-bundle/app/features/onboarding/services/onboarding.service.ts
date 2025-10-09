@@ -208,7 +208,7 @@ export class OnboardingService {
         threshold_amount: pricingTier.trial_threshold_amount,
         status: "ACTIVE",
         started_at: new Date(),
-        accumulated_revenue: 0.0,
+        // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
         commission_saved: 0.0,
       },
     });
