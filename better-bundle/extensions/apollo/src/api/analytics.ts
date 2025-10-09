@@ -80,9 +80,6 @@ export interface UnifiedResponse {
 
 class ApolloAnalyticsClient {
   private baseUrl: string;
-  private currentSessionId: string | null = null;
-  private sessionExpiresAt: number | null = null;
-  private clientId: string | null = null; // ✅ NEW
 
   constructor() {
     // Use the unified analytics service URL
@@ -96,70 +93,19 @@ class ApolloAnalyticsClient {
     shopId: string,
     customerId?: string,
   ): Promise<string> {
-    // ✅ STEP 1: Try to get client_id from sessionStorage
-    if (!this.clientId) {
-      this.clientId = this.getClientIdFromStorage();
-    }
-
-    // ✅ STEP 2: Check if we have a valid cached session in sessionStorage
-    try {
-      const cachedSessionId = sessionStorage.getItem("unified_session_id");
-      const cachedExpiry = sessionStorage.getItem("unified_session_expires_at");
-
-      if (
-        cachedSessionId &&
-        cachedExpiry &&
-        Date.now() < parseInt(cachedExpiry)
-      ) {
-        console.log(
-          "⚡ Apollo: Session loaded from unified sessionStorage:",
-          cachedSessionId,
-        );
-        console.log(
-          "📱 Apollo: Using client_id:",
-          this.clientId ? this.clientId.substring(0, 16) + "..." : "none",
-        );
-
-        this.currentSessionId = cachedSessionId;
-        this.sessionExpiresAt = parseInt(cachedExpiry);
-        return cachedSessionId;
-      }
-    } catch (error) {
-      console.warn("Apollo: Failed to read from session storage:", error);
-    }
-
-    // ✅ STEP 3: Check if we have a valid session in memory
-    if (
-      this.currentSessionId &&
-      this.sessionExpiresAt &&
-      Date.now() < this.sessionExpiresAt
-    ) {
-      return this.currentSessionId;
-    }
-
-    // ✅ STEP 4: No cached session, create new one
     try {
       const url = `${this.baseUrl}/api/apollo/get-or-create-session`;
-
-      const browserSessionId = this.getBrowserSessionId();
 
       const payload: UnifiedSessionRequest = {
         shop_id: shopId,
         customer_id: customerId || undefined,
-        browser_session_id: browserSessionId,
-        client_id: this.clientId || undefined, // ✅ Include client_id if available
+        browser_session_id: undefined,
+        client_id: undefined,
         user_agent: navigator.userAgent,
         ip_address: undefined,
         referrer: document.referrer,
         page_url: window.location.href,
       };
-
-      console.log("🌐 Apollo: Creating session with:", {
-        shop_id: shopId,
-        has_customer: !!customerId,
-        has_client_id: !!this.clientId,
-        browser_session_id: browserSessionId,
-      });
 
       const response = await fetch(url, {
         method: "POST",
@@ -178,30 +124,6 @@ class ApolloAnalyticsClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        this.currentSessionId = sessionId;
-        this.sessionExpiresAt = Date.now() + 30 * 60 * 1000;
-
-        // ✅ NEW: Store client_id from backend response
-        if (result.data.client_id && !this.clientId) {
-          this.clientId = result.data.client_id;
-          this.storeClientId(this.clientId);
-        }
-
-        // Store session in sessionStorage (shared across all extensions)
-        try {
-          sessionStorage.setItem("unified_session_id", sessionId);
-          sessionStorage.setItem(
-            "unified_session_expires_at",
-            this.sessionExpiresAt.toString(),
-          );
-          console.log(
-            "💾 Apollo: Session saved to unified sessionStorage:",
-            sessionId,
-          );
-        } catch (error) {
-          console.warn("Apollo: Failed to store session:", error);
-        }
-
         console.log("🔄 Apollo: Session created/retrieved:", sessionId);
         return sessionId;
       } else {
@@ -220,18 +142,6 @@ class ApolloAnalyticsClient {
     request: UnifiedInteractionRequest,
   ): Promise<boolean> {
     try {
-      // Get or create session first
-      const sessionId = await this.getOrCreateSession(
-        request.shop_id,
-        request.customer_id,
-      );
-
-      // Update request with session ID
-      const interactionData = {
-        ...request,
-        session_id: sessionId,
-      };
-
       // Send to unified analytics endpoint
       const url = `${this.baseUrl}/api/apollo/track-interaction`;
 
@@ -240,7 +150,7 @@ class ApolloAnalyticsClient {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(interactionData),
+        body: JSON.stringify(request),
         keepalive: true,
       });
 
@@ -336,98 +246,6 @@ class ApolloAnalyticsClient {
     } catch (error) {
       console.error("Failed to track recommendation click:", error);
       return false;
-    }
-  }
-
-  /**
-   * Track add to order action
-   */
-  async trackAddToOrder(
-    shopId: string,
-    productId: string,
-    variantId: string,
-    position: number,
-    customerId?: string,
-    orderId?: string,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    try {
-      const request: UnifiedInteractionRequest = {
-        session_id: "", // Will be set by trackUnifiedInteraction
-        shop_id: shopId,
-        context: "post_purchase",
-        interaction_type: "add_to_order",
-        customer_id: customerId,
-        product_id: productId,
-        page_url: window.location.href,
-        referrer: document.referrer,
-        metadata: {
-          ...metadata,
-          extension_type: "apollo",
-          variant_id: variantId,
-          position,
-          order_id: orderId,
-          source: "apollo_post_purchase",
-          interaction_type: "add_to_order",
-        },
-      };
-
-      return await this.trackUnifiedInteraction(request);
-    } catch (error) {
-      console.error("Failed to track add to order:", error);
-      return false;
-    }
-  }
-
-  /**
-   * Get unified browser session ID (shared across all extensions)
-   */
-  private getBrowserSessionId(): string {
-    let sessionId = sessionStorage.getItem("unified_browser_session_id");
-    if (!sessionId) {
-      sessionId =
-        "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem("unified_browser_session_id", sessionId);
-    }
-    return sessionId;
-  }
-
-  /**
-   * Get client_id from sessionStorage (set by Atlas or other extensions)
-   * ✅ NEW METHOD
-   */
-  private getClientIdFromStorage(): string | null {
-    try {
-      const clientId = sessionStorage.getItem("unified_client_id");
-      if (clientId) {
-        console.log(
-          "📱 Apollo: Found client_id in sessionStorage:",
-          clientId.substring(0, 16) + "...",
-        );
-        return clientId;
-      }
-    } catch (error) {
-      console.warn(
-        "Apollo: Failed to read client_id from sessionStorage:",
-        error,
-      );
-    }
-    return null;
-  }
-
-  /**
-   * Store client_id in sessionStorage for other extensions
-   * ✅ NEW METHOD
-   */
-  private storeClientId(clientId: string): void {
-    try {
-      sessionStorage.setItem("unified_client_id", clientId);
-      console.log(
-        "📱 Apollo: Stored client_id in sessionStorage:",
-        clientId.substring(0, 16) + "...",
-      );
-    } catch (error) {
-      console.warn("Apollo: Failed to store client_id:", error);
     }
   }
 }

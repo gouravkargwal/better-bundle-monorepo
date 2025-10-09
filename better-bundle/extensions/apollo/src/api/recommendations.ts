@@ -17,11 +17,12 @@ export type ExtensionContext =
   | "thank_you_page"
   | "post_purchase";
 
-export interface PostPurchaseRecommendationRequest {
+export interface RecommendationRequest {
   shop_domain?: string;
   context: ExtensionContext;
   order_id?: string;
   customer_id?: string;
+  session_id?: string;
   purchased_products?: Array<{
     product_id: string;
     variant_id: string;
@@ -75,7 +76,7 @@ export interface ProductRecommendation {
   selling_plan?: any;
 }
 
-export interface PostPurchaseRecommendationResponse {
+export interface RecommendationResponse {
   success: boolean;
   recommendations: ProductRecommendation[];
   count: number;
@@ -97,9 +98,9 @@ class ApolloRecommendationClient {
   /**
    * Get post-purchase recommendations based on the completed order
    */
-  async getPostPurchaseRecommendations(
-    request: PostPurchaseRecommendationRequest,
-  ): Promise<PostPurchaseRecommendationResponse> {
+  async getRecommendations(
+    request: RecommendationRequest,
+  ): Promise<RecommendationResponse> {
     try {
       // Use main recommendation API with post_purchase context
       const response = await fetch(`${this.baseUrl}/api/v1/recommendations/`, {
@@ -112,8 +113,7 @@ class ApolloRecommendationClient {
           context: "post_purchase",
           product_ids: request.purchased_products?.map((p) => p.product_id),
           user_id: request.customer_id,
-          session_id:
-            request.session_id || sessionStorage.getItem("unified_session_id"),
+          session_id: request.session_id,
           limit: request.limit || 3,
         }),
       });
@@ -127,51 +127,6 @@ class ApolloRecommendationClient {
     } catch (error) {
       console.error("Failed to fetch post-purchase recommendations:", error);
       throw error;
-    }
-  }
-
-  /**
-   * Get fallback recommendations when post-purchase specific ones fail
-   */
-  async getFallbackRecommendations(
-    shopDomain: string,
-    limit: number = 3,
-  ): Promise<ProductRecommendation[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/fallback`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          shop_domain: shopDomain,
-          context: "post_purchase",
-          limit,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.recommendations || [];
-    } catch (error) {
-      console.error("Failed to fetch fallback recommendations:", error);
-      return [];
-    }
-  }
-
-  /**
-   * Health check for recommendation service
-   */
-  async healthCheck(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
-    } catch (error) {
-      console.error("Recommendation service health check failed:", error);
-      return false;
     }
   }
 }
