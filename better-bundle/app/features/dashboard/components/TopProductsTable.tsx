@@ -7,7 +7,7 @@ import {
   InlineStack,
   Button,
 } from "@shopify/polaris";
-import type { TopProductData } from "../../services/dashboard.service";
+import type { TopProductData } from "../types/dashboard.types";
 
 interface TopProductsTableProps {
   data: TopProductData[];

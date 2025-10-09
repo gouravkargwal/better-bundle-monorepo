@@ -1,6 +1,3 @@
-// features/overview/components/OverviewHero.tsx
-import { Text } from "@shopify/polaris";
-
 interface OverviewHeroProps {
   shop: {
     shop_domain: string;

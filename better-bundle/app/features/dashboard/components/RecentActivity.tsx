@@ -6,8 +6,8 @@ import {
   Badge,
   Divider,
 } from "@shopify/polaris";
-import type { RecentActivityData } from "../../services/dashboard.service";
-import { formatCurrency } from "../../utils/currency";
+import type { RecentActivityData } from "../types/dashboard.types";
+import { formatCurrency } from "../../../utils/currency";
 
 interface RecentActivityProps {
   data: RecentActivityData;

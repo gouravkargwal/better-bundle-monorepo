@@ -7,12 +7,12 @@ import {
   CashDollarIcon,
   TeamIcon,
 } from "@shopify/polaris-icons";
+
+import { formatCurrency } from "../../../utils/currency";
 import type {
   DashboardOverview,
   AttributedMetrics,
-  PerformanceMetrics,
-} from "../../services/dashboard.service";
-import { formatCurrency } from "../../utils/currency";
+} from "../types/dashboard.types";
 
 interface KPICardsProps {
   data: DashboardOverview;

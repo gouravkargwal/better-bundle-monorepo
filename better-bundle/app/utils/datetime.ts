@@ -122,3 +122,23 @@ export function getDateRange(period: string) {
       };
   }
 }
+
+/**
+ * Parse date range from URL search parameters
+ */
+export function getDateRangeFromUrl(url: URL) {
+  const searchParams = url.searchParams;
+  const startDate = searchParams.get("startDate") || getDefaultStartDate();
+  const endDate = searchParams.get("endDate") || getDefaultEndDate();
+  return { startDate, endDate };
+}
+
+function getDefaultStartDate(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 30); // 30 days ago
+  return date.toISOString().split("T")[0];
+}
+
+function getDefaultEndDate(): string {
+  return new Date().toISOString().split("T")[0];
+}

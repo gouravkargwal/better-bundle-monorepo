@@ -254,6 +254,18 @@ model customer_data {
   @@index([verified_email], map: "ix_customer_data_verified_email")
 }
 
+model feedback {
+  feedback_type String   @db.VarChar(256)
+  user_id       String   @db.VarChar(256)
+  item_id       String   @db.VarChar(256)
+  time_stamp    DateTime @db.Timestamptz(6)
+  comment       String   @default("")
+
+  @@id([feedback_type, user_id, item_id])
+  @@index([item_id], map: "item_id_index")
+  @@index([user_id], map: "user_id_index")
+}
+
 model interaction_features {
   interaction_strength_score   Float
   customer_product_affinity    Float
@@ -286,6 +298,15 @@ model interaction_features {
   @@index([customer_id], map: "ix_interaction_features_customer_id")
   @@index([product_id], map: "ix_interaction_features_product_id")
   @@index([shop_id], map: "ix_interaction_features_shop_id")
+}
+
+model items {
+  item_id    String   @id @db.VarChar(256)
+  is_hidden  Boolean  @default(false)
+  categories Json     @default("[]") @db.Json
+  time_stamp DateTime @db.Timestamptz(6)
+  labels     Json     @default("[]") @db.Json
+  comment    String   @default("")
 }
 
 model line_item_data {
@@ -1016,6 +1037,13 @@ model user_sessions {
   @@index([shop_id], map: "ix_user_sessions_shop_id")
   @@index([shop_id, client_id], map: "ix_user_sessions_shop_id_client_id")
   @@index([status], map: "ix_user_sessions_status")
+}
+
+model users {
+  user_id   String @id @db.VarChar(256)
+  labels    Json   @default("[]") @db.Json
+  subscribe Json   @default("[]") @db.Json
+  comment   String @default("")
 }
 
 enum adjustment_reason_enum {
