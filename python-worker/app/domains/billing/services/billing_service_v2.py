@@ -276,7 +276,7 @@ class BillingServiceV2:
             )
 
             query = select(PurchaseAttribution).where(
-                PurchaseAttribution.order_id == purchase_event.order_id,
+                PurchaseAttribution.order_id == str(purchase_event.order_id),
                 PurchaseAttribution.shop_id == purchase_event.shop_id,
             )
             result = await self.session.execute(query)
@@ -298,7 +298,7 @@ class BillingServiceV2:
             )
 
             query = select(PurchaseAttribution).where(
-                PurchaseAttribution.order_id == purchase_event.order_id,
+                PurchaseAttribution.order_id == str(purchase_event.order_id),
                 PurchaseAttribution.shop_id == purchase_event.shop_id,
             )
             result = await self.session.execute(query)
