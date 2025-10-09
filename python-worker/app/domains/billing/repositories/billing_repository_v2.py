@@ -399,24 +399,34 @@ class BillingRepositoryV2:
         additional_usage: Decimal,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Update billing cycle usage amount"""
+        """Update billing cycle usage amount - ATOMIC"""
         try:
-            # Get current cycle to update metadata
-            cycle = await self.get_billing_cycle_by_id(cycle_id)
-            if not cycle:
-                logger.error(f"Billing cycle {cycle_id} not found")
+            from sqlalchemy import update
+
+            # ✅ ATOMIC: Use database-level increment to prevent race conditions
+            cycle_update = (
+                update(BillingCycle)
+                .where(BillingCycle.id == cycle_id)
+                .values(
+                    usage_amount=BillingCycle.usage_amount + additional_usage,
+                    commission_count=BillingCycle.commission_count + 1,
+                    updated_at=now_utc(),
+                )
+            )
+
+            result = await self.session.execute(cycle_update)
+
+            if result.rowcount == 0:
+                logger.error(f"Billing cycle {cycle_id} not found for usage update")
                 return False
 
-            # Update usage amount
-            cycle.usage_amount += additional_usage
-            cycle.commission_count += 1
-            cycle.updated_at = now_utc()
-
-            # Update metadata if provided
+            # Update metadata separately if provided (less critical)
             if metadata:
-                if not cycle.usage_metadata:
-                    cycle.usage_metadata = {}
-                cycle.usage_metadata.update(metadata)
+                cycle = await self.get_billing_cycle_by_id(cycle_id)
+                if cycle:
+                    if not cycle.usage_metadata:
+                        cycle.usage_metadata = {}
+                    cycle.usage_metadata.update(metadata)
 
             await self.session.flush()
             return True

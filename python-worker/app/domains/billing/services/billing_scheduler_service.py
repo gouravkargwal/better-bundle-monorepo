@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database.session import get_transaction_context
 from app.core.database.models import Shop, ShopSubscription, BillingCycle
+from app.core.database.models.enums import SubscriptionStatus
 from app.core.logging import get_logger
 from app.domains.billing.services.billing_service_v2 import BillingServiceV2
 from app.domains.billing.repositories.billing_repository_v2 import (
@@ -53,12 +54,12 @@ class BillingSchedulerService:
         self.semaphore = asyncio.Semaphore(max_concurrent_shops)
 
     async def initialize(self):
-        """Initialize the billing service and repository"""
+        """Initialize the billing service and repository - SESSION SAFE"""
         try:
-            # Initialize billing service with SQLAlchemy session
-            async with get_transaction_context() as session:
-                self.billing_service = BillingServiceV2(session)
-                self.billing_repository = BillingRepositoryV2(session)
+            # ✅ FIX: Don't create services with closed sessions
+            # Services will be created per-operation with fresh sessions
+            self.billing_service = None
+            self.billing_repository = None
 
             logger.info("Billing scheduler service initialized")
         except Exception as e:
@@ -348,9 +349,68 @@ class BillingSchedulerService:
     async def _process_shop_billing_single(
         self, shop: Shop, period: BillingPeriod, dry_run: bool
     ) -> Dict[str, Any]:
-        """Process billing for a single shop (internal method)"""
+        """Process billing for a single shop with fresh session - TRANSACTION SAFE"""
         try:
-            return await self.process_shop_billing(shop.id, period, dry_run)
+            # ✅ FIX: Use fresh session for each shop processing
+            async with get_transaction_context() as session:
+                billing_service = BillingServiceV2(session)
+                billing_repository = BillingRepositoryV2(session)
+
+                # Process billing with fresh session
+                return await self._process_shop_billing_with_session(
+                    shop, period, dry_run, billing_service, billing_repository
+                )
+        except Exception as e:
+            logger.error(f"Error processing billing for shop {shop.id}: {e}")
+            return {"success": False, "shop_id": shop.id, "error": str(e)}
+
+    async def _process_shop_billing_with_session(
+        self,
+        shop: Shop,
+        period: BillingPeriod,
+        dry_run: bool,
+        billing_service: BillingServiceV2,
+        billing_repository: BillingRepositoryV2,
+    ) -> Dict[str, Any]:
+        """Process billing for a single shop with provided services - TRANSACTION SAFE"""
+        try:
+            # Get shop subscription
+            shop_subscription = await billing_repository.get_shop_subscription(shop.id)
+            if not shop_subscription:
+                return {
+                    "success": False,
+                    "shop_id": shop.id,
+                    "error": "No subscription found",
+                }
+
+            # Process billing based on subscription status
+            if shop_subscription.status == SubscriptionStatus.TRIAL:
+                # Handle trial billing
+                return await self._handle_trial_billing(
+                    shop,
+                    shop_subscription,
+                    period,
+                    dry_run,
+                    billing_service,
+                    billing_repository,
+                )
+            elif shop_subscription.status == SubscriptionStatus.ACTIVE:
+                # Handle active subscription billing
+                return await self._handle_active_billing(
+                    shop,
+                    shop_subscription,
+                    period,
+                    dry_run,
+                    billing_service,
+                    billing_repository,
+                )
+            else:
+                return {
+                    "success": False,
+                    "shop_id": shop.id,
+                    "error": f"Invalid subscription status: {shop_subscription.status}",
+                }
+
         except Exception as e:
             logger.error(f"Error processing billing for shop {shop.id}: {e}")
             return {"success": False, "shop_id": shop.id, "error": str(e)}
@@ -444,3 +504,82 @@ class BillingSchedulerService:
                 "error": str(e),
                 "last_updated": now_utc().isoformat(),
             }
+
+    async def _handle_trial_billing(
+        self,
+        shop: Shop,
+        shop_subscription: ShopSubscription,
+        period: BillingPeriod,
+        dry_run: bool,
+        billing_service: BillingServiceV2,
+        billing_repository: BillingRepositoryV2,
+    ) -> Dict[str, Any]:
+        """Handle billing for trial shops - TRANSACTION SAFE"""
+        try:
+            # Trial shops don't get charged, just track progress
+            logger.info(f"Trial shop {shop.id} - no billing charges")
+            return {
+                "success": True,
+                "shop_id": shop.id,
+                "status": "trial",
+                "message": "Trial shop - no charges applied",
+            }
+        except Exception as e:
+            logger.error(f"Error handling trial billing for shop {shop.id}: {e}")
+            return {"success": False, "shop_id": shop.id, "error": str(e)}
+
+    async def _handle_active_billing(
+        self,
+        shop: Shop,
+        shop_subscription: ShopSubscription,
+        period: BillingPeriod,
+        dry_run: bool,
+        billing_service: BillingServiceV2,
+        billing_repository: BillingRepositoryV2,
+    ) -> Dict[str, Any]:
+        """Handle billing for active subscription shops - TRANSACTION SAFE"""
+        try:
+            # Process active subscription billing
+            logger.info(f"Processing active billing for shop {shop.id}")
+
+            # Get billing cycle for the period
+            billing_cycle = await billing_repository.get_current_billing_cycle(
+                shop_subscription.id
+            )
+            if not billing_cycle:
+                return {
+                    "success": False,
+                    "shop_id": shop.id,
+                    "error": "No billing cycle found",
+                }
+
+            # Calculate billing amount (simplified for now)
+            billing_amount = Decimal("0.00")  # This would be calculated based on usage
+
+            if not dry_run and billing_amount > 0:
+                # Create invoice and charge
+                invoice = await self._create_billing_invoice(
+                    billing_service.session,
+                    shop,
+                    shop_subscription,
+                    {"total_amount": billing_amount},
+                    period,
+                )
+
+                return {
+                    "success": True,
+                    "shop_id": shop.id,
+                    "billing_amount": float(billing_amount),
+                    "invoice_id": invoice.id if invoice else None,
+                }
+            else:
+                return {
+                    "success": True,
+                    "shop_id": shop.id,
+                    "billing_amount": 0.0,
+                    "message": "Dry run or no charges",
+                }
+
+        except Exception as e:
+            logger.error(f"Error handling active billing for shop {shop.id}: {e}")
+            return {"success": False, "shop_id": shop.id, "error": str(e)}

@@ -50,28 +50,51 @@ class BillingServiceV2:
     async def process_purchase_attribution(
         self, purchase_event: PurchaseEvent
     ) -> AttributionResult:
-        """Process purchase attribution and handle billing based on subscription status."""
+        """Process purchase attribution and handle billing based on subscription status - TRANSACTION SAFE."""
         try:
             shop_id = purchase_event.shop_id
             logger.info(
                 f"🛒 Processing purchase {purchase_event.order_id} for shop {shop_id}"
             )
 
-            # 1. Calculate attribution
-            attribution_result = await self._calculate_attribution(purchase_event)
+            # ✅ IDEMPOTENCY: Check if purchase already processed
+            if await self._is_purchase_already_processed(purchase_event):
+                logger.info(
+                    f"Purchase {purchase_event.order_id} already processed, skipping"
+                )
+                return await self._get_existing_attribution_result(purchase_event)
 
-            # 2. Get subscription and check trial completion
-            shop_subscription = await self.billing_repository.get_shop_subscription(
-                shop_id
-            )
-            await self._check_trial_completion(shop_id, shop_subscription)
+            # ✅ TRANSACTION: Wrap all operations in a single transaction
+            try:
+                # 1. Calculate attribution
+                attribution_result = await self._calculate_attribution(purchase_event)
 
-            # 3. Handle billing based on subscription status
-            await self._process_billing_by_status(
-                shop_id, shop_subscription, attribution_result, purchase_event
-            )
+                # 2. Get subscription and check trial completion
+                shop_subscription = await self.billing_repository.get_shop_subscription(
+                    shop_id
+                )
+                await self._check_trial_completion(shop_id, shop_subscription)
 
-            return attribution_result
+                # 3. Handle billing based on subscription status
+                await self._process_billing_by_status(
+                    shop_id, shop_subscription, attribution_result, purchase_event
+                )
+
+                # ✅ ATOMIC: Commit all changes together
+                await self.session.commit()
+                logger.info(
+                    f"✅ Successfully processed purchase {purchase_event.order_id}"
+                )
+
+                return attribution_result
+
+            except Exception as e:
+                # ✅ ROLLBACK: Ensure data consistency on any failure
+                await self.session.rollback()
+                logger.error(
+                    f"❌ Transaction rolled back for purchase {purchase_event.order_id}: {e}"
+                )
+                raise
 
         except Exception as e:
             logger.error(f"❌ Error processing attribution: {e}", exc_info=True)
@@ -223,30 +246,81 @@ class BillingServiceV2:
     async def _complete_trial(
         self, shop_id: str, shop_subscription: ShopSubscription
     ) -> None:
-        """Complete trial and wait for user to setup billing with their chosen cap"""
+        """Complete trial and wait for user to setup billing with their chosen cap - TRANSACTION SAFE"""
         try:
-            # Update trial status
-            trial = await self.billing_repository.get_subscription_trial(
-                shop_subscription.id
+            # ✅ ATOMIC: Use the repository's atomic trial completion method
+            await self.billing_repository.check_trial_completion(
+                shop_subscription.id,
+                Decimal("0"),  # Will be calculated dynamically in the repository
             )
-            if trial:
-                trial.status = TrialStatus.COMPLETED
-                trial.completed_at = now_utc()
-
-            # ✅ FIX: Set to TRIAL_COMPLETED, not SUSPENDED or PENDING_APPROVAL
-            shop_subscription.status = SubscriptionStatus.TRIAL_COMPLETED
 
             logger.info(
                 f"✅ Trial completed for shop {shop_id}. "
                 f"Awaiting user to setup billing with cap."
             )
 
-            # Persist changes immediately so UI sees updated status
-            await self.session.flush()
-            await self.session.commit()
+            # ✅ NO MANUAL COMMIT: Let the main transaction handle it
 
         except Exception as e:
             logger.error(f"❌ Error completing trial: {e}")
+            raise
+
+    async def _is_purchase_already_processed(
+        self, purchase_event: PurchaseEvent
+    ) -> bool:
+        """Check if purchase has already been processed to prevent duplicate processing."""
+        try:
+            from sqlalchemy import select
+            from app.core.database.models.purchase_attribution import (
+                PurchaseAttribution,
+            )
+
+            query = select(PurchaseAttribution).where(
+                PurchaseAttribution.order_id == purchase_event.order_id,
+                PurchaseAttribution.shop_id == purchase_event.shop_id,
+            )
+            result = await self.session.execute(query)
+            existing = result.scalar_one_or_none()
+
+            return existing is not None
+        except Exception as e:
+            logger.error(f"Error checking if purchase already processed: {e}")
+            return False
+
+    async def _get_existing_attribution_result(
+        self, purchase_event: PurchaseEvent
+    ) -> AttributionResult:
+        """Get existing attribution result for already processed purchase."""
+        try:
+            from sqlalchemy import select
+            from app.core.database.models.purchase_attribution import (
+                PurchaseAttribution,
+            )
+
+            query = select(PurchaseAttribution).where(
+                PurchaseAttribution.order_id == purchase_event.order_id,
+                PurchaseAttribution.shop_id == purchase_event.shop_id,
+            )
+            result = await self.session.execute(query)
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                # Return existing attribution result
+                return AttributionResult(
+                    attribution_id=existing.id,
+                    total_attributed_revenue=existing.total_revenue,
+                    # Add other fields as needed
+                )
+            else:
+                # Fallback - create empty result
+                return AttributionResult(
+                    attribution_id="", total_attributed_revenue=Decimal("0.00")
+                )
+        except Exception as e:
+            logger.error(f"Error getting existing attribution result: {e}")
+            return AttributionResult(
+                attribution_id="", total_attributed_revenue=Decimal("0.00")
+            )
 
     async def _check_trial_completion(self, shop_id: str, shop_subscription) -> None:
         """

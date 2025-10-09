@@ -117,7 +117,7 @@ class CommissionServiceV2:
                 return None
 
             # Get current trial revenue (calculated dynamically)
-            current_trial_revenue = await self._get_trial_accumulated_revenue(shop_id)
+            current_trial_revenue = await self._get_trial_current_revenue(shop_id)
 
             # Create commission record
             commission = self._build_trial_commission(
@@ -144,7 +144,44 @@ class CommissionServiceV2:
             logger.error(f"❌ Error creating trial commission: {e}")
             return None
 
-    async def _get_trial_accumulated_revenue(self, shop_id: str) -> Decimal:
+    async def _suspend_shop_for_cap_reached(self, shop_id: str) -> None:
+        """Suspend shop when monthly cap is reached - ATOMIC"""
+        try:
+            from app.core.database.models.shop import Shop
+            from sqlalchemy import update
+
+            # ✅ ATOMIC: Only suspend if shop is currently active
+            shop_update = (
+                update(Shop)
+                .where(
+                    Shop.id == shop_id,
+                    Shop.is_active == True,  # Only suspend if currently active
+                    Shop.suspension_reason
+                    != "monthly_cap_reached",  # Not already suspended for cap
+                )
+                .values(
+                    is_active=False,
+                    suspended_at=now_utc(),
+                    suspension_reason="monthly_cap_reached",
+                    service_impact="suspended",
+                    updated_at=now_utc(),
+                )
+            )
+
+            result = await self.session.execute(shop_update)
+
+            if result.rowcount > 0:
+                logger.warning(
+                    f"🛑 Shop {shop_id} suspended due to monthly cap reached"
+                )
+            else:
+                logger.debug(f"Shop {shop_id} was already suspended or not found")
+
+        except Exception as e:
+            logger.error(f"❌ Error suspending shop {shop_id}: {e}")
+            raise
+
+    async def _get_trial_current_revenue(self, shop_id: str) -> Decimal:
         """Get total trial revenue for shop."""
         try:
             return await self.purchase_attribution_repository.get_total_revenue_by_shop(
@@ -239,6 +276,10 @@ class CommissionServiceV2:
             await self.billing_repository.update_billing_cycle_usage(
                 current_cycle.id, charge_data["actual_charge"]
             )
+
+            # ✅ SUSPEND SHOP if cap is completely reached
+            if charge_data["charge_type"] == ChargeType.REJECTED:
+                await self._suspend_shop_for_cap_reached(shop_id)
 
             return commission
 

@@ -50,25 +50,39 @@ export function BillingPage({
             trialData={billingState.trialData!}
             shopCurrency={shopCurrency}
             onSetupBilling={async (setupData: BillingSetupData) => {
-              // This will be handled by the existing API route
-              const response = await fetch("/api/billing/setup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  monthlyCap: setupData.spendingLimit,
-                  currency: setupData.currency,
-                }),
-              });
+              try {
+                // This will be handled by the existing API route
+                const response = await fetch("/api/billing/setup", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    monthlyCap: setupData.spendingLimit,
+                    currency: setupData.currency,
+                  }),
+                });
 
-              const result = await response.json();
-              console.log("Billing setup response:", result);
-              if (result.success && result.confirmationUrl) {
-                console.log("Redirecting to:", result.confirmationUrl);
-                window.top!.location.href = result.confirmationUrl;
-              } else {
-                console.error("No confirmation URL in response:", result);
+                if (!response.ok) {
+                  throw new Error(
+                    `HTTP ${response.status}: ${response.statusText}`,
+                  );
+                }
+
+                const result = await response.json();
+                console.log("Billing setup response:", result);
+
+                if (result.success && result.confirmationUrl) {
+                  console.log("Redirecting to:", result.confirmationUrl);
+                  window.top!.location.href = result.confirmationUrl;
+                } else {
+                  throw new Error(
+                    result.error || "No confirmation URL in response",
+                  );
+                }
+                return result;
+              } catch (error) {
+                console.error("Billing setup failed:", error);
+                throw error; // Re-throw to let component handle it
               }
-              return result;
             }}
           />
         );

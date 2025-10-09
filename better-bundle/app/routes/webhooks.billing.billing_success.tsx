@@ -69,38 +69,26 @@ export async function action({ request }: ActionFunctionArgs) {
       payment_reference: billingAttempt.payment_reference || null,
     };
 
-    // Check if invoice already exists
-    const existingInvoice = await prisma.billing_invoices.findFirst({
+    // ✅ RACE CONDITION PROTECTION: Use upsert to prevent duplicate processing
+    const upsertResult = await prisma.billing_invoices.upsert({
       where: {
         shopify_invoice_id: invoiceData.shopify_invoice_id,
       },
+      update: {
+        amount_paid: invoiceData.amount_paid,
+        status: "paid",
+        paid_at: invoiceData.paid_at,
+        payment_method: invoiceData.payment_method,
+        payment_reference: invoiceData.payment_reference,
+        shopify_response: invoiceData.shopify_response,
+        updated_at: new Date(),
+      },
+      create: invoiceData,
     });
 
-    if (existingInvoice) {
-      // Update existing invoice
-      await prisma.billing_invoices.update({
-        where: { id: existingInvoice.id },
-        data: {
-          amount_paid: invoiceData.amount_paid,
-          status: "paid",
-          paid_at: invoiceData.paid_at,
-          payment_method: invoiceData.payment_method,
-          payment_reference: invoiceData.payment_reference,
-          shopify_response: invoiceData.shopify_response,
-        },
-      });
-      console.log(
-        `✅ Updated existing billing invoice ${invoiceData.shopify_invoice_id}`,
-      );
-    } else {
-      // Create new invoice
-      await prisma.billing_invoices.create({
-        data: invoiceData,
-      });
-      console.log(
-        `✅ Created new billing invoice ${invoiceData.shopify_invoice_id}`,
-      );
-    }
+    console.log(
+      `✅ Billing invoice processed: ${invoiceData.shopify_invoice_id} (${upsertResult.id})`,
+    );
 
     console.log(
       `✅ Billing successful: $${amount} ${currency} for shop ${shop}`,

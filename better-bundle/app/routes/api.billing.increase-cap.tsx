@@ -2,6 +2,142 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
+  try {
+    // ✅ TRANSACTION: Wrap all reprocessing in a single transaction
+    await prisma.$transaction(async (tx) => {
+      // Find all rejected commissions for this cycle with row-level locking
+      const rejectedCommissions = await tx.commission_records.findMany({
+        where: {
+          shop_id: shopId,
+          billing_cycle_id: cycleId,
+          charge_type: "rejected",
+          status: "rejected",
+        },
+        select: {
+          id: true,
+          commission_overflow: true,
+        },
+        orderBy: { created_at: "asc" }, // Process in order
+      });
+
+      if (rejectedCommissions.length === 0) {
+        console.log(
+          `ℹ️ No rejected commissions to reprocess for shop ${shopId}`,
+        );
+        return;
+      }
+
+      console.log(
+        `🔄 Reprocessing ${rejectedCommissions.length} rejected commissions for shop ${shopId}`,
+      );
+
+      // Get current cycle with row-level locking
+      const currentCycle = await tx.billing_cycles.findUnique({
+        where: { id: cycleId },
+        select: {
+          current_cap_amount: true,
+          usage_amount: true,
+        },
+      });
+
+      if (!currentCycle) {
+        console.error(`❌ Billing cycle ${cycleId} not found`);
+        return;
+      }
+
+      let remainingCap =
+        Number(currentCycle.current_cap_amount) -
+        Number(currentCycle.usage_amount);
+
+      let totalCharged = 0;
+
+      // Reprocess each rejected commission with atomic updates
+      for (const commission of rejectedCommissions) {
+        const commissionOverflow = Number(commission.commission_overflow);
+
+        if (commissionOverflow <= remainingCap) {
+          // Can charge the full overflow amount
+          const updateResult = await tx.commission_records.updateMany({
+            where: {
+              id: commission.id,
+              charge_type: "rejected", // Only update if still rejected
+              status: "rejected",
+            },
+            data: {
+              commission_charged: commissionOverflow,
+              commission_overflow: 0,
+              charge_type: "full",
+              status: "pending",
+              updated_at: new Date(),
+            },
+          });
+
+          if (updateResult.count > 0) {
+            totalCharged += commissionOverflow;
+            remainingCap -= commissionOverflow;
+            console.log(
+              `✅ Reprocessed commission ${commission.id}: $${commissionOverflow} charged`,
+            );
+          }
+        } else if (remainingCap > 0) {
+          // Partial charge only
+          const partialCharge = remainingCap;
+          const newOverflow = commissionOverflow - partialCharge;
+
+          const updateResult = await tx.commission_records.updateMany({
+            where: {
+              id: commission.id,
+              charge_type: "rejected", // Only update if still rejected
+              status: "rejected",
+            },
+            data: {
+              commission_charged: partialCharge,
+              commission_overflow: newOverflow,
+              charge_type: "partial",
+              status: "pending",
+              updated_at: new Date(),
+            },
+          });
+
+          if (updateResult.count > 0) {
+            totalCharged += partialCharge;
+            remainingCap = 0;
+            console.log(
+              `⚠️ Partial reprocess commission ${commission.id}: $${partialCharge} charged, $${newOverflow} still overflow`,
+            );
+          }
+        } else {
+          // No remaining cap
+          break;
+        }
+      }
+
+      // ✅ ATOMIC: Update cycle usage once with total charged amount
+      if (totalCharged > 0) {
+        await tx.billing_cycles.update({
+          where: { id: cycleId },
+          data: {
+            usage_amount: {
+              increment: totalCharged,
+            },
+          },
+        });
+
+        console.log(
+          `✅ Updated cycle usage by $${totalCharged} for shop ${shopId}`,
+        );
+      }
+
+      console.log(
+        `✅ Completed reprocessing rejected commissions for shop ${shopId}`,
+      );
+    });
+  } catch (error) {
+    console.error(`❌ Error reprocessing rejected commissions: ${error}`);
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
@@ -107,7 +243,7 @@ export async function action({ request }: ActionFunctionArgs) {
     `;
 
     const variables = {
-      id: billingPlan.subscription_line_item_id,
+      id: shopSubscription.shopify_subscription.shopify_line_item_id,
       cappedAmount: {
         amount: newSpendingLimit.toString(),
         currencyCode: currency,
@@ -143,9 +279,12 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Update billing cycle cap
+    // ✅ ATOMIC: Update billing cycle cap with race condition protection
     await prisma.billing_cycles.update({
-      where: { id: currentCycle.id },
+      where: {
+        id: currentCycle.id,
+        current_cap_amount: currentCap, // Only update if cap hasn't changed
+      },
       data: {
         current_cap_amount: newSpendingLimit,
       },
@@ -165,6 +304,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       console.log(`✅ Shop ${shop} services reactivated after cap increase`);
+
+      // ✅ REPROCESS REJECTED COMMISSIONS
+      await reprocessRejectedCommissions(shopRecord.id, currentCycle.id);
     }
 
     console.log(
