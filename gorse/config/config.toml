@@ -55,7 +55,10 @@ negative_feedback_types = [
     "refund",
     "product_removed_from_cart",
     "bounce",
-    "session_bounce"
+    "session_bounce",
+    "recommendation_declined",
+    "recommendation_declined_high_confidence",
+    "recommendation_declined_similar"
 ]
 
 positive_feedback_ttl = 0

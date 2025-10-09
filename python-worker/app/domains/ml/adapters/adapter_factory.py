@@ -18,6 +18,7 @@ from .customer_linked_adapter import CustomerLinkedAdapter
 from .recommendation_viewed_adapter import RecommendationViewedAdapter
 from .recommendation_clicked_adapter import RecommendationClickedAdapter
 from .recommendation_add_to_cart_adapter import RecommendationAddToCartAdapter
+from .recommendation_declined_adapter import RecommendationDeclinedAdapter
 
 from app.core.logging import get_logger
 
@@ -47,6 +48,7 @@ class InteractionEventAdapterFactory:
             "recommendation_viewed": RecommendationViewedAdapter(),
             "recommendation_clicked": RecommendationClickedAdapter(),
             "recommendation_add_to_cart": RecommendationAddToCartAdapter(),
+            "recommendation_declined": RecommendationDeclinedAdapter(),
         }
 
     def get_adapter(self, event_type: str) -> Optional[BaseInteractionEventAdapter]:

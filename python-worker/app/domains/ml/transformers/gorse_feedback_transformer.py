@@ -37,6 +37,10 @@ class GorseFeedbackTransformer:
             "product_removed_from_cart": -0.2,
             "bounce": -0.1,
             "session_bounce": -0.15,
+            # Recommendation decline signals
+            "recommendation_declined": -0.3,  # User explicitly rejected recommendation
+            "recommendation_declined_high_confidence": -0.5,  # Rejected high-confidence recommendation
+            "recommendation_declined_similar": -0.4,  # Rejected similar product
             # Session-based feedback
             "high_engagement_session": 0.4,
             "conversion_session": 0.8,
@@ -144,6 +148,81 @@ class GorseFeedbackTransformer:
         except Exception as e:
             logger.error(f"Failed to transform order to feedback: {str(e)}")
             return []
+
+    def transform_decline_event_to_feedback(
+        self, decline_event: Dict[str, Any], shop_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Transform recommendation decline event to Gorse feedback
+
+        Creates negative feedback signals to help Gorse learn from user rejections
+        """
+        try:
+            # Extract basic event data
+            customer_id = decline_event.get("customer_id", "")
+            product_id = decline_event.get("product_id", "")
+            session_id = decline_event.get("session_id", "")
+            created_at = decline_event.get("created_at", now_utc())
+
+            if not customer_id or not product_id:
+                return None
+
+            # Extract decline metadata
+            metadata = decline_event.get("metadata", {})
+            data = metadata.get("data", {})
+
+            # Get decline context for weighting
+            decline_reason = data.get("decline_reason", "user_declined")
+            confidence = float(data.get("confidence", 0.0))
+            position = int(data.get("position", 1))
+            product_type = data.get("product", {}).get("type", "")
+
+            # Calculate decline weight based on context
+            base_weight = self.feedback_weights.get("recommendation_declined", -0.3)
+
+            # Adjust weight based on confidence (higher confidence = stronger negative signal)
+            if confidence >= 0.8:
+                weight = self.feedback_weights.get(
+                    "recommendation_declined_high_confidence", -0.5
+                )
+            elif confidence >= 0.6:
+                weight = base_weight * 1.2  # 20% stronger negative signal
+            else:
+                weight = base_weight
+
+            # Adjust weight based on position (earlier declines = stronger signal)
+            position_factor = max(
+                0.5, 1.0 - (position - 1) * 0.1
+            )  # 1st position = 1.0, 2nd = 0.9, etc.
+            weight *= position_factor
+
+            # Determine the appropriate decline feedback type based on context
+            if confidence >= 0.8:
+                feedback_type = "recommendation_declined_high_confidence"
+            elif confidence >= 0.6:
+                feedback_type = "recommendation_declined_similar"
+            else:
+                feedback_type = "recommendation_declined"
+
+            # Create feedback object using Gorse-configured decline types
+            feedback = {
+                "UserId": f"shop_{shop_id}_{customer_id}",
+                "ItemId": f"shop_{shop_id}_{product_id}",
+                "FeedbackType": feedback_type,  # Use Gorse-configured decline types
+                "Value": round(weight, 3),  # Negative value for decline
+                "Timestamp": (
+                    created_at.isoformat()
+                    if hasattr(created_at, "isoformat")
+                    else str(created_at)
+                ),
+                "Comment": f"Declined: {decline_reason} (conf: {confidence:.2f}, pos: {position})",
+            }
+
+            return feedback
+
+        except Exception as e:
+            logger.error(f"Failed to transform decline event to feedback: {str(e)}")
+            return None
 
     def transform_optimized_interaction_features_to_feedback(
         self, interaction_features, shop_id: str
