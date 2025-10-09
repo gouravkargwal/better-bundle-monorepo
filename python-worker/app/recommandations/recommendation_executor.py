@@ -85,6 +85,9 @@ class RecommendationExecutor:
             elif level == "latest":
                 return await self._execute_latest(category, limit)
 
+            elif level == "trending":
+                return await self._execute_trending(category, limit)
+
             elif level == "popular_category":
                 return await self._execute_popular_category(category, limit)
 
@@ -334,6 +337,20 @@ class RecommendationExecutor:
             }
         return {"success": False, "items": [], "source": "gorse_latest_failed"}
 
+    async def _execute_trending(
+        self, category: Optional[str], limit: int
+    ) -> Dict[str, Any]:
+        """Execute trending recommendation"""
+        # Use Gorse's popular items as trending (can be enhanced with trending-specific logic)
+        result = await self.gorse_client.get_popular_items(n=limit, category=category)
+        if result["success"]:
+            return {
+                "success": True,
+                "items": result["items"],
+                "source": "gorse_trending",
+            }
+        return {"success": False, "items": [], "source": "gorse_trending_failed"}
+
     async def _execute_popular_category(
         self, category: Optional[str], limit: int
     ) -> Dict[str, Any]:
@@ -474,10 +491,11 @@ class RecommendationExecutor:
                 "popular_category",  # Level 5: Fallback
             ],
             "homepage": [
-                "recently_viewed",  # Level 1: For returning visitors (continuity)
-                "user_recommendations",  # Level 2: Personalized (if user_id)
-                "latest",  # Level 3: New arrivals (fresh content)
-                "popular",  # Level 4: Best sellers (for new visitors)
+                "user_recommendations",  # Level 1: Personalized (if user_id)
+                "recently_viewed",  # Level 2: For returning visitors (continuity)
+                "trending",  # Level 3: Trending items (industry standard)
+                "latest",  # Level 4: New arrivals (fresh content)
+                "popular",  # Level 5: Best sellers (for new visitors)
             ],
             "cart": [
                 "session_recommendations",  # Level 1: Session-based
@@ -490,7 +508,11 @@ class RecommendationExecutor:
                 "recently_viewed",  # Level 2: Recently viewed items
                 "popular",  # Level 3: Popular items
             ],
-            "checkout": ["popular"],  # Level 1: Popular items (fast)
+            "checkout": [
+                "frequently_bought_together",  # Level 1: Last-minute add-ons (industry standard)
+                "popular_category",  # Level 2: Popular in same category
+                "popular",  # Level 3: General popular items (fallback)
+            ],
             "order_history": [
                 "user_recommendations",  # Level 1: Personalized based on order history
                 "item_neighbors",  # Level 2: Similar to previously ordered items

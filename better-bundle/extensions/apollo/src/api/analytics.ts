@@ -280,6 +280,7 @@ class ApolloAnalyticsClient {
     sessionId: string,
     productId: string,
     position: number,
+    productData?: any,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -290,15 +291,21 @@ class ApolloAnalyticsClient {
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
-        // Standard structure expected by adapters
+        // Streamlined metadata - only what Gorse actually uses
         data: {
           product: {
             id: productId,
+            title: productData?.title || "",
+            price: productData?.price?.amount || 0,
+            type: productData?.product_type || "",
+            vendor: productData?.vendor || "",
           },
           type: "recommendation",
           position: position,
           widget: "apollo_recommendation",
           algorithm: "apollo_algorithm",
+          confidence: productData?.score || 0.0,
+          decline_reason: metadata?.decline_reason || "user_declined",
         },
         action: "recommendation_declined",
         ...metadata,

@@ -188,16 +188,17 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
     // Track decline
     if (shopDomain && sessionId && currentProduct) {
-      await apolloAnalytics.trackRecommendationClick(
+      await apolloAnalytics.trackRecommendationDecline(
         shopDomain,
         sessionId,
         currentProduct.id,
         currentOfferIndex + 1,
+        currentProduct, // Pass full product data
         {
           source: "apollo_post_purchase",
           customer_id: customerId,
           order_id: orderId,
-          action: "recommendation_declined",
+          decline_reason: "user_declined",
         },
       );
     }
@@ -219,6 +220,10 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
       console.log(
         "Apollo: Max offers reached or no more products, completing flow",
       );
+
+      // No need to track implicit declines - user never saw these products
+      // Only track actual user interactions (views, clicks, explicit declines)
+
       await done();
     }
   }, [

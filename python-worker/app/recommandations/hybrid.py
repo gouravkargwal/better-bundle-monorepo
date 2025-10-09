@@ -31,8 +31,10 @@ class HybridRecommendationService:
             "user_recommendations": 0.3,  # 30% personalized (if user_id available)
         },
         "homepage": {
-            "user_recommendations": 0.6,  # 60% personalized
-            "popular": 0.4,  # 40% popular items
+            "user_recommendations": 0.4,  # 40% personalized
+            "recently_viewed": 0.3,  # 30% recently viewed
+            "trending": 0.2,  # 20% trending items
+            "popular": 0.1,  # 10% popular items
         },
         "cart": {
             "session_recommendations": 0.5,  # 50% session-based
@@ -45,7 +47,11 @@ class HybridRecommendationService:
             "user_neighbors": 0.3,  # 30% "People like you bought..."
             "popular": 0.2,  # 20% popular items
         },
-        "checkout": {"popular": 1.0},  # 100% popular (fast, reliable)
+        "checkout": {
+            "frequently_bought_together": 0.6,  # 60% cross-sell (last-minute add-ons)
+            "popular_category": 0.3,  # 30% category popular
+            "popular": 0.1,  # 10% general popular items
+        },
         "order_history": {
             "user_recommendations": 0.6,  # 60% personalized based on order history
             "popular_category": 0.3,  # 30% popular in order history categories
@@ -485,6 +491,18 @@ class HybridRecommendationService:
                     "success": True,
                     "items": result["items"],
                     "source": "gorse_latest",
+                }
+            return result
+
+        elif source == "trending":
+            result = await self.gorse_client.get_popular_items(
+                n=limit, category=category
+            )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_trending",
                 }
             return result
 
