@@ -1,4 +1,4 @@
-import React from "react";
+import { useEffect } from "react";
 import {
   BlockStack,
   reactExtension,
@@ -12,7 +12,6 @@ import {
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
 import { useRecommendations } from "./hooks/useRecommendations";
-import { analyticsApi } from "./api/analytics";
 
 export default reactExtension(
   "customer-account.order-status.block.render",
@@ -24,21 +23,32 @@ function OrderStatusWithRecommendations() {
   const { myshopifyDomain } = useShop();
   const { navigate } = useNavigation();
 
-  // Extension activity is automatically tracked via recommendation API calls
+  const {
+    loading,
+    products,
+    error,
+    trackRecommendationClick,
+    trackRecommendationView,
+    columnConfig,
+  } = useRecommendations({
+    context: "order_status",
+    limit: 2,
+    customerId,
+    shopDomain: myshopifyDomain,
+    columnConfig: {
+      extraSmall: 1, // 1 column on very small screens
+      small: 2, // 2 columns on small screens
+      medium: 2, // 2 columns on medium screens
+      large: 2, // 2 columns on large screens
+    },
+  });
 
-  const { loading, products, error, trackRecommendationClick, columnConfig } =
-    useRecommendations({
-      context: "order_status",
-      limit: 2,
-      customerId,
-      shopDomain: myshopifyDomain,
-      columnConfig: {
-        extraSmall: 1, // 1 column on very small screens
-        small: 2, // 2 columns on small screens
-        medium: 2, // 2 columns on medium screens
-        large: 2, // 2 columns on large screens
-      },
-    });
+  // Track when recommendations come into view
+  useEffect(() => {
+    if (!products.length || loading) return;
+    console.log("🔍 Venus: Tracking recommendation view");
+    trackRecommendationView();
+  }, [products, loading, trackRecommendationView]);
 
   // Override trackRecommendationClick to include navigation
   const handleShopNow = async (
@@ -46,6 +56,7 @@ function OrderStatusWithRecommendations() {
     position: number,
     productUrl: string,
   ) => {
+    console.log("🔍 Venus: Tracking recommendation click");
     const urlWithAttribution = await trackRecommendationClick(
       productId,
       position,

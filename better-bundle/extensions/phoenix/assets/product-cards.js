@@ -182,6 +182,7 @@ class ProductCardManager {
     analyticsApi = null,
     sessionId,
     context = "cart",
+    trackRecommendationView = null,
   ) {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
     if (!swiperWrapper) {
@@ -272,6 +273,28 @@ class ProductCardManager {
 
         // Set skeleton state to loaded
         this.setSkeletonState('loaded');
+
+        // Set up intersection observer to track when recommendations are actually viewed
+        if (trackRecommendationView && recommendations.length > 0) {
+          const productIds = recommendations.map(product => product.id);
+          const carouselContainer = document.querySelector('.shopify-app-block');
+
+          if (carouselContainer) {
+            const observer = new IntersectionObserver(
+              (entries) => {
+                entries.forEach((entry) => {
+                  if (entry.isIntersecting) {
+                    trackRecommendationView(productIds);
+                    observer.disconnect(); // Only track once
+                  }
+                });
+              },
+              { threshold: 0.1 } // Trigger when 10% of the element is visible
+            );
+
+            observer.observe(carouselContainer);
+          }
+        }
 
         console.log('✅ ProductCardManager: Successfully updated product cards');
       } catch (error) {

@@ -13,7 +13,13 @@
  * - Comprehensive error handling and fallbacks
  * - Advanced analytics and attribution tracking
  */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 
 import {
   extend,
@@ -320,6 +326,7 @@ export function App({
   const [error, setError] = useState<string | null>(null);
   const [addedProducts, setAddedProducts] = useState<Set<string>>(new Set());
   const [analyticsTracked, setAnalyticsTracked] = useState(false);
+  const recommendationsRef = useRef<HTMLDivElement>(null);
 
   // ✅ CONVERSION OPTIMIZATION: Advanced state management
   const [viewTime, setViewTime] = useState<number>(0);
@@ -382,35 +389,55 @@ export function App({
     [],
   );
 
-  // Track recommendation view when component mounts (only once)
+  // Track recommendation view when user actually views them
   useEffect(() => {
-    if (shopDomain && recommendations.length > 0 && !analyticsTracked) {
-      const productIds = recommendations.map(
-        (rec: ProductRecommendation) => rec.id,
-      );
+    if (!shopDomain || recommendations.length === 0 || analyticsTracked) return;
 
-      apolloAnalytics
-        .trackRecommendationView(
-          shopDomain.replace(".myshopify.com", ""),
-          customerId,
-          orderId,
-          productIds,
-          {
-            source: "apollo_post_purchase",
-            recommendation_count: recommendations.length,
-            purchased_products_count: purchasedProducts.length,
-            recommendation_source: source,
-            load_time: timestamp ? Date.now() - timestamp : undefined,
-          },
-        )
-        .then(() => {
-          setAnalyticsTracked(true);
-          console.log("Apollo: Recommendation view tracked successfully");
-        })
-        .catch((error) => {
-          console.error("Apollo: Failed to track recommendation view:", error);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const productIds = recommendations.map(
+              (rec: ProductRecommendation) => rec.id,
+            );
+
+            apolloAnalytics
+              .trackRecommendationView(
+                shopDomain.replace(".myshopify.com", ""),
+                customerId,
+                orderId,
+                productIds,
+                {
+                  source: "apollo_post_purchase",
+                  recommendation_count: recommendations.length,
+                  purchased_products_count: purchasedProducts.length,
+                  recommendation_source: source,
+                  load_time: timestamp ? Date.now() - timestamp : undefined,
+                },
+              )
+              .then(() => {
+                setAnalyticsTracked(true);
+                console.log("Apollo: Recommendation view tracked successfully");
+              })
+              .catch((error) => {
+                console.error(
+                  "Apollo: Failed to track recommendation view:",
+                  error,
+                );
+              });
+
+            observer.disconnect(); // Only track once
+          }
         });
+      },
+      { threshold: 0.1 }, // Trigger when 10% of the element is visible
+    );
+
+    if (recommendationsRef.current) {
+      observer.observe(recommendationsRef.current);
     }
+
+    return () => observer.disconnect();
   }, [
     recommendations,
     shopDomain,
@@ -906,7 +933,9 @@ export function App({
       </TextContainer>
 
       {/* @ts-ignore */}
-      <BlockStack spacing="base">{recommendationComponents}</BlockStack>
+      <BlockStack spacing="base" ref={recommendationsRef}>
+        {recommendationComponents}
+      </BlockStack>
 
       {/* @ts-ignore */}
       <View>

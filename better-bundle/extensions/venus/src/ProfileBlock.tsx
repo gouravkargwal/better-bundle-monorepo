@@ -1,4 +1,4 @@
-import React from "react";
+import { useEffect } from "react";
 import {
   reactExtension,
   TextBlock,
@@ -10,7 +10,6 @@ import {
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
 import { useRecommendations } from "./hooks/useRecommendations";
-import { analyticsApi } from "./api/analytics";
 
 export default reactExtension("customer-account.profile.block.render", () => (
   <ProfileBlock />
@@ -20,20 +19,31 @@ function ProfileBlock() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { navigate } = useNavigation();
 
-  // Extension activity is automatically tracked via recommendation API calls
+  const {
+    loading,
+    products,
+    error,
+    trackRecommendationClick,
+    trackRecommendationView,
+    columnConfig,
+  } = useRecommendations({
+    context: "profile",
+    limit: 8,
+    customerId,
+    shopDomain: "",
+    columnConfig: {
+      extraSmall: 1, // 1 column on very small screens
+      small: 2, // 2 columns on small screens
+      medium: 3, // 3 columns on medium screens
+      large: 4, // 4 columns on large screens
+    },
+  });
 
-  const { loading, products, error, trackRecommendationClick, columnConfig } =
-    useRecommendations({
-      context: "profile",
-      limit: 8,
-      customerId,
-      columnConfig: {
-        extraSmall: 1, // 1 column on very small screens
-        small: 2, // 2 columns on small screens
-        medium: 3, // 3 columns on medium screens
-        large: 4, // 4 columns on large screens
-      },
-    });
+  // Track when recommendations come into view
+  useEffect(() => {
+    if (!products.length || loading) return;
+    trackRecommendationView();
+  }, [products, loading, trackRecommendationView]);
 
   // Override trackRecommendationClick to include navigation
   const handleShopNow = async (

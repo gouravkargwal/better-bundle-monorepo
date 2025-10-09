@@ -40,6 +40,30 @@ class RecommendationCarousel {
     };
   }
 
+  // Track recommendation view when user actually views them
+  async trackRecommendationView(productIds) {
+    if (!this.analyticsApi || !productIds || productIds.length === 0) {
+      return;
+    }
+
+    try {
+      await this.analyticsApi.trackRecommendationView(
+        this.config.shopDomain || '',
+        this.config.context,
+        this.config.customerId ? String(this.config.customerId) : undefined,
+        productIds,
+        {
+          source: 'phoenix_theme_extension',
+          cart_product_count: this.config.productIds?.length || 0,
+          recommendation_count: productIds.length
+        }
+      );
+      console.log('✅ Phoenix: Recommendation view tracked successfully');
+    } catch (error) {
+      console.error('❌ Phoenix: Failed to track recommendation view:', error);
+    }
+  }
+
   // Initialize the recommendation carousel
   async init() {
     try {
@@ -123,29 +147,8 @@ class RecommendationCarousel {
 
         const productIds = recommendations.map((product) => product.id);
 
-        if (this.analyticsApi) {
-          try {
-            await this.analyticsApi.trackRecommendationView(
-              this.config.shopDomain || '',
-              this.config.context,
-              this.config.customerId ? String(this.config.customerId) : undefined,
-              productIds,
-              {
-                source: 'phoenix_theme_extension',
-                cart_product_count: this.config.productIds?.length || 0,
-                recommendation_count: productIds.length
-              }
-            );
-          } catch (error) {
-            console.error('❌ Phoenix: Failed to track recommendation view:', error);
-            // Don't fail the entire flow for tracking errors
-          }
-        } else {
-          console.warn('⚠️ Phoenix: Analytics API not available, skipping recommendation tracking');
-        }
-
         // Update product cards with real recommendations and analytics tracking
-        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
+        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context, this.trackRecommendationView.bind(this));
       } else {
         console.log('❌ Phoenix: No recommendations available, hiding carousel');
         this.hideCarousel();

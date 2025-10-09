@@ -5,6 +5,7 @@ import {
   type ExtensionContext,
 } from "../api/recommendations";
 import { analyticsApi } from "../api/analytics";
+import { useApi } from "@shopify/ui-extensions-react/customer-account";
 
 interface Product {
   id: string;
@@ -37,21 +38,45 @@ export function useRecommendations({
   shopDomain,
   columnConfig,
 }: UseRecommendationsProps) {
-  const [loading, setLoading] = useState(true);
+  const { storage } = useApi();
+  const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId] = useState(() => {
-    // Try to get unified session_id from sessionStorage first
-    const unifiedSessionId = sessionStorage.getItem("unified_session_id");
-    if (unifiedSessionId) {
-      console.log("🔗 Venus: Using unified session_id:", unifiedSessionId);
-      return unifiedSessionId;
-    }
-    // Fallback to generated session_id
-    const generatedId = `venus_${context}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    console.log("🔗 Venus: Generated session_id:", generatedId);
-    return generatedId;
-  });
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        // 1. Try reading from storage first (fastest)
+        const cachedSessionId =
+          await storage.read<string>("unified_session_id");
+
+        if (cachedSessionId) {
+          console.log(
+            "🔗 Venus: Using cached session_id from storage:",
+            cachedSessionId,
+          );
+          setSessionId(cachedSessionId);
+          return;
+        }
+
+        // 2. If not in storage, fetch from backend API
+        console.log("🌐 Venus: Fetching session_id from backend");
+        const sessionId = await analyticsApi.getOrCreateSession(
+          shopDomain,
+          customerId,
+        );
+        await storage.write("unified_session_id", sessionId);
+        console.log("✨ Venus: Session initialized from backend:", sessionId);
+        setSessionId(sessionId);
+      } catch (err) {
+        console.error("❌ Venus: Failed to initialize session:", err);
+        setError("Failed to initialize session");
+      }
+    };
+
+    initializeSession();
+  }, [storage, shopDomain, customerId]);
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
@@ -61,13 +86,13 @@ export function useRecommendations({
     position: number,
     productUrl: string,
   ): Promise<string> => {
-    // Track interaction using unified analytics (non-blocking)
     analyticsApi
       .trackRecommendationClick(
-        shopDomain?.replace(".myshopify.com", "") || "",
+        shopDomain,
         context,
         productId,
         position,
+        sessionId,
         customerId,
         { source: `${context}_recommendation` },
       )
@@ -75,40 +100,37 @@ export function useRecommendations({
         console.error(`Failed to track ${context} click:`, error);
       });
 
-    // Store attribution in cart for order processing
-    analyticsApi
-      .storeCartAttribution(sessionId, productId, context, position)
-      .catch((error) => {
-        console.error(`Failed to store cart attribution:`, error);
-      });
+    return productUrl;
+  };
 
-    // Add attribution parameters to track recommendation source
-    const shortRef = sessionId
-      .split("")
-      .reduce((hash, char) => {
-        return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
-      }, 0)
-      .toString(36)
-      .substring(0, 6);
+  // Track recommendation view when user actually views them
+  const trackRecommendationView = async () => {
+    if (products.length === 0) {
+      return;
+    }
 
-    const attributionParams = new URLSearchParams({
-      ref: shortRef,
-      src: productId,
-      pos: position.toString(),
-    });
-
-    // Return product page URL with attribution immediately
-    const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
-    console.log(
-      `${context} recommendation clicked:`,
-      productUrlWithAttribution,
-    );
-
-    return productUrlWithAttribution;
+    try {
+      const productIds = products.map((product) => product.id);
+      await analyticsApi.trackRecommendationView(
+        shopDomain,
+        context,
+        sessionId,
+        customerId,
+        productIds,
+        { source: `${context}_page` },
+      );
+      console.log(`✅ Venus: Recommendation view tracked for ${context}`);
+    } catch (error) {
+      console.error(`❌ Venus: Failed to track recommendation view:`, error);
+    }
   };
 
   // Fetch recommendations
   useEffect(() => {
+    if (!sessionId) {
+      console.log("⏳ Venus: Waiting for session initialization");
+      return;
+    }
     const fetchRecommendations = async () => {
       try {
         setLoading(true);
@@ -137,18 +159,6 @@ export function useRecommendations({
           );
 
           setProducts(transformedProducts);
-
-          // Only track recommendation view if there are actually products to display
-          if (transformedProducts.length > 0) {
-            const productIds = transformedProducts.map((product) => product.id);
-            await analyticsApi.trackRecommendationView(
-              shopDomain,
-              context,
-              customerId,
-              productIds,
-              { source: `${context}_page` },
-            );
-          }
         } else {
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
@@ -168,6 +178,7 @@ export function useRecommendations({
     products,
     error,
     trackRecommendationClick,
+    trackRecommendationView,
     columnConfig: memoizedColumnConfig,
   };
 }
