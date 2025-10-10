@@ -70,13 +70,20 @@ class AttributionEngine:
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
         self.commission_service = CommissionServiceV2(session)
-        # ✅ SCENARIO 9: Configurable attribution windows
+        # ✅ INDUSTRY STANDARD: Configurable attribution windows
         self.attribution_windows = {
-            "default": timedelta(hours=24),  # 24 hours default
-            "short": timedelta(hours=2),  # 2 hours for quick purchases
-            "medium": timedelta(days=3),  # 3 days for consideration
-            "long": timedelta(days=30),  # 30 days for long consideration
-            "extended": timedelta(days=90),  # 90 days for high-value items
+            "quick": timedelta(hours=24),  # Fast purchases (food, essentials)
+            "standard": timedelta(days=7),  # Most e-commerce (industry standard)
+            "extended": timedelta(days=14),  # High-consideration products
+            "complex": timedelta(days=30),  # B2B/complex purchases only
+        }
+
+        # ✅ INDUSTRY STANDARD: Minimum confidence thresholds
+        self.confidence_thresholds = {
+            "recommendation_add_to_cart": 0.7,  # 70% minimum (industry standard)
+            "recommendation_clicked": 0.6,  # 60% minimum
+            "recommendation_viewed": 0.5,  # 50% minimum
+            "journey_based": 0.6,  # 60% minimum for journey matching
         }
 
     async def calculate_attribution(
@@ -168,15 +175,15 @@ class AttributionEngine:
                 breakdown.attributed_amount for breakdown in attribution_breakdown
             )
 
-            # If no attribution found, still count the total purchase amount for revenue tracking
+            # If no attribution found, do NOT count any revenue
             if total_attributed_revenue == 0 and attribution_breakdown:
                 # This means attribution was calculated but resulted in 0
                 total_attributed_revenue = Decimal("0.00")
             elif total_attributed_revenue == 0 and not attribution_breakdown:
-                # No attribution-eligible interactions found, but still count total revenue
-                total_attributed_revenue = context.purchase_amount
+                # No attribution-eligible interactions found - do NOT attribute any revenue
+                total_attributed_revenue = Decimal("0.00")
                 logger.info(
-                    f"💰 No attribution-eligible interactions found, counting total purchase amount: ${total_attributed_revenue}"
+                    f"💰 No attribution-eligible interactions found, attributing $0.00 (no extension interactions)"
                 )
 
             result = AttributionResult(
@@ -697,6 +704,20 @@ class AttributionEngine:
                     rec_interaction, time_diff, journey_steps, product_interactions
                 )
 
+                # ✅ INDUSTRY STANDARD: Apply minimum confidence threshold
+                interaction_type = rec_interaction["interaction_type"]
+                min_confidence = self.confidence_thresholds.get(
+                    interaction_type,
+                    self.confidence_thresholds.get("journey_based", 0.6),
+                )
+
+                if confidence < min_confidence:
+                    logger.info(
+                        f"❌ Confidence {confidence:.2%} below industry threshold {min_confidence:.2%} "
+                        f"for {interaction_type}"
+                    )
+                    continue
+
                 logger.info(
                     f"✅ ATTRIBUTION MATCH FOUND!\n"
                     f"   Product: {product_id}\n"
@@ -704,7 +725,7 @@ class AttributionEngine:
                     f"   Type: {rec_interaction['interaction_type']}\n"
                     f"   Time to purchase: {time_diff}\n"
                     f"   Journey steps: {journey_steps}\n"
-                    f"   Confidence: {confidence:.2%}"
+                    f"   Confidence: {confidence:.2%} (threshold: {min_confidence:.2%})"
                 )
 
                 return {
@@ -1322,18 +1343,18 @@ class AttributionEngine:
                 for product in context.purchase_products
             )
 
-            # Determine window based on purchase value
-            if total_value < 50:
-                window_type = "short"  # Quick purchases under $50
+            # ✅ INDUSTRY STANDARD: Determine window based on purchase value
+            if total_value < 25:
+                window_type = "quick"  # Fast purchases (food, essentials)
             elif total_value < 200:
-                window_type = "medium"  # Medium consideration $50-$200
+                window_type = "standard"  # Most e-commerce (industry standard)
             elif total_value < 1000:
-                window_type = "long"  # Long consideration $200-$1000
+                window_type = "extended"  # High-consideration products
             else:
-                window_type = "extended"  # Extended consideration $1000+
+                window_type = "complex"  # B2B/complex purchases only
 
             window = self.attribution_windows.get(
-                window_type, self.attribution_windows["default"]
+                window_type, self.attribution_windows["standard"]
             )
 
             logger.info(
