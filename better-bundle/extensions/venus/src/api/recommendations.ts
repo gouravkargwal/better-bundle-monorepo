@@ -38,10 +38,10 @@ export interface ProductRecommendation {
     amount: string;
     currency_code: string;
   };
-  image?: {
+  image: {
     url: string;
     alt_text?: string;
-  };
+  } | null;
   vendor?: string;
   product_type?: string;
   tags?: string[];

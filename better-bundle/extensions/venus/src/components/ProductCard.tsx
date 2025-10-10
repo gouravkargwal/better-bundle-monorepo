@@ -14,7 +14,10 @@ interface Product {
   title: string;
   handle: string;
   price: string;
-  image: string;
+  image: {
+    url: string;
+    alt_text?: string;
+  } | null;
   inStock: boolean;
   url: string;
   variant_id?: string;
@@ -65,7 +68,11 @@ export function ProductCard({
               "none",
             )}
           >
-            <Image source={product.image} fit="cover" aspectRatio={2} />
+            <Image
+              source={product.image?.url || ""}
+              fit="cover"
+              aspectRatio={2}
+            />
           </View>
 
           {/* Mobile: Compact aspect ratio */}
@@ -74,7 +81,11 @@ export function ProductCard({
               .when({ viewportInlineSize: { min: "extraSmall" } }, "auto")
               .when({ viewportInlineSize: { min: "small" } }, "none")}
           >
-            <Image source={product.image} fit="cover" aspectRatio={2} />
+            <Image
+              source={product.image?.url || ""}
+              fit="cover"
+              aspectRatio={2}
+            />
           </View>
 
           {/* Tablet: Slightly wider */}
@@ -83,7 +94,11 @@ export function ProductCard({
               .when({ viewportInlineSize: { min: "small" } }, "auto")
               .when({ viewportInlineSize: { min: "medium" } }, "none")}
           >
-            <Image source={product.image} fit="cover" aspectRatio={1.1} />
+            <Image
+              source={product.image?.url || ""}
+              fit="cover"
+              aspectRatio={1.1}
+            />
           </View>
 
           {/* Desktop: Moderate aspect ratio */}
@@ -93,7 +108,11 @@ export function ProductCard({
               "auto",
             )}
           >
-            <Image source={product.image} fit="cover" aspectRatio={1.2} />
+            <Image
+              source={product.image?.url || ""}
+              fit="cover"
+              aspectRatio={1.2}
+            />
           </View>
         </View>
         <BlockStack spacing="tight">

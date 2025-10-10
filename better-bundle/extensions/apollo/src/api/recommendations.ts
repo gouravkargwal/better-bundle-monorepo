@@ -53,7 +53,10 @@ export interface ProductRecommendation {
     amount: string;
     currency_code: string;
   };
-  image: string | null;
+  image: {
+    url: string;
+    alt_text?: string;
+  } | null;
   vendor: string;
   product_type: string;
   available: boolean;

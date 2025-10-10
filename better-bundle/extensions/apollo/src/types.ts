@@ -9,6 +9,7 @@ interface ProductRecommendationAPI {
   };
   image: {
     url: string;
+    alt_text?: string;
   } | null;
   vendor: string;
   product_type: string;
