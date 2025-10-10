@@ -11,7 +11,9 @@ Requirements:
 - Required packages: httpx, asyncio
 
 Usage:
-    1. Edit the SHOP_DOMAIN and ACCESS_TOKEN variables in the main() function
+    1. Set environment variables:
+       export SHOP_DOMAIN=your-store.myshopify.com
+       export SHOPIFY_ACCESS_TOKEN=shpat_...
     2. Run: python delete_store_data.py
     3. Type 'DELETE ALL' when prompted to confirm deletion
 """
@@ -848,11 +850,16 @@ class ShopifyStoreDeleter:
 
 async def main():
     """Main function to run the deletion script"""
-    # Configure your shop details here
-    SHOP_DOMAIN = "vnsaid.myshopify.com"  # Replace with your shop domain
-    ACCESS_TOKEN = (
-        "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"  # Replace with your access token
-    )
+    # Get shop details from environment variables
+    SHOP_DOMAIN = os.getenv("SHOP_DOMAIN")
+    ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
+    
+    if not SHOP_DOMAIN or not ACCESS_TOKEN:
+        logger.error("❌ Missing required environment variables!")
+        logger.error("Please set SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN environment variables")
+        logger.error("Example: export SHOP_DOMAIN=your-store.myshopify.com")
+        logger.error("Example: export SHOPIFY_ACCESS_TOKEN=shpat_...")
+        sys.exit(1)
 
     # Remove .myshopify.com if present for URL construction
     shop_domain = SHOP_DOMAIN.replace(".myshopify.com", "")
