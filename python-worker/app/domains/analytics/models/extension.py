@@ -17,6 +17,7 @@ class ExtensionType(str, Enum):
     ATLAS = "atlas"  # Web pixels (behavioral tracking)
     PHOENIX = "phoenix"  # Checkout UI extensions
     APOLLO = "apollo"  # Post-purchase extensions
+    MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class ExtensionContext(str, Enum):
@@ -42,6 +43,9 @@ class ExtensionContext(str, Enum):
     # Apollo contexts
     POST_PURCHASE = "post_purchase"
     THANK_YOU_PAGE = "thank_you_page"
+
+    # Mercury contexts (Shopify Plus checkout)
+    CHECKOUT_PAGE = "checkout_page"
 
 
 class ExtensionCapability(BaseModel):
@@ -106,6 +110,16 @@ EXTENSION_CAPABILITIES: Dict[ExtensionType, ExtensionCapability] = {
         can_show_recommendations=True,
         can_track_attribution=True,
         can_access_customer_data=False,
+    ),
+    ExtensionType.MERCURY: ExtensionCapability(
+        extension_type=ExtensionType.MERCURY,
+        supported_contexts=[
+            ExtensionContext.CHECKOUT_PAGE,
+        ],
+        can_track_behavior=True,
+        can_show_recommendations=True,
+        can_track_attribution=True,
+        can_access_customer_data=True,  # Mercury has access to customer data in checkout
     ),
 }
 

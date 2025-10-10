@@ -12,16 +12,20 @@ const getShopInfoFromShopify = async (admin: any) => {
           primaryDomain {
             host
             url
-            }
-            email
-            currencyCode
-            plan {
-              displayName
-              }
-              }
-              }
-              `);
+          }
+          email
+          currencyCode
+          plan {
+            displayName
+            shopifyPlus
+          }
+        }
+      }
+    `);
     const shopData = await shopResponse.json();
+    if (shopData.errors) {
+      throw new Error("GraphQL errors: " + JSON.stringify(shopData.errors));
+    }
     const shop = shopData.data?.shop;
     if (!shop) {
       throw new Error("Failed to fetch shop data from Shopify API");
@@ -52,6 +56,22 @@ const getShopOnboardingCompleted = async (shopDomain: string) => {
     return !!onboardingStatus; // Ensure boolean return
   } catch (error) {
     console.error("❌ Error getting shop onboarding completed:", error);
+    return false;
+  }
+};
+
+const getShopifyPlusStatus = async (shopDomain: string) => {
+  try {
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: shopDomain },
+      select: { shopify_plus: true, plan_type: true },
+    });
+    if (!shop) {
+      return false;
+    }
+    return shop.shopify_plus || false;
+  } catch (error) {
+    console.error("❌ Error getting Shopify Plus status:", error);
     return false;
   }
 };
@@ -90,6 +110,7 @@ const createShopAndSetOnboardingCompleted = async (
       currency_code: shopData.currencyCode,
       email: shopData.email,
       plan_type: shopData.plan.displayName,
+      shopify_plus: shopData.plan.shopifyPlus || false,
       is_active: true,
       // For reinstalls, preserve onboarding status if it was completed
       ...(isReinstall && existingShop.onboarding_completed
@@ -102,6 +123,7 @@ const createShopAndSetOnboardingCompleted = async (
       currency_code: shopData.currencyCode,
       email: shopData.email,
       plan_type: shopData.plan.displayName,
+      shopify_plus: shopData.plan.shopifyPlus || false,
       is_active: true,
       onboarding_completed: false as any, // Start as false, will be set to true later
     },
@@ -259,6 +281,7 @@ const deactivateShopBilling = async (
 export {
   getShop,
   getShopOnboardingCompleted,
+  getShopifyPlusStatus,
   createShopAndSetOnboardingCompleted,
   getShopSubscription,
   activateAtlasWebPixel,

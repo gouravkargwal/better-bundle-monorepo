@@ -864,9 +864,24 @@ class ShopifyGraphQLSeeder:
 
 
 async def main() -> bool:
-    seeder = ShopifyGraphQLSeeder(
-        "vnsaid.myshopify.com", "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"
-    )
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Seed Shopify store with test data")
+    parser.add_argument("--shop", help="Shop domain (e.g., your-store.myshopify.com)")
+    parser.add_argument("--token", help="Shopify access token")
+    args = parser.parse_args()
+    
+    # Get shop details from arguments or environment variables
+    shop_domain = args.shop or os.getenv("SHOP_DOMAIN")
+    access_token = args.token or os.getenv("SHOPIFY_ACCESS_TOKEN")
+    
+    if not shop_domain or not access_token:
+        print("❌ Missing required parameters!")
+        print("Please provide shop domain and access token either:")
+        print("  - As command line arguments: --shop your-store.myshopify.com --token shpat_...")
+        print("  - As environment variables: SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN")
+        return False
+    
+    seeder = ShopifyGraphQLSeeder(shop_domain, access_token)
     return await seeder.run()
 
 

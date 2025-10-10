@@ -254,6 +254,129 @@ class SmartSelectionService:
 
         return result
 
+    async def get_smart_checkout_recommendation_type(
+        self,
+        shop_id: str,
+        cart_items: Optional[List[str]] = None,
+        cart_value: Optional[float] = None,
+        user_id: Optional[str] = None,
+        checkout_step: Optional[str] = None,
+        limit: int = 3,
+    ) -> str:
+        """
+        Get smart checkout recommendation type for Mercury
+        Optimized for checkout context with focus on upsells and last-minute add-ons
+        """
+        # Mercury checkout-specific recommendation priority
+        recommendation_types = [
+            "frequently_bought_together",  # Primary: Complementary products (high AOV impact)
+            "item_neighbors",  # Secondary: Similar alternatives
+            "user_recommendations",  # Tertiary: Personalized based on history
+            "popular_category",  # Fallback: Category-based popular items
+            "popular",  # Final fallback: General popular items
+        ]
+
+        # Adjust strategy based on cart value and checkout step
+        if cart_value and cart_value > 100:
+            # High-value cart: focus on premium upsells
+            recommendation_types = [
+                "frequently_bought_together",
+                "user_recommendations",
+                "item_neighbors",
+                "popular_category",
+                "popular",
+            ]
+        elif checkout_step == "payment":
+            # Payment step: focus on last-minute essentials
+            recommendation_types = [
+                "frequently_bought_together",
+                "item_neighbors",
+                "popular_category",
+                "user_recommendations",
+                "popular",
+            ]
+
+        for rec_type in recommendation_types:
+            try:
+                # Quick test to see if this type has data
+                test_result = (
+                    await self.recommendation_executor.execute_recommendation_level(
+                        level=rec_type,
+                        shop_id=shop_id,
+                        product_ids=cart_items,
+                        user_id=user_id,
+                        limit=1,  # Just test with 1 item
+                    )
+                )
+                if test_result.get("success") and test_result.get("items"):
+                    logger.info(
+                        f"✅ Mercury checkout: Selected {rec_type} for shop {shop_id}"
+                    )
+                    return rec_type
+            except Exception as e:
+                logger.debug(f"⚠️ Error testing {rec_type}: {e}")
+                continue
+
+        # Fallback to popular items (always works)
+        logger.info("🔄 Mercury checkout: falling back to popular items")
+        return "popular"
+
+    async def get_smart_checkout_recommendation(
+        self,
+        shop_id: str,
+        cart_items: Optional[List[str]] = None,
+        cart_value: Optional[float] = None,
+        user_id: Optional[str] = None,
+        checkout_step: Optional[str] = None,
+        limit: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Get smart checkout recommendation for Mercury
+        Optimized for checkout context with focus on upsells and complementary products
+        """
+        # Get the smart recommendation type
+        smart_type = await self.get_smart_checkout_recommendation_type(
+            shop_id=shop_id,
+            cart_items=cart_items,
+            cart_value=cart_value,
+            user_id=user_id,
+            checkout_step=checkout_step,
+            limit=limit,
+        )
+
+        # Execute the smart-selected recommendation type
+        result = await self.recommendation_executor.execute_recommendation_level(
+            level=smart_type,
+            shop_id=shop_id,
+            user_id=user_id,
+            product_ids=cart_items,
+            limit=limit,
+        )
+
+        # Add Mercury-specific smart selection metadata
+        result["smart_selection"] = {
+            "selected_type": smart_type,
+            "visitor_type": ("returning" if user_id else "new"),
+            "checkout_context": "mercury_upsell",
+            "cart_value": cart_value,
+            "checkout_step": checkout_step,
+            "reason": (
+                "complementary_upsells"
+                if smart_type == "frequently_bought_together"
+                else (
+                    "similar_alternatives"
+                    if smart_type == "item_neighbors"
+                    else (
+                        "personalized_checkout"
+                        if smart_type == "user_recommendations"
+                        else "category_popularity"
+                    )
+                )
+            ),
+        }
+
+        return result
+
     async def get_smart_homepage_recommendation(
         self,
         shop_id: str,

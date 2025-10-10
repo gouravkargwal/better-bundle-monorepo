@@ -874,6 +874,7 @@ model shops {
   money_format               String?                      @db.VarChar(100)
   is_active                  Boolean
   onboarding_completed       Boolean
+  shopify_plus               Boolean
   suspended_at               DateTime?                    @db.Timestamptz(6)
   suspension_reason          String?                      @db.VarChar(255)
   service_impact             String?                      @db.VarChar(50)
@@ -909,6 +910,7 @@ model shops {
   @@index([last_analysis_at], map: "ix_shops_last_analysis_at")
   @@index([plan_type], map: "ix_shops_plan_type")
   @@index([shop_domain], map: "ix_shops_shop_domain")
+  @@index([shopify_plus], map: "ix_shops_shopify_plus")
 }
 
 model subscription_plans {
