@@ -1,7 +1,7 @@
 class RecommendationAPI {
   constructor() {
     this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
-    this.shopifyBaseUrl = window.location.origin; // For Shopify API calls
+    this.shopifyBaseUrl = window.location.origin;
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
@@ -9,7 +9,6 @@ class RecommendationAPI {
       const context = window.context || 'cart';
       const shopDomain = window.shopDomain || '';
 
-      // Validate required fields
       if (!shopDomain) {
         console.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');

@@ -52,7 +52,14 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
   // Helper functions
   const getDefaultVariant = useCallback((product: ProductRecommendationAPI) => {
-    return product.variants?.[0] || null;
+    // Find the first available variant instead of just the first variant
+    return (
+      product.variants?.find(
+        (variant: any) => variant.inventory > 0 && variant.available !== false,
+      ) ||
+      product.variants?.[0] ||
+      null
+    );
   }, []);
 
   // Get variant by selected options
@@ -239,6 +246,32 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     orderId,
     done,
   ]);
+
+  // Initialize selected options with first available variant
+  useEffect(() => {
+    if (currentProduct && currentProduct.variants && currentProduct.options) {
+      const firstAvailableVariant = currentProduct.variants.find(
+        (variant: any) => variant.inventory > 0 && variant.available !== false,
+      );
+
+      if (firstAvailableVariant && firstAvailableVariant.title) {
+        const variantTitle = firstAvailableVariant.title;
+        const parts = variantTitle.split(" / ").map((p: string) => p.trim());
+
+        const newOptions: Record<string, string> = {};
+        currentProduct.options.forEach((option: any, index: number) => {
+          if (parts[index]) {
+            newOptions[option.name] = parts[index];
+          }
+        });
+
+        setSelectedOptions((prev) => ({
+          ...prev,
+          [currentProduct.id]: newOptions,
+        }));
+      }
+    }
+  }, [currentProduct]);
 
   // Real-time pricing calculation
   useEffect(() => {
@@ -456,7 +489,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         // Get signed token from backend
         console.log("Apollo: Requesting signed token from backend");
         const tokenResponse = await fetch(
-          `https://owen-origin-opening-peterson.trycloudflare.com/api/sign-changeset`,
+          `https://poster-salaries-hispanic-overhead.trycloudflare.com/api/sign-changeset`,
           {
             method: "POST",
             headers: {
@@ -788,10 +821,9 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                           product,
                         )
                       }
-                      options={option.values.map((value: string) => ({
+                      options={availableValues.map((value: string) => ({
                         value: value,
                         label: value,
-                        disabled: !availableValues.includes(value),
                       }))}
                     />
                   );

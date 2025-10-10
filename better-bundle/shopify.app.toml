@@ -2,13 +2,12 @@
 
 client_id = "87c44f5966daa80691a480bcd03c225c"
 name = "BetterBundle"
-application_url = "https://namibia-nokia-internet-secretariat.trycloudflare.com"
+application_url = "https://owen-origin-opening-peterson.trycloudflare.com"
 embedded = true
 handle = "better-bundle-1"
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 
 [webhooks]
