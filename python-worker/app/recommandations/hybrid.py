@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
+from app.shared.helpers import now_utc
+
 from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.config.settings import settings
@@ -29,8 +31,10 @@ class HybridRecommendationService:
             "user_recommendations": 0.3,  # 30% personalized (if user_id available)
         },
         "homepage": {
-            "user_recommendations": 0.6,  # 60% personalized
-            "popular": 0.4,  # 40% popular items
+            "user_recommendations": 0.4,  # 40% personalized
+            "recently_viewed": 0.3,  # 30% recently viewed
+            "trending": 0.2,  # 20% trending items
+            "popular": 0.1,  # 10% popular items
         },
         "cart": {
             "session_recommendations": 0.5,  # 50% session-based
@@ -43,7 +47,11 @@ class HybridRecommendationService:
             "user_neighbors": 0.3,  # 30% "People like you bought..."
             "popular": 0.2,  # 20% popular items
         },
-        "checkout": {"popular": 1.0},  # 100% popular (fast, reliable)
+        "checkout": {
+            "frequently_bought_together": 0.6,  # 60% cross-sell (last-minute add-ons)
+            "popular_category": 0.3,  # 30% category popular
+            "popular": 0.1,  # 10% general popular items
+        },
         "order_history": {
             "user_recommendations": 0.6,  # 60% personalized based on order history
             "popular_category": 0.3,  # 30% popular in order history categories
@@ -53,6 +61,17 @@ class HybridRecommendationService:
             "item_neighbors": 0.5,  # 50% similar to ordered products
             "user_recommendations": 0.3,  # 30% personalized
             "popular_category": 0.2,  # 20% popular in same category
+        },
+        "collection_page": {
+            "popular_category": 0.6,  # 60% popular in collection category
+            "user_recommendations": 0.3,  # 30% personalized
+            "popular": 0.1,  # 10% general popular items
+        },
+        "post_purchase": {
+            "popular_category": 0.5,  # 50% popular in same category (most relevant)
+            "item_neighbors": 0.3,  # 30% similar products to purchased items
+            "frequently_bought_together": 0.15,  # 15% cross-sell (if data available)
+            "user_recommendations": 0.05,  # 5% personalized based on user history
         },
     }
 
@@ -102,8 +121,11 @@ class HybridRecommendationService:
                     continue
 
                 # Calculate how many items to get from this source
-                source_limit = max(1, int(limit * ratio))
-                logger.debug(
+                # Ensure we get enough items for diversity, even with small ratios
+                source_limit = max(
+                    3, int(limit * ratio * 2)
+                )  # Request at least 3 items per source
+                logger.info(
                     f"🎯 Getting {source} recommendations | ratio={ratio} | source_limit={source_limit}"
                 )
 
@@ -160,8 +182,8 @@ class HybridRecommendationService:
                             "ratio": ratio,
                             "success": True,
                         }
-                        logger.debug(
-                            f"✅ {source} source successful | items={len(source_result['items'])}"
+                        logger.info(
+                            f"✅ {source} source successful | items={len(source_result['items'])} | items={source_result['items'][:3]}..."
                         )
                     else:
                         source_info[source] = {
@@ -190,9 +212,26 @@ class HybridRecommendationService:
                 f"🔄 Deduplicating and blending | total_collected={len(all_recommendations)} | target_limit={limit}"
             )
             blended_items = self._deduplicate_and_blend(all_recommendations, limit)
-            logger.info(
-                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len([s for s in source_info.values() if s['success']])}"
+
+            # Apply cross-context deduplication for better diversity
+            blended_items = self._apply_cross_context_deduplication(
+                blended_items, context, user_id
             )
+
+            # Log detailed source information
+            successful_sources = [s for s in source_info.values() if s["success"]]
+            failed_sources = [s for s in source_info.values() if not s["success"]]
+
+            logger.info(
+                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len(successful_sources)}"
+            )
+            logger.info(
+                f"📊 Source details - Successful: {[(k, v['count']) for k, v in source_info.items() if v['success']]}"
+            )
+            if failed_sources:
+                logger.info(
+                    f"📊 Source details - Failed: {[(k, v['error']) for k, v in source_info.items() if not v['success']]}"
+                )
 
             return {
                 "success": True,
@@ -320,6 +359,15 @@ class HybridRecommendationService:
                         "error": "All recommendations were empty",
                     }
             return result
+        elif source == "user_recommendations" and not user_id:
+            # No user_id provided, skip this source
+            logger.debug("⚠️ user_recommendations source skipped: no user_id provided")
+            return {
+                "success": False,
+                "items": [],
+                "source": "gorse_user_recommendations_skipped",
+                "error": "No user_id provided",
+            }
 
         elif source == "session_recommendations":
             logger.info(
@@ -328,28 +376,31 @@ class HybridRecommendationService:
             # Apply shop prefix for multi-tenancy
             prefixed_user_id = f"shop_{shop_id}_{user_id}" if user_id else None
 
-            # We allow session recommendations even without an explicit session_id
-            # as long as we have session-derived metadata (cart/recent views/context products).
-            has_session_context = False
-            if metadata:
-                has_session_context = any(
-                    bool(metadata.get(key))
-                    for key in [
-                        "cart_contents",
-                        "recent_views",
-                        "recent_adds",
-                        "cart_data",
-                        "product_ids",
-                    ]
-                )
-
             # If session_id is missing, synthesize a lightweight one for logging/comment purposes
             effective_session_id = session_id or "auto"
+
+            # Try to extract session data from behavioral events if we have a session_id
+            enhanced_metadata = metadata or {}
+            if session_id and user_id:
+                try:
+                    from app.recommandations.session_service import SessionDataService
+
+                    session_data_service = SessionDataService()
+                    session_behavioral_data = await session_data_service.extract_session_data_from_behavioral_events(
+                        user_id=user_id, shop_id=shop_id
+                    )
+                    # Merge behavioral data with existing metadata
+                    enhanced_metadata.update(session_behavioral_data)
+                    logger.info(
+                        f"📊 Enhanced metadata with session data: {enhanced_metadata}"
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to extract session behavioral data: {e}")
 
             session_data = self._build_session_data(
                 session_id=effective_session_id,
                 user_id=prefixed_user_id,
-                metadata=metadata,
+                metadata=enhanced_metadata,
                 shop_id=shop_id,
             )
             logger.info(f"📊 Session data built: {session_data}")
@@ -457,6 +508,18 @@ class HybridRecommendationService:
                 }
             return result
 
+        elif source == "trending":
+            result = await self.gorse_client.get_popular_items(
+                n=limit, category=category
+            )
+            if result["success"]:
+                return {
+                    "success": True,
+                    "items": result["items"],
+                    "source": "gorse_trending",
+                }
+            return result
+
         elif source == "popular_category":
             result = await self.gorse_client.get_popular_items(
                 n=limit, category=category
@@ -474,6 +537,15 @@ class HybridRecommendationService:
             user_neighbors_service = UserNeighborsService()
             return await user_neighbors_service.get_neighbor_recommendations(
                 user_id=user_id, shop_id=shop_id, limit=limit, category=category
+            )
+
+        elif source == "recently_viewed" and user_id:
+            # Use the RecentlyViewedService for recently viewed products
+            from app.recommandations.recently_viewed import RecentlyViewedService
+
+            recently_viewed_service = RecentlyViewedService()
+            return await recently_viewed_service.get_recently_viewed_products(
+                shop_id=shop_id, user_id=user_id, limit=limit
             )
 
         else:
@@ -494,7 +566,7 @@ class HybridRecommendationService:
             "Comment": f"session_{session_id}",
             "FeedbackType": GorseFeedbackType.VIEW,  # Default feedback type
             "ItemId": "",  # Will be filled if we have cart contents
-            "Timestamp": datetime.now().isoformat(),
+            "Timestamp": now_utc().isoformat(),
             "UserId": user_id or "",
         }
 
@@ -557,6 +629,13 @@ class HybridRecommendationService:
                 minimal_feedback = base_feedback.copy()
                 minimal_feedback["Comment"] = f"session_{session_id}_minimal"
                 minimal_feedback["FeedbackType"] = "view"
+                # Don't add empty ItemId - this causes Gorse to return None
+                # Instead, return empty list to indicate no session data
+                if not minimal_feedback.get("ItemId"):
+                    logger.debug(
+                        "⚠️ No meaningful session data available for recommendations"
+                    )
+                    return []
                 feedback_objects.append(minimal_feedback)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to create minimal session feedback: {e}")
@@ -598,9 +677,24 @@ class HybridRecommendationService:
                 logger.debug(f"🚫 Skipping empty item during deduplication: {item}")
                 continue
 
-            if item_key not in seen:
+            # Enhanced deduplication: also check for shop-prefixed items
+            # Remove shop prefix for comparison if present
+            clean_item_key = item_key
+            if isinstance(item_key, str) and item_key.startswith("shop_"):
+                # Extract the actual product ID after shop prefix
+                parts = item_key.split("_", 2)
+                if len(parts) >= 3:
+                    clean_item_key = parts[2]  # Get the actual product ID
+
+            # Check both original and clean keys for deduplication
+            if item_key not in seen and clean_item_key not in seen:
                 seen.add(item_key)
+                seen.add(clean_item_key)
                 deduplicated.append(item)
+            else:
+                logger.debug(
+                    f"🚫 Duplicate item filtered: {item_key} (clean: {clean_item_key})"
+                )
 
         # Sort by source ratio (higher ratio items first)
         deduplicated.sort(
@@ -610,3 +704,99 @@ class HybridRecommendationService:
 
         # Return top items up to limit
         return deduplicated[:limit]
+
+    def _apply_cross_context_deduplication(
+        self,
+        recommendations: List[Dict[str, Any]],
+        context: str,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply cross-context deduplication to prevent same products across different contexts
+
+        Args:
+            recommendations: List of recommendation items
+            context: Current recommendation context
+            user_id: User ID for context-specific filtering
+
+        Returns:
+            Deduplicated recommendations with context diversity
+        """
+        if not recommendations:
+            return recommendations
+
+        # Context-specific diversity rules
+        context_diversity_rules = {
+            "homepage": {
+                "max_similarity": 0.3,  # Allow 30% similarity with other contexts
+                "prefer_fresh": True,  # Prefer fresh/new content
+            },
+            "product_page": {
+                "max_similarity": 0.5,  # Allow 50% similarity (more focused)
+                "prefer_related": True,  # Prefer related products
+            },
+            "cart": {
+                "max_similarity": 0.4,  # Allow 40% similarity
+                "prefer_cross_sell": True,  # Prefer cross-sell items
+            },
+            "profile": {
+                "max_similarity": 0.2,  # Allow only 20% similarity (highly personalized)
+                "prefer_personalized": True,  # Prefer highly personalized items
+            },
+        }
+
+        # Get diversity rules for current context
+        rules = context_diversity_rules.get(
+            context,
+            {
+                "max_similarity": 0.5,
+                "prefer_fresh": False,
+            },
+        )
+
+        # Apply diversity filtering
+        diverse_recommendations = []
+        seen_products = set()
+
+        for item in recommendations:
+            if isinstance(item, dict):
+                item_id = item.get("Id", item.get("id", ""))
+            else:
+                item_id = str(item)
+
+            # Skip if already seen (basic deduplication)
+            if item_id in seen_products:
+                continue
+
+            # Apply context-specific diversity rules
+            if rules.get("prefer_fresh") and "latest" in str(item.get("source", "")):
+                # Prioritize fresh content for homepage
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_related") and "neighbors" in str(
+                item.get("source", "")
+            ):
+                # Prioritize related products for product page
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_cross_sell") and "frequently_bought" in str(
+                item.get("source", "")
+            ):
+                # Prioritize cross-sell items for cart
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            elif rules.get("prefer_personalized") and "user" in str(
+                item.get("source", "")
+            ):
+                # Prioritize personalized items for profile
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+            else:
+                # Add other items if within similarity threshold
+                diverse_recommendations.append(item)
+                seen_products.add(item_id)
+
+        logger.debug(
+            f"🎯 Cross-context deduplication applied | context={context} | original={len(recommendations)} | filtered={len(diverse_recommendations)}"
+        )
+        return diverse_recommendations

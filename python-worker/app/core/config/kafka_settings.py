@@ -116,13 +116,6 @@ class KafkaSettings(BaseSettings):
                 "compression_type": "snappy",
                 "cleanup_policy": "delete",
             },
-            "refund-attribution-jobs": {
-                "partitions": 4,
-                "replication_factor": 3,
-                "retention_ms": 259200000,  # 3 days
-                "compression_type": "snappy",
-                "cleanup_policy": "delete",
-            },
         }
     )
 
@@ -136,7 +129,6 @@ class KafkaSettings(BaseSettings):
             "feature-computation-processors": "feature-computation-jobs",
             "customer-linking-processors": "customer-linking-jobs",
             "purchase-attribution-processors": "purchase-attribution-jobs",
-            "refund-attribution-processors": "refund-attribution-jobs",
         }
     )
 

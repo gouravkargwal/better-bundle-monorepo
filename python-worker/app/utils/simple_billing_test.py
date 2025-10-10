@@ -77,7 +77,6 @@ async def cleanup_test_data(db) -> None:
     ]
 
     # Delete in reverse order to handle foreign key constraints
-    await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.billinginvoice.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.shop.delete_many(where={"id": {"in": test_shop_ids}})

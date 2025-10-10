@@ -13,6 +13,8 @@ Industry Standard Solution:
 
 import asyncio
 from typing import Optional, Dict, Any
+
+from app.shared.helpers import now_utc
 from datetime import datetime, timedelta
 
 from app.core.logging import get_logger
@@ -277,7 +279,7 @@ class ShopCacheService:
         try:
             await self.cache_service.set(
                 "negative_shop",
-                {"not_found": True, "cached_at": datetime.now().isoformat()},
+                {"not_found": True, "cached_at": now_utc().isoformat()},
                 ttl=self.SHOP_CACHE_TTL // 2,  # Shorter TTL for negative results
                 shop_domain=shop_domain,
             )
@@ -304,12 +306,12 @@ class ShopCacheService:
         if self._circuit_breaker_failures >= self._circuit_breaker_threshold:
             # Reset after timeout
             if hasattr(self, "_circuit_breaker_reset_time"):
-                if datetime.now() > self._circuit_breaker_reset_time:
+                if now_utc() > self._circuit_breaker_reset_time:
                     self._circuit_breaker_failures = 0
                     delattr(self, "_circuit_breaker_reset_time")
                     return False
             else:
-                self._circuit_breaker_reset_time = datetime.now() + timedelta(
+                self._circuit_breaker_reset_time = now_utc() + timedelta(
                     seconds=self._circuit_breaker_timeout
                 )
             return True

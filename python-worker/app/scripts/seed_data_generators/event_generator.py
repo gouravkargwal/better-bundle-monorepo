@@ -17,8 +17,8 @@ class EventGenerator(BaseGenerator):
         """Generate comprehensive behavioral events for realistic user journeys."""
         events = []
 
-        # Generate client IDs for sessions
-        client_ids = [self.generate_client_id() for _ in range(8)]
+        # Generate client IDs for sessions (increased for more diverse interactions)
+        client_ids = [self.generate_client_id() for _ in range(15)]
 
         # Alice's journey (VIP customer - multiple sessions)
         events.extend(
@@ -73,6 +73,56 @@ class EventGenerator(BaseGenerator):
         events.extend(
             self._generate_henry_journey(
                 client_ids[7], product_variant_ids, customer_ids[7]
+            )
+        )
+
+        # Additional customer journeys for more diverse interactions
+        # Ivy's journey (fashion enthusiast)
+        events.extend(
+            self._generate_ivy_journey(
+                client_ids[8], product_variant_ids, customer_ids[8]
+            )
+        )
+
+        # Jack's journey (tech early adopter)
+        events.extend(
+            self._generate_jack_journey(
+                client_ids[9], product_variant_ids, customer_ids[9]
+            )
+        )
+
+        # Kelly's journey (bargain hunter)
+        events.extend(
+            self._generate_kelly_journey(
+                client_ids[10], product_variant_ids, customer_ids[10]
+            )
+        )
+
+        # Liam's journey (seasonal buyer)
+        events.extend(
+            self._generate_liam_journey(
+                client_ids[11], product_variant_ids, customer_ids[11]
+            )
+        )
+
+        # Maya's journey (family shopper)
+        events.extend(
+            self._generate_maya_journey(
+                client_ids[12], product_variant_ids, customer_ids[12]
+            )
+        )
+
+        # Noah's journey (mobile shopper)
+        events.extend(
+            self._generate_noah_journey(
+                client_ids[13], product_variant_ids, customer_ids[13]
+            )
+        )
+
+        # Olivia's journey (luxury buyer)
+        events.extend(
+            self._generate_olivia_journey(
+                client_ids[14], product_variant_ids, customer_ids[14]
             )
         )
 
@@ -1767,17 +1817,56 @@ class EventGenerator(BaseGenerator):
             60.00,
         ]
 
+        # Real image URLs for product views
+        real_images = [
+            "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1571945153237-4929e783af4a?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1583743814966-8936f37f0c7e?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1511499767150-a48a237f0cfe?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1583394838336-acd977736f90?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1583394838336-acd977736f90?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1601972602288-d1bcf3b5b8b5?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=400&h=400&fit=crop",
+            "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=400&h=400&fit=crop",
+        ]
+
         return {
             "productVariant": {
                 "id": product_variant_ids[product_index],
                 "title": "Default Title",
                 "price": {"amount": prices[product_index], "currencyCode": "USD"},
+                "image": {
+                    "url": real_images[product_index % len(real_images)],
+                    "altText": f"{product_titles[product_index]} - Product view",
+                    "width": 400,
+                    "height": 400,
+                },
                 "product": {
                     "id": self.dynamic_ids[f"product_{product_index + 1}_id"],
                     "title": product_titles[product_index],
                     "vendor": self.get_vendor(
                         self.get_product_category(product_index + 1)
                     ),
+                    "images": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "url": real_images[
+                                        product_index % len(real_images)
+                                    ],
+                                    "altText": f"{product_titles[product_index]} - Main image",
+                                    "width": 400,
+                                    "height": 400,
+                                }
+                            }
+                        ]
+                    },
                 },
             }
         }
@@ -1885,3 +1974,239 @@ class EventGenerator(BaseGenerator):
                 "productVariants": product_variants,
             }
         }
+
+    def _generate_ivy_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Ivy's journey as a fashion enthusiast with social media influence."""
+        events = []
+        base_time = self.past_date(1)
+
+        # Fashion browsing session
+        events.extend(self._generate_page_view_events(client_id, base_time, 3))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [0, 1, 2, 3], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["clothing", "accessories"], base_time
+            )
+        )
+
+        # Social media influenced purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [1, 2], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [1, 2], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_jack_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Jack's journey as a tech early adopter."""
+        events = []
+        base_time = self.past_date(4)
+
+        # Tech product research
+        events.extend(self._generate_page_view_events(client_id, base_time, 5))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [10, 11, 12, 13], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(client_id, ["electronics"], base_time)
+        )
+
+        # High-value tech purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [10, 11], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [10, 11], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_kelly_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Kelly's journey as a bargain hunter."""
+        events = []
+        base_time = self.past_date(6)
+
+        # Price comparison browsing
+        events.extend(self._generate_page_view_events(client_id, base_time, 4))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [5, 6, 7, 8], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["accessories", "home"], base_time
+            )
+        )
+
+        # Budget-conscious purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [5, 6], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [5, 6], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_liam_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Liam's journey as a seasonal buyer."""
+        events = []
+        base_time = self.past_date(8)
+
+        # Seasonal shopping
+        events.extend(self._generate_page_view_events(client_id, base_time, 3))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [0, 1, 14, 15], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["clothing", "home"], base_time
+            )
+        )
+
+        # Seasonal purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [0, 14], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [0, 14], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_maya_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Maya's journey as a family shopper."""
+        events = []
+        base_time = self.past_date(2)
+
+        # Family shopping session
+        events.extend(self._generate_page_view_events(client_id, base_time, 6))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [0, 1, 2, 5, 6, 14], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["clothing", "accessories", "home"], base_time
+            )
+        )
+
+        # Family bulk purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [0, 1, 5, 14], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [0, 1, 5, 14], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_noah_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Noah's journey as a mobile shopper."""
+        events = []
+        base_time = self.past_date(5)
+
+        # Mobile browsing session
+        events.extend(self._generate_page_view_events(client_id, base_time, 2))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [10, 11, 5, 6], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["electronics", "accessories"], base_time
+            )
+        )
+
+        # Quick mobile purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [10, 5], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [10, 5], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events
+
+    def _generate_olivia_journey(
+        self, client_id: str, product_variant_ids: List[str], customer_id: str
+    ) -> List[Dict[str, Any]]:
+        """Generate Olivia's journey as a luxury buyer."""
+        events = []
+        base_time = self.past_date(10)
+
+        # Luxury product browsing
+        events.extend(self._generate_page_view_events(client_id, base_time, 4))
+        events.extend(
+            self._generate_product_view_events(
+                client_id, [10, 11, 12, 13], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_collection_view_events(
+                client_id, ["electronics", "accessories"], base_time
+            )
+        )
+
+        # High-value luxury purchase
+        events.extend(
+            self._generate_add_to_cart_events(
+                client_id, [10, 12], product_variant_ids, base_time
+            )
+        )
+        events.extend(
+            self._generate_checkout_events(
+                client_id, [10, 12], product_variant_ids, customer_id, base_time
+            )
+        )
+
+        return events

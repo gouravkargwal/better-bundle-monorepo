@@ -1,0 +1,74 @@
+{% comment %}
+  Centralized skeleton loader for all recommendation blocks
+  Usage: {% render 'skeleton-loader', type: 'product-card', count: 4 %}
+{% endcomment %}
+
+{% assign skeleton_count = count | default: 4 %}
+{% assign skeleton_type = type | default: 'product-card' %}
+
+{% if skeleton_type == 'product-card' %}
+  <div class="loading-placeholder">
+    {% for i in (1..skeleton_count) %}
+      <div class="product-card loading-skeleton">
+        <div class="product-card__image loading-skeleton"></div>
+        <div class="product-card__body">
+          <div class="product-card__title loading-skeleton"></div>
+          <div class="product-card__price-quantity loading-skeleton">
+            <div class="product-card__price loading-skeleton"></div>
+            <div class="product-card__quantity loading-skeleton">
+              <div class="qty-btn loading-skeleton"></div>
+              <div class="qty-input loading-skeleton"></div>
+              <div class="qty-btn loading-skeleton"></div>
+            </div>
+          </div>
+          <div class="product-card__variants loading-skeleton">
+            <div class="variant-select loading-skeleton"></div>
+          </div>
+          <div class="product-card__btn loading-skeleton"></div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% elsif skeleton_type == 'carousel' %}
+  {% for i in (1..skeleton_count) %}
+    <div class="swiper-slide loading-placeholder">
+      <div class="product-card">
+        <div class="product-card__image loading-skeleton">&nbsp;</div>
+        <div class="product-card__body">
+          <h4 class="product-card__title loading-skeleton">&nbsp;</h4>
+
+          <!-- Line 1: Price and Quantity on same line -->
+          <div class="product-card__price-quantity">
+            <p class="product-card__price loading-skeleton">&nbsp;</p>
+            <div class="product-card__quantity">
+              <button class="qty-btn loading-skeleton">&nbsp;</button>
+              <input type="number" class="qty-input loading-skeleton">
+              <button class="qty-btn loading-skeleton">&nbsp;</button>
+            </div>
+          </div>
+
+          <!-- Line 2: Variant Dropdowns -->
+          <div class="product-card__variants two-dropdowns">
+            <div class="variant-option">
+              <label class="variant-label loading-skeleton">&nbsp;</label>
+              <select class="variant-select loading-skeleton"></select>
+            </div>
+            <div class="variant-option">
+              <label class="variant-label loading-skeleton">&nbsp;</label>
+              <select class="variant-select loading-skeleton"></select>
+            </div>
+          </div>
+
+          <!-- Line 3: Add to Cart Button -->
+          <button class="product-card__btn loading-skeleton">&nbsp;</button>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+{% elsif skeleton_type == 'heading' %}
+  <div class="loading-placeholder">
+    <div class="section-heading loading-skeleton">
+      <div class="heading loading-skeleton"></div>
+    </div>
+  </div>
+{% endif %}

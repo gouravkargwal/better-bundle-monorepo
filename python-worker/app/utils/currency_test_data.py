@@ -80,7 +80,6 @@ async def cleanup_currency_test_data(db) -> None:
     test_shop_ids = ["test-usd-shop", "test-eur-shop", "test-gbp-shop", "test-cad-shop"]
 
     # Delete in reverse order to handle foreign key constraints
-    await db.billingevent.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.billinginvoice.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.billingplan.delete_many(where={"shopId": {"in": test_shop_ids}})
     await db.shop.delete_many(where={"id": {"in": test_shop_ids}})

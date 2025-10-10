@@ -3,6 +3,8 @@ import hashlib
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+from app.shared.helpers.datetime_utils import now_utc
+
 
 from app.core.logging import get_logger
 from app.core.redis_client import get_redis_client
@@ -30,6 +32,7 @@ class RecommendationCacheService:
         "checkout": 0,  # No cache (fast, fresh)
         "order_history": 0,  # Temporarily disable caching
         "order_status": 0,  # 15 minutes (order-specific)
+        "post_purchase": 0,  # Post-purchase context (skip cache by default)
     }
 
     def generate_cache_key(
@@ -91,8 +94,8 @@ class RecommendationCacheService:
             Cached recommendations or None
         """
         try:
-            # Skip caching for checkout context
-            if self.CACHE_TTL[context] == 0:
+            # Skip caching for contexts with TTL 0 (including unknown contexts)
+            if self.CACHE_TTL.get(context, 0) == 0:
                 return None
 
             redis_client = await self.get_redis_client()
@@ -124,17 +127,17 @@ class RecommendationCacheService:
             context: Recommendation context
         """
         try:
-            # Skip caching for checkout context
-            if self.CACHE_TTL[context] == 0:
+            # Skip caching for contexts with TTL 0 (including unknown contexts)
+            if self.CACHE_TTL.get(context, 0) == 0:
                 return
 
             redis_client = await self.get_redis_client()
-            ttl = self.CACHE_TTL[context]
+            ttl = self.CACHE_TTL.get(context, 0)
 
             # Add metadata to cached data
             cached_data = {
                 "recommendations": recommendations,
-                "cached_at": datetime.now().isoformat(),
+                "cached_at": now_utc().isoformat(),
                 "context": context,
                 "ttl": ttl,
             }

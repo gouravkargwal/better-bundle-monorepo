@@ -2,6 +2,8 @@
 
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
+
+from app.shared.helpers import now_utc
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
@@ -48,9 +50,9 @@ class DLQService:
                     "reason": reason,
                     "original_topic": original_topic,
                     "original_timestamp": original_message.get(
-                        "timestamp", datetime.utcnow().isoformat()
+                        "timestamp", now_utc().isoformat()
                     ),
-                    "dlq_timestamp": datetime.utcnow().isoformat(),
+                    "dlq_timestamp": now_utc().isoformat(),
                     "error_details": error_details,
                     "retry_count": retry_count,
                     "shop_id": original_message.get("shop_id"),
@@ -94,7 +96,7 @@ class DLQService:
             consumer = KafkaConsumer(kafka_settings.model_dump())
             await consumer.initialize(
                 topics=["suspended-shop-events"],
-                group_id=f"dlq-retrieval-{shop_id}-{datetime.utcnow().timestamp()}",
+                group_id=f"dlq-retrieval-{shop_id}-{now_utc().timestamp()}",
             )
 
             # Read messages from the beginning

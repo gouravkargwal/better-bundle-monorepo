@@ -42,11 +42,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : null;
 
     // Update the shop record with the new custom domain
-    const updatedShop = await prisma.shop.update({
-      where: { shopDomain: session.shop },
+    await prisma.shops.update({
+      where: { shop_domain: session.shop },
       data: {
-        customDomain: customDomain,
-        updatedAt: new Date(),
+        custom_domain: customDomain,
+        updated_at: new Date(),
       },
     });
 

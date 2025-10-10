@@ -16,9 +16,6 @@ from app.consumers.kafka.data_collection_consumer import DataCollectionKafkaCons
 from app.consumers.kafka.purchase_attribution_consumer import (
     PurchaseAttributionKafkaConsumer,
 )
-from app.consumers.kafka.refund_attribution_consumer import (
-    RefundAttributionKafkaConsumer,
-)
 from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
 from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
 
@@ -53,7 +50,6 @@ class KafkaConsumerManager:
                 "normalization": NormalizationKafkaConsumer(),
                 "feature_computation": FeatureComputationKafkaConsumer(),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
-                "refund_attribution": RefundAttributionKafkaConsumer(),
                 "customer_linking": CustomerLinkingKafkaConsumer(),
                 "billing": BillingKafkaConsumer(),
             }
@@ -160,6 +156,7 @@ class KafkaConsumerManager:
             for name, consumer in self.consumers.items():
                 try:
                     await asyncio.wait_for(consumer.close(), timeout=10.0)
+                    logger.debug(f"✅ {name} consumer stopped successfully")
                 except asyncio.TimeoutError:
                     logger.warning(f"⚠️ Timeout stopping {name} consumer")
                 except Exception as e:
@@ -167,6 +164,9 @@ class KafkaConsumerManager:
 
         except Exception as e:
             logger.exception(f"Error stopping consumers: {e}")
+        finally:
+            # Ensure all consumers are marked as stopped
+            self._running = False
 
     async def close(self):
         """Close all consumers and cleanup"""

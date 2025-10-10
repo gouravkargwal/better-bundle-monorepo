@@ -5,6 +5,8 @@ Kafka-based normalization consumer for processing entity normalization jobs
 import json
 from typing import Dict, Any
 from datetime import datetime
+
+from app.shared.helpers import now_utc
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.logging import get_logger
@@ -67,7 +69,7 @@ class NormalizationKafkaConsumer:
         """Get health status of the normalization consumer"""
         return {
             "status": "running" if self._initialized else "stopped",
-            "last_health_check": datetime.utcnow().isoformat(),
+            "last_health_check": now_utc().isoformat(),
         }
 
     async def _handle_message(self, message: Dict[str, Any]):
@@ -95,7 +97,7 @@ class NormalizationKafkaConsumer:
                     original_message=payload,
                     reason="shop_suspended",
                     original_topic="normalization-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
                 await self.consumer.commit(message)
                 return

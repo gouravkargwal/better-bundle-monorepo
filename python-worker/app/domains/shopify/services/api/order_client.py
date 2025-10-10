@@ -95,8 +95,12 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                     id
                                     title
                                     quantity
-                                    original_unit_price: originalUnitPrice
+                                    original_unit_original_unit_price: originalUnitPrice
                                     sku
+                                    customAttributes {
+                                        key
+                                        value
+                                    }
                                     variant {
                                         id
                                     }
@@ -110,6 +114,39 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                 has_previous_page: hasPreviousPage
                                 start_cursor: startCursor
                                 end_cursor: endCursor
+                            }
+                        }
+                        refunds {
+                            id
+                            created_at: createdAt
+                            note
+                            total_refunded: totalRefunded {
+                                amount
+                                currency_code: currencyCode
+                            }
+                            refund_line_items: refundLineItems(first: 10) {
+                                edges {
+                                    node {
+                                        id
+                                        quantity
+                                        subtotal
+                                        line_item: lineItem {
+                                            id
+                                            product {
+                                                id
+                                            }
+                                            variant {
+                                                id
+                                            }
+                                            title
+                                            sku
+                                            customAttributes {
+                                                key
+                                                value
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -160,6 +197,58 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         "edges": all_line_items,
                         "page_info": {"has_next_page": False},
                     }
+
+                # Check and fetch additional refund line items if needed
+                refunds = order.get("refunds", [])
+                if refunds:
+                    processed_refunds = []
+                    for refund in refunds:
+                        # Process refund line items with pagination
+                        refund_line_items = refund.get("refund_line_items", {})
+                        if refund_line_items:
+                            line_items_page_info = refund_line_items.get(
+                                "page_info", {}
+                            )
+                            if line_items_page_info.get("has_next_page"):
+                                # Fetch additional refund line items
+                                all_line_items = refund_line_items.get(
+                                    "edges", []
+                                ).copy()
+                                line_items_cursor = line_items_page_info.get(
+                                    "end_cursor"
+                                )
+
+                                while line_items_cursor:
+                                    rate_limit_info = await self.check_rate_limit(
+                                        shop_domain
+                                    )
+                                    if not rate_limit_info["can_make_request"]:
+                                        await self.wait_for_rate_limit(shop_domain)
+
+                                    line_items_batch = (
+                                        await self._fetch_refund_line_items(
+                                            shop_domain, refund["id"], line_items_cursor
+                                        )
+                                    )
+                                    if not line_items_batch:
+                                        break
+
+                                    new_line_items = line_items_batch.get("edges", [])
+                                    all_line_items.extend(new_line_items)
+
+                                    page_info = line_items_batch.get("page_info", {})
+                                    line_items_cursor = (
+                                        page_info.get("end_cursor")
+                                        if page_info.get("has_next_page")
+                                        else None
+                                    )
+
+                                refund["refund_line_items"] = {
+                                    "edges": all_line_items,
+                                    "page_info": {"has_next_page": False},
+                                }
+                        processed_refunds.append(refund)
+                    order["refunds"] = processed_refunds
 
                 processed_orders.append(order)
 
@@ -252,10 +341,18 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price: originalUnitPrice
+                            original_unit_price: originalUnitPrice
                             sku
-                            variant_id: variant { id }
-                            product_id: product { id }
+                            custom_attributes: customAttributes {
+                                key
+                                value
+                            }
+                            variant {
+                                id
+                            }
+                            product {
+                                id
+                            }
                         }
                     }
                     page_info: pageInfo {
@@ -263,6 +360,51 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         has_previous_page: hasPreviousPage
                         start_cursor: startCursor
                         end_cursor: endCursor
+                    }
+                }
+                refunds {
+                    id
+                    created_at: createdAt
+                    note
+                    total_refunded: totalRefunded {
+                        amount
+                        currency_code: currencyCode
+                    }
+                    refund_line_items: refundLineItems(first: 10) {
+                        edges {
+                            node {
+                                id
+                                quantity
+                                subtotal
+                                line_item: lineItem {
+                                    id
+                                    product {
+                                        id
+                                    }
+                                    variant {
+                                        id
+                                    }
+                                    title
+                                    sku
+                                    customAttributes {
+                                        key
+                                        value
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    transactions(first: 10) {
+                        edges {
+                            node {
+                                id
+                                kind
+                                amount
+                                gateway
+                                status
+                                created_at: createdAt
+                            }
+                        }
                     }
                 }
             }
@@ -310,6 +452,70 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 "page_info": {"has_next_page": False},
             }
 
+        # Process refunds with pagination for refund line items
+        refunds = order.get("refunds", [])
+        if refunds:
+            processed_refunds = []
+            for refund in refunds:
+                # Process refund line items with pagination (similar to order line items)
+                refund_line_items = refund.get("refund_line_items", {})
+                if refund_line_items:
+                    line_items_page_info = refund_line_items.get("pageInfo", {})
+                    if line_items_page_info.get("hasNextPage"):
+                        # Fetch additional refund line items
+                        all_line_items = refund_line_items.get("edges", []).copy()
+                        line_items_cursor = line_items_page_info.get("endCursor")
+
+                        while line_items_cursor:
+                            rate_limit_info = await self.check_rate_limit(shop_domain)
+                            if not rate_limit_info["can_make_request"]:
+                                await self.wait_for_rate_limit(shop_domain)
+
+                            line_items_batch = await self._fetch_refund_line_items(
+                                shop_domain, refund["id"], line_items_cursor
+                            )
+                            if not line_items_batch:
+                                break
+
+                            new_line_items = line_items_batch.get("edges", [])
+                            all_line_items.extend(new_line_items)
+
+                            page_info = line_items_batch.get("page_info", {})
+                            line_items_cursor = (
+                                page_info.get("end_cursor")
+                                if page_info.get("has_next_page")
+                                else None
+                            )
+
+                        refund["refund_line_items"] = {
+                            "edges": all_line_items,
+                            "page_info": {"has_next_page": False},
+                        }
+                    else:
+                        # No pagination needed, just format the data
+                        line_item_edges = refund_line_items.get("edges", [])
+                        refund["refund_line_items"] = {
+                            "edges": line_item_edges,
+                            "page_info": {"has_next_page": False},
+                        }
+
+                # Process transactions (connection format)
+                transactions = refund.get("transactions", {})
+                if transactions:
+                    transaction_edges = transactions.get("edges", [])
+                    refund["transactions"] = {
+                        "edges": transaction_edges,
+                        "page_info": {"has_next_page": False},
+                    }
+
+                processed_refunds.append(refund)
+
+            # Convert to the expected format for consistency
+            order["refunds"] = {
+                "edges": [{"node": refund} for refund in processed_refunds],
+                "page_info": {"has_next_page": False},
+            }
+
         return order
 
     async def _fetch_order_line_items(
@@ -325,10 +531,18 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             title
                             quantity
-                            price: originalUnitPrice
+                            original_unit_price: originalUnitPrice
                             sku
-                            variant_id: variant { id }
-                            product_id: product { id }
+                            custom_attributes: customAttributes {
+                                key
+                                value
+                            }
+                            variant {
+                                id
+                            }
+                            product {
+                                id
+                            }
                         }
                     }
                     page_info: pageInfo {
@@ -349,3 +563,125 @@ class OrderAPIClient(BaseShopifyAPIClient):
         result = await self.execute_query(line_items_query, variables, shop_domain)
         order_data = result.get("order", {})
         return order_data.get("line_items", {})
+
+    async def _fetch_order_refunds(
+        self, shop_domain: str, order_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of refunds for a specific order"""
+        refunds_query = """
+        query($orderId: ID!, $first: Int!, $after: String) {
+            order(id: $orderId) {
+                refunds(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            created_at: createdAt
+                            note
+                            total_refunded: totalRefunded {
+                                amount
+                                currency_code: currencyCode
+                            }
+                            refund_line_items: refundLineItems(first: 10) {
+                                edges {
+                                    node {
+                                        id
+                                        quantity
+                                        subtotal
+                                        line_item: lineItem {
+                                            id
+                                            product_id: productId
+                                            variant_id: variantId
+                                            title
+                                            sku
+                                            properties {
+                                                key
+                                                value
+                                            }
+                                        }
+                                    }
+                                }
+                                page_info: pageInfo {
+                                    has_next_page: hasNextPage
+                                    end_cursor: endCursor
+                                }
+                            }
+                            transactions {
+                                id
+                                kind
+                                amount
+                                currency
+                                gateway
+                                status
+                                created_at: createdAt
+                            }
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "orderId": order_id,
+            "first": 50,  # Smaller batch size for cost efficiency
+            "after": cursor,
+        }
+
+        result = await self.execute_query(refunds_query, variables, shop_domain)
+        order_data = result.get("order", {})
+        return order_data.get("refunds", {})
+
+    async def _fetch_refund_line_items(
+        self, shop_domain: str, refund_id: str, cursor: str
+    ) -> Dict[str, Any]:
+        """Fetch a batch of refund line items for a specific refund"""
+        refund_line_items_query = """
+        query($refundId: ID!, $first: Int!, $after: String) {
+            refund(id: $refundId) {
+                refund_line_items: refundLineItems(first: $first, after: $after) {
+                    edges {
+                        node {
+                            id
+                            quantity
+                            subtotal
+                            line_item: lineItem {
+                                id
+                                product {
+                                    id
+                                }
+                                variant {
+                                    id
+                                }
+                                title
+                                sku
+                                customAttributes {
+                                    key
+                                    value
+                                }
+                            }
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
+                        end_cursor: endCursor
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "refundId": refund_id,
+            "first": 250,  # Max batch size for cost efficiency
+            "after": cursor,
+        }
+
+        result = await self.execute_query(
+            refund_line_items_query, variables, shop_domain
+        )
+        refund_data = result.get("refund", {})
+        return refund_data.get("refund_line_items", {})

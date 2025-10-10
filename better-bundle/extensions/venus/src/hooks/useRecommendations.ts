@@ -5,13 +5,58 @@ import {
   type ExtensionContext,
 } from "../api/recommendations";
 import { analyticsApi } from "../api/analytics";
+import { useApi } from "@shopify/ui-extensions-react/customer-account";
+
+// Format price using the same logic as the Remix app
+const formatPrice = (amount: string, currencyCode: string): string => {
+  try {
+    const numericAmount = parseFloat(amount);
+
+    // Use Intl.NumberFormat for proper currency formatting (same as Remix app)
+    const formatter = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits:
+        currencyCode === "JPY" || currencyCode === "KRW" ? 0 : 2,
+      maximumFractionDigits:
+        currencyCode === "JPY" || currencyCode === "KRW" ? 0 : 2,
+    });
+
+    return formatter.format(numericAmount);
+  } catch (error) {
+    // Fallback to simple symbol + amount
+    const currencySymbols: { [key: string]: string } = {
+      USD: "$",
+      EUR: "€",
+      GBP: "£",
+      CAD: "C$",
+      AUD: "A$",
+      JPY: "¥",
+      INR: "₹",
+      KRW: "₩",
+      BRL: "R$",
+      MXN: "$",
+    };
+    const symbol = currencySymbols[currencyCode] || currencyCode;
+    return `${symbol}${amount}`;
+  }
+};
 
 interface Product {
   id: string;
   title: string;
   handle: string;
   price: string;
-  image: string;
+  image: {
+    url: string;
+    alt_text?: string;
+  } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   inStock: boolean;
   url: string;
   variant_id?: string;
@@ -37,13 +82,45 @@ export function useRecommendations({
   shopDomain,
   columnConfig,
 }: UseRecommendationsProps) {
-  const [loading, setLoading] = useState(true);
+  const { storage } = useApi();
+  const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId] = useState(
-    () =>
-      `venus_${context}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-  );
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        // 1. Try reading from storage first (fastest)
+        const cachedSessionId =
+          await storage.read<string>("unified_session_id");
+
+        if (cachedSessionId) {
+          console.log(
+            "🔗 Venus: Using cached session_id from storage:",
+            cachedSessionId,
+          );
+          setSessionId(cachedSessionId);
+          return;
+        }
+
+        // 2. If not in storage, fetch from backend API
+        console.log("🌐 Venus: Fetching session_id from backend");
+        const sessionId = await analyticsApi.getOrCreateSession(
+          shopDomain,
+          customerId,
+        );
+        await storage.write("unified_session_id", sessionId);
+        console.log("✨ Venus: Session initialized from backend:", sessionId);
+        setSessionId(sessionId);
+      } catch (err) {
+        console.error("❌ Venus: Failed to initialize session:", err);
+        setError("Failed to initialize session");
+      }
+    };
+
+    initializeSession();
+  }, [storage, shopDomain, customerId]);
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
@@ -53,13 +130,13 @@ export function useRecommendations({
     position: number,
     productUrl: string,
   ): Promise<string> => {
-    // Track interaction using unified analytics (non-blocking)
     analyticsApi
       .trackRecommendationClick(
-        shopDomain?.replace(".myshopify.com", "") || "",
+        shopDomain,
         context,
         productId,
         position,
+        sessionId,
         customerId,
         { source: `${context}_recommendation` },
       )
@@ -67,40 +144,37 @@ export function useRecommendations({
         console.error(`Failed to track ${context} click:`, error);
       });
 
-    // Store attribution in cart for order processing
-    analyticsApi
-      .storeCartAttribution(sessionId, productId, context, position)
-      .catch((error) => {
-        console.error(`Failed to store cart attribution:`, error);
-      });
+    return productUrl;
+  };
 
-    // Add attribution parameters to track recommendation source
-    const shortRef = sessionId
-      .split("")
-      .reduce((hash, char) => {
-        return ((hash << 5) - hash + char.charCodeAt(0)) & 0xffffffff;
-      }, 0)
-      .toString(36)
-      .substring(0, 6);
+  // Track recommendation view when user actually views them
+  const trackRecommendationView = async () => {
+    if (products.length === 0) {
+      return;
+    }
 
-    const attributionParams = new URLSearchParams({
-      ref: shortRef,
-      src: productId,
-      pos: position.toString(),
-    });
-
-    // Return product page URL with attribution immediately
-    const productUrlWithAttribution = `${productUrl}?${attributionParams.toString()}`;
-    console.log(
-      `${context} recommendation clicked:`,
-      productUrlWithAttribution,
-    );
-
-    return productUrlWithAttribution;
+    try {
+      const productIds = products.map((product) => product.id);
+      await analyticsApi.trackRecommendationView(
+        shopDomain,
+        context,
+        sessionId,
+        customerId,
+        productIds,
+        { source: `${context}_page` },
+      );
+      console.log(`✅ Venus: Recommendation view tracked for ${context}`);
+    } catch (error) {
+      console.error(`❌ Venus: Failed to track recommendation view:`, error);
+    }
   };
 
   // Fetch recommendations
   useEffect(() => {
+    if (!sessionId) {
+      console.log("⏳ Venus: Waiting for session initialization");
+      return;
+    }
     const fetchRecommendations = async () => {
       try {
         setLoading(true);
@@ -110,6 +184,7 @@ export function useRecommendations({
           context,
           limit,
           user_id: customerId,
+          session_id: sessionId,
           ...(shopDomain && { shop_domain: shopDomain }),
         });
 
@@ -120,26 +195,16 @@ export function useRecommendations({
               id: rec.id,
               title: rec.title,
               handle: rec.handle,
-              price: `${rec.price.currency_code} ${rec.price.amount}`,
-              image: rec.image?.url,
+              price: formatPrice(rec.price.amount, rec.price.currency_code),
+              image: rec.image,
+              images: (rec as any).images,
               inStock: rec.available ?? true,
               url: rec.url,
+              variants: (rec as any).variants || [],
             }),
           );
 
           setProducts(transformedProducts);
-
-          // Only track recommendation view if there are actually products to display
-          if (transformedProducts.length > 0) {
-            const productIds = transformedProducts.map((product) => product.id);
-            await analyticsApi.trackRecommendationView(
-              shopDomain,
-              context,
-              customerId,
-              productIds,
-              { source: `${context}_page` },
-            );
-          }
         } else {
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
@@ -159,6 +224,7 @@ export function useRecommendations({
     products,
     error,
     trackRecommendationClick,
+    trackRecommendationView,
     columnConfig: memoizedColumnConfig,
   };
 }

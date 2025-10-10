@@ -265,11 +265,26 @@ class KafkaConsumer:
         """Close consumer with proper cleanup"""
         if self._consumer:
             try:
+                # Stop the consumer gracefully
                 await self._consumer.stop()
+                # Ensure the consumer is properly closed
+                if hasattr(self._consumer, "_closed") and not self._consumer._closed:
+                    await self._consumer.close()
                 self._consumer = None
                 self._is_initialized = False
+                logger.debug("Kafka consumer closed successfully")
             except Exception as e:
                 logger.exception(f"Error closing consumer: {e}")
+                # Force cleanup even if stop fails
+                try:
+                    if self._consumer and hasattr(self._consumer, "close"):
+                        await self._consumer.close()
+                except Exception:
+                    pass
+                self._consumer = None
+                self._is_initialized = False
+            finally:
+                # Ensure consumer is always set to None
                 self._consumer = None
                 self._is_initialized = False
 

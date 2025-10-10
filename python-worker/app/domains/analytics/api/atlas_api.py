@@ -90,7 +90,7 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             interaction_type=request.interaction_type,
             customer_id=request.customer_id,
             shop_id=shop_id,
-            metadata={
+            interaction_metadata={
                 **request.metadata,
             },
         )

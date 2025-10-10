@@ -1,0 +1,87 @@
+{
+  "test_scenario_6_multiple_recommendations": {
+    "original_count": 3,
+    "deduplicated_count": 1,
+    "best_interaction_type": "recommendation_clicked",
+    "success": true
+  },
+  "test_scenario_7_cross_extension_attribution": {
+    "extensions": [
+      "phoenix",
+      "venus",
+      "apollo"
+    ],
+    "weights_sum": 1.0,
+    "has_weights": true,
+    "success": true
+  },
+  "test_scenario_14_payment_failure": {
+    "detected_failure": true,
+    "attribution_type": "direct_click",
+    "attributed_revenue": 0.0,
+    "success": true
+  },
+  "test_scenario_15_subscription_cancellation": {
+    "detected_cancellation": true,
+    "attribution_type": "direct_click",
+    "attributed_revenue": 0.0,
+    "success": true
+  },
+  "test_scenario_17_cross_shop_attribution": {
+    "detected_cross_shop": true,
+    "attribution_type": "cross_extension",
+    "attributed_revenue": 29.997,
+    "reduced_attribution": true,
+    "success": true
+  },
+  "test_scenario_21_low_quality_recommendations": {
+    "detected_low_quality": true,
+    "attribution_type": "direct_click",
+    "attributed_revenue": 29.997,
+    "reduced_attribution": true,
+    "success": true
+  },
+  "test_scenario_22_recommendation_timing": {
+    "requires_adjustment": true,
+    "timing_score": 0.6,
+    "attribution_type": "time_decay",
+    "attributed_revenue": 59.994,
+    "success": true
+  },
+  "test_scenario_26_data_loss_recovery": {
+    "detected_data_loss": true,
+    "attribution_type": "direct_click",
+    "attributed_revenue": 0.0,
+    "success": true
+  },
+  "test_scenario_27_fraudulent_attribution": {
+    "detected_fraud": true,
+    "attribution_type": "direct_click",
+    "attributed_revenue": 0.0,
+    "success": true
+  },
+  "test_scenario_28_attribution_manipulation": {
+    "detected_manipulation": true,
+    "success": true
+  },
+  "test_scenario_33_anonymous_to_customer_conversion": {
+    "conversion_success": true,
+    "conversion_type": "anonymous_to_customer",
+    "linked_sessions_count": 2,
+    "success": true
+  },
+  "test_scenario_34_multiple_devices_same_customer": {
+    "multi_device_success": true,
+    "scenario": "multiple_devices_same_customer",
+    "total_devices": 2,
+    "cross_device_attribution": true,
+    "success": true
+  },
+  "test_performance_scenarios": {
+    "original_count": 1000,
+    "deduplicated_count": 1,
+    "processing_time": 0.0008833408355712891,
+    "performance_acceptable": true,
+    "success": true
+  }
+}

@@ -6,6 +6,8 @@ from typing import Dict, Any, List
 from abc import ABC, abstractmethod
 from datetime import datetime
 
+from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
+
 from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -236,7 +238,7 @@ class FeatureRepository(IFeatureRepository):
                                 sanitized[k] = None
                             else:
                                 sanitized[k] = coerced_value
-                    sanitized["last_computed_at"] = datetime.utcnow()
+                    sanitized["last_computed_at"] = now_utc()
                     prepared_data.append(sanitized)
 
                 # Use PostgreSQL's ON CONFLICT for efficient upsert
@@ -280,7 +282,7 @@ class FeatureRepository(IFeatureRepository):
                 # Data is already in snake_case format
                 prepared_data = []
                 for record in batch_data:
-                    record["last_computed_at"] = datetime.utcnow()
+                    record["last_computed_at"] = now_utc()
                     prepared_data.append(record)
 
                 # Use PostgreSQL's ON CONFLICT for efficient upsert
@@ -317,7 +319,7 @@ class FeatureRepository(IFeatureRepository):
                 # Data is already in snake_case format
                 prepared_data = []
                 for record in batch_data:
-                    record["last_computed_at"] = datetime.utcnow()
+                    record["last_computed_at"] = now_utc()
                     prepared_data.append(record)
 
                 # Use PostgreSQL's ON CONFLICT for efficient upsert
@@ -357,7 +359,7 @@ class FeatureRepository(IFeatureRepository):
                 # Data is already in snake_case format
                 prepared_data = []
                 for record in batch_data:
-                    record["last_computed_at"] = datetime.utcnow()
+                    record["last_computed_at"] = now_utc()
                     prepared_data.append(record)
 
                 # Use PostgreSQL's ON CONFLICT for efficient upsert
@@ -673,9 +675,9 @@ class FeatureRepository(IFeatureRepository):
         """Get products modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -703,9 +705,9 @@ class FeatureRepository(IFeatureRepository):
         """Get customers modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -733,9 +735,9 @@ class FeatureRepository(IFeatureRepository):
         """Get orders modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -781,9 +783,9 @@ class FeatureRepository(IFeatureRepository):
         """Get collections modified since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -811,9 +813,9 @@ class FeatureRepository(IFeatureRepository):
         """Get behavioral events since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -864,9 +866,9 @@ class FeatureRepository(IFeatureRepository):
         """Get user interactions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -916,9 +918,9 @@ class FeatureRepository(IFeatureRepository):
         """Get user sessions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (
@@ -968,9 +970,9 @@ class FeatureRepository(IFeatureRepository):
         """Get purchase attributions since a specific timestamp for incremental processing using SQLAlchemy"""
         try:
             # Convert string timestamp to datetime object
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
+            since_dt = parse_iso_timestamp(since_timestamp)
+            if since_dt is None:
+                raise ValueError(f"Invalid timestamp format: {since_timestamp}")
 
             async with get_session_context() as session:
                 stmt = (

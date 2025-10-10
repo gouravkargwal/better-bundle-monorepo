@@ -34,17 +34,31 @@ export class KafkaClientService {
 
   private async initialize(): Promise<void> {
     try {
+      console.log("🔧 Initializing Kafka client service...");
+      console.log("📋 Kafka config:", {
+        clientId: kafkaConfig.clientId,
+        bootstrapServers: kafkaConfig.bootstrapServers,
+        workerId: kafkaConfig.workerId
+      });
+
       // Initialize admin client
       this.admin = this.kafka.admin();
+      console.log("🔌 Connecting to Kafka admin...");
       await this.admin.connect();
 
       // Test connection
+      console.log("🧪 Testing Kafka connection...");
       await this.testConnection();
       this.connected = true;
 
       console.log("✅ Kafka client service initialized successfully");
     } catch (error) {
       console.error("❌ Failed to initialize Kafka client:", error);
+      console.error("Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        bootstrapServers: kafkaConfig.bootstrapServers
+      });
       throw error;
     }
   }
@@ -65,6 +79,7 @@ export class KafkaClientService {
 
   public async getProducer(): Promise<Producer> {
     if (!this.producer) {
+      console.log("🔧 Creating Kafka producer...");
       this.producer = this.kafka.producer({
         maxInFlightRequests: 1,
         idempotent: true,
@@ -75,8 +90,9 @@ export class KafkaClientService {
         },
       });
 
+      console.log("🔌 Connecting Kafka producer...");
       await this.producer.connect();
-      console.log("📤 Kafka producer connected");
+      console.log("📤 Kafka producer connected successfully");
     }
     return this.producer;
   }

@@ -29,14 +29,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             # Use session here
     """
     async with get_session_context() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {e}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+        yield session
 
 
 async def get_db_transaction() -> AsyncGenerator[AsyncSession, None]:

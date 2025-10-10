@@ -22,13 +22,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No inventory_item_id found" }, { status: 400 });
     }
 
-    console.log("📦 Inventory update received:", {
-      inventoryItemId,
-      locationId,
-      available,
-      shop,
-    });
-
     // Publish Kafka event with shop_domain - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {

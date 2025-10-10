@@ -24,7 +24,11 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     browser_session_id = Column(String(255), nullable=False)
     status = Column(String(50), default="active", nullable=False, index=True)
     client_id = Column(String, nullable=True, index=True)  # ✅ NEW: Shopify client ID
-    last_active = Column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
+    last_active = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
+    )
     expires_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     user_agent = Column(String, nullable=True)
     ip_address = Column(String(45), nullable=True)
@@ -36,9 +40,6 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     shop = relationship("Shop", back_populates="user_sessions")
     attributions = relationship(
         "PurchaseAttribution", back_populates="session", cascade="all, delete-orphan"
-    )
-    refund_attributions = relationship(
-        "RefundAttribution", back_populates="session", cascade="all, delete-orphan"
     )
     interactions = relationship(
         "UserInteraction", back_populates="session", cascade="all, delete-orphan"

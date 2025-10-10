@@ -16,33 +16,97 @@ class ProductEnrichment:
     def __init__(self):
         pass
 
-    def _extract_image_from_media(
+    def enhance_recommendations_with_currency(
+        self, recommendations: List[Dict[str, Any]], shop_currency: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Centralized function to enhance all recommendations with consistent currency information
+
+        Args:
+            recommendations: List of recommendation dictionaries
+            shop_currency: Shop's currency code (e.g., "USD", "INR")
+
+        Returns:
+            Enhanced recommendations with consistent currency
+        """
+        enhanced_recommendations = []
+
+        for rec in recommendations:
+            # Create a copy to avoid modifying the original
+            enhanced_rec = rec.copy()
+
+            # Ensure price has currency_code
+            if "price" in enhanced_rec and isinstance(enhanced_rec["price"], dict):
+                enhanced_rec["price"]["currency_code"] = shop_currency
+            else:
+                # If price is not a dict, create proper structure
+                enhanced_rec["price"] = {
+                    "amount": str(enhanced_rec.get("price", "0")),
+                    "currency_code": shop_currency,
+                }
+
+            # Enhance variants with currency information
+            if "variants" in enhanced_rec and isinstance(
+                enhanced_rec["variants"], list
+            ):
+                enhanced_variants = []
+                for variant in enhanced_rec["variants"]:
+                    if isinstance(variant, dict):
+                        enhanced_variant = variant.copy()
+                        enhanced_variant["currency_code"] = shop_currency
+                        enhanced_variants.append(enhanced_variant)
+                    else:
+                        enhanced_variants.append(variant)
+                enhanced_rec["variants"] = enhanced_variants
+
+            enhanced_recommendations.append(enhanced_rec)
+
+        return enhanced_recommendations
+
+    def _extract_images_from_media(
         self, media_data: Any, fallback_title: str
-    ) -> Dict[str, str] | None:
-        """Extract image URL and alt text from media JSON data"""
+    ) -> List[Dict[str, str]] | None:
+        """Extract all image URLs and alt text from media JSON data"""
         if not media_data or not isinstance(media_data, list) or len(media_data) == 0:
             return None
 
-        # Get the first media item (usually the main product image)
-        first_media = media_data[0]
+        images = []
+        for i, media_item in enumerate(media_data):
+            if isinstance(media_item, dict):
+                # Check for direct image properties
+                if "image" in media_item and isinstance(media_item["image"], dict):
+                    image_data = media_item["image"]
+                    images.append(
+                        {
+                            "url": image_data.get("url", ""),
+                            "alt_text": image_data.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
+                # Check for direct URL properties
+                elif "url" in media_item:
+                    images.append(
+                        {
+                            "url": media_item.get("url", ""),
+                            "alt_text": media_item.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
 
-        # Handle different media structures
-        if isinstance(first_media, dict):
-            # Check for direct image properties
-            if "image" in first_media and isinstance(first_media["image"], dict):
-                image_data = first_media["image"]
-                return {
-                    "url": image_data.get("url", ""),
-                    "alt_text": image_data.get("altText", fallback_title),
-                }
-            # Check for direct URL properties
-            elif "url" in first_media:
-                return {
-                    "url": first_media.get("url", ""),
-                    "alt_text": first_media.get("altText", fallback_title),
-                }
+        return images if images else None
 
-        return None
+    def _extract_image_from_media(
+        self, media_data: Any, fallback_title: str
+    ) -> Dict[str, str] | None:
+        """Extract first image URL and alt text from media JSON data (backward compatibility)"""
+        images = self._extract_images_from_media(media_data, fallback_title)
+        return images[0] if images else None
 
     async def enrich_items(
         self,
@@ -100,6 +164,17 @@ class ProductEnrichment:
                     logger.debug(f"🚫 Skipping empty item ID: {item_id}")
                     continue
 
+                # Skip non-product IDs (like "collection", "category", etc.)
+                if actual_item_id.lower() in [
+                    "collection",
+                    "category",
+                    "tag",
+                    "vendor",
+                    "type",
+                ]:
+                    logger.debug(f"🚫 Skipping non-product ID: {actual_item_id}")
+                    continue
+
                 if actual_item_id.startswith("shop_"):
                     # Extract shop ID and product ID
                     parts = actual_item_id.split("_")
@@ -109,28 +184,29 @@ class ProductEnrichment:
                         ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
                         product_id = parts[2]  # 7903465537675
 
-                        # Only include if it's from the current shop and product_id is not empty
+                        # Only include if it's from the current shop and product_id is not empty and numeric
                         if (
                             gorse_shop_id == shop_id
                             and product_id
                             and product_id.strip()
+                            and product_id.isdigit()  # Ensure it's a numeric product ID
                         ):
                             clean_item_ids.append(product_id)
                         else:
                             logger.debug(
-                                f"🚫 Skipping product from different shop or empty product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
+                                f"🚫 Skipping product from different shop or invalid product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
                             )
                     else:
                         logger.warning(
                             f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
                         )
                 else:
-                    # Assume it's already a clean product ID, but check it's not empty
-                    if actual_item_id.strip():
+                    # Assume it's already a clean product ID, but check it's not empty and numeric
+                    if actual_item_id.strip() and actual_item_id.isdigit():
                         clean_item_ids.append(actual_item_id)
                     else:
                         logger.debug(
-                            f"🚫 Skipping empty clean product ID: {actual_item_id}"
+                            f"🚫 Skipping non-numeric product ID: {actual_item_id}"
                         )
 
             # Fetch products from database using cleaned IDs
@@ -220,8 +296,8 @@ class ProductEnrichment:
                                     f"⚠️ No variant ID found in variant: {default_variant}"
                                 )
 
-                    # Determine availability based on overall and per-variant inventory
-                    total_inventory = getattr(product, "total_inventory", None)
+                    # Determine availability based on per-variant inventory
+                    # Check if ANY variant has positive inventory
                     any_variant_instock = False
                     if isinstance(variants, list) and len(variants) > 0:
                         for v in variants:
@@ -234,13 +310,18 @@ class ProductEnrichment:
                                     break
                             except Exception:
                                 pass
-                    is_available = (product.status == "ACTIVE") and (
-                        (isinstance(total_inventory, int) and total_inventory > 0)
-                        or any_variant_instock
-                    )
+
+                    # Product is available only if:
+                    # 1. Status is ACTIVE
+                    # 2. At least one variant has positive inventory
+                    is_available = (product.status == "ACTIVE") and any_variant_instock
 
                     # Skip products that are unavailable (sold out or inactive)
                     if not is_available:
+                        logger.debug(
+                            f"🚫 Skipping unavailable product: {product.title} "
+                            f"(status: {product.status}, any_variant_instock: {any_variant_instock})"
+                        )
                         continue
 
                     # Format for frontend ProductRecommendation interface
@@ -252,13 +333,11 @@ class ProductEnrichment:
                             "url": f"https://{product_domain}/products/{product.handle}",
                             "price": {
                                 "amount": str(product.price),
-                                "currency_code": (
-                                    shop.currency_code
-                                    if shop and shop.currency_code
-                                    else "USD"
-                                ),
                             },
                             "image": self._extract_image_from_media(
+                                product.media, product.title
+                            ),
+                            "images": self._extract_images_from_media(
                                 product.media, product.title
                             ),
                             "vendor": product.vendor or "",

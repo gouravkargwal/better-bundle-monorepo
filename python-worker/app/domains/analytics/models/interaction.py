@@ -33,6 +33,10 @@ class InteractionType(str, Enum):
     RECOMMENDATION_CLICKED = "recommendation_clicked"
     RECOMMENDATION_ADD_TO_CART = "recommendation_add_to_cart"
 
+    # Server-side only events
+    RECOMMENDATION_READY = "recommendation_ready"
+    RECOMMENDATION_DECLINED = "recommendation_declined"
+
 
 class UserInteraction(BaseModel):
     """User interaction model for unified analytics tracking"""
@@ -46,7 +50,7 @@ class UserInteraction(BaseModel):
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     shop_id: str = Field(..., description="Shop identifier")
 
-    metadata: Dict[str, Any] = Field(
+    interaction_metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional interaction metadata"
     )
 
@@ -67,7 +71,7 @@ class InteractionCreate(BaseModel):
     customer_id: Optional[str] = Field(None, description="Customer identifier")
     shop_id: str = Field(..., description="Shop identifier")
 
-    metadata: Dict[str, Any] = Field(
+    interaction_metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional interaction metadata"
     )
 

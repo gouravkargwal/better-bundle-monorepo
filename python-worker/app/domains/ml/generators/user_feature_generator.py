@@ -1,6 +1,6 @@
 """
-User/Customer Feature Generator for Gorse integration
-Computes features from orders, customer data, and behavioral events
+Optimized User/Customer Feature Generator for State-of-the-Art Gorse Integration
+Focuses on high-signal features that actually improve recommendation quality
 """
 
 import datetime
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class UserFeatureGenerator(BaseFeatureGenerator):
-    """Feature generator for user/customer features"""
+    """State-of-the-art feature generator for user/customer features optimized for Gorse"""
 
     async def generate_features(
         self,
@@ -24,7 +24,7 @@ class UserFeatureGenerator(BaseFeatureGenerator):
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Generate user features for a customer
+        Generate optimized user features for Gorse collaborative filtering
 
         Args:
             shop_id: The shop ID
@@ -32,438 +32,409 @@ class UserFeatureGenerator(BaseFeatureGenerator):
             context: Additional context data (orders, customer_data, behavioral_events)
 
         Returns:
-            Dictionary matching UserFeatures table schema
+            Dictionary with minimal, high-signal features for Gorse
         """
         try:
             logger.debug(
-                f"Computing user features for shop: {shop_id}, customer: {customer_id}"
+                f"Computing optimized user features for customer: {customer_id}"
             )
 
             # Get data from context
             orders = context.get("orders", [])
-            customer_data = context.get("customer_data", {})
-            behavioral_events = context.get("behavioral_events", [])
-            products = context.get("products", [])  # For category/vendor analysis
+            user_interactions = context.get("user_interactions", [])
 
             # Filter customer's orders
             customer_orders = [
                 order for order in orders if order.get("customer_id") == customer_id
             ]
 
-            # Compute purchase metrics
-            purchase_metrics = self._compute_purchase_metrics(customer_orders)
+            # Filter customer's interactions
+            customer_interactions = [
+                interaction
+                for interaction in user_interactions
+                if interaction.get("customer_id") == customer_id
+            ]
 
-            # Compute time-based metrics
-            temporal_metrics = self._compute_temporal_metrics(customer_orders)
-
-            # Compute product preferences
-            product_preferences = self._compute_product_preferences(
-                customer_orders, products
-            )
-
-            # Compute discount behavior
-            discount_metrics = self._compute_discount_metrics(customer_orders)
-
-            # Compute enhanced customer features from new order data
-            customer_enhancement_features = self._compute_customer_enhancement_features(
-                customer_orders
-            )
-
-            # NEW: Compute customer demographic features using CustomerData table
-            customer_demographic_features = self._compute_customer_demographic_features(
-                customer_data
-            )
-
+            # Core Gorse-optimized features
             features = {
                 "shop_id": shop_id,
                 "customer_id": customer_id,
-                "total_purchases": purchase_metrics["total_purchases"],
-                "total_spent": purchase_metrics["total_spent"],
-                "avg_order_value": purchase_metrics["avg_order_value"],
-                "lifetime_value": purchase_metrics["lifetime_value"],
-                "refunded_orders": purchase_metrics["refunded_orders"],
-                "refund_rate": purchase_metrics["refund_rate"],
-                "total_refunded_amount": purchase_metrics["total_refunded_amount"],
-                "net_lifetime_value": purchase_metrics["net_lifetime_value"],
-                "days_since_first_order": temporal_metrics["days_since_first_order"],
-                "days_since_last_order": temporal_metrics["days_since_last_order"],
-                "avg_days_between_orders": temporal_metrics["avg_days_between_orders"],
-                "order_frequency_per_month": temporal_metrics[
-                    "order_frequency_per_month"
-                ],
-                "distinct_products_purchased": product_preferences["distinct_products"],
-                "distinct_categories_purchased": product_preferences[
-                    "distinct_categories"
-                ],
-                "preferred_category": product_preferences["preferred_category"],
-                "preferred_vendor": product_preferences["preferred_vendor"],
-                "price_point_preference": product_preferences["price_point_preference"],
-                "orders_with_discount_count": discount_metrics["orders_with_discount"],
-                "discount_sensitivity": discount_metrics["discount_sensitivity"],
-                "avg_discount_amount": discount_metrics["avg_discount_amount"],
-                "customer_state": customer_enhancement_features["customer_state"],
-                "is_verified_email": customer_enhancement_features["is_verified_email"],
-                "customer_age": customer_enhancement_features["customer_age"],
-                "has_default_address": customer_enhancement_features[
-                    "has_default_address"
-                ],
-                "geographic_region": customer_enhancement_features["geographic_region"],
-                "currency_preference": customer_enhancement_features[
-                    "currency_preference"
-                ],
-                "customer_health_score": customer_enhancement_features[
-                    "customer_health_score"
-                ],
-                "customer_first_name": customer_demographic_features[
-                    "customer_first_name"
-                ],
-                "customer_last_name": customer_demographic_features[
-                    "customer_last_name"
-                ],
-                "customer_location": customer_demographic_features["customer_location"],
-                "customer_tags": customer_demographic_features["customer_tags"],
-                "customer_created_at_shopify": customer_demographic_features[
-                    "customer_created_at_shopify"
-                ],
-                "customer_last_order_id": customer_demographic_features[
-                    "customer_last_order_id"
-                ],
-                "customer_state": customer_demographic_features["customer_state"],
-                "customer_verified_email": customer_demographic_features[
-                    "customer_verified_email"
-                ],
-                "customer_tax_exempt": customer_demographic_features[
-                    "customer_tax_exempt"
-                ],
-                "customer_default_address": customer_demographic_features[
-                    "customer_default_address"
-                ],
-                "customer_locale": customer_demographic_features["customer_locale"],
+                # === CORE ENGAGEMENT SIGNALS ===
+                # These are the most predictive for collaborative filtering
+                "total_purchases": len(customer_orders),
+                "total_interactions": len(customer_interactions),
+                "lifetime_value": self._compute_lifetime_value(customer_orders),
+                # === BEHAVIORAL PREFERENCES ===
+                # High-level patterns Gorse can use for clustering
+                "avg_order_value": self._compute_avg_order_value(customer_orders),
+                "purchase_frequency_score": self._compute_purchase_frequency(
+                    customer_orders
+                ),
+                "interaction_diversity_score": self._compute_interaction_diversity_score(
+                    customer_interactions
+                ),
+                # === TEMPORAL SIGNALS ===
+                # Recent behavior is most predictive
+                "days_since_last_purchase": self._compute_days_since_last_purchase(
+                    customer_orders
+                ),
+                "recency_score": self._compute_recency_score(
+                    customer_orders, customer_interactions
+                ),
+                # === CONVERSION QUALITY ===
+                # User's propensity to convert
+                "conversion_rate": self._compute_conversion_rate(
+                    customer_interactions, customer_orders
+                ),
+                # === CATEGORY AFFINITY ===
+                # For cold-start recommendations
+                "primary_category": self._compute_primary_category(
+                    customer_orders, context.get("products", [])
+                ),
+                "category_diversity": self._compute_category_diversity(
+                    customer_orders, context.get("products", [])
+                ),
+                # === USER LIFECYCLE STAGE ===
+                # Critical for recommendation strategy
+                "user_lifecycle_stage": self._compute_lifecycle_stage(
+                    customer_orders, customer_interactions
+                ),
+                # === RISK FACTORS ===
+                # Important for recommendation quality
+                "churn_risk_score": self._compute_churn_risk(
+                    customer_orders, customer_interactions
+                ),
                 "last_computed_at": now_utc(),
             }
-
-            logger.debug(
-                f"Computed user features for customer: {customer_id} - "
-                f"LTV: ${features['lifetime_value']:.2f}, Orders: {features['total_purchases']}"
-            )
 
             return features
 
         except Exception as e:
-            logger.error(f"Failed to compute user features: {str(e)}")
-            return self._get_default_features(shop_id, customer_id)
+            logger.error(f"Failed to compute optimized user features: {str(e)}")
+            return self._get_minimal_default_features(shop_id, customer_id)
 
-    def _compute_purchase_metrics(
-        self, customer_orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute purchase-related metrics including refund analysis"""
+    def _compute_lifetime_value(self, customer_orders: List[Dict[str, Any]]) -> float:
+        """Compute total customer lifetime value - core signal for Gorse"""
         if not customer_orders:
-            return {
-                "total_purchases": 0,
-                "total_spent": 0.0,
-                "avg_order_value": 0.0,
-                "lifetime_value": 0.0,
-                "refunded_orders": 0,
-                "refund_rate": 0.0,
-                "total_refunded_amount": 0.0,
-                "net_lifetime_value": 0.0,
-            }
+            return 0.0
 
-        total_purchases = len(customer_orders)
+        total_value = sum(
+            float(order.get("totalAmount", 0.0)) for order in customer_orders
+        )
 
-        # Calculate total spent and refund metrics
-        total_spent = 0.0
-        total_refunded_amount = 0.0
-        refunded_orders = 0
-
+        # Apply refund adjustment
         for order in customer_orders:
-            order_amount = float(order.get("totalAmount", 0.0))
-            total_spent += order_amount
+            if order.get("financialStatus") == "refunded":
+                refunded_amount = float(
+                    order.get("totalRefundedAmount", order.get("totalAmount", 0.0))
+                )
+                total_value -= refunded_amount
 
-            # Check financial status for refunds
-            financial_status = order.get("financialStatus")
-            if financial_status == "refunded":
-                refunded_orders += 1
-                # Use totalRefundedAmount if available, otherwise use totalAmount
-                refunded_amount = float(order.get("totalRefundedAmount", order_amount))
-                total_refunded_amount += refunded_amount
+        return round(max(0.0, total_value), 2)
 
-        # Calculate metrics
-        avg_order_value = total_spent / total_purchases if total_purchases > 0 else 0.0
-        refund_rate = refunded_orders / total_purchases if total_purchases > 0 else 0.0
-
-        # Net lifetime value (total spent minus refunds)
-        net_lifetime_value = total_spent - total_refunded_amount
-
-        return {
-            "total_purchases": total_purchases,
-            "total_spent": round(total_spent, 2),
-            "avg_order_value": round(avg_order_value, 2),
-            "lifetime_value": round(total_spent, 2),  # Gross lifetime value
-            "refunded_orders": refunded_orders,
-            "refund_rate": round(refund_rate, 3),
-            "total_refunded_amount": round(total_refunded_amount, 2),
-            "net_lifetime_value": round(net_lifetime_value, 2),
-        }
-
-    def _compute_temporal_metrics(
-        self, customer_orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute time-based metrics"""
+    def _compute_avg_order_value(self, customer_orders: List[Dict[str, Any]]) -> float:
+        """Compute average order value - key for price-based clustering"""
         if not customer_orders:
-            return {
-                "days_since_first_order": None,
-                "days_since_last_order": None,
-                "avg_days_between_orders": None,
-                "order_frequency_per_month": None,
-            }
+            return 0.0
+
+        total_value = sum(
+            float(order.get("totalAmount", 0.0)) for order in customer_orders
+        )
+        return round(total_value / len(customer_orders), 2)
+
+    def _compute_purchase_frequency(
+        self, customer_orders: List[Dict[str, Any]]
+    ) -> float:
+        """Compute purchase frequency score - critical for active user identification"""
+        if len(customer_orders) <= 1:
+            return 0.0
 
         # Sort orders by date
         sorted_orders = sorted(
             customer_orders, key=lambda x: self._parse_date(x.get("order_date"))
         )
 
-        first_order_date = self._parse_date(sorted_orders[0].get("order_date"))
-        last_order_date = self._parse_date(sorted_orders[-1].get("order_date"))
+        first_order = self._parse_date(sorted_orders[0].get("order_date"))
+        last_order = self._parse_date(sorted_orders[-1].get("order_date"))
 
-        if not first_order_date or not last_order_date:
-            return {
-                "days_since_first_order": None,
-                "days_since_last_order": None,
-                "avg_days_between_orders": None,
-                "order_frequency_per_month": None,
-            }
+        if not first_order or not last_order:
+            return 0.0
 
-        # Days since first and last order
-        days_since_first = (now_utc() - first_order_date).days
-        days_since_last = (now_utc() - last_order_date).days
+        # Calculate orders per month
+        days_span = max(1, (last_order - first_order).days)
+        frequency_per_month = (len(customer_orders) - 1) / (days_span / 30.0)
 
-        # Average days between orders
-        avg_days_between = None
-        order_frequency = None
+        # Normalize to 0-1 scale (4+ orders per month = max score)
+        return round(min(1.0, frequency_per_month / 4.0), 3)
 
-        if len(sorted_orders) > 1:
-            # Calculate gaps between consecutive orders
-            gaps = []
-            for i in range(1, len(sorted_orders)):
-                prev_date = self._parse_date(sorted_orders[i - 1].get("order_date"))
-                curr_date = self._parse_date(sorted_orders[i].get("order_date"))
-                if prev_date and curr_date:
-                    gap_days = (curr_date - prev_date).days
-                    gaps.append(gap_days)
+    def _compute_interaction_diversity_score(
+        self, customer_interactions: List[Dict[str, Any]]
+    ) -> float:
+        """Compute interaction diversity - helps Gorse understand user engagement patterns"""
+        if not customer_interactions:
+            return 0.0
 
-            if gaps:
-                avg_days_between = round(statistics.mean(gaps), 1)
+        # Count unique interaction types
+        interaction_types = set(
+            interaction.get("interactionType", "")
+            for interaction in customer_interactions
+        )
 
-            # Order frequency per month
-            total_span_days = (last_order_date - first_order_date).days
-            if total_span_days > 0:
-                order_frequency = round(
-                    (len(sorted_orders) - 1) / (total_span_days / 30.0), 2
-                )
-        else:
-            # Single order
-            order_frequency = 0.0
+        # Normalize diversity score (8+ types = max diversity)
+        diversity = len(interaction_types) / 8.0
+        return round(min(1.0, diversity), 3)
 
-        return {
-            "days_since_first_order": days_since_first,
-            "days_since_last_order": days_since_last,
-            "avg_days_between_orders": avg_days_between,
-            "order_frequency_per_month": order_frequency,
-        }
-
-    def _compute_product_preferences(
-        self, customer_orders: List[Dict[str, Any]], products: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute product preference metrics"""
+    def _compute_days_since_last_purchase(
+        self, customer_orders: List[Dict[str, Any]]
+    ) -> Optional[int]:
+        """Days since last purchase - critical recency signal"""
         if not customer_orders:
-            return {
-                "distinct_products": 0,
-                "distinct_categories": 0,
-                "preferred_category": None,
-                "preferred_vendor": None,
-                "price_point_preference": None,
-            }
+            return None
 
-        # Track products, categories, vendors, and prices
-        purchased_products = set()
+        latest_order_date = max(
+            (self._parse_date(order.get("order_date")) for order in customer_orders),
+            default=None,
+        )
+
+        if not latest_order_date:
+            return None
+
+        return (now_utc() - latest_order_date).days
+
+    def _compute_recency_score(
+        self,
+        customer_orders: List[Dict[str, Any]],
+        customer_interactions: List[Dict[str, Any]],
+    ) -> float:
+        """Compute combined recency score from orders and interactions"""
+
+        # Get most recent activity (order or interaction)
+        most_recent_activity = None
+
+        # Check orders
+        if customer_orders:
+            latest_order = max(
+                (
+                    self._parse_date(order.get("order_date"))
+                    for order in customer_orders
+                ),
+                default=None,
+            )
+            if latest_order:
+                most_recent_activity = latest_order
+
+        # Check interactions
+        if customer_interactions:
+            latest_interaction = max(
+                (
+                    self._parse_date(interaction.get("created_at"))
+                    for interaction in customer_interactions
+                ),
+                default=None,
+            )
+            if latest_interaction:
+                if (
+                    not most_recent_activity
+                    or latest_interaction > most_recent_activity
+                ):
+                    most_recent_activity = latest_interaction
+
+        if not most_recent_activity:
+            return 0.0
+
+        # Calculate recency score with exponential decay
+        days_since_activity = (now_utc() - most_recent_activity).days
+
+        # Score decays: 1.0 for today, 0.5 for 14 days ago, 0.1 for 60 days ago
+        recency_score = max(0.0, 1.0 - (days_since_activity / 60.0))
+        return round(recency_score, 3)
+
+    def _compute_conversion_rate(
+        self,
+        customer_interactions: List[Dict[str, Any]],
+        customer_orders: List[Dict[str, Any]],
+    ) -> float:
+        """Compute user's conversion rate - key quality signal for Gorse"""
+        if not customer_interactions:
+            return 0.0
+
+        # Count high-intent interactions (views, cart adds)
+        high_intent_interactions = sum(
+            1
+            for interaction in customer_interactions
+            if interaction.get("interactionType")
+            in ["product_viewed", "product_added_to_cart", "cart_viewed"]
+        )
+
+        if high_intent_interactions == 0:
+            return 0.0
+
+        # Count purchases (completed orders)
+        purchase_count = len(customer_orders)
+
+        conversion_rate = purchase_count / high_intent_interactions
+        return round(min(1.0, conversion_rate), 3)
+
+    def _compute_primary_category(
+        self, customer_orders: List[Dict[str, Any]], products: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Find user's primary product category - for content-based signals in Gorse"""
+        if not customer_orders or not products:
+            return None
+
         category_counts = {}
-        vendor_counts = {}
-        all_prices = []
 
         for order in customer_orders:
-            # Use snake_case field names as they come from the database
-            line_items = order.get("line_items", [])
-
-            for item in line_items:
-                # Get product ID
+            for item in order.get("line_items", []):
                 product_id = self._extract_product_id_from_line_item(item)
-                if product_id:
-                    purchased_products.add(product_id)
+                if not product_id:
+                    continue
 
-                # Get price
-                price = float(item.get("price", 0.0))
-                quantity = int(item.get("quantity", 1))
-                all_prices.extend([price] * quantity)  # Weight by quantity
-
-                # Find product details to get category and vendor
-                product_info = self._find_product_info(product_id, products, item)
+                # Find product info
+                product_info = next(
+                    (p for p in products if p.get("product_id") == product_id), None
+                )
 
                 if product_info:
-                    # Count categories
                     category = product_info.get("productType") or product_info.get(
                         "category"
                     )
                     if category:
+                        quantity = int(item.get("quantity", 1))
                         category_counts[category] = (
                             category_counts.get(category, 0) + quantity
                         )
 
-                    # Count vendors
-                    vendor = product_info.get("vendor")
-                    if vendor:
-                        vendor_counts[vendor] = vendor_counts.get(vendor, 0) + quantity
-
-        # Determine preferences
-        preferred_category = (
+        return (
             max(category_counts, key=category_counts.get) if category_counts else None
         )
-        preferred_vendor = (
-            max(vendor_counts, key=vendor_counts.get) if vendor_counts else None
-        )
 
-        # Calculate price point preference
-        price_point_preference = self._calculate_price_tier(all_prices)
+    def _compute_category_diversity(
+        self, customer_orders: List[Dict[str, Any]], products: List[Dict[str, Any]]
+    ) -> int:
+        """Count distinct categories user has purchased from"""
+        if not customer_orders or not products:
+            return 0
 
-        # Count distinct categories
-        distinct_categories = len(set(category_counts.keys()))
-
-        return {
-            "distinct_products": len(purchased_products),
-            "distinct_categories": distinct_categories,
-            "preferred_category": preferred_category,
-            "preferred_vendor": preferred_vendor,
-            "price_point_preference": price_point_preference,
-        }
-
-    def _compute_discount_metrics(
-        self, customer_orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute discount-related metrics"""
-        if not customer_orders:
-            return {
-                "orders_with_discount": 0,
-                "discount_sensitivity": 0.0,
-                "avg_discount_amount": 0.0,
-            }
-
-        orders_with_discount = 0
-        total_discount_amount = 0.0
+        categories = set()
 
         for order in customer_orders:
-            # Check for discount applications
-            discount_applications = order.get("discount_applications", [])
+            for item in order.get("line_items", []):
+                product_id = self._extract_product_id_from_line_item(item)
+                if not product_id:
+                    continue
 
-            # Also check for discount codes in the order
-            if discount_applications:
-                orders_with_discount += 1
+                product_info = next(
+                    (p for p in products if p.get("product_id") == product_id), None
+                )
 
-                # Sum discount amounts
-                for discount in discount_applications:
-                    if isinstance(discount, dict):
-                        value = discount.get("value", {})
-                        if isinstance(value, dict):
-                            amount = float(value.get("amount", 0.0))
-                        else:
-                            amount = float(value) if value else 0.0
-                        total_discount_amount += amount
+                if product_info:
+                    category = product_info.get("productType") or product_info.get(
+                        "category"
+                    )
+                    if category:
+                        categories.add(category)
 
-            # Alternative: check totalDiscounts field if available
-            elif order.get("totalDiscounts"):
-                total_discounts = float(order.get("totalDiscounts", 0.0))
-                if total_discounts > 0:
-                    orders_with_discount += 1
-                    total_discount_amount += total_discounts
+        return len(categories)
 
-        # Calculate metrics
+    def _compute_lifecycle_stage(
+        self,
+        customer_orders: List[Dict[str, Any]],
+        customer_interactions: List[Dict[str, Any]],
+    ) -> str:
+        """Determine user lifecycle stage - critical for recommendation strategy"""
+
         total_orders = len(customer_orders)
-        discount_sensitivity = (
-            orders_with_discount / total_orders if total_orders > 0 else 0.0
-        )
-        avg_discount_amount = (
-            total_discount_amount / orders_with_discount
-            if orders_with_discount > 0
-            else 0.0
+        total_interactions = len(customer_interactions)
+
+        # Get recency
+        days_since_last_purchase = self._compute_days_since_last_purchase(
+            customer_orders
         )
 
-        return {
-            "orders_with_discount": orders_with_discount,
-            "discount_sensitivity": round(discount_sensitivity, 3),
-            "avg_discount_amount": round(avg_discount_amount, 2),
-        }
+        # Classify lifecycle stage
+        if total_orders == 0:
+            if total_interactions > 0:
+                return "browser"  # Engaged but never purchased
+            else:
+                return "new"  # No activity
 
+        elif total_orders == 1:
+            if days_since_last_purchase and days_since_last_purchase <= 30:
+                return "new_customer"  # Recent first purchase
+            else:
+                return "one_time"  # Single purchase, long ago
+
+        elif total_orders >= 2:
+            if days_since_last_purchase and days_since_last_purchase <= 60:
+                return "repeat_active"  # Regular repeat customer
+            elif days_since_last_purchase and days_since_last_purchase <= 180:
+                return "repeat_dormant"  # Repeat customer going dormant
+            else:
+                return "repeat_churned"  # Churned repeat customer
+
+        return "unknown"
+
+    def _compute_churn_risk(
+        self,
+        customer_orders: List[Dict[str, Any]],
+        customer_interactions: List[Dict[str, Any]],
+    ) -> float:
+        """Compute churn risk score - helps Gorse prioritize retention recommendations"""
+
+        if not customer_orders and not customer_interactions:
+            return 1.0  # High churn risk for inactive users
+
+        churn_signals = 0
+        max_signals = 5
+
+        # Signal 1: Long time since last purchase
+        days_since_last_purchase = self._compute_days_since_last_purchase(
+            customer_orders
+        )
+        if days_since_last_purchase and days_since_last_purchase > 90:
+            churn_signals += 1
+
+        # Signal 2: Low interaction frequency
+        if len(customer_interactions) < 5:
+            churn_signals += 1
+
+        # Signal 3: Low purchase frequency
+        purchase_frequency = self._compute_purchase_frequency(customer_orders)
+        if purchase_frequency < 0.1:  # Less than once per 10 months
+            churn_signals += 1
+
+        # Signal 4: High refund rate
+        if customer_orders:
+            refunded_orders = sum(
+                1
+                for order in customer_orders
+                if order.get("financialStatus") == "refunded"
+            )
+            refund_rate = refunded_orders / len(customer_orders)
+            if refund_rate > 0.2:  # More than 20% refund rate
+                churn_signals += 1
+
+        # Signal 5: Single category only (low engagement breadth)
+        category_diversity = self._compute_category_diversity(customer_orders, [])
+        if category_diversity <= 1 and len(customer_orders) > 1:
+            churn_signals += 1
+
+        churn_risk = churn_signals / max_signals
+        return round(churn_risk, 3)
+
+    # Helper methods
     def _extract_product_id_from_line_item(self, line_item: Dict[str, Any]) -> str:
         """Extract product ID from order line item"""
-        # Use snake_case field names as they come from the database
-        # The LineItemData model stores product_id directly
         if "product_id" in line_item:
             return str(line_item["product_id"])
 
-        # Fallback to camelCase for backward compatibility
-        if "productId" in line_item:
-            return str(line_item["productId"])
-
-        # From variant
         if "variant" in line_item and isinstance(line_item["variant"], dict):
             product = line_item["variant"].get("product", {})
             if isinstance(product, dict):
                 return product.get("id", "")
 
-        # From product field
-        if "product" in line_item and isinstance(line_item["product"], dict):
-            return line_item["product"].get("id", "")
-
         return ""
-
-    def _find_product_info(
-        self, product_id: str, products: List[Dict[str, Any]], line_item: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Find product information from products list or line item"""
-        # First try to find in products list
-        # Use snake_case field names as they come from the database
-        for product in products:
-            if product.get("product_id") == product_id:
-                return product
-            # Fallback to camelCase for backward compatibility
-            if product.get("productId") == product_id:
-                return product
-
-        # Fallback to line item data
-        # Line items might have embedded product data
-        if "product" in line_item and isinstance(line_item["product"], dict):
-            return line_item["product"]
-
-        if "variant" in line_item and isinstance(line_item["variant"], dict):
-            return line_item["variant"].get("product", {})
-
-        return {}
-
-    def _calculate_price_tier(self, prices: List[float]) -> str:
-        """Calculate price tier preference based on purchase history"""
-        if not prices:
-            return None
-
-        avg_price = statistics.mean(prices)
-
-        # Define price tiers (adjust these based on your store's price range)
-        if avg_price < 25:
-            return "budget"
-        elif avg_price < 75:
-            return "mid"
-        elif avg_price < 200:
-            return "premium"
-        else:
-            return "luxury"
 
     def _parse_date(self, date_value: Any) -> Optional[datetime.datetime]:
         """Parse date from various formats"""
@@ -483,189 +454,25 @@ class UserFeatureGenerator(BaseFeatureGenerator):
 
         return None
 
-    def _get_default_features(self, shop_id: str, customer_id: str) -> Dict[str, Any]:
-        """Return default features when computation fails"""
+    def _get_minimal_default_features(
+        self, shop_id: str, customer_id: str
+    ) -> Dict[str, Any]:
+        """Return minimal default features when computation fails"""
         return {
             "shop_id": shop_id,
             "customer_id": customer_id,
             "total_purchases": 0,
-            "total_spent": 0.0,
-            "avg_order_value": 0.0,
+            "total_interactions": 0,
             "lifetime_value": 0.0,
-            "refunded_orders": 0,
-            "refund_rate": 0.0,
-            "total_refunded_amount": 0.0,
-            "net_lifetime_value": 0.0,
-            "days_since_first_order": None,
-            "days_since_last_order": None,
-            "avg_days_between_orders": None,
-            "order_frequency_per_month": None,
-            "distinct_products_purchased": 0,
-            "distinct_categories_purchased": 0,
-            "preferred_category": None,
-            "preferred_vendor": None,
-            "price_point_preference": None,
-            "orders_with_discount_count": 0,
-            "discount_sensitivity": 0.0,
-            "avg_discount_amount": 0.0,
-            "customer_state": None,
-            "is_verified_email": False,
-            "customer_age": None,
-            "has_default_address": False,
-            "geographic_region": None,
-            "currency_preference": "USD",
-            "customer_health_score": 0,
-            "customer_first_name": "",
-            "customer_last_name": "",
-            "customer_location": {},
-            "customer_tags": [],
-            "customer_created_at_shopify": None,
-            "customer_last_order_id": "",
-            "customer_state": "",
-            "customer_verified_email": False,
-            "customer_tax_exempt": False,
-            "customer_default_address": {},
-            "customer_locale": "en",
+            "avg_order_value": 0.0,
+            "purchase_frequency_score": 0.0,
+            "interaction_diversity_score": 0.0,
+            "days_since_last_purchase": None,
+            "recency_score": 0.0,
+            "conversion_rate": 0.0,
+            "primary_category": None,
+            "category_diversity": 0,
+            "user_lifecycle_stage": "new",
+            "churn_risk_score": 1.0,
             "last_computed_at": now_utc(),
         }
-
-    def _compute_customer_enhancement_features(
-        self, customer_orders: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute enhanced customer features from new order data"""
-        try:
-            if not customer_orders:
-                return {
-                    "customer_state": None,
-                    "is_verified_email": False,
-                    "customer_age": None,
-                    "has_default_address": False,
-                    "geographic_region": None,
-                    "currency_preference": None,
-                    "customer_health_score": 0,
-                }
-
-            # Get the most recent order for customer data
-            latest_order = max(customer_orders, key=lambda x: x.get("order_date", ""))
-
-            # Extract customer data from order
-            customer_state = latest_order.get("customer_state")
-            is_verified_email = latest_order.get("customer_verified_email", False)
-            customer_created_at = latest_order.get("customer_created_at")
-            customer_default_address = latest_order.get("customer_default_address", {})
-            currency_preference = latest_order.get("currency_code", "USD")
-
-            # Calculate customer age (days since creation)
-            customer_age = None
-            if customer_created_at:
-                from datetime import datetime
-
-                try:
-                    if isinstance(customer_created_at, str):
-                        customer_created_at = datetime.fromisoformat(
-                            customer_created_at.replace("Z", "+00:00")
-                        )
-                    customer_age = (datetime.now() - customer_created_at).days
-                except:
-                    customer_age = None
-
-            # Extract geographic region from default address
-            geographic_region = None
-            has_default_address = bool(customer_default_address)
-            if customer_default_address:
-                country = customer_default_address.get("country_code")
-                province = customer_default_address.get("province")
-                if country:
-                    geographic_region = (
-                        f"{province}, {country}" if province else country
-                    )
-
-            # Calculate customer health score (0-100) including refund metrics
-            customer_health_score = 0
-            if customer_state == "ENABLED":
-                customer_health_score += 40
-            elif customer_state == "DISABLED":
-                customer_health_score += 10
-
-            if is_verified_email:
-                customer_health_score += 30
-
-            if has_default_address:
-                customer_health_score += 20
-
-            if customer_age and customer_age > 30:  # Customer for more than 30 days
-                customer_health_score += 10
-
-            # Apply refund penalty to health score
-            total_orders = len(customer_orders)
-            if total_orders > 0:
-                refunded_orders = sum(
-                    1
-                    for order in customer_orders
-                    if order.get("financial_status") == "refunded"
-                )
-                refund_rate = refunded_orders / total_orders
-
-                # Penalize high refund rates (reduce health score)
-                if refund_rate > 0.5:  # More than 50% refund rate
-                    customer_health_score -= 30
-                elif refund_rate > 0.25:  # More than 25% refund rate
-                    customer_health_score -= 15
-                elif refund_rate > 0.1:  # More than 10% refund rate
-                    customer_health_score -= 5
-
-            return {
-                "customer_state": customer_state,
-                "is_verified_email": is_verified_email,
-                "customer_age": customer_age,
-                "has_default_address": has_default_address,
-                "geographic_region": geographic_region,
-                "currency_preference": currency_preference,
-                "customer_health_score": min(100, customer_health_score),
-            }
-        except Exception as e:
-            logger.error(f"Error computing customer enhancement features: {str(e)}")
-            return {
-                "customer_state": None,
-                "is_verified_email": False,
-                "customer_age": None,
-                "has_default_address": False,
-                "geographic_region": None,
-                "currency_preference": None,
-                "customer_health_score": 0,
-            }
-
-    def _compute_customer_demographic_features(
-        self, customer_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Compute customer demographic features using CustomerData table"""
-        try:
-            return {
-                "customer_first_name": customer_data.get("first_name", ""),
-                "customer_last_name": customer_data.get("last_name", ""),
-                "customer_location": customer_data.get("location", {}),
-                "customer_tags": customer_data.get("tags", []),
-                "customer_created_at_shopify": customer_data.get("created_at_shopify"),
-                "customer_last_order_id": customer_data.get("last_order_id", ""),
-                "customer_state": customer_data.get("state", ""),
-                "customer_verified_email": customer_data.get("verified_email", False),
-                "customer_tax_exempt": customer_data.get("tax_exempt", False),
-                "customer_default_address": customer_data.get("default_address", {}),
-                "customer_locale": customer_data.get("customer_locale", "en"),
-                "customer_is_active": customer_data.get("is_active", True),
-            }
-        except Exception as e:
-            logger.error(f"Error computing customer demographic features: {str(e)}")
-            return {
-                "customer_first_name": "",
-                "customer_last_name": "",
-                "customer_location": {},
-                "customer_tags": [],
-                "customer_created_at_shopify": None,
-                "customer_last_order_id": "",
-                "customer_state": "",
-                "customer_verified_email": False,
-                "customer_tax_exempt": False,
-                "customer_default_address": {},
-                "customer_locale": "en",
-            }

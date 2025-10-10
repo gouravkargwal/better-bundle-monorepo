@@ -7,14 +7,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 from app.core.logging import get_logger
-from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
 from ..interfaces.permission_service import IShopifyPermissionService
 from .data_storage import ShopifyDataStorageService
-from app.repository.PipelineWatermarkRepository import (
-    PipelineWatermarkRepository,
-)
+
 from app.repository.RawDataRepository import RawDataRepository
 
 logger = get_logger(__name__)
@@ -28,13 +26,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         api_client: IShopifyAPIClient,
         permission_service: IShopifyPermissionService,
         data_storage: ShopifyDataStorageService = None,
-        pipeline_watermark_repository: PipelineWatermarkRepository = None,
     ):
         self.api_client = api_client
         self.permission_service = permission_service
-        self.pipeline_watermark_repository = (
-            pipeline_watermark_repository or PipelineWatermarkRepository()
-        )
 
         # Inject storage service or create default
         self.data_storage = data_storage or ShopifyDataStorageService()
@@ -248,7 +242,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             permissions, collection_payload
         )
 
-        if collectable_data:
+        if not collectable_data:
             logger.warning("No data types can be collected due to permissions")
 
         return collectable_data
@@ -627,7 +621,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         Uses existing NormalizationWatermark table to avoid schema churn.
         """
         # Accept both Z and +00:00 formats
-        last_dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        last_dt = parse_iso_timestamp(iso_time)
         # Normalize to aware UTC
         if last_dt.tzinfo is None:
             last_dt = last_dt.replace(tzinfo=timezone.utc)

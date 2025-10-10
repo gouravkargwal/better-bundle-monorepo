@@ -13,7 +13,7 @@ from app.core.config.kafka_settings import kafka_settings
 from app.shared.helpers import now_utc
 from app.core.database.session import get_session_context
 from app.core.database.models.collection_data import CollectionData
-from sqlalchemy import select
+from sqlalchemy import select, and_
 
 logger = get_logger(__name__)
 
@@ -415,12 +415,8 @@ class OrderNormalizationService:
                 # 1️⃣ ALWAYS publish purchase attribution event
                 await self._publish_order_events(shop_id, order_id)
 
-                # 2️⃣ Check if order has refunds and publish refund attribution events
-                refunds = canonical.get("refunds", [])
-                if refunds:
-                    await self._publish_refund_events(shop_id, order_id, refunds)
-                else:
-                    self.logger.debug(f"📦 Order {order_id} has no refunds")
+                # ✅ NO REFUND COMMISSION POLICY - Refund attribution removed
+                # Refunds are still processed for order data updates but not for attribution
 
             return True
 
@@ -506,7 +502,6 @@ class OrderNormalizationService:
             processed_count = await self.data_storage.upsert_orders_batch(
                 canonical_data_list, shop_id
             )
-
             return processed_count
         except Exception as e:
             self.logger.error(f"Failed to upsert order batch: {e}", exc_info=True)
@@ -548,81 +543,31 @@ class OrderNormalizationService:
     async def _publish_order_events(self, shop_id: str, order_id: str):
         """Publish events after successful order processing."""
         try:
+            self.logger.info(
+                f"🚀 Publishing purchase attribution event for order {order_id} in shop {shop_id}"
+            )
+
             publisher = EventPublisher(kafka_settings.model_dump())
             await publisher.initialize()
             try:
-                await publisher.publish_purchase_attribution_event(
-                    {
-                        "event_type": "purchase_ready_for_attribution",
-                        "shop_id": shop_id,
-                        "order_id": order_id,
-                        "timestamp": now_utc().isoformat(),
-                    }
+                event_data = {
+                    "event_type": "purchase_ready_for_attribution",
+                    "shop_id": shop_id,
+                    "order_id": order_id,
+                    "timestamp": now_utc().isoformat(),
+                }
+
+                self.logger.info(f"📤 Publishing event: {event_data}")
+
+                await publisher.publish_purchase_attribution_event(event_data)
+
+                self.logger.info(
+                    f"✅ Purchase attribution event published successfully for order {order_id}"
                 )
             finally:
                 await publisher.close()
         except Exception as e:
             self.logger.error(f"Failed to publish order events: {e}")
-
-    async def _publish_refund_events(
-        self, shop_id: str, order_id: str, refunds: List[Dict[str, Any]]
-    ):
-        """
-        Publish refund attribution events for all refunds in an order.
-
-        Args:
-            shop_id: Shop identifier
-            order_id: Order identifier
-            refunds: List of refund dictionaries from canonical format
-        """
-        if not refunds:
-            self.logger.debug("No refunds to publish")
-            return
-
-        try:
-            publisher = EventPublisher(kafka_settings.model_dump())
-            await publisher.initialize()
-
-            try:
-                published_count = 0
-
-                for refund in refunds:
-                    # Extract refund ID (handle different possible field names)
-                    refund_id = (
-                        refund.get("refund_id")
-                        or refund.get("refundId")
-                        or str(refund.get("id", ""))
-                    )
-
-                    if not refund_id:
-                        self.logger.warning(
-                            f"⚠️ Refund missing ID in order {order_id}, skipping",
-                            extra={"refund_data": refund},
-                        )
-                        continue
-
-                    # Publish refund attribution event
-                    await publisher.publish_refund_attribution_event(
-                        {
-                            "event_type": "refund_created",
-                            "shop_id": shop_id,
-                            "order_id": order_id,
-                            "refund_id": refund_id,
-                            "timestamp": now_utc().isoformat(),
-                        }
-                    )
-
-                    published_count += 1
-
-            finally:
-                await publisher.close()
-
-        except Exception as e:
-            self.logger.error(
-                f"❌ Failed to publish refund events for order {order_id}: {e}",
-                exc_info=True,
-            )
-            # Don't raise - we don't want refund event publishing to fail the whole normalization
 
 
 class FeatureComputationService:
@@ -860,16 +805,6 @@ class NormalizationService:
                 success = await self.entity_service.normalize_entity(
                     raw, shop_id, data_type
                 )
-
-            if success:
-                # Update PipelineWatermark.lastNormalizedAt with raw.extractedAt if available
-                if getattr(raw, "extracted_at", None):
-                    await self.data_storage.upsert_watermark(
-                        shop_id=shop_id,
-                        data_type=data_type,
-                        iso_time=raw.extracted_at.isoformat(),
-                        format_type="graphql",  # we store in PipelineWatermark to unify tracking
-                    )
 
             return success
 

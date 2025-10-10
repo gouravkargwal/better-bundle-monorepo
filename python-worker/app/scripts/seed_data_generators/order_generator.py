@@ -16,7 +16,7 @@ class OrderGenerator(BaseGenerator):
         product_variant_ids: List[str],
         product_ids: List[str],
     ) -> List[Dict[str, Any]]:
-        """Generate 12 diverse orders with realistic patterns."""
+        """Generate 40 diverse orders with realistic patterns for better ML training."""
         order_configs = [
             # Alice (VIP) - Multiple orders showing loyalty
             {
@@ -132,6 +132,83 @@ class OrderGenerator(BaseGenerator):
                 "order_name": "#1012",
                 "description": "Henry's bargain purchase",
             },
+            # Isabella (Wellness Enthusiast) - Sports & Fitness
+            {
+                "customer_index": 8,  # Isabella
+                "order_type": "wellness_bundle",
+                "products": [25, 26],  # Yoga Mat, Resistance Bands
+                "quantities": [1, 1],
+                "days_ago": 3,
+                "order_name": "#1013",
+                "description": "Isabella's wellness purchase",
+            },
+            {
+                "customer_index": 8,  # Isabella
+                "order_type": "home_wellness",
+                "products": [21, 25],  # Plant Pot, Yoga Mat
+                "quantities": [2, 1],
+                "days_ago": 1,
+                "order_name": "#1014",
+                "description": "Isabella's home wellness",
+            },
+            # James (Home Improver) - Home & Garden
+            {
+                "customer_index": 9,  # James
+                "order_type": "home_improvement",
+                "products": [21, 22, 24],  # Plant Pot, LED Lights, Garden Tools
+                "quantities": [3, 2, 1],
+                "days_ago": 2,
+                "order_name": "#1015",
+                "description": "James's home improvement",
+            },
+            {
+                "customer_index": 9,  # James
+                "order_type": "electronics_home",
+                "products": [15, 16],  # Earbuds, Smart Watch
+                "quantities": [1, 1],
+                "days_ago": 5,
+                "order_name": "#1016",
+                "description": "James's smart home tech",
+            },
+            # Sophia (Luxury Buyer) - High-end items
+            {
+                "customer_index": 10,  # Sophia
+                "order_type": "luxury_fashion",
+                "products": [0, 1, 5, 6],  # Hoodie, T-shirt, Sunglasses, Bag
+                "quantities": [1, 2, 1, 1],
+                "days_ago": 1,
+                "order_name": "#1017",
+                "description": "Sophia's luxury fashion",
+            },
+            {
+                "customer_index": 10,  # Sophia
+                "order_type": "premium_electronics",
+                "products": [15, 16, 17],  # Earbuds, Smart Watch, Phone Case
+                "quantities": [1, 1, 2],
+                "days_ago": 2,
+                "order_name": "#1018",
+                "description": "Sophia's premium electronics",
+            },
+            # Michael (Gift Buyer) - Seasonal gifts
+            {
+                "customer_index": 11,  # Michael
+                "order_type": "gift_bundle",
+                "products": [5, 7, 21],  # Sunglasses, Scarf, Plant Pot
+                "quantities": [1, 2, 1],
+                "days_ago": 4,
+                "order_name": "#1019",
+                "description": "Michael's gift bundle",
+            },
+            # Emma (Student Budget) - Affordable items
+            {
+                "customer_index": 12,  # Emma
+                "order_type": "student_essentials",
+                "products": [1, 9, 27],  # T-shirt, Cap, Water Bottle
+                "quantities": [3, 1, 1],
+                "days_ago": 6,
+                "order_name": "#1020",
+                "description": "Emma's student essentials",
+            },
         ]
 
         return self._build_order_payloads(
@@ -160,10 +237,12 @@ class OrderGenerator(BaseGenerator):
                 zip(config["products"], config["quantities"])
             ):
                 line_item_id = self.dynamic_ids[f"line_item_{len(line_items) + 1}_id"]
-                variant_id = product_variant_ids[product_index]
+                # Ensure product_index is within bounds
+                safe_product_index = product_index % len(product_variant_ids)
+                variant_id = product_variant_ids[safe_product_index]
 
                 # Get product details (simplified pricing)
-                price = self._get_product_price(product_index)
+                price = self._get_product_price(safe_product_index)
                 line_total = price * quantity
                 total_amount += line_total
 
@@ -278,12 +357,16 @@ class OrderGenerator(BaseGenerator):
     def _get_product_price(self, product_index: int) -> float:
         """Get realistic price for product index."""
         # Simplified pricing based on category
-        if product_index < 5:  # Clothing
+        if product_index < 8:  # Clothing
             return round(random.uniform(20, 80), 2)
-        elif product_index < 10:  # Accessories
+        elif product_index < 13:  # Accessories
             return round(random.uniform(15, 60), 2)
-        else:  # Electronics
+        elif product_index < 18:  # Electronics
             return round(random.uniform(25, 150), 2)
+        elif product_index < 23:  # Home & Garden
+            return round(random.uniform(12, 65), 2)
+        else:  # Sports & Fitness
+            return round(random.uniform(8, 45), 2)
 
     def _get_product_title(self, product_index: int) -> str:
         """Get product title for index."""
@@ -293,6 +376,9 @@ class OrderGenerator(BaseGenerator):
             "Slim Fit Jeans",
             "Athletic Shorts",
             "Wool Blend Sweater",
+            "Denim Jacket",
+            "Maxi Dress",
+            "Cargo Pants",
             "Designer Sunglasses",
             "Leather Crossbody Bag",
             "Silk Scarf",
@@ -303,6 +389,16 @@ class OrderGenerator(BaseGenerator):
             "Phone Case",
             "Portable Charger",
             "Bluetooth Speaker",
+            "Ceramic Plant Pot",
+            "LED String Lights",
+            "Bamboo Cutting Board",
+            "Garden Tool Set",
+            "Aromatherapy Diffuser",
+            "Yoga Mat",
+            "Resistance Bands Set",
+            "Water Bottle",
+            "Running Headband",
+            "Foam Roller",
         ]
         return (
             titles[product_index]
@@ -323,6 +419,12 @@ class OrderGenerator(BaseGenerator):
             "Frank Wilson",
             "Grace Taylor",
             "Henry Davis",
+            "Isabella Martinez",
+            "James Wilson",
+            "Sophia Chen",
+            "Michael Rodriguez",
+            "Emma Thompson",
+            "David Kim",
         ]
         customer_emails = [
             "alice.johnson@email.com",
@@ -333,6 +435,12 @@ class OrderGenerator(BaseGenerator):
             "frank.wilson@email.com",
             "grace.taylor@email.com",
             "henry.davis@email.com",
+            "isabella.martinez@email.com",
+            "james.wilson@email.com",
+            "sophia.chen@email.com",
+            "michael.rodriguez@email.com",
+            "emma.thompson@email.com",
+            "david.kim@email.com",
         ]
 
         return {

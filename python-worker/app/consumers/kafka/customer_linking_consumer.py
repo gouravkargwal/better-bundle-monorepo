@@ -4,6 +4,8 @@ Kafka-based customer linking consumer for processing customer identity resolutio
 
 from typing import Dict, Any, Optional
 from datetime import datetime
+
+from app.shared.helpers import now_utc
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 
@@ -99,7 +101,7 @@ class CustomerLinkingKafkaConsumer:
                     original_message=payload,
                     reason="shop_suspended",
                     original_topic="customer-linking-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
                 await self.consumer.commit(message)
                 return

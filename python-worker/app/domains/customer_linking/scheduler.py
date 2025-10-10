@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from app.core.logging import get_logger
 from app.core.database.simple_db_client import get_database
+from app.shared.helpers.datetime_utils import now_utc
 
 logger = get_logger(__name__)
 
@@ -67,7 +68,7 @@ class CustomerLinkingScheduler:
                         "browserSessionId": link.clientId,  # clientId maps to browserSessionId
                     }
                 )
-                
+
                 if sessions_with_client_id:
                     # Check if any interactions for these sessions need backfilling
                     session_ids = [s.id for s in sessions_with_client_id]
@@ -115,18 +116,20 @@ class CustomerLinkingScheduler:
                             "browserSessionId": link.clientId,
                         }
                     )
-                    
+
                     if not sessions_with_client_id:
-                        logger.warning(f"No sessions found for clientId: {link.clientId}")
+                        logger.warning(
+                            f"No sessions found for clientId: {link.clientId}"
+                        )
                         continue
-                    
+
                     # Get session IDs
                     session_ids = [s.id for s in sessions_with_client_id]
-                    
+
                     # Update all events for these sessions that don't have a customerId
                     from datetime import datetime
 
-                    now_utc = lambda: datetime.now()
+                    now_utc = lambda: now_utc()
 
                     updated_count = await db.userinteraction.update_many(
                         where={
@@ -170,7 +173,7 @@ class CustomerLinkingScheduler:
         Returns:
             Job execution statistics
         """
-        start_time = datetime.now()
+        start_time = now_utc()
         logger.info("Starting customer linking backfill job")
 
         try:
@@ -182,7 +185,7 @@ class CustomerLinkingScheduler:
                 return {
                     "status": "success",
                     "message": "No unprocessed links found",
-                    "duration_seconds": (datetime.now() - start_time).total_seconds(),
+                    "duration_seconds": (now_utc() - start_time).total_seconds(),
                     "processed_links": 0,
                     "total_events_backfilled": 0,
                     "errors": 0,
@@ -191,7 +194,7 @@ class CustomerLinkingScheduler:
             # Backfill the links
             backfill_stats = await self.backfill_customer_links(unprocessed_links)
 
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (now_utc() - start_time).total_seconds()
 
             logger.info(
                 f"Customer linking backfill job completed in {duration:.2f}s. "
@@ -203,7 +206,7 @@ class CustomerLinkingScheduler:
             return {"status": "success", "duration_seconds": duration, **backfill_stats}
 
         except Exception as e:
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (now_utc() - start_time).total_seconds()
             logger.error(
                 f"Customer linking backfill job failed after {duration:.2f}s: {e}"
             )

@@ -9,6 +9,7 @@ import math
 
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 
 logger = get_logger(__name__)
 
@@ -69,13 +70,13 @@ class BaseFeatureGenerator(ABC):
         # Handle both datetime objects and string timestamps
         if isinstance(created_at, str):
             try:
-                created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                created_at = parse_iso_timestamp(created_at)
             except (ValueError, AttributeError):
                 created_at = None
 
         if isinstance(updated_at, str):
             try:
-                updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                updated_at = parse_iso_timestamp(updated_at)
             except (ValueError, AttributeError):
                 updated_at = None
 
@@ -202,17 +203,11 @@ class BaseFeatureGenerator(ABC):
             "language",
             "referrer_type",
             "traffic_source",
-            "customer_email",
-            "customer_first_name",
-            "customer_last_name",
             "customer_last_order_id",
             "customer_currency_code",
             "customer_locale",
             "price_tier",
             "product_type",
-            "lifecycle_stage",
-            "handle",
-            "template_suffix",
         }
 
         for key, value in features.items():

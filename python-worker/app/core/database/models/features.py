@@ -9,7 +9,6 @@ from sqlalchemy import (
     String,
     Float,
     Boolean,
-    DateTime,
     Integer,
     ForeignKey,
     Index,
@@ -29,64 +28,23 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
     # Foreign key to Shop
     # shop_id provided by ShopMixin
 
-    # Customer metrics
     total_purchases = Column(Integer, default=0, nullable=False)
-    total_spent = Column(Float, default=0, nullable=False, index=True)
-    avg_order_value = Column(Float, default=0, nullable=False)
+    total_interactions = Column(Integer, default=0, nullable=False)
     lifetime_value = Column(Float, default=0, nullable=False)
-
-    # Temporal features
-    days_since_first_order = Column(Integer, nullable=True)
-    days_since_last_order = Column(Integer, nullable=True, index=True)
-    avg_days_between_orders = Column(Float, nullable=True)
-    order_frequency_per_month = Column(Float, nullable=True)
-
-    # Product diversity
-    distinct_products_purchased = Column(Integer, default=0, nullable=False)
-    distinct_categories_purchased = Column(Integer, default=0, nullable=False)
-    preferred_category = Column(String(100), nullable=True)
-    preferred_vendor = Column(String(255), nullable=True)
-    price_point_preference = Column(String(20), nullable=True)
-
-    # Discount behavior
-    orders_with_discount_count = Column(Integer, default=0, nullable=False)
-    discount_sensitivity = Column(Float, nullable=True)
-    avg_discount_amount = Column(Float, nullable=True)
-
-    # Customer attributes
-    customer_state = Column(String(50), nullable=True, index=True)
-    is_verified_email = Column(Boolean, default=False, nullable=False, index=True)
-    customer_age = Column(Integer, nullable=True)
-    has_default_address = Column(Boolean, default=False, nullable=False)
-    geographic_region = Column(String(100), nullable=True)
-    currency_preference = Column(String(10), nullable=True)
-
-    # Health and risk scores
-    customer_health_score = Column(Integer, default=0, nullable=False)
-    refunded_orders = Column(Integer, default=0, nullable=False)
-    refund_rate = Column(Float, default=0.0, nullable=False, index=True)
-    total_refunded_amount = Column(Float, default=0.0, nullable=False)
-    net_lifetime_value = Column(Float, default=0.0, nullable=False, index=True)
-
-    # Customer demographic data
-    customer_email = Column(String(255), nullable=True)
-    customer_first_name = Column(String(100), nullable=True)
-    customer_last_name = Column(String(100), nullable=True)
-    customer_location = Column(JSON, default={}, nullable=True)
-    customer_tags = Column(JSON, default=[], nullable=True)
-    customer_created_at_shopify = Column(TIMESTAMP(timezone=True), nullable=True)
-    customer_last_order_id = Column(String(100), nullable=True)
-    customer_metafields = Column(JSON, default=[], nullable=True)
-    customer_verified_email = Column(Boolean, default=False, nullable=False)
-    customer_tax_exempt = Column(Boolean, default=False, nullable=False)
-    customer_default_address = Column(JSON, default={}, nullable=True)
-    customer_addresses = Column(JSON, default=[], nullable=True)
-    customer_currency_code = Column(String(10), nullable=True)
-    customer_locale = Column(String(10), nullable=True)
-
-    # Computation tracking
+    avg_order_value = Column(Float, default=0, nullable=False)
+    purchase_frequency_score = Column(Float, default=0, nullable=False)
+    interaction_diversity_score = Column(Float, default=0, nullable=False)
+    days_since_last_purchase = Column(Integer, nullable=True)
+    recency_score = Column(Float, default=0, nullable=False)
+    conversion_rate = Column(Float, default=0, nullable=False)
+    primary_category = Column(String(100), nullable=True)
+    category_diversity = Column(Integer, default=0, nullable=False)
+    user_lifecycle_stage = Column(String(100), nullable=True)
+    churn_risk_score = Column(Float, default=1.0, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -100,24 +58,6 @@ class UserFeatures(BaseModel, ShopMixin, CustomerMixin):
             "customer_id",
             unique=True,
         ),
-        Index("ix_user_features_shop_id_total_spent", "shop_id", "total_spent"),
-        Index(
-            "ix_user_features_shop_id_days_since_last_order",
-            "shop_id",
-            "days_since_last_order",
-        ),
-        Index("ix_user_features_shop_id_refund_rate", "shop_id", "refund_rate"),
-        Index(
-            "ix_user_features_shop_id_net_lifetime_value",
-            "shop_id",
-            "net_lifetime_value",
-        ),
-        Index(
-            "ix_user_features_shop_id_lifetime_value_days_since_last_order",
-            "shop_id",
-            "lifetime_value",
-            "days_since_last_order",
-        ),
     )
 
     def __repr__(self) -> str:
@@ -129,85 +69,22 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
 
     __tablename__ = "product_features"
 
-    # Foreign key to Shop
-    # shop_id provided by ShopMixin
-
-    # Engagement metrics (30-day)
-    view_count_30d = Column(Integer, default=0, nullable=False)
-    unique_viewers_30d = Column(Integer, default=0, nullable=False)
-    cart_add_count_30d = Column(Integer, default=0, nullable=False)
-    cart_view_count_30d = Column(Integer, default=0, nullable=False)
-    cart_remove_count_30d = Column(Integer, default=0, nullable=False)
-    purchase_count_30d = Column(Integer, default=0, nullable=False)
-    unique_purchasers_30d = Column(Integer, default=0, nullable=False)
-
-    # Conversion rates
-    view_to_cart_rate = Column(Float, nullable=True)
-    cart_to_purchase_rate = Column(Float, nullable=True)
-    overall_conversion_rate = Column(Float, nullable=True)
-    cart_abandonment_rate = Column(Float, nullable=True)
-    cart_modification_rate = Column(Float, nullable=True)
-    cart_view_to_purchase_rate = Column(Float, nullable=True)
-
-    # Temporal features
-    last_viewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    last_purchased_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    first_purchased_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    days_since_first_purchase = Column(Integer, nullable=True)
+    interaction_volume_score = Column(Float, nullable=False)
+    purchase_velocity_score = Column(Float, nullable=False)
+    engagement_quality_score = Column(Float, nullable=False)
+    price_tier = Column(String(20), nullable=False)
+    revenue_potential_score = Column(Float, nullable=False)
+    conversion_efficiency = Column(Float, nullable=False)
     days_since_last_purchase = Column(Integer, nullable=True)
-
-    # Pricing features
-    avg_selling_price = Column(Float, nullable=True)
-    price_variance = Column(Float, nullable=True)
-    total_inventory = Column(Integer, nullable=True)
-    inventory_turnover = Column(Float, nullable=True)
-    stock_velocity = Column(Float, nullable=True)
-    price_tier = Column(String(20), nullable=True)
-
-    # Content features
-    variant_complexity = Column(Float, nullable=True)
-    image_richness = Column(Float, nullable=True)
-    tag_diversity = Column(Float, nullable=True)
-    metafield_utilization = Column(Float, nullable=True)
-    media_richness = Column(Float, nullable=True)
-    seo_optimization = Column(Float, nullable=True)
-    seo_title_length = Column(Integer, nullable=True)
-    seo_description_length = Column(Integer, nullable=True)
-
-    # Media features
-    has_video_content = Column(Boolean, default=False, nullable=False)
-    has_3d_content = Column(Boolean, default=False, nullable=False)
-    media_count = Column(Integer, default=0, nullable=False)
-    has_online_store_url = Column(Boolean, default=False, nullable=False)
-    has_preview_url = Column(Boolean, default=False, nullable=False)
-    has_custom_template = Column(Boolean, default=False, nullable=False)
-
-    # Performance scores
-    popularity_score = Column(Float, default=0, nullable=False, index=True)
-    trending_score = Column(Float, default=0, nullable=False, index=True)
-
-    # Refund metrics
-    refunded_orders = Column(Integer, default=0, nullable=False)
-    refund_rate = Column(Float, default=0.0, nullable=False, index=True)
-    total_refunded_amount = Column(Float, default=0.0, nullable=False)
-    net_revenue = Column(Float, default=0.0, nullable=False, index=True)
-    refund_risk_score = Column(Float, default=0.0, nullable=False, index=True)
-
-    # Enhanced content features
-    content_richness_score = Column(Integer, default=0, nullable=False)
-    description_length = Column(Integer, default=0, nullable=False)
-    description_html_length = Column(Integer, default=0, nullable=False)
-    product_age = Column(Integer, nullable=True)
-    last_updated_days = Column(Integer, nullable=True)
-    update_frequency = Column(Float, nullable=True)
-    product_type = Column(String(100), nullable=True)
-    category_complexity = Column(Float, nullable=True)
-    availability_score = Column(Float, nullable=True)
-    status_stability = Column(Float, nullable=True)
-
-    # Computation tracking
+    activity_recency_score = Column(Float, nullable=False)
+    trending_momentum = Column(Float, nullable=False)
+    product_lifecycle_stage = Column(String(100), nullable=False)
+    inventory_health_score = Column(Float, nullable=False)
+    product_category = Column(String(100), nullable=True)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -222,33 +99,54 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
             unique=True,
         ),
         Index(
-            "ix_product_features_shop_id_popularity_score",
+            "ix_product_features_shop_id_interaction_volume_score",
             "shop_id",
-            "popularity_score",
+            "interaction_volume_score",
         ),
         Index(
-            "ix_product_features_shop_id_trending_score", "shop_id", "trending_score"
-        ),
-        Index(
-            "ix_product_features_shop_id_view_count_30d", "shop_id", "view_count_30d"
-        ),
-        Index(
-            "ix_product_features_shop_id_purchase_count_30d",
+            "ix_product_features_shop_id_purchase_velocity_score",
             "shop_id",
-            "purchase_count_30d",
+            "purchase_velocity_score",
         ),
-        Index("ix_product_features_shop_id_refund_rate", "shop_id", "refund_rate"),
         Index(
-            "ix_product_features_shop_id_refund_risk_score",
+            "ix_product_features_shop_id_engagement_quality_score",
             "shop_id",
-            "refund_risk_score",
+            "engagement_quality_score",
         ),
-        Index("ix_product_features_shop_id_net_revenue", "shop_id", "net_revenue"),
         Index(
-            "ix_product_features_shop_id_popularity_trending",
+            "ix_product_features_shop_id_price_tier",
             "shop_id",
-            "popularity_score",
-            "trending_score",
+            "price_tier",
+        ),
+        Index(
+            "ix_product_features_shop_id_revenue_potential_score",
+            "shop_id",
+            "revenue_potential_score",
+        ),
+        Index(
+            "ix_product_features_shop_id_conversion_efficiency",
+            "shop_id",
+            "conversion_efficiency",
+        ),
+        Index(
+            "ix_product_features_shop_id_activity_recency_score",
+            "shop_id",
+            "activity_recency_score",
+        ),
+        Index(
+            "ix_product_features_shop_id_trending_momentum",
+            "shop_id",
+            "trending_momentum",
+        ),
+        Index(
+            "ix_product_features_shop_id_product_lifecycle_stage",
+            "shop_id",
+            "product_lifecycle_stage",
+        ),
+        Index(
+            "ix_product_features_shop_id_inventory_health_score",
+            "shop_id",
+            "inventory_health_score",
         ),
     )
 
@@ -268,56 +166,20 @@ class CollectionFeatures(BaseModel, ShopMixin):
 
     # Collection identification
     collection_id = Column(String, nullable=False)
-
-    # Basic metrics
-    product_count = Column(Integer, default=0, nullable=False, index=True)
-    is_automated = Column(Boolean, default=False, nullable=False)
-
-    # Engagement metrics
-    view_count_30d = Column(Integer, default=0, nullable=False)
-    unique_viewers_30d = Column(Integer, default=0, nullable=False)
-
-    # Performance metrics
-    click_through_rate = Column(Float, nullable=True)
-    bounce_rate = Column(Float, nullable=True)
-    avg_product_price = Column(Float, nullable=True)
-    min_product_price = Column(Float, nullable=True)
-    max_product_price = Column(Float, nullable=True)
-    price_range = Column(Float, nullable=True)
-    price_variance = Column(Float, nullable=True)
-    conversion_rate = Column(Float, nullable=True)
-    revenue_contribution = Column(Float, nullable=True)
-
-    # Top performers
-    top_products = Column(JSON, default=[], nullable=False)
-    top_vendors = Column(JSON, default=[], nullable=False)
-
-    # Scores
-    performance_score = Column(Float, default=0, nullable=False, index=True)
-    seo_score = Column(Integer, default=0, nullable=False)
-    image_score = Column(Integer, default=0, nullable=False)
-
-    # Enhanced features
-    handle_quality = Column(Float, nullable=True)
-    template_score = Column(Integer, default=0, nullable=False)
-    seo_optimization_score = Column(Float, nullable=True)
-    collection_age = Column(Integer, nullable=True)
-    update_frequency = Column(Float, nullable=True)
-    lifecycle_stage = Column(String(50), nullable=True)
-
-    # Additional fields from feature computation
-    handle = Column(String(255), nullable=True)
-    template_suffix = Column(String(100), nullable=True)
-    last_updated_days = Column(Integer, nullable=True)
-    metafield_count = Column(Integer, default=0, nullable=False)
-    extras_utilization = Column(Float, nullable=True)
-    maturity_score = Column(Float, nullable=True)
-    extras_count = Column(Integer, default=0, nullable=False)
-    metafield_utilization = Column(Float, nullable=True)
-
-    # Computation tracking
+    collection_engagement_score = Column(Float, nullable=False)
+    collection_conversion_rate = Column(Float, nullable=False)
+    collection_popularity_score = Column(Float, nullable=False)
+    avg_product_value = Column(Float, nullable=True)
+    collection_revenue_potential = Column(Float, nullable=False)
+    product_diversity_score = Column(Float, nullable=False)
+    collection_size_tier = Column(String(100), nullable=False)
+    days_since_last_interaction = Column(Integer, nullable=True)
+    collection_recency_score = Column(Float, nullable=False)
+    is_curated_collection = Column(Boolean, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -332,18 +194,19 @@ class CollectionFeatures(BaseModel, ShopMixin):
             unique=True,
         ),
         Index(
-            "ix_collection_features_shop_id_product_count", "shop_id", "product_count"
+            "ix_collection_features_shop_id_collection_engagement_score",
+            "shop_id",
+            "collection_engagement_score",
         ),
         Index(
-            "ix_collection_features_shop_id_performance_score",
+            "ix_collection_features_shop_id_collection_conversion_rate",
             "shop_id",
-            "performance_score",
+            "collection_conversion_rate",
         ),
         Index(
-            "ix_collection_features_shop_id_view_count_30d_performance",
+            "ix_collection_features_shop_id_collection_popularity_score",
             "shop_id",
-            "view_count_30d",
-            "performance_score",
+            "collection_popularity_score",
         ),
     )
 
@@ -359,35 +222,20 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     # Foreign key to Shop
     # shop_id provided by ShopMixin
 
-    # Interaction counts
-    view_count = Column(Integer, default=0, nullable=False)
-    cart_add_count = Column(Integer, default=0, nullable=False)
-    cart_view_count = Column(Integer, default=0, nullable=False)
-    cart_remove_count = Column(Integer, default=0, nullable=False)
-    purchase_count = Column(Integer, default=0, nullable=False)
-
-    # Temporal features
-    first_view_date = Column(TIMESTAMP(timezone=True), nullable=True)
-    last_view_date = Column(TIMESTAMP(timezone=True), nullable=True)
-    first_purchase_date = Column(TIMESTAMP(timezone=True), nullable=True)
-    last_purchase_date = Column(TIMESTAMP(timezone=True), nullable=True)
-    view_to_purchase_days = Column(Integer, nullable=True)
-    interaction_span_days = Column(Integer, nullable=True)
-
-    # Scores
-    interaction_score = Column(Float, default=0, nullable=False, index=True)
-    affinity_score = Column(Float, nullable=True)
-
-    # Refund metrics
-    refunded_purchases = Column(Integer, default=0, nullable=False)
-    refund_rate = Column(Float, default=0.0, nullable=False, index=True)
-    total_refunded_amount = Column(Float, default=0.0, nullable=False)
-    net_purchase_value = Column(Float, default=0.0, nullable=False, index=True)
-    refund_risk_score = Column(Float, default=0.0, nullable=False, index=True)
-
-    # Computation tracking
+    interaction_strength_score = Column(Float, nullable=False)
+    customer_product_affinity = Column(Float, nullable=False)
+    engagement_progression_score = Column(Float, nullable=False)
+    conversion_likelihood = Column(Float, nullable=False)
+    purchase_intent_score = Column(Float, nullable=False)
+    interaction_recency_score = Column(Float, nullable=False)
+    relationship_maturity = Column(String(100), nullable=False)
+    interaction_frequency_score = Column(Float, nullable=False)
+    customer_product_loyalty = Column(Float, nullable=False)
+    total_interaction_value = Column(Float, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -396,35 +244,59 @@ class InteractionFeatures(BaseModel, ShopMixin, CustomerMixin, ProductMixin):
     # Indexes
     __table_args__ = (
         Index(
-            "ix_interaction_features_shop_id_customer_id_product_id",
+            "ix_int_features_shop_cust_prod",
             "shop_id",
             "customer_id",
             "product_id",
             unique=True,
         ),
-        Index("ix_interaction_features_shop_id_customer_id", "shop_id", "customer_id"),
-        Index("ix_interaction_features_shop_id_product_id", "shop_id", "product_id"),
         Index(
-            "ix_interaction_features_shop_id_interaction_score",
-            "shop_id",
-            "interaction_score",
-        ),
-        Index("ix_interaction_features_shop_id_refund_rate", "shop_id", "refund_rate"),
-        Index(
-            "ix_interaction_features_shop_id_refund_risk_score",
-            "shop_id",
-            "refund_risk_score",
-        ),
-        Index(
-            "ix_interaction_features_shop_id_net_purchase_value",
-            "shop_id",
-            "net_purchase_value",
-        ),
-        Index(
-            "ix_interaction_features_shop_id_customer_id_interaction_score",
+            "ix_int_features_shop_cust_strength",
             "shop_id",
             "customer_id",
-            "interaction_score",
+            "interaction_strength_score",
+        ),
+        Index(
+            "ix_int_features_shop_cust_affinity",
+            "shop_id",
+            "customer_id",
+            "customer_product_affinity",
+        ),
+        Index(
+            "ix_int_features_shop_cust_engagement",
+            "shop_id",
+            "customer_id",
+            "engagement_progression_score",
+        ),
+        Index(
+            "ix_int_features_shop_cust_conv_likelihood",
+            "shop_id",
+            "customer_id",
+            "conversion_likelihood",
+        ),
+        Index(
+            "ix_int_features_shop_cust_intent",
+            "shop_id",
+            "customer_id",
+            "purchase_intent_score",
+        ),
+        Index(
+            "ix_int_features_shop_cust_recency",
+            "shop_id",
+            "customer_id",
+            "interaction_recency_score",
+        ),
+        Index(
+            "ix_int_features_shop_cust_maturity",
+            "shop_id",
+            "customer_id",
+            "relationship_maturity",
+        ),
+        Index(
+            "ix_int_features_shop_cust_frequency",
+            "shop_id",
+            "customer_id",
+            "interaction_frequency_score",
         ),
     )
 
@@ -441,50 +313,23 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
     # shop_id provided by ShopMixin
 
     # Session identification
-    session_id = Column(String, nullable=False, unique=True)
-    start_time = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
-    end_time = Column(TIMESTAMP(timezone=True), nullable=False)
-    duration_seconds = Column(Integer, nullable=False)
-
-    # Event counts
-    event_count = Column(Integer, default=0, nullable=False)
-    page_view_count = Column(Integer, default=0, nullable=False)
-    product_view_count = Column(Integer, default=0, nullable=False)
-    collection_view_count = Column(Integer, default=0, nullable=False)
-    search_count = Column(Integer, default=0, nullable=False)
-    cart_add_count = Column(Integer, default=0, nullable=False)
-    cart_view_count = Column(Integer, default=0, nullable=False)
-    cart_remove_count = Column(Integer, default=0, nullable=False)
-
-    # Conversion tracking
-    checkout_started = Column(Boolean, default=False, nullable=False)
-    checkout_completed = Column(Boolean, default=False, nullable=False, index=True)
-    order_value = Column(Float, nullable=True)
-    cart_viewed = Column(Boolean, default=False, nullable=False)
-    cart_abandoned = Column(Boolean, default=False, nullable=False)
-
-    # Device and referrer information
-    device_type = Column(String(20), nullable=True)
-    referrer_domain = Column(String(255), nullable=True)
-    landing_page = Column(String(500), nullable=True)
-    exit_page = Column(String(500), nullable=True)
-
-    # Enhanced device and location features
-    browser_type = Column(String(50), nullable=True)
-    os_type = Column(String(50), nullable=True)
-    screen_resolution = Column(String(20), nullable=True)
-    country = Column(String(100), nullable=True)
-    region = Column(String(100), nullable=True)
-    city = Column(String(100), nullable=True)
-    timezone = Column(String(50), nullable=True)
-    language = Column(String(10), nullable=True)
-    referrer_type = Column(String(50), nullable=True)
-    traffic_source = Column(String(50), nullable=True)
-    device_consistency = Column(Float, nullable=True)
-
-    # Computation tracking
+    session_id = Column(String, nullable=False, unique=True, index=True)
+    session_duration_minutes = Column(Integer, nullable=False)
+    interaction_count = Column(Integer, nullable=False)
+    interaction_intensity = Column(Float, nullable=False)
+    unique_products_viewed = Column(Integer, nullable=False)
+    browse_depth_score = Column(Float, nullable=False)
+    conversion_funnel_stage = Column(String(100), nullable=False)
+    purchase_intent_score = Column(Float, nullable=False)
+    session_value = Column(Float, nullable=False)
+    session_type = Column(String(100), nullable=False)
+    bounce_session = Column(Boolean, nullable=False)
+    traffic_source = Column(String(100), nullable=False)
+    returning_visitor = Column(Boolean, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -498,19 +343,7 @@ class SessionFeatures(BaseModel, ShopMixin, CustomerMixin):
             "session_id",
             unique=True,
         ),
-        Index("ix_session_features_shop_id_customer_id", "shop_id", "customer_id"),
-        Index("ix_session_features_shop_id_start_time", "shop_id", "start_time"),
-        Index(
-            "ix_session_features_shop_id_checkout_completed",
-            "shop_id",
-            "checkout_completed",
-        ),
-        Index(
-            "ix_session_features_shop_id_start_time_checkout_completed",
-            "shop_id",
-            "start_time",
-            "checkout_completed",
-        ),
+        Index("ix_session_features_shop_cust", "shop_id", "customer_id"),
     )
 
     def __repr__(self) -> str:
@@ -530,22 +363,19 @@ class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     # Product pair identification
     product_id1 = Column(String, nullable=False, index=True)
     product_id2 = Column(String, nullable=False, index=True)
-
-    # Co-occurrence metrics
-    co_purchase_count = Column(Integer, default=0, nullable=False, index=True)
-    co_view_count = Column(Integer, default=0, nullable=False)
-    co_cart_count = Column(Integer, default=0, nullable=False)
-    co_cart_views = Column(Integer, default=0, nullable=False)
-    co_cart_removes = Column(Integer, default=0, nullable=False)
-
-    # Association metrics
-    support_score = Column(Float, nullable=True)
-    lift_score = Column(Float, nullable=True)
-    last_co_occurrence = Column(TIMESTAMP(timezone=True), nullable=True)
-
-    # Computation tracking
+    co_purchase_strength = Column(Float, nullable=False)
+    co_engagement_score = Column(Float, nullable=False)
+    pair_affinity_score = Column(Float, nullable=False)
+    total_pair_revenue = Column(Float, nullable=False)
+    pair_frequency_score = Column(Float, nullable=False)
+    days_since_last_co_occurrence = Column(Integer, nullable=True)
+    pair_recency_score = Column(Float, nullable=False)
+    pair_confidence_level = Column(String(100), nullable=False)
+    cross_sell_potential = Column(Float, nullable=False)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -554,24 +384,65 @@ class ProductPairFeatures(BaseModel, ShopMixin, ProductMixin):
     # Indexes
     __table_args__ = (
         Index(
-            "ix_product_pair_features_shop_id_product_id1_product_id2",
+            "ix_pp_features_shop_p1_p2",
             "shop_id",
             "product_id1",
             "product_id2",
             unique=True,
         ),
-        Index("ix_product_pair_features_shop_id_product_id1", "shop_id", "product_id1"),
-        Index("ix_product_pair_features_shop_id_product_id2", "shop_id", "product_id2"),
+        Index("ix_pp_features_shop_p1", "shop_id", "product_id1"),
+        Index("ix_pp_features_shop_p2", "shop_id", "product_id2"),
         Index(
-            "ix_product_pair_features_shop_id_co_purchase_count",
+            "ix_pp_features_shop_co_purchase",
             "shop_id",
-            "co_purchase_count",
+            "co_purchase_strength",
         ),
         Index(
-            "ix_product_pair_features_shop_id_product_id1_co_purchase_count",
+            "ix_pp_features_shop_p1_co_purchase",
             "shop_id",
             "product_id1",
-            "co_purchase_count",
+            "co_purchase_strength",
+        ),
+        Index(
+            "ix_pp_features_shop_p2_co_purchase",
+            "shop_id",
+            "product_id2",
+            "co_purchase_strength",
+        ),
+        Index(
+            "ix_pp_features_shop_affinity",
+            "shop_id",
+            "pair_affinity_score",
+        ),
+        Index(
+            "ix_pp_features_shop_revenue",
+            "shop_id",
+            "total_pair_revenue",
+        ),
+        Index(
+            "ix_pp_features_shop_frequency",
+            "shop_id",
+            "pair_frequency_score",
+        ),
+        Index(
+            "ix_pp_features_shop_days_co_occur",
+            "shop_id",
+            "days_since_last_co_occurrence",
+        ),
+        Index(
+            "ix_pp_features_shop_recency",
+            "shop_id",
+            "pair_recency_score",
+        ),
+        Index(
+            "ix_pp_features_shop_confidence",
+            "shop_id",
+            "pair_confidence_level",
+        ),
+        Index(
+            "ix_pp_features_shop_cross_sell",
+            "shop_id",
+            "cross_sell_potential",
         ),
     )
 
@@ -589,21 +460,21 @@ class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
 
     # Search identification
     search_query = Column(String(500), nullable=False, index=True)
-
-    # Search metrics
-    impression_count = Column(Integer, default=0, nullable=False)
-    click_count = Column(Integer, default=0, nullable=False)
-    purchase_count = Column(Integer, default=0, nullable=False)
-    avg_position = Column(Float, nullable=True)
-
-    # Performance metrics
-    click_through_rate = Column(Float, nullable=True, index=True)
-    conversion_rate = Column(Float, nullable=True)
-    last_occurrence = Column(TIMESTAMP(timezone=True), nullable=True)
+    search_click_rate = Column(Float, nullable=False)
+    search_conversion_rate = Column(Float, nullable=False)
+    search_relevance_score = Column(Float, nullable=False)
+    total_search_interactions = Column(Integer, default=0, nullable=False)
+    search_to_purchase_count = Column(Integer, default=0, nullable=False)
+    days_since_last_search_interaction = Column(Integer, nullable=True)
+    search_recency_score = Column(Float, nullable=False)
+    semantic_match_score = Column(Float, nullable=False)
+    search_intent_alignment = Column(String(100), nullable=False)
 
     # Computation tracking
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -612,26 +483,24 @@ class SearchProductFeatures(BaseModel, ShopMixin, ProductMixin):
     # Indexes
     __table_args__ = (
         Index(
-            "ix_search_product_features_shop_id_search_query_product_id",
+            "ix_sp_features_shop_query_prod",
             "shop_id",
             "search_query",
             "product_id",
             unique=True,
         ),
+        Index("ix_sp_features_shop_query", "shop_id", "search_query"),
+        Index("ix_sp_features_shop_prod", "shop_id", "product_id"),
         Index(
-            "ix_search_product_features_shop_id_search_query", "shop_id", "search_query"
-        ),
-        Index("ix_search_product_features_shop_id_product_id", "shop_id", "product_id"),
-        Index(
-            "ix_search_product_features_shop_id_click_through_rate",
+            "ix_sp_features_shop_click_rate",
             "shop_id",
-            "click_through_rate",
+            "search_click_rate",
         ),
         Index(
-            "ix_search_product_features_shop_id_search_query_ctr",
+            "ix_sp_features_shop_query_click",
             "shop_id",
             "search_query",
-            "click_through_rate",
+            "search_click_rate",
         ),
     )
 
@@ -647,90 +516,22 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     # Foreign key to Shop
     # shop_id provided by ShopMixin
 
-    # Session metrics
-    session_count = Column(Integer, default=0, nullable=False)
-    avg_events_per_session = Column(Float, nullable=True)
-    total_event_count = Column(Integer, default=0, nullable=False)
-
-    # Event type counts
-    product_view_count = Column(Integer, default=0, nullable=False)
-    collection_view_count = Column(Integer, default=0, nullable=False)
-    cart_add_count = Column(Integer, default=0, nullable=False)
-    cart_view_count = Column(Integer, default=0, nullable=False)
-    cart_remove_count = Column(Integer, default=0, nullable=False)
-    search_count = Column(Integer, default=0, nullable=False)
-    checkout_start_count = Column(Integer, default=0, nullable=False)
-    purchase_count = Column(Integer, default=0, nullable=False)
-
-    # Temporal features
-    days_since_first_event = Column(Integer, default=0, nullable=False)
-    days_since_last_event = Column(Integer, default=0, nullable=False, index=True)
-    most_active_hour = Column(Integer, nullable=True)
-    most_active_day = Column(Integer, nullable=True)
-
-    # Diversity metrics
-    unique_products_viewed = Column(Integer, default=0, nullable=False)
-    unique_collections_viewed = Column(Integer, default=0, nullable=False)
-    search_terms = Column(JSON, default=[], nullable=False)
-    top_categories = Column(JSON, default=[], nullable=False)
-
-    # Device and referrer information
-    device_type = Column(String(20), nullable=True)
-    primary_referrer = Column(String(255), nullable=True)
-
-    # Conversion rates
-    browse_to_cart_rate = Column(Float, nullable=True)
-    cart_to_purchase_rate = Column(Float, nullable=True)
-    search_to_purchase_rate = Column(Float, nullable=True)
-
-    # Behavioral scores
-    engagement_score = Column(Float, default=0, nullable=False, index=True)
+    user_lifecycle_stage = Column(String(100), nullable=True)
+    purchase_frequency_score = Column(Float, default=0, nullable=False)
+    interaction_diversity_score = Column(Float, default=0, nullable=False)
+    category_diversity = Column(Integer, default=0, nullable=False)
+    primary_category = Column(String(100), nullable=True)
+    conversion_rate = Column(Float, default=0, nullable=False)
+    avg_order_value = Column(Float, default=0, nullable=False)
+    lifetime_value = Column(Float, default=0, nullable=False)
     recency_score = Column(Float, default=0, nullable=False)
-    diversity_score = Column(Float, default=0, nullable=False)
-    behavioral_score = Column(Float, default=0, nullable=False, index=True)
-
-    # Session analytics
-    total_unified_sessions = Column(Integer, default=0, nullable=False, index=True)
-    cross_session_span_days = Column(Integer, default=0, nullable=False)
-    session_frequency_score = Column(Float, default=0, nullable=False)
-    device_diversity = Column(Integer, default=0, nullable=False)
-    avg_session_duration = Column(Float, nullable=True)
-
-    # Extension engagement
-    phoenix_interaction_count = Column(Integer, default=0, nullable=False)
-    apollo_interaction_count = Column(Integer, default=0, nullable=False)
-    venus_interaction_count = Column(Integer, default=0, nullable=False)
-    atlas_interaction_count = Column(Integer, default=0, nullable=False)
-    extension_engagement_score = Column(Float, default=0, nullable=False, index=True)
-
-    # Recommendation and upsell metrics
-    recommendation_click_rate = Column(Float, default=0, nullable=False)
-    upsell_interaction_count = Column(Integer, default=0, nullable=False)
-    total_interactions_in_sessions = Column(Integer, default=0, nullable=False)
-    avg_interactions_per_session = Column(Float, default=0, nullable=False)
-    session_engagement_score = Column(Float, default=0, nullable=False)
-
-    # Attribution analytics
-    multi_touch_attribution_score = Column(Float, default=0, nullable=False, index=True)
-    attribution_revenue = Column(Float, default=0, nullable=False)
-    conversion_path_length = Column(Integer, default=0, nullable=False)
-
-    # Enhanced device and location features
-    browser_type = Column(String(50), nullable=True)
-    os_type = Column(String(50), nullable=True)
-    screen_resolution = Column(String(20), nullable=True)
-    country = Column(String(100), nullable=True)
-    region = Column(String(100), nullable=True)
-    city = Column(String(100), nullable=True)
-    timezone = Column(String(50), nullable=True)
-    language = Column(String(10), nullable=True)
-    referrer_type = Column(String(50), nullable=True)
-    traffic_source = Column(String(50), nullable=True)
-    device_consistency = Column(Float, nullable=True)
-
-    # Computation tracking
+    churn_risk_score = Column(Float, default=1.0, nullable=False)
+    total_interactions = Column(Integer, default=0, nullable=False)
+    days_since_last_purchase = Column(Integer, nullable=True)
     last_computed_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, default=func.now()
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=func.timezone("UTC", func.current_timestamp()),
     )
 
     # Relationships
@@ -739,46 +540,42 @@ class CustomerBehaviorFeatures(BaseModel, ShopMixin, CustomerMixin):
     # Indexes
     __table_args__ = (
         Index(
-            "ix_customer_behavior_features_shop_id_customer_id",
+            "ix_cb_features_shop_cust",
             "shop_id",
             "customer_id",
             unique=True,
         ),
         Index(
-            "ix_customer_behavior_features_shop_id_engagement_score",
+            "ix_cb_features_shop_user_lifecycle_stage",
             "shop_id",
-            "engagement_score",
+            "user_lifecycle_stage",
         ),
         Index(
-            "ix_customer_behavior_features_shop_id_behavioral_score",
+            "ix_cb_features_shop_purchase_frequency_score",
             "shop_id",
-            "behavioral_score",
+            "purchase_frequency_score",
         ),
         Index(
-            "ix_customer_behavior_features_shop_id_days_since_last_event",
+            "ix_cb_features_shop_interaction_diversity_score",
             "shop_id",
-            "days_since_last_event",
+            "interaction_diversity_score",
         ),
         Index(
-            "ix_customer_behavior_features_shop_id_total_unified_sessions",
-            "shop_id",
-            "total_unified_sessions",
+            "ix_cb_features_shop_category_diversity", "shop_id", "category_diversity"
+        ),
+        Index("ix_cb_features_shop_primary_category", "shop_id", "primary_category"),
+        Index("ix_cb_features_shop_conversion_rate", "shop_id", "conversion_rate"),
+        Index("ix_cb_features_shop_avg_order_value", "shop_id", "avg_order_value"),
+        Index("ix_cb_features_shop_lifetime_value", "shop_id", "lifetime_value"),
+        Index("ix_cb_features_shop_recency_score", "shop_id", "recency_score"),
+        Index("ix_cb_features_shop_churn_risk_score", "shop_id", "churn_risk_score"),
+        Index(
+            "ix_cb_features_shop_total_interactions", "shop_id", "total_interactions"
         ),
         Index(
-            "ix_customer_behavior_features_shop_id_ext_engagement",
+            "ix_cb_features_shop_days_since_last_purchase",
             "shop_id",
-            "extension_engagement_score",
-        ),
-        Index(
-            "ix_customer_behavior_features_shop_id_multi_touch_attr",
-            "shop_id",
-            "multi_touch_attribution_score",
-        ),
-        Index(
-            "ix_customer_behavior_features_shop_id_engagement_behavioral",
-            "shop_id",
-            "engagement_score",
-            "behavioral_score",
+            "days_since_last_purchase",
         ),
     )
 

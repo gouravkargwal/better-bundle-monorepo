@@ -54,7 +54,7 @@ class GorseApiClient:
         This automatically triggers user-based model training
 
         Args:
-            users: List of user dictionaries with userId, labels, etc.
+            users: List of user dictionaries already in Gorse format (UserId, Labels, etc.)
 
         Returns:
             API response dictionary
@@ -63,37 +63,25 @@ class GorseApiClient:
             return {"success": True, "message": "No users to insert", "count": 0}
 
         try:
-            # Transform users to Gorse format
-            gorse_users = []
-            for user in users:
-                # Convert labels dict to list format as per Gorse API
-                labels = user.get("labels", {})
-                if isinstance(labels, dict):
-                    # Convert dict to list of key-value pairs or just keys
-                    labels_list = (
-                        [f"{k}:{v}" for k, v in labels.items()] if labels else []
-                    )
-                else:
-                    labels_list = labels if isinstance(labels, list) else []
+            # Only validate, don't transform (data is already in correct format)
+            valid_users = [u for u in users if "UserId" in u and u["UserId"]]
 
-                gorse_user = {
-                    "UserId": user.get("userId", ""),
-                    "Labels": labels_list,
-                    "Subscribe": user.get("subscribe", []),
-                    "Comment": user.get("comment", ""),
-                }
-                gorse_users.append(gorse_user)
+            if not valid_users:
+                logger.warning("No valid users with UserId found")
+                return {"success": False, "error": "No valid users", "count": 0}
 
             url = f"{self.base_url}/api/users"
 
+            # Retry loop
             attempt = 0
-            while True:
+            response = None
+            while attempt <= self.max_retries:
                 try:
                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                         response = await client.post(
-                            url, json=gorse_users, headers=self._get_headers()
+                            url, json=valid_users, headers=self._get_headers()
                         )
-                    break
+                    break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,
@@ -107,44 +95,40 @@ class GorseApiClient:
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
-                # Check HTTP status
-                if response.status_code == 200:
-                    result = response.json()
-                    row_affected = result.get("RowAffected", 0)
+            # Check HTTP status
+            if response and response.status_code == 200:
+                result = response.json()
+                row_affected = result.get("RowAffected", 0)
 
-                    logger.info(
-                        f"Successfully inserted {row_affected} users to Gorse (sent {len(gorse_users)})"
-                    )
-
-                    return {
-                        "success": True,
-                        "count": row_affected,
-                        "total_sent": len(gorse_users),
-                        "response": result,
-                        "timestamp": now_utc(),
-                    }
-                else:
-                    # HTTP error
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                    logger.error(f"HTTP error inserting users batch: {error_msg}")
-                    return {
-                        "success": False,
-                        "error": error_msg,
-                        "count": 0,
-                    }
+                return {
+                    "success": True,
+                    "count": row_affected,
+                    "total_sent": len(valid_users),
+                    "response": result,
+                    "timestamp": now_utc(),
+                }
+            else:
+                error_msg = (
+                    f"HTTP {response.status_code}: {response.text}"
+                    if response
+                    else "No response"
+                )
+                logger.error(f"HTTP error inserting users batch: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "count": 0,
+                }
 
         except httpx.TimeoutException:
-            error_msg = "Request timeout"
-            logger.error(f"Timeout inserting users batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Timeout inserting users batch")
+            return {"success": False, "error": "Request timeout", "count": 0}
         except httpx.ConnectError:
-            error_msg = "Connection error"
-            logger.error(f"Connection error inserting users batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Connection error inserting users batch")
+            return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to insert users batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error(f"Failed to insert users batch: {str(e)}")
+            return {"success": False, "error": str(e), "count": 0}
 
     async def insert_items_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -152,7 +136,7 @@ class GorseApiClient:
         This automatically triggers item-based model training
 
         Args:
-            items: List of item dictionaries with itemId, categories, labels, etc.
+            items: List of item dictionaries already in Gorse format (ItemId, Labels, etc.)
 
         Returns:
             API response dictionary
@@ -161,39 +145,25 @@ class GorseApiClient:
             return {"success": True, "message": "No items to insert", "count": 0}
 
         try:
-            # Transform items to Gorse format
-            gorse_items = []
-            for item in items:
-                # Convert labels dict to list format as per Gorse API
-                labels = item.get("labels", {})
-                if isinstance(labels, dict):
-                    # Convert dict to list of key-value pairs
-                    labels_list = (
-                        [f"{k}:{v}" for k, v in labels.items()] if labels else []
-                    )
-                else:
-                    labels_list = labels if isinstance(labels, list) else []
+            # Only validate, don't transform (data is already in correct format)
+            valid_items = [i for i in items if "ItemId" in i and i["ItemId"]]
 
-                gorse_item = {
-                    "ItemId": item.get("itemId", ""),
-                    "Categories": item.get("categories", []),
-                    "Labels": labels_list,
-                    "IsHidden": item.get("isHidden", False),
-                    "Timestamp": item.get("timestamp", now_utc().isoformat()),
-                    "Comment": item.get("comment", ""),
-                }
-                gorse_items.append(gorse_item)
+            if not valid_items:
+                logger.warning("No valid items with ItemId found")
+                return {"success": False, "error": "No valid items", "count": 0}
 
             url = f"{self.base_url}/api/items"
 
+            # Retry loop
             attempt = 0
-            while True:
+            response = None
+            while attempt <= self.max_retries:
                 try:
                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                         response = await client.post(
-                            url, json=gorse_items, headers=self._get_headers()
+                            url, json=valid_items, headers=self._get_headers()
                         )
-                    break
+                    break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,
@@ -207,44 +177,40 @@ class GorseApiClient:
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
-                # Check HTTP status
-                if response.status_code == 200:
-                    result = response.json()
-                    row_affected = result.get("RowAffected", 0)
+            # Check HTTP status
+            if response and response.status_code == 200:
+                result = response.json()
+                row_affected = result.get("RowAffected", 0)
 
-                    logger.info(
-                        f"Successfully inserted {row_affected} items to Gorse (sent {len(gorse_items)})"
-                    )
-
-                    return {
-                        "success": True,
-                        "count": row_affected,
-                        "total_sent": len(gorse_items),
-                        "response": result,
-                        "timestamp": now_utc(),
-                    }
-                else:
-                    # HTTP error
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                    logger.error(f"HTTP error inserting items batch: {error_msg}")
-                    return {
-                        "success": False,
-                        "error": error_msg,
-                        "count": 0,
-                    }
+                return {
+                    "success": True,
+                    "count": row_affected,
+                    "total_sent": len(valid_items),
+                    "response": result,
+                    "timestamp": now_utc(),
+                }
+            else:
+                error_msg = (
+                    f"HTTP {response.status_code}: {response.text}"
+                    if response
+                    else "No response"
+                )
+                logger.error(f"HTTP error inserting items batch: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "count": 0,
+                }
 
         except httpx.TimeoutException:
-            error_msg = "Request timeout"
-            logger.error(f"Timeout inserting items batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Timeout inserting items batch")
+            return {"success": False, "error": "Request timeout", "count": 0}
         except httpx.ConnectError:
-            error_msg = "Connection error"
-            logger.error(f"Connection error inserting items batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Connection error inserting items batch")
+            return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to insert items batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error(f"Failed to insert items batch: {str(e)}")
+            return {"success": False, "error": str(e), "count": 0}
 
     async def insert_feedback_batch(
         self, feedback: List[Dict[str, Any]]
@@ -254,7 +220,7 @@ class GorseApiClient:
         This automatically triggers feedback-based model training
 
         Args:
-            feedback: List of feedback dictionaries with feedbackType, userId, itemId, etc.
+            feedback: List of feedback dictionaries already in Gorse format
 
         Returns:
             API response dictionary
@@ -263,33 +229,29 @@ class GorseApiClient:
             return {"success": True, "message": "No feedback to insert", "count": 0}
 
         try:
-            # Transform feedback to Gorse format
-            gorse_feedback = []
-            for fb in feedback:
-                gorse_fb = {
-                    "FeedbackType": fb.get("feedbackType", ""),
-                    "UserId": fb.get("userId", ""),
-                    "ItemId": fb.get("itemId", ""),
-                    "Timestamp": (
-                        fb.get("timestamp", now_utc()).isoformat()
-                        if isinstance(fb.get("timestamp", now_utc()), datetime)
-                        else fb.get("timestamp", now_utc().isoformat())
-                    ),
-                    "Value": fb.get("value", 1.0),
-                    "Comment": fb.get("comment", ""),
-                }
-                gorse_feedback.append(gorse_fb)
+            # Only validate, don't transform (data is already in correct format)
+            valid_feedback = [
+                f
+                for f in feedback
+                if "FeedbackType" in f and "UserId" in f and "ItemId" in f
+            ]
+
+            if not valid_feedback:
+                logger.warning("No valid feedback found")
+                return {"success": False, "error": "No valid feedback", "count": 0}
 
             url = f"{self.base_url}/api/feedback"
 
+            # Retry loop
             attempt = 0
-            while True:
+            response = None
+            while attempt <= self.max_retries:
                 try:
                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                         response = await client.post(
-                            url, json=gorse_feedback, headers=self._get_headers()
+                            url, json=valid_feedback, headers=self._get_headers()
                         )
-                    break
+                    break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,
@@ -303,44 +265,40 @@ class GorseApiClient:
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
-                # Check HTTP status
-                if response.status_code == 200:
-                    result = response.json()
-                    row_affected = result.get("RowAffected", 0)
+            # Check HTTP status
+            if response and response.status_code == 200:
+                result = response.json()
+                row_affected = result.get("RowAffected", 0)
 
-                    logger.info(
-                        f"Successfully inserted {row_affected} feedback records to Gorse (sent {len(gorse_feedback)})"
-                    )
-
-                    return {
-                        "success": True,
-                        "count": row_affected,
-                        "total_sent": len(gorse_feedback),
-                        "response": result,
-                        "timestamp": now_utc(),
-                    }
-                else:
-                    # HTTP error
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                    logger.error(f"HTTP error inserting feedback batch: {error_msg}")
-                    return {
-                        "success": False,
-                        "error": error_msg,
-                        "count": 0,
-                    }
+                return {
+                    "success": True,
+                    "count": row_affected,
+                    "total_sent": len(valid_feedback),
+                    "response": result,
+                    "timestamp": now_utc(),
+                }
+            else:
+                error_msg = (
+                    f"HTTP {response.status_code}: {response.text}"
+                    if response
+                    else "No response"
+                )
+                logger.error(f"HTTP error inserting feedback batch: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "count": 0,
+                }
 
         except httpx.TimeoutException:
-            error_msg = "Request timeout"
-            logger.error(f"Timeout inserting feedback batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Timeout inserting feedback batch")
+            return {"success": False, "error": "Request timeout", "count": 0}
         except httpx.ConnectError:
-            error_msg = "Connection error"
-            logger.error(f"Connection error inserting feedback batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error("Connection error inserting feedback batch")
+            return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to insert feedback batch: {error_msg}")
-            return {"success": False, "error": error_msg, "count": 0}
+            logger.error(f"Failed to insert feedback batch: {str(e)}")
+            return {"success": False, "error": str(e), "count": 0}
 
     async def get_recommendations(
         self,
@@ -690,7 +648,6 @@ class GorseApiClient:
 
             # Gorse returns a list of user IDs with scores
             if isinstance(result, list):
-                logger.info(f"Found {len(result)} user neighbors for user {user_id}")
                 return {
                     "success": True,
                     "neighbors": result,

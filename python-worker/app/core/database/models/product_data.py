@@ -4,7 +4,7 @@ Product data model for SQLAlchemy
 Represents product information from Shopify.
 """
 
-from sqlalchemy import Column, String, Float, Boolean, DateTime, Text, Integer
+from sqlalchemy import Column, String, Float, Boolean, Text, Integer
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin

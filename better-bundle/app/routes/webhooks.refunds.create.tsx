@@ -33,13 +33,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const kafkaProducer = await KafkaProducerService.getInstance();
 
+    // ✅ ONLY FOR ORDER DATA UPDATE - No refund attribution processing
     const streamData = {
-      event_type: "refund_created", // ✅ Changed from "refund_created"
+      event_type: "refund_created", // For order data normalization only
       shop_domain: shop,
-      shopify_id: orderId, // ✅ Order ID (not refund ID)
+      shopify_id: orderId, // Order ID for order data update
       metadata: {
         trigger: "refund_created",
         refund_id: refundId,
+        // ✅ NO REFUND COMMISSION POLICY - Only for data collection
+        purpose: "order_data_update_only",
       },
       timestamp: new Date().toISOString(),
     } as const;
@@ -52,16 +55,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       orderId: orderId,
       shopDomain: shop,
       message:
-        "Refund event published to Kafka - will trigger data collection and normalization",
+        "Refund event published to Kafka - will trigger order data update only (no refund attribution processing)",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
-    return json(
-      {
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 },
-    );
+    console.error("❌ Error processing refund webhook:", error);
+    return json({ error: "Internal server error" }, { status: 500 });
   }
 };

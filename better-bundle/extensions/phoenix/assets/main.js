@@ -1,3 +1,12 @@
+// Load required modules first
+// Note: These should be loaded in the correct order in the HTML
+// 1. variant-manager.js
+// 2. dropdown-manager.js  
+// 3. swiper-manager.js
+// 4. product-card-renderer.js
+// 5. product-cards.js
+// 6. main.js
+
 class RecommendationCarousel {
   constructor() {
     this.api = window.RecommendationAPI ? new window.RecommendationAPI() : null;
@@ -27,8 +36,32 @@ class RecommendationCarousel {
       showArrows: window.showArrows || true,
       showPagination: window.showPagination || true,
       limit: window.recommendationLimit || 4,
-      context: 'cart' // Phoenix extension context
+      context: window.context || 'cart' // Dynamic context from Liquid template
     };
+  }
+
+  // Track recommendation view when user actually views them
+  async trackRecommendationView(productIds) {
+    if (!this.analyticsApi || !productIds || productIds.length === 0) {
+      return;
+    }
+
+    try {
+      await this.analyticsApi.trackRecommendationView(
+        this.config.shopDomain || '',
+        this.config.context,
+        this.config.customerId ? String(this.config.customerId) : undefined,
+        productIds,
+        {
+          source: 'phoenix_theme_extension',
+          cart_product_count: this.config.productIds?.length || 0,
+          recommendation_count: productIds.length
+        }
+      );
+      console.log('✅ Phoenix: Recommendation view tracked successfully');
+    } catch (error) {
+      console.error('❌ Phoenix: Failed to track recommendation view:', error);
+    }
   }
 
   // Initialize the recommendation carousel
@@ -73,6 +106,25 @@ class RecommendationCarousel {
         return;
       }
 
+      // Show skeleton loading before API call
+      if (window.productCardManager) {
+        console.log('🔄 Phoenix: Showing skeleton loading...');
+        window.productCardManager.showSkeletonLoading();
+
+        // Debug: Check if skeleton elements are created
+        setTimeout(() => {
+          const skeletonElements = document.querySelectorAll('.loading-skeleton');
+          console.log('🔍 Phoenix: Skeleton elements found:', skeletonElements.length);
+          if (skeletonElements.length > 0) {
+            console.log('✅ Phoenix: Skeleton animation should be visible');
+          } else {
+            console.warn('⚠️ Phoenix: No skeleton elements found');
+          }
+        }, 100);
+      } else {
+        console.error('❌ Phoenix: ProductCardManager not available');
+      }
+
       // Fetch recommendations with timeout
       console.log('🌐 Phoenix: Fetching recommendations...');
       const recommendations = await this.api.fetchRecommendations(
@@ -86,31 +138,17 @@ class RecommendationCarousel {
 
       if (recommendations && recommendations.length > 0) {
         console.log('✅ Phoenix: Received recommendations, updating cards...');
-        const productIds = recommendations.map((product) => product.id);
 
-        if (this.analyticsApi) {
-          try {
-            await this.analyticsApi.trackRecommendationView(
-              this.config.shopDomain || '',
-              this.config.context,
-              this.config.customerId ? String(this.config.customerId) : undefined,
-              productIds,
-              {
-                source: 'phoenix_theme_extension',
-                cart_product_count: this.config.productIds?.length || 0,
-                recommendation_count: productIds.length
-              }
-            );
-          } catch (error) {
-            console.error('❌ Phoenix: Failed to track recommendation view:', error);
-            // Don't fail the entire flow for tracking errors
-          }
-        } else {
-          console.warn('⚠️ Phoenix: Analytics API not available, skipping recommendation tracking');
+        // Clear global fallback timeout since we successfully loaded recommendations
+        if (window.globalFallbackTimeout) {
+          clearTimeout(window.globalFallbackTimeout);
+          console.log('✅ Phoenix: Cleared global fallback timeout');
         }
 
+        const productIds = recommendations.map((product) => product.id);
+
         // Update product cards with real recommendations and analytics tracking
-        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context);
+        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context, this.trackRecommendationView.bind(this));
       } else {
         console.log('❌ Phoenix: No recommendations available, hiding carousel');
         this.hideCarousel();
@@ -123,18 +161,22 @@ class RecommendationCarousel {
 
   // Show skeleton loading state
   showSkeleton() {
-    const skeletonContainer = document.querySelector('.skeleton-container');
-    if (skeletonContainer) {
-      skeletonContainer.style.display = 'block';
-    }
+    const skeletonElements = document.querySelectorAll('.loading-skeleton');
+    skeletonElements.forEach(element => {
+      element.style.display = 'block';
+      element.classList.remove('fade-out');
+    });
   }
 
   // Hide skeleton loading state
   hideSkeleton() {
-    const skeletonContainer = document.querySelector('.skeleton-container');
-    if (skeletonContainer) {
-      skeletonContainer.style.display = 'none';
-    }
+    const skeletonElements = document.querySelectorAll('.loading-skeleton');
+    skeletonElements.forEach(element => {
+      element.classList.add('fade-out');
+      setTimeout(() => {
+        element.style.display = 'none';
+      }, 300);
+    });
   }
 
   // Hide the entire carousel when API fails or no recommendations
@@ -156,22 +198,26 @@ document.addEventListener('DOMContentLoaded', function () {
       console.warn('⏰ Phoenix: Global fallback timeout - hiding carousel after 15 seconds');
       const carouselContainer = document.querySelector('.shopify-app-block');
       if (carouselContainer) {
-        carouselContainer.style.display = 'none';
+        // Only hide if carousel is still in skeleton loading state
+        const skeletonElements = carouselContainer.querySelectorAll('.loading-skeleton');
+        if (skeletonElements.length > 0) {
+          console.log('⚠️ Phoenix: Hiding carousel due to timeout - skeleton still visible');
+          carouselContainer.style.display = 'none';
+        } else {
+          console.log('✅ Phoenix: Carousel already loaded successfully, not hiding');
+        }
       }
     }, 15000); // 15 second global timeout
 
-    // Clear global timeout when carousel successfully loads
-    const originalHideCarousel = RecommendationCarousel.prototype.hideCarousel;
-    RecommendationCarousel.prototype.hideCarousel = function () {
-      clearTimeout(globalFallbackTimeout);
-      return originalHideCarousel.call(this);
-    };
+    // Store global timeout reference for clearing
+    window.globalFallbackTimeout = globalFallbackTimeout;
 
     // Global variables are now initialized in the Liquid template
     // Initialize Swiper for both design and live mode
     if (window.designMode) {
       console.log('Design mode detected - initializing Swiper with dummy data');
       clearTimeout(globalFallbackTimeout); // Clear timeout in design mode
+      console.log('✅ Phoenix: Cleared global fallback timeout in design mode');
 
       // Initialize Swiper for design mode (dummy data already in HTML)
       window.swiperConfig = {

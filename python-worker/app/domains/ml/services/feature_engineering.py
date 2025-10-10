@@ -1269,15 +1269,14 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             # Initialize unified Gorse service
             gorse_service = UnifiedGorseService()
 
-            # Run unified sync and training - no complex mode switching
-            await gorse_service.sync_and_train(shop_id=shop_id)
+            # Use the comprehensive sync method directly
+            await gorse_service.comprehensive_sync_and_train(shop_id=shop_id)
 
         except Exception as e:
             logger.error(
                 f"Failed to trigger unified Gorse sync after feature computation: {str(e)}",
                 shop_id=shop_id,
             )
-            # Don't raise the exception - feature computation succeeded, Gorse sync failure shouldn't fail the whole job
 
     async def generate_session_features_from_interactions(
         self,
@@ -1304,7 +1303,12 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                         if interaction.get("session_id") == session_id
                     ]
 
-                    # Build session context
+                    # Build session context with events in session_data
+                    session_with_events = {
+                        **session,
+                        "events": session_interactions,  # Add events to session_data
+                    }
+
                     context = {
                         "shop": shop or {},
                         "session": session,
@@ -1315,7 +1319,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                     # Generate features for this session
                     session_features = await self._compute_feature_safely(
                         self.session_generator,
-                        session,
+                        session_with_events,
                         context,
                         entity_id=session_id,
                         feature_type="session",
@@ -1355,6 +1359,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                             if session_interactions
                             else None
                         ),
+                        "events": session_interactions,  # Add events to session_data
                     }
 
                     # Build session context

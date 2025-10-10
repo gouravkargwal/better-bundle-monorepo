@@ -216,9 +216,17 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          product_ids: productIds,
-          recommendation_count: productIds?.length || 0,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            recommendations: productIds?.map((productId, index) => ({
+              id: productId,
+              position: index + 1
+            })) || [],
+            type: "recommendation",
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm"
+          }
         },
       };
 
@@ -247,8 +255,17 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          recommendation_position: position,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            product: {
+              id: productId
+            },
+            type: "recommendation",
+            position: position,
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm"
+          }
         },
       };
 
@@ -276,9 +293,25 @@ class AnalyticsApiClient {
         metadata: {
           ...metadata,
           extension_type: "phoenix",
-          variant_id: variantId,
-          recommendation_position: position,
           source: "phoenix_theme_extension",
+          // Standard structure expected by adapters
+          data: {
+            cartLine: {
+              merchandise: {
+                id: variantId,
+                product: {
+                  id: productId  // Use productId instead of variantId for product_id
+                }
+              },
+              quantity: metadata?.quantity || 1
+            },
+            type: "recommendation",
+            position: position,
+            widget: "phoenix_recommendation",
+            algorithm: "phoenix_algorithm",
+            // ✅ Add quantity tracking for proper attribution
+            selected_quantity: metadata?.quantity || 1
+          }
         },
       };
 
@@ -294,7 +327,7 @@ class AnalyticsApiClient {
   /**
    * Store attribution data in cart attributes for order processing
    */
-  async storeCartAttribution(sessionId, productId, context, position) {
+  async storeCartAttribution(sessionId, productId, context, position, quantity = 1) {
     try {
       const response = await fetch("/cart/update.js", {
         method: "POST",
@@ -306,6 +339,7 @@ class AnalyticsApiClient {
             bb_recommendation_extension: "phoenix",
             bb_recommendation_context: context,
             bb_recommendation_position: position.toString(),
+            bb_recommendation_quantity: quantity.toString(), // ✅ Add quantity to cart attributes
             bb_recommendation_timestamp: new Date().toISOString(),
             bb_recommendation_source: "betterbundle",
           },

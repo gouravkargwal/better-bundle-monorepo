@@ -198,6 +198,62 @@ class ShopifyGraphQLSeeder:
         )
         return success_count > 0
 
+    def _batch_publish_collections(
+        self, collection_ids: List[str], publication_id: str
+    ) -> bool:
+        """Publish multiple collections to Online Store in a single batch operation."""
+        if not collection_ids:
+            return True
+
+        print(f"  📡 Publishing {len(collection_ids)} collections to Online Store...")
+
+        # Create batch publish mutation for collections
+        mutation = """
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+            publishablePublish(id: $id, input: $input) {
+                publishable {
+                    ... on Collection {
+                        id
+                        title
+                    }
+                }
+                userErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        success_count = 0
+        for collection_id in collection_ids:
+            try:
+                variables = {
+                    "id": collection_id,
+                    "input": [{"publicationId": publication_id}],
+                }
+
+                result = self._graphql_request(mutation, variables)
+
+                if result["data"]["publishablePublish"]["userErrors"]:
+                    errors = [
+                        error["message"]
+                        for error in result["data"]["publishablePublish"]["userErrors"]
+                    ]
+                    print(
+                        f"    ⚠️ Failed to publish collection {collection_id}: {', '.join(errors)}"
+                    )
+                else:
+                    success_count += 1
+
+            except Exception as e:
+                print(f"    ⚠️ Failed to publish collection {collection_id}: {e}")
+
+        print(
+            f"  ✅ Successfully published {success_count}/{len(collection_ids)} collections"
+        )
+        return success_count > 0
+
     async def create_products(self) -> Dict[str, Dict[str, Any]]:
         print("📦 Creating products...")
         products = self.product_generator.generate_products()
@@ -226,6 +282,9 @@ class ShopifyGraphQLSeeder:
                             "inventoryPolicy": v["inventoryPolicy"],
                             "requiresShipping": True,
                             "fulfillmentService": "manual",
+                            "option1": v.get("option1"),
+                            "option2": v.get("option2"),
+                            "option3": v.get("option3"),
                         }
                     )
 
@@ -254,28 +313,51 @@ class ShopifyGraphQLSeeder:
                 }
                 """
 
-                # Create product options and variants
-                product_options = [
-                    {
-                        "name": "Size",
-                        "position": 1,
-                        "values": [
-                            {"name": "Small"},
-                            {"name": "Medium"},
-                            {"name": "Large"},
-                        ],
-                    }
-                ]
+                # Create product options from the product data
+                product_options = []
+                if product_data.get("options"):
+                    for option in product_data["options"]:
+                        product_options.append(
+                            {
+                                "name": option["name"],
+                                "position": option["position"],
+                                "values": [
+                                    {"name": value} for value in option["values"]
+                                ],
+                            }
+                        )
 
                 # Convert variants to productSet format with proper option values and inventory
                 product_variants = []
-                sizes = ["Small", "Medium", "Large"]
-                for i, variant_data in enumerate(variants):
-                    size = sizes[i % len(sizes)]  # Cycle through sizes
+                for variant_data in variants:
+                    # Build option values from the variant data
+                    option_values = []
+                    if variant_data.get("option1") and len(product_options) > 0:
+                        option_values.append(
+                            {
+                                "optionName": product_options[0]["name"],
+                                "name": variant_data["option1"],
+                            }
+                        )
+                    if variant_data.get("option2") and len(product_options) > 1:
+                        option_values.append(
+                            {
+                                "optionName": product_options[1]["name"],
+                                "name": variant_data["option2"],
+                            }
+                        )
+                    if variant_data.get("option3") and len(product_options) > 2:
+                        option_values.append(
+                            {
+                                "optionName": product_options[2]["name"],
+                                "name": variant_data["option3"],
+                            }
+                        )
+
                     product_variants.append(
                         {
                             "price": variant_data["price"],
-                            "sku": f"{variant_data['sku']}-{size[:1]}",  # Add size to SKU
+                            "sku": variant_data["sku"],
                             "compareAtPrice": variant_data.get("compareAtPrice"),
                             "taxable": variant_data["taxable"],
                             "inventoryPolicy": variant_data["inventoryPolicy"],
@@ -290,7 +372,7 @@ class ShopifyGraphQLSeeder:
                                     "quantity": variant_data["inventoryQuantity"],
                                 }
                             ],
-                            "optionValues": [{"optionName": "Size", "name": size}],
+                            "optionValues": option_values,
                         }
                     )
 
@@ -322,6 +404,12 @@ class ShopifyGraphQLSeeder:
                 variant_ids = []
                 for variant_node in product["variants"]["nodes"]:
                     variant_ids.append(variant_node["id"])
+
+                # Add media to the product if available
+                if product_data.get("media", {}).get("edges"):
+                    self._add_media_to_product(
+                        product["id"], product_data["media"]["edges"]
+                    )
 
                 self.created_products[f"product_{i}"] = {
                     "id": product["id"],
@@ -416,7 +504,7 @@ class ShopifyGraphQLSeeder:
         return self.created_customers
 
     def _generate_collections_from_products(self) -> List[Dict[str, Any]]:
-        # Build two simple collections grouping created products
+        # Build two collections with proper product distribution
         product_ids = [p["id"] for p in self.created_products.values()]
         collections = []
 
@@ -425,12 +513,16 @@ class ShopifyGraphQLSeeder:
 
         timestamp = int(time.time())
 
+        # Split products more evenly - first 10 products for Summer Essentials
+        # Remaining products for Tech Gear (should be around 10 as well)
+        mid_point = len(product_ids) // 2
+
         collections.append(
             {
                 "title": "Summer Essentials",
                 "handle": f"summer-essentials-{timestamp}",
                 "descriptionHtml": "Perfect for summer - clothing and accessories",
-                "productIds": product_ids[:10],
+                "productIds": product_ids[:mid_point],
             }
         )
         collections.append(
@@ -438,7 +530,7 @@ class ShopifyGraphQLSeeder:
                 "title": "Tech Gear",
                 "handle": f"tech-gear-{timestamp}",
                 "descriptionHtml": "Latest technology and electronics",
-                "productIds": product_ids[10:],
+                "productIds": product_ids[mid_point:],
             }
         )
         return collections
@@ -450,6 +542,8 @@ class ShopifyGraphQLSeeder:
             return {}
 
         collections = self._generate_collections_from_products()
+        created_collection_ids = []
+
         for i, c in enumerate(collections, 1):
             try:
                 # Create collection mutation
@@ -490,6 +584,7 @@ class ShopifyGraphQLSeeder:
                     "id": collection["id"],
                     "title": collection["title"],
                 }
+                created_collection_ids.append(collection["id"])
                 print(f"  ✅ Collection: {collection['title']} ({collection['id']})")
 
                 # Add products to collection
@@ -535,6 +630,12 @@ class ShopifyGraphQLSeeder:
 
             except Exception as e:
                 print(f"  ❌ Collection '{c['title']}' failed: {e}")
+
+        # Publish all collections to Online Store after creation
+        if created_collection_ids:
+            publication_id = self._get_online_store_publication_id()
+            self._batch_publish_collections(created_collection_ids, publication_id)
+
         return self.created_collections
 
     async def create_orders(self) -> Dict[str, Dict[str, Any]]:
@@ -547,8 +648,8 @@ class ShopifyGraphQLSeeder:
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
-        # Create orders following the original customer journey (12 orders)
-        for i in range(1, 13):  # Create 12 orders to match original seed script
+        # Create orders following the enhanced customer journey (40 orders)
+        for i in range(1, 41):  # Create 40 orders for comprehensive ML training
             try:
                 # Pick random customer and products
                 customer_id = random.choice(customer_ids)
@@ -690,12 +791,76 @@ class ShopifyGraphQLSeeder:
             f"  ✅ Products:   {len(self.created_products)} (published to Online Store)"
         )
         print(f"  ✅ Customers:  {len(self.created_customers)}")
-        print(f"  ✅ Collections:{len(self.created_collections)}")
+        print(
+            f"  ✅ Collections:{len(self.created_collections)} (published to Online Store)"
+        )
         print(f"  ✅ Orders:     {len(self.created_orders)}")
         print(f"  📦 Inventory: Tracked for all product variants")
-        print(f"  🌐 Storefront: Products visible on {self.shop_domain}")
+        print(
+            f"  🏷️  Categories: Clothing, Accessories, Electronics, Home & Garden, Sports & Fitness"
+        )
+        print(
+            f"  🌐 Storefront: Products and collections visible on {self.shop_domain}"
+        )
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
+
+    def _add_media_to_product(self, product_id: str, media_edges: List[Dict]) -> None:
+        """Add media files to a product using productCreateMedia with original source URLs."""
+        media_inputs = []
+
+        for media_edge in media_edges:
+            media_node = media_edge["node"]
+
+            if media_node.get("image"):
+                # Use original source URLs directly with productCreateMedia
+                media_inputs.append(
+                    {
+                        "originalSource": media_node["image"]["url"],
+                        "mediaContentType": "IMAGE",
+                        "alt": media_node["image"].get("altText", ""),
+                    }
+                )
+                print(f"    📸 Preparing media: {media_node['image']['url']}")
+
+        # Attach all media to product in one call
+        if media_inputs:
+            self._attach_media_to_product(product_id, media_inputs)
+
+    def _attach_media_to_product(
+        self, product_id: str, media_inputs: List[Dict]
+    ) -> None:
+        """Attach media to product using productCreateMedia mutation (2024-01+ API)."""
+        mutation = """
+        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+            productCreateMedia(productId: $productId, media: $media) {
+                media {
+                    id
+                    alt
+                    status
+                }
+                mediaUserErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        variables = {"productId": product_id, "media": media_inputs}
+
+        try:
+            result = self._graphql_request(mutation, variables)
+            if result["data"]["productCreateMedia"]["mediaUserErrors"]:
+                print(
+                    f"    ⚠️ Failed to attach media: {result['data']['productCreateMedia']['mediaUserErrors']}"
+                )
+            else:
+                print(
+                    f"    📸 Added {len(media_inputs)} media files to product {product_id}"
+                )
+        except Exception as e:
+            print(f"    ⚠️ Failed to attach media: {e}")
 
 
 async def main() -> bool:

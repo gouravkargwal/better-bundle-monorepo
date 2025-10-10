@@ -6,7 +6,16 @@ interface Product {
   title: string;
   handle: string;
   price: string;
-  image: string;
+  image: {
+    url: string;
+    alt_text?: string;
+  } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   inStock: boolean;
   url: string;
   variant_id?: string;

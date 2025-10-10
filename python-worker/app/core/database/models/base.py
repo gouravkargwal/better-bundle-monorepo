@@ -4,9 +4,9 @@ Base model class for SQLAlchemy models
 Provides common functionality and base configuration for all models.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from sqlalchemy import Column, String, DateTime, func, ForeignKey
+from sqlalchemy import Column, String, func, ForeignKey
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declared_attr
@@ -18,19 +18,21 @@ Base = declarative_base()
 
 
 class TimestampMixin:
-    """Mixin for models that need created_at and updated_at timestamps"""
+    """Mixin for models that need created_at and updated_at timestamps in UTC"""
 
     created_at = Column(
         "created_at",
         TIMESTAMP(timezone=True),
-        default=func.current_timestamp(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.timezone("UTC", func.current_timestamp()),
         nullable=False,
     )
     updated_at = Column(
         "updated_at",
         TIMESTAMP(timezone=True),
-        default=func.current_timestamp(),
-        onupdate=func.current_timestamp(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.timezone("UTC", func.current_timestamp()),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 
@@ -40,7 +42,12 @@ class IDMixin:
 
     @declared_attr
     def id(cls):
-        return Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+        return Column(
+            String,
+            primary_key=True,
+            default=lambda: str(uuid.uuid4()),
+            server_default=func.gen_random_uuid(),
+        )
 
 
 class BaseModel(Base, IDMixin, TimestampMixin):
@@ -54,6 +61,12 @@ class BaseModel(Base, IDMixin, TimestampMixin):
     """
 
     __abstract__ = True
+
+    def __init__(self, **kwargs):
+        # Generate ID if not provided
+        if "id" not in kwargs or kwargs["id"] is None:
+            kwargs["id"] = str(uuid.uuid4())
+        super().__init__(**kwargs)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary"""

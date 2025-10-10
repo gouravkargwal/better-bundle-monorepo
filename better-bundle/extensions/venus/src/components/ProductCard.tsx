@@ -4,20 +4,35 @@ import {
   Button,
   Image,
   View,
-  Style,
   Card,
   BlockStack,
 } from "@shopify/ui-extensions-react/customer-account";
+import { useState, useEffect, useRef } from "react";
 
 interface Product {
   id: string;
   title: string;
   handle: string;
   price: string;
-  image: string;
+  image: {
+    url: string;
+    alt_text?: string;
+  } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   inStock: boolean;
   url: string;
   variant_id?: string;
+  variants?: Array<{
+    id: string;
+    title: string;
+    price: string;
+    available: boolean;
+  }>;
 }
 
 interface ProductCardProps {
@@ -35,74 +50,83 @@ export function ProductCard({
   position,
   onShopNow,
 }: ProductCardProps) {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get available images (fallback to main image if no images array)
+  const availableImages =
+    product.images && product.images.length > 0
+      ? product.images
+      : product.image
+        ? [product.image]
+        : [];
+
+  const currentImage = availableImages[currentImageIndex];
+
+  // Clean auto-slide functionality
+  useEffect(() => {
+    if (availableImages.length <= 1) return;
+
+    const startAutoSlide = () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => {
+        setCurrentImageIndex((prev) =>
+          prev < availableImages.length - 1 ? prev + 1 : 0,
+        );
+      }, 3000); // Smooth 3-second intervals
+    };
+
+    const stopAutoSlide = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
+    startAutoSlide();
+    return () => stopAutoSlide();
+  }, [availableImages.length]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
   return (
     <Card padding>
-      <Grid
-        columns={["fill"]}
-        rows={Style.default(["auto", "2fr", "1fr"]) // extraSmall: smaller image and content
-          .when({ viewportInlineSize: { min: "small" } }, [
-            "auto",
-            "2fr",
-            "1fr",
-          ])
-          .when({ viewportInlineSize: { min: "medium" } }, [
-            "auto",
-            "2.5fr",
-            "1fr",
-          ])
-          .when({ viewportInlineSize: { min: "large" } }, [
-            "auto",
-            "2fr",
-            "1fr",
-          ])}
-        spacing="base"
-      >
+      <Grid columns={["fill"]} rows={["auto", "2fr", "auto"]} spacing="tight">
         <View>
-          {/* Ultra Mobile: Very compact */}
-          <View
-            display={Style.default("auto").when(
-              { viewportInlineSize: { min: "extraSmall" } },
-              "none",
-            )}
-          >
-            <Image source={product.image} fit="cover" aspectRatio={2} />
-          </View>
-
-          {/* Mobile: Compact aspect ratio */}
-          <View
-            display={Style.default("none")
-              .when({ viewportInlineSize: { min: "extraSmall" } }, "auto")
-              .when({ viewportInlineSize: { min: "small" } }, "none")}
-          >
-            <Image source={product.image} fit="cover" aspectRatio={2} />
-          </View>
-
-          {/* Tablet: Slightly wider */}
-          <View
-            display={Style.default("none")
-              .when({ viewportInlineSize: { min: "small" } }, "auto")
-              .when({ viewportInlineSize: { min: "medium" } }, "none")}
-          >
-            <Image source={product.image} fit="cover" aspectRatio={1.1} />
-          </View>
-
-          {/* Desktop: Moderate aspect ratio */}
-          <View
-            display={Style.default("none").when(
-              { viewportInlineSize: { min: "medium" } },
-              "auto",
-            )}
-          >
-            <Image source={product.image} fit="cover" aspectRatio={1.2} />
-          </View>
+          {/* Larger Auto-Sliding Image */}
+          {availableImages.length > 0 && (
+            <View>
+              <Image
+                source={currentImage?.url || ""}
+                fit="cover"
+                aspectRatio={1.5}
+              />
+            </View>
+          )}
         </View>
         <BlockStack spacing="tight">
-          <TextBlock size="medium" emphasis="bold">
+          <TextBlock size="small" emphasis="bold">
             {product.title}
           </TextBlock>
-          <TextBlock size="large" emphasis="bold">
+          <TextBlock size="medium" emphasis="bold">
             {product.price}
           </TextBlock>
+
+          {/* Variant Information - Compact */}
+          {product.variants && product.variants.length > 0 && (
+            <TextBlock size="small" appearance="subdued">
+              {product.variants.length} variant
+              {product.variants.length > 1 ? "s" : ""} available
+            </TextBlock>
+          )}
+
           <TextBlock size="small" appearance="success">
             ✓ In Stock
           </TextBlock>

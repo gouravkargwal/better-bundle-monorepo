@@ -5,6 +5,7 @@ Adapter for product_removed_from_cart events
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from .base_adapter import BaseInteractionEventAdapter
 
 
@@ -55,7 +56,7 @@ class CartRemoveAdapter(BaseInteractionEventAdapter):
                 if isinstance(timestamp, str):
                     from datetime import datetime
 
-                    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    return parse_iso_timestamp(timestamp)
                 return timestamp
             return None
         except Exception:

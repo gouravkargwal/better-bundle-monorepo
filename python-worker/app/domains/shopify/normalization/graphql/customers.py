@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.shared.helpers import now_utc
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalCustomer
 
@@ -34,7 +35,7 @@ class GraphQLCustomerAdapter(BaseAdapter):
         entity_id = _extract_numeric_gid(payload.get("id")) or ""
 
         created_at = (
-            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+            _parse_iso(payload.get("created_at")) or now_utc()
         )  # Updated to snake_case
         updated_at = (
             _parse_iso(payload.get("updated_at")) or created_at
@@ -68,7 +69,9 @@ class GraphQLCustomerAdapter(BaseAdapter):
             state=(payload.get("default_address") or {}).get(
                 "province"
             ),  # Updated to snake_case
-            default_address=payload.get("default_address"),  # Updated to snake_case
+            default_address=self._convert_address_ids(
+                payload.get("default_address")
+            ),  # Updated to snake_case
             # Add required internal timestamps
             created_at=created_at,
             updated_at=updated_at,
@@ -77,3 +80,19 @@ class GraphQLCustomerAdapter(BaseAdapter):
         )
 
         return model.dict()
+
+    def _convert_address_ids(
+        self, address: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Convert GraphQL IDs in address to numeric IDs"""
+        if not address:
+            return address
+
+        # Create a copy to avoid modifying the original
+        converted_address = address.copy()
+
+        # Convert the main address ID
+        if "id" in converted_address:
+            converted_address["id"] = _extract_numeric_gid(converted_address["id"])
+
+        return converted_address

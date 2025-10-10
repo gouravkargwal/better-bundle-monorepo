@@ -10,8 +10,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
 
+from app.shared.helpers import now_utc
+from app.core.database.models import SubscriptionStatus
+
 from ..models.attribution_models import AttributionMetrics
-from ..repositories.billing_repository import BillingRepository, BillingPeriod
+from ..repositories.billing_repository_v2 import BillingRepositoryV2, BillingPeriod
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +24,7 @@ class BillingCalculator:
     Calculates billing fees based on performance metrics.
     """
 
-    def __init__(self, billing_repository: BillingRepository):
+    def __init__(self, billing_repository: BillingRepositoryV2):
         self.billing_repository = billing_repository
 
         # Default billing configuration
@@ -76,20 +79,26 @@ class BillingCalculator:
             store_currency = shop.currencyCode if shop and shop.currencyCode else "USD"
             logger.info(f"Using currency {store_currency} for shop {shop_id}")
 
-            # Get billing plan for shop
-            billing_plan = await self.billing_repository.get_billing_plan(shop_id)
-            if not billing_plan:
-                logger.warning(f"No billing plan found for shop {shop_id}")
+            # Get shop subscription for shop
+            shop_subscription = await self.billing_repository.get_shop_subscription(
+                shop_id
+            )
+            if not shop_subscription:
+                logger.warning(f"No shop subscription found for shop {shop_id}")
                 return self._create_empty_billing_result(
                     shop_id, period, store_currency
                 )
 
             # Check if shop is in trial period
-            trial_status = await self._check_trial_status(billing_plan, metrics_data)
+            trial_status = await self._check_trial_status(
+                shop_subscription, metrics_data
+            )
 
             # Handle trial completion if threshold reached
             if trial_status.get("trial_just_completed", False):
-                await self._handle_trial_completion(shop_id, billing_plan, trial_status)
+                await self._handle_trial_completion(
+                    shop_id, shop_subscription, trial_status
+                )
 
             if trial_status["is_trial_active"]:
                 logger.info(
@@ -99,8 +108,13 @@ class BillingCalculator:
                     shop_id, period, trial_status, store_currency
                 )
 
-            # Get plan configuration
-            plan_config = billing_plan.configuration or self.default_config
+            # Get plan configuration from pricing tier
+            pricing_tier = shop_subscription.pricing_tier
+            plan_config = (
+                pricing_tier.tier_metadata
+                if pricing_tier and pricing_tier.tier_metadata
+                else self.default_config
+            )
 
             # Calculate base fee
             base_fee = self._calculate_base_fee(metrics_data, plan_config)
@@ -121,7 +135,7 @@ class BillingCalculator:
             # Create billing result
             billing_result = {
                 "shop_id": shop_id,
-                "plan_id": billing_plan.id,
+                "subscription_id": shop_subscription.id,
                 "currency": store_currency,
                 "period": {
                     "start_date": period.start_date,
@@ -137,7 +151,7 @@ class BillingCalculator:
                     "currency": store_currency,
                 },
                 "breakdown": self._create_fee_breakdown(metrics_data, plan_config),
-                "calculated_at": datetime.utcnow().isoformat(),
+                "calculated_at": now_utc().isoformat(),
             }
 
             logger.info(f"Calculated billing fee for shop {shop_id}: ${final_fee}")
@@ -341,7 +355,7 @@ class BillingCalculator:
                 "currency": "USD",
             },
             "breakdown": {},
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
             "error": "No billing plan found",
         }
 
@@ -366,7 +380,7 @@ class BillingCalculator:
                 "currency": "USD",
             },
             "breakdown": {},
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
             "error": error_message,
         }
 
@@ -388,10 +402,12 @@ class BillingCalculator:
                 f"Calculating billing summary for shop {shop_id} for last {months} months"
             )
 
-            # Get billing plan
-            billing_plan = await self.billing_repository.get_billing_plan(shop_id)
-            if not billing_plan:
-                return {"error": "No billing plan found"}
+            # Get shop subscription
+            shop_subscription = await self.billing_repository.get_shop_subscription(
+                shop_id
+            )
+            if not shop_subscription:
+                return {"error": "No shop subscription found"}
 
             # Get billing periods
             periods = await self.billing_repository.get_billing_periods_for_shop(
@@ -451,7 +467,7 @@ class BillingCalculator:
 
             return {
                 "shop_id": shop_id,
-                "plan_id": billing_plan.id,
+                "subscription_id": shop_subscription.id,
                 "summary": {
                     "total_revenue": float(total_revenue),
                     "total_fees": float(total_fees),
@@ -461,7 +477,7 @@ class BillingCalculator:
                     "months_analyzed": len(monthly_summaries),
                 },
                 "monthly_breakdown": monthly_summaries,
-                "calculated_at": datetime.utcnow().isoformat(),
+                "calculated_at": now_utc().isoformat(),
             }
 
         except Exception as e:
@@ -471,13 +487,13 @@ class BillingCalculator:
     # ============= TRIAL LOGIC =============
 
     async def _check_trial_status(
-        self, billing_plan, metrics_data: Dict[str, Any]
+        self, shop_subscription, metrics_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Check if shop is still in trial period based on revenue threshold.
 
         Args:
-            billing_plan: Shop's billing plan
+            shop_subscription: Shop's subscription
             metrics_data: Current period metrics
 
         Returns:
@@ -487,12 +503,24 @@ class BillingCalculator:
             # Get current attributed revenue for this period
             current_revenue = Decimal(str(metrics_data.get("attributed_revenue", 0)))
 
-            # Get trial threshold (default $200)
-            trial_threshold = Decimal(str(billing_plan.trialThreshold or 200.00))
+            # Get trial information
+            trial = await self.billing_repository.get_subscription_trial(
+                shop_subscription.id
+            )
+            if not trial:
+                return {
+                    "is_trial_active": False,
+                    "current_revenue": 0,
+                    "threshold": 0,
+                    "remaining_revenue": 0,
+                    "trial_progress": 0,
+                }
+
+            trial_threshold = trial.threshold_amount
 
             # Check if trial is still active
             is_trial_active = (
-                billing_plan.isTrialActive and current_revenue < trial_threshold
+                trial.status.value == "active" and current_revenue < trial_threshold
             )
 
             # Calculate remaining revenue needed
@@ -500,7 +528,7 @@ class BillingCalculator:
 
             # Check if trial just completed (revenue threshold reached)
             trial_just_completed = (
-                billing_plan.isTrialActive and current_revenue >= trial_threshold
+                trial.status.value == "active" and current_revenue >= trial_threshold
             )
 
             return {
@@ -521,20 +549,20 @@ class BillingCalculator:
             return {
                 "is_trial_active": False,
                 "current_revenue": 0,
-                "threshold": 200,
-                "remaining_revenue": 200,
+                "threshold": 0,
+                "remaining_revenue": 0,
                 "trial_progress": 0,
             }
 
     async def _handle_trial_completion(
-        self, shop_id: str, billing_plan, trial_status: Dict[str, Any]
+        self, shop_id: str, shop_subscription, trial_status: Dict[str, Any]
     ) -> None:
         """
-        Handle trial completion by updating billing plan status.
+        Handle trial completion by updating subscription status and creating trial completion invoice.
 
         Args:
             shop_id: Shop ID
-            billing_plan: Current billing plan
+            shop_subscription: Current shop subscription
             trial_status: Trial status information
         """
         try:
@@ -543,13 +571,12 @@ class BillingCalculator:
                     f"🎉 Trial completed for shop {shop_id}! Revenue: ${trial_status['current_revenue']}"
                 )
 
-                # Update billing plan to end trial
-                await self.prisma.billingplan.update(
-                    where={"id": billing_plan.id},
-                    data={
-                        "isTrialActive": False,
-                        "trialRevenue": trial_status["current_revenue"],
-                    },
+                # ✅ Trial completion is now handled automatically in commission service
+                # No need to update trial revenue separately - it's calculated dynamically
+
+                # Update shop subscription status to active
+                await self.billing_repository.update_shop_subscription_status(
+                    shop_subscription.id, SubscriptionStatus.ACTIVE
                 )
 
                 logger.info(
@@ -601,5 +628,5 @@ class BillingCalculator:
                 "remaining_revenue": trial_status["remaining_revenue"],
                 "trial_progress": trial_status["trial_progress"],
             },
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": now_utc().isoformat(),
         }

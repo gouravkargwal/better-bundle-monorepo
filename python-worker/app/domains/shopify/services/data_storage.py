@@ -18,7 +18,7 @@ from app.core.database.models import (
 
 # Using string values directly for database insertion
 from sqlalchemy import select, update, insert
-from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 
 logger = get_logger(__name__)
 
@@ -124,7 +124,7 @@ class ShopifyDataStorageService:
         self, data_type: str, items: List[Any], shop_id: str, incremental: bool
     ) -> Dict[str, int]:
         """Generic method to process any type of items with essential batching"""
-        current_time = datetime.utcnow()
+        current_time = now_utc()
 
         # Store raw data with full GraphQL ID - no extraction here
         item_data_map = {}
@@ -335,13 +335,12 @@ class ShopifyDataStorageService:
             if isinstance(timestamp_str, str):
                 # Handle various Shopify timestamp formats
                 if timestamp_str.endswith("Z"):
-                    # ISO format with Z - convert to timezone-naive
-                    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                    return dt.replace(tzinfo=None)
+                    # ISO format with Z - keep timezone-aware
+                    return parse_iso_timestamp(timestamp_str)
                 elif "+" in timestamp_str or timestamp_str.endswith("T"):
-                    # ISO format with timezone - convert to timezone-naive
+                    # ISO format with timezone - keep timezone-aware
                     dt = datetime.fromisoformat(timestamp_str)
-                    return dt.replace(tzinfo=None)
+                    return dt
                 else:
                     # Try parsing as ISO format
                     return datetime.fromisoformat(timestamp_str)

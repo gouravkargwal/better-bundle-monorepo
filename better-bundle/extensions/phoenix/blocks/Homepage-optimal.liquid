@@ -1,0 +1,121 @@
+{% comment %}
+  Optimal Homepage Recommendations - Smart Visitor Detection
+  Backend intelligently chooses the best recommendation type based on visitor type:
+  - Returning visitors: Recently Viewed (continuity)
+  - New visitors: Best Sellers (social proof)
+  - Logged-in users: Personalized recommendations
+{% endcomment %}
+
+{% assign dummy_data = 'Premium T-Shirt,Designer Jeans,Leather Jacket,Cotton Hoodie,Denim Shorts,Summer Dress|24.99,89.99,149.99,45.99,35.99,65.99|e74c3c,34495e,8b4513,95a5a6,3498db,f39c12|Size: XS|Size: S|Size: M|Size: L|Size: XL,Color: Black|Color: White|Color: Navy,Size: 28|Size: 30|Size: 32|Size: 34,Color: Black|Color: Brown|Color: Tan,Size: S|Size: M|Size: L|Size: XL,Color: Gray|Color: Black|Color: White,Size: 4|Size: 6|Size: 8|Size: 10,Color: Blue|Color: Pink|Color: White|1,1,1,1,1,1'
+  | split: '|'
+%}
+
+{% render 'recommendation-base', context: 'homepage', dummy_data: dummy_data %}
+
+{% schema %}
+{
+  "name": "Homepage",
+  "target": "section",
+  "tag": "section",
+  "settings": [
+    { "type": "header", "content": "Section Heading" },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Recommended for You"
+    },
+    {
+      "type": "select",
+      "id": "heading_size",
+      "label": "Heading Size",
+      "options": [
+        { "value": "h1", "label": "H1" },
+        { "value": "h2", "label": "H2" },
+        { "value": "h3", "label": "H3" },
+        { "value": "h4", "label": "H4" }
+      ],
+      "default": "h2"
+    },
+    {
+      "type": "select",
+      "id": "heading_alignment",
+      "label": "Heading Alignment",
+      "options": [
+        { "value": "left", "label": "Left" },
+        { "value": "center", "label": "Center" },
+        { "value": "right", "label": "Right" }
+      ],
+      "default": "center"
+    },
+    { "type": "color", "id": "heading_color", "label": "Heading Color", "default": "#1e293b" },
+    { "type": "checkbox", "id": "show_heading", "label": "Show Heading", "default": true },
+
+    { "type": "header", "content": "Recommendations" },
+    {
+      "type": "range",
+      "id": "limit",
+      "label": "Number of Products",
+      "min": 4,
+      "max": 8,
+      "step": 1,
+      "default": 6,
+      "info": "4-6 for mobile, 6-8 for desktop"
+    },
+    {
+      "type": "select",
+      "id": "visitor_strategy",
+      "label": "Visitor Strategy",
+      "options": [
+        { "value": "auto", "label": "Auto (Smart Detection)" },
+        { "value": "new_visitor", "label": "New Visitor (Best Sellers)" },
+        { "value": "returning_visitor", "label": "Returning Visitor (Recently Viewed)" },
+        { "value": "personalized", "label": "Personalized (Logged-in Users)" }
+      ],
+      "default": "auto",
+      "info": "Auto will intelligently detect visitor type and show appropriate recommendations"
+    },
+
+    { "type": "header", "content": "Card Styles" },
+    {
+      "type": "range",
+      "id": "card_border_radius",
+      "label": "Card Border Radius",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "default": 8
+    },
+    { "type": "color", "id": "card_bg", "label": "Card Background", "default": "#ffffff" },
+    { "type": "color", "id": "title_color", "label": "Title Color", "default": "#1a202c" },
+    { "type": "color", "id": "price_color", "label": "Price Color", "default": "#2d3748" },
+    { "type": "color", "id": "button_bg", "label": "Button Background", "default": "#000000" },
+    { "type": "color", "id": "button_text", "label": "Button Text Color", "default": "#ffffff" },
+    {
+      "type": "range",
+      "id": "button_border_radius",
+      "label": "Button Border Radius",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "default": 6
+    },
+
+    { "type": "header", "content": "Controls" },
+    { "type": "checkbox", "id": "show_arrows", "label": "Show Arrows", "default": true },
+    { "type": "checkbox", "id": "show_pagination", "label": "Show Pagination", "default": true },
+    { "type": "color", "id": "pagination_color", "label": "Pagination Color", "default": "#000000" },
+    { "type": "checkbox", "id": "enable_autoplay", "label": "Enable Autoplay", "default": true },
+    {
+      "type": "range",
+      "id": "autoplay_delay",
+      "label": "Autoplay Delay (seconds)",
+      "min": 1,
+      "max": 10,
+      "step": 0.5,
+      "default": 3,
+      "unit": "s"
+    }
+  ]
+}
+{% endschema %}

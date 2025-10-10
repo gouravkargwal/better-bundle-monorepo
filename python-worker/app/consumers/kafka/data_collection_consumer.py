@@ -1,5 +1,7 @@
 from datetime import datetime
 from typing import Dict, Any
+
+from app.shared.helpers import now_utc
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
 from app.core.logging import get_logger
@@ -85,7 +87,7 @@ class DataCollectionKafkaConsumer:
                     original_message=payload,
                     reason="shop_suspended",
                     original_topic="data-collection-jobs",
-                    error_details=f"Shop suspended at {datetime.utcnow().isoformat()}",
+                    error_details=f"Shop suspended at {now_utc().isoformat()}",
                 )
                 await self.consumer.commit(message)
                 return

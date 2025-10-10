@@ -6,6 +6,8 @@ Handles customer linking and backfilling operations
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from app.shared.helpers import now_utc
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -90,7 +92,7 @@ async def backfill_customer_links(
             batch_size = request.batch_size
             force = request.force
 
-        start_time = datetime.now()
+        start_time = now_utc()
 
         # Check if shop exists
         db = await get_database()
@@ -103,7 +105,7 @@ async def backfill_customer_links(
 
         # Filter results for this specific shop if needed
         # (The scheduler currently processes all shops, but we can filter here)
-        duration = (datetime.now() - start_time).total_seconds()
+        duration = (now_utc() - start_time).total_seconds()
 
         if result["status"] == "success":
             message = f"Successfully backfilled customer links for shop {shop_id}"
@@ -324,9 +326,9 @@ async def customer_linking_health_check() -> Dict[str, Any]:
             "total_links": total_links,
             "total_shops": total_shops,
             "scheduler_available": True,
-            "checked_at": datetime.now(),
+            "checked_at": now_utc(),
         }
 
     except Exception as e:
         logger.error(f"Customer linking health check failed: {str(e)}")
-        return {"status": "unhealthy", "error": str(e), "checked_at": datetime.now()}
+        return {"status": "unhealthy", "error": str(e), "checked_at": now_utc()}

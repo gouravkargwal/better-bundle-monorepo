@@ -38,6 +38,7 @@ def map_to_gorse_feedback_type(interaction_type: str) -> str:
         # Our interaction types -> Gorse feedback types
         "recommendation_viewed": GorseFeedbackType.VIEW,
         "recommendation_clicked": GorseFeedbackType.CLICK,
+        "recommendation_declined": "recommendation_declined",  # Use Gorse-configured decline type
         "product_viewed": GorseFeedbackType.VIEW,
         "product_clicked": GorseFeedbackType.CLICK,
         "add_to_cart": GorseFeedbackType.CART_ADD,

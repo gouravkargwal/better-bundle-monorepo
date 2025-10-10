@@ -16,12 +16,11 @@ async def create_all_tables():
     try:
         engine = await get_engine()
 
-        # Use connect() instead of begin() to avoid transaction rollback issues
-        async with engine.connect() as conn:
+        # Use begin() for proper transaction management
+        async with engine.begin() as conn:
             # Create all tables defined in the models
             # This is safe to run multiple times - it won't recreate existing tables
             await conn.run_sync(Base.metadata.create_all)
-            await conn.commit()
 
         return True
 

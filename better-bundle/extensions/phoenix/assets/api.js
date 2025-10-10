@@ -1,18 +1,14 @@
-
 class RecommendationAPI {
   constructor() {
     this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
-    this.shopifyBaseUrl = window.location.origin; // For Shopify API calls
+    this.shopifyBaseUrl = window.location.origin;
   }
-
-
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
-      const context = 'cart';
+      const context = window.context || 'cart';
       const shopDomain = window.shopDomain || '';
 
-      // Validate required fields
       if (!shopDomain) {
         console.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');
@@ -25,10 +21,36 @@ class RecommendationAPI {
         limit: limit
       };
 
+      // Add context-specific fields
+      if (context === 'product_page' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_similar' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_frequently_bought' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'product_page_customers_viewed' && window.productId) {
+        requestBody.product_id = String(window.productId);
+      }
+      if (context === 'collection_page' && window.collectionId) {
+        requestBody.collection_id = String(window.collectionId);
+      }
+
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings
       if (customerId) requestBody.user_id = String(customerId); // Convert to string as backend expects string
-      if (window.sessionId) requestBody.session_id = String(window.sessionId); // Add session ID for session-based recommendations
+
+      // Get session_id from sessionStorage (unified across all extensions)
+      const unifiedSessionId = sessionStorage.getItem('unified_session_id');
+      if (unifiedSessionId) {
+        requestBody.session_id = unifiedSessionId;
+        console.log('🔗 Phoenix: Using unified session_id:', unifiedSessionId);
+      } else if (window.sessionId) {
+        requestBody.session_id = String(window.sessionId); // Fallback to window.sessionId
+        console.log('🔗 Phoenix: Using window.sessionId:', window.sessionId);
+      }
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
       console.log('🌐 Fetching recommendations from unified API:', apiUrl);
@@ -101,7 +123,6 @@ class RecommendationAPI {
         ]
       };
 
-      console.log('Cart API payload:', cartPayload);
 
       const response = await fetch('/cart/add.js', {
         method: 'POST',

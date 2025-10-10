@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
+from app.shared.helpers import now_utc
 from ..base_adapter import BaseAdapter
 from ..canonical_models import CanonicalLineItem, CanonicalOrder
 
@@ -102,8 +103,8 @@ class GraphQLOrderAdapter(BaseAdapter):
                 if not currency_code:
                     currency_code = shop_money.get("currency_code")
 
-            # Map customAttributes (array of {key, value}) into a dict for properties
-            custom_attrs = node.get("customAttributes") or []
+            # Map custom_attributes (array of {key, value}) into a dict for properties
+            custom_attrs = node.get("custom_attributes") or []
             props_dict: Dict[str, Any] = {}
             try:
                 for attr in custom_attrs:
@@ -155,7 +156,7 @@ class GraphQLOrderAdapter(BaseAdapter):
 
         # Compute canonical timestamps - now using snake_case field names
         created_at = (
-            _parse_iso(payload.get("created_at")) or datetime.utcnow()
+            _parse_iso(payload.get("created_at")) or now_utc()
         )  # Updated to snake_case
         updated_at = (
             _parse_iso(payload.get("updated_at"))  # Updated to snake_case
@@ -190,8 +191,6 @@ class GraphQLOrderAdapter(BaseAdapter):
             test=payload.get("test", False),
             order_name=payload.get("name"),
             note=payload.get("note"),
-            customer_email=(payload.get("customer") or {}).get("email"),
-            customer_phone=(payload.get("customer") or {}).get("phone"),
             customer_display_name=f"{(payload.get('customer') or {}).get('firstName', '')} {(payload.get('customer') or {}).get('lastName', '')}".strip(),
             financial_status=payload.get("financial_status") or None,
             fulfillment_status=payload.get("fulfillment_status") or None,
@@ -200,8 +199,12 @@ class GraphQLOrderAdapter(BaseAdapter):
             note_attributes=payload.get("customAttributes")
             or [],  # GraphQL uses customAttributes for note_attributes
             line_items=line_items,
-            billing_address=payload.get("billing_address"),  # Updated to snake_case
-            shipping_address=payload.get("shipping_address"),  # Updated to snake_case
+            billing_address=self._convert_address_ids(
+                payload.get("billing_address")
+            ),  # Updated to snake_case
+            shipping_address=self._convert_address_ids(
+                payload.get("shipping_address")
+            ),  # Updated to snake_case
             discount_applications=(
                 payload.get("discount_applications", {}) or {}
             ).get(  # Updated to snake_case
@@ -216,6 +219,22 @@ class GraphQLOrderAdapter(BaseAdapter):
         result = model.dict()
         return result
 
+    def _convert_address_ids(
+        self, address: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Convert GraphQL IDs in address to numeric IDs"""
+        if not address:
+            return address
+
+        # Create a copy to avoid modifying the original
+        converted_address = address.copy()
+
+        # Convert the main address ID
+        if "id" in converted_address:
+            converted_address["id"] = _extract_numeric_gid(converted_address["id"])
+
+        return converted_address
+
     def _extract_refunds(
         self, payload: Dict[str, Any], shop_id: str
     ) -> List[Dict[str, Any]]:
@@ -223,36 +242,86 @@ class GraphQLOrderAdapter(BaseAdapter):
         refunds = []
         raw_refunds = payload.get("refunds", [])
 
+        # Handle case where refunds might be a dict (connection format) or list
+        if isinstance(raw_refunds, dict):
+            # Handle connection format with edges
+            if "edges" in raw_refunds:
+                raw_refunds = [
+                    edge.get("node", {}) for edge in raw_refunds.get("edges", [])
+                ]
+            else:
+                # If it's a dict but not edges format, it might be a single refund object
+                # Convert to list format
+                self.logger.info(
+                    f"Refunds data is a single dict, converting to list: {raw_refunds}"
+                )
+                raw_refunds = [raw_refunds]
+        elif not isinstance(raw_refunds, list):
+            self.logger.warning(
+                f"Refunds data is not a list or dict: {type(raw_refunds)}"
+            )
+            return refunds
+
         for refund in raw_refunds:
             try:
-                # Calculate total refund amount from transactions
-                total_refund_amount = 0.0
-                currency_code = "USD"
+                # Skip if refund is not a dictionary (might be just an ID string)
+                if not isinstance(refund, dict):
+                    self.logger.warning(
+                        f"Skipping non-dict refund: {type(refund)} - {refund}"
+                    )
+                    continue
 
-                transactions = refund.get("transactions", [])
-                if transactions:
-                    for transaction in transactions:
-                        if transaction.get("kind") == "refund":
-                            amount = float(transaction.get("amount", 0))
-                            total_refund_amount += amount
-                            currency_code = transaction.get("currency", "USD")
+                # Get currency from order level first, then from refund's total_refunded
+                currency_code = payload.get("currency_code")
+
+                # Try to get currency from refund's total_refunded field
+                total_refunded = refund.get("total_refunded", {})
+                if total_refunded and isinstance(total_refunded, dict):
+                    currency_code = total_refunded.get("currency_code", currency_code)
+                    total_refund_amount = float(total_refunded.get("amount", 0))
+                else:
+                    # Fallback: Calculate total refund amount from transactions
+                    total_refund_amount = 0.0
+                    transactions = refund.get("transactions", [])
+                    if isinstance(transactions, list):
+                        for transaction in transactions:
+                            if transaction.get("kind") == "refund":
+                                amount = float(transaction.get("amount", 0))
+                                total_refund_amount += amount
+                                # Don't override currency from transaction, use order currency
 
                 # Process refund line items
                 refund_line_items = []
                 raw_line_items = refund.get("refund_line_items", [])
 
+                # Handle line items - they are in edges format from our working test
+                if isinstance(raw_line_items, dict) and "edges" in raw_line_items:
+                    # Handle GraphQL edges format
+                    raw_line_items = [
+                        edge.get("node", {}) for edge in raw_line_items.get("edges", [])
+                    ]
+                elif isinstance(raw_line_items, list):
+                    # Already in list format
+                    pass
+                else:
+                    raw_line_items = []
+
                 for rli in raw_line_items:
                     line_item = rli.get("line_item", {})
 
                     refund_line_item = {
-                        "refund_id": str(refund.get("id", "")),
-                        "order_id": str(payload.get("id", "")),
-                        "product_id": str(line_item.get("product_id", "")),
-                        "variant_id": str(line_item.get("variant_id", "")),
+                        "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
+                        "order_id": _extract_numeric_gid(str(payload.get("id", ""))),
+                        "product_id": _extract_numeric_gid(
+                            str(line_item.get("product", {}).get("id", ""))
+                        ),
+                        "variant_id": _extract_numeric_gid(
+                            str(line_item.get("variant", {}).get("id", ""))
+                        ),
                         "quantity": int(rli.get("quantity", 0)),
                         "unit_price": float(rli.get("subtotal", 0)),
                         "refund_amount": float(rli.get("subtotal", 0)),
-                        "properties": line_item.get("properties", []),
+                        "properties": line_item.get("customAttributes", []),
                     }
                     refund_line_items.append(refund_line_item)
 
@@ -260,15 +329,15 @@ class GraphQLOrderAdapter(BaseAdapter):
                 refund_data = {
                     "shop_id": shop_id,
                     "order_id": str(payload.get("id", "")),
-                    "refund_id": str(refund.get("id", "")),
-                    "refunded_at": self._parse_iso(refund.get("created_at")),
+                    "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
+                    "refunded_at": _parse_iso(refund.get("created_at")),
                     "note": refund.get("note", ""),
-                    "restock": refund.get("restock", False),
+                    "restock": False,  # restock field not available in GraphQL API
                     "total_refund_amount": total_refund_amount,
                     "currency_code": currency_code,
                     "refund_line_items": refund_line_items,
-                    "created_at": self._parse_iso(refund.get("created_at")),
-                    "updated_at": self._parse_iso(refund.get("processed_at")),
+                    "created_at": _parse_iso(refund.get("created_at")),
+                    "updated_at": _parse_iso(refund.get("processed_at")),
                     "extras": refund,
                 }
 

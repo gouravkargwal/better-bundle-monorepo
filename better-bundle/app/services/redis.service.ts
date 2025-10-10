@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from "redis";
+import { createClient, type RedisClientType } from "redis";
 
 // Redis client singleton
 let redisClient: RedisClientType | null = null;
@@ -6,7 +6,6 @@ let redisClient: RedisClientType | null = null;
 export async function getRedisClient(): Promise<RedisClientType> {
   if (!redisClient) {
     const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
-    console.log(`🔌 Creating Redis client with URL: ${redisUrl}`);
 
     redisClient = createClient({
       url: redisUrl,
@@ -133,6 +132,7 @@ export class CacheService {
     await Promise.all([
       this.delPattern(`dashboard:${shopId}:*`),
       this.delPattern(`overview:${shopId}:*`),
+      this.delPattern(`performance:${shopId}:*`),
       this.delPattern(`context:${shopId}:*`),
       this.delPattern(`products:${shopId}:*`),
       this.delPattern(`activity:${shopId}:*`),
@@ -166,6 +166,8 @@ export const CacheKeys = {
   ) => `dashboard:${shopId}:${period}:${startDate}:${endDate}`,
   overview: (shopId: string, startDate: string, endDate: string) =>
     `overview:${shopId}:${startDate}:${endDate}`,
+  performance: (shopId: string, startDate: string, endDate: string) =>
+    `performance:${shopId}:${startDate}:${endDate}`,
   context: (shopId: string, startDate: string, endDate: string) =>
     `context:${shopId}:${startDate}:${endDate}`,
   products: (
@@ -176,8 +178,6 @@ export const CacheKeys = {
   ) => `products:${shopId}:${startDate}:${endDate}:${limit}`,
   activity: (shopId: string, startDate: string, endDate: string) =>
     `activity:${shopId}:${startDate}:${endDate}`,
-  refundAttribution: (shopId: string, startDate: string, endDate: string) =>
-    `refundAttribution:${shopId}:${startDate}:${endDate}`,
 };
 
 // Cache TTL constants (in seconds)
@@ -185,6 +185,7 @@ export const CacheTTL = {
   SHOP: 3600, // 1 hour
   DASHBOARD: 300, // 5 minutes
   OVERVIEW: 300, // 5 minutes
+  PERFORMANCE: 300, // 5 minutes
   CONTEXT: 300, // 5 minutes
   PRODUCTS: 600, // 10 minutes
   ACTIVITY: 120, // 2 minutes

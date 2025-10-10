@@ -4,7 +4,7 @@ Collection data model for SQLAlchemy
 Represents collection information from Shopify.
 """
 
-from sqlalchemy import Column, String, Boolean, Text, Integer, DateTime
+from sqlalchemy import Column, String, Boolean, Text, Integer
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin

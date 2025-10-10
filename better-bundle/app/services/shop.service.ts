@@ -1,6 +1,5 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
-import { getTrialThresholdInShopCurrency } from "../utils/currency-converter";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -43,7 +42,6 @@ const getShop = async (shopDomain: string) => {
 
 const getShopOnboardingCompleted = async (shopDomain: string) => {
   try {
-    console.log("🔍 Checking shop onboarding status for:", shopDomain);
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
     });
@@ -109,101 +107,13 @@ const createShopAndSetOnboardingCompleted = async (
     },
   });
 
-  // Create billing event for reactivation if it's a reinstall
-  if (isReinstall) {
-    await db.billing_events.create({
-      data: {
-        shop_id: shop.id,
-        type: "billing_reactivated",
-        data: {
-          reason: "app_reinstalled",
-          reactivated_at: new Date().toISOString(),
-          shop_domain: shopData.myshopifyDomain,
-          preserved_onboarding: existingShop.onboarding_completed,
-        },
-        metadata: {
-          processed_at: new Date().toISOString(),
-          is_reinstall: true,
-        },
-        occurred_at: new Date(),
-      },
-    });
-  }
-
   return shop;
 };
 
-const getBillingPlan = async (shopDomain: string) => {
-  const billingPlan = await prisma.billing_plans.findFirst({
-    where: { shop_domain: shopDomain, status: "active" },
+const getShopSubscription = async (shopDomain: string) => {
+  const billingPlan = await prisma.shop_subscriptions.findFirst({
+    where: { shop_domain: shopDomain, status: "ACTIVE" },
   });
-  return billingPlan;
-};
-
-const activateTrialBillingPlan = async (
-  shopDomain: string,
-  shopRecord: any,
-  tx?: any,
-) => {
-  const db = tx || prisma;
-
-  // Fixed $200 USD trial threshold (industry standard)
-  const TRIAL_THRESHOLD_USD = 200.0;
-
-  // Convert to shop currency for display and storage
-  const trialThresholdInShopCurrency = await getTrialThresholdInShopCurrency(
-    shopRecord.currency_code,
-  );
-
-  const billingPlan = await db.billing_plans.upsert({
-    where: { shop_id: shopRecord.id },
-    update: {
-      status: "active",
-      configuration: {
-        usage_based: true,
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        subscription_pending: true,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-      },
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-    },
-    create: {
-      shop_id: shopRecord.id,
-      shop_domain: shopDomain,
-      name: "Trial Plan",
-      type: "usage_based",
-      status: "active",
-      configuration: {
-        usage_based: true,
-        trial_active: true,
-        trial_threshold: trialThresholdInShopCurrency,
-        trial_revenue: 0.0,
-        revenue_share_rate: 0.03,
-        currency: shopRecord.currency_code,
-        subscription_pending: true,
-        trial_threshold_usd: TRIAL_THRESHOLD_USD,
-      },
-      effective_from: new Date(),
-      is_trial_active: true,
-      trial_threshold: trialThresholdInShopCurrency,
-      trial_revenue: 0.0,
-    },
-  });
-
-  console.log(`✅ Trial billing plan activated for ${shopDomain}:`);
-  console.log(`   - Trial threshold: $${TRIAL_THRESHOLD_USD} USD`);
-  console.log(
-    `   - Trial threshold in shop currency: ${trialThresholdInShopCurrency} ${shopRecord.currency_code}`,
-  );
-  console.log(`   - Shop currency: ${shopRecord.currency_code}`);
-  console.log(`   - Revenue share rate: 3%`);
-
   return billingPlan;
 };
 
@@ -304,7 +214,7 @@ const deactivateShopBilling = async (
     console.log(`🔄 Deactivating billing for shop: ${shopDomain}`);
 
     // 1. Mark shop as inactive
-    await prisma.shops.updateMany({
+    const updatedShops = await prisma.shops.update({
       where: { shop_domain: shopDomain },
       data: {
         is_active: false,
@@ -313,50 +223,29 @@ const deactivateShopBilling = async (
     });
 
     // 2. Deactivate all billing plans for this shop
-    const updatedPlans = await prisma.billing_plans.updateMany({
-      where: { shop_domain: shopDomain },
+    const updatedSubscriptions = await prisma.shop_subscriptions.updateMany({
+      where: { shop_id: updatedShops.id, status: "ACTIVE" },
       data: {
-        status: "inactive",
-        effective_until: new Date(),
+        status: "CANCELLED",
+        effective_to: new Date(),
         updated_at: new Date(),
       },
     });
 
     // 3. Create billing event to track the deactivation
-    const billingPlan = await prisma.billing_plans.findFirst({
-      where: { shop_domain: shopDomain },
+    await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: updatedShops.id, status: "ACTIVE" },
       select: { id: true, shop_id: true },
     });
 
-    if (billingPlan) {
-      await prisma.billing_events.create({
-        data: {
-          plan_id: billingPlan.id,
-          shop_id: billingPlan.shop_id,
-          type: "billing_suspended",
-          data: {
-            reason,
-            deactivated_at: new Date().toISOString(),
-            shop_domain: shopDomain,
-          },
-          billing_metadata: {
-            processed_at: new Date().toISOString(),
-            plans_affected_count: updatedPlans.count,
-          },
-          occurred_at: new Date(),
-          processed_at: new Date(),
-        },
-      });
-    }
-
     console.log(`✅ Successfully deactivated billing for ${shopDomain}:`);
     console.log(`   - Marked shop as inactive`);
-    console.log(`   - Deactivated ${updatedPlans.count} billing plans`);
+    console.log(`   - Deactivated ${updatedSubscriptions.count} billing plans`);
     console.log(`   - Created billing event`);
 
     return {
       success: true,
-      plans_deactivated_count: updatedPlans.count,
+      plans_deactivated_count: updatedSubscriptions.count,
       reason,
     };
   } catch (error) {
@@ -371,8 +260,7 @@ export {
   getShop,
   getShopOnboardingCompleted,
   createShopAndSetOnboardingCompleted,
-  getBillingPlan,
-  activateTrialBillingPlan,
+  getShopSubscription,
   activateAtlasWebPixel,
   getShopInfoFromShopify,
   markOnboardingCompleted,

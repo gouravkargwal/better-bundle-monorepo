@@ -2,12 +2,7 @@
 cache_store = "redis://localhost:6379/0"
 data_store = "postgresql://postgres:postgres@host.docker.internal:5433/betterbundle?sslmode=disable"
 
-# table_prefix = "gorse_"
-# cache_table_prefix = "gorse_cache_"
-
 [database.mysql]
-
-# Transaction isolation level. The default value is "READ-UNCOMMITTED".
 isolation_level = "READ-UNCOMMITTED"
 
 [master]
@@ -15,193 +10,125 @@ port = 8086
 host = "0.0.0.0"
 http_port = 8088
 http_host = "0.0.0.0"
-n_jobs = 8  # Adjust to CPU cores - 1
-meta_timeout = "60s"  # Increased for large datasets
+n_jobs = 8
+meta_timeout = "120s"
 
 [server]
-default_n = 20
-api_key = "secure_random_key_123"  # Set a secure API key
-cache_expire = "1h"  # Extended for stable product catalog
-auto_insert_user = true  # CRITICAL: Allow auto-insert for feedback to work
-auto_insert_item = true  # CRITICAL: Allow auto-insert for feedback to work
+default_n = 25
+api_key = "secure_random_key_123"
+cache_expire = "2h"
+auto_insert_user = true
+auto_insert_item = true
 
 [recommend]
-# Industry-standard caching for e-commerce
-cache_size = 50000  # Increased for larger product catalogs
-cache_expire = "2h"  # Longer cache for stable product catalogs
+cache_size = 100000
+cache_expire = "4h"
 active_user_ttl = 0
-
-# E-commerce specific recommendation settings
-enable_hot_recommend = true      # Enable trending/popular items
-enable_latest_recommend = true   # Enable newest items
-enable_user_based_recommend = true  # Enable collaborative filtering
-enable_item_based_recommend = true  # Enable item similarity
-enable_collaborative_recommend = true  # Enable matrix factorization 
+enable_hot_recommend = true
+enable_latest_recommend = true
+enable_user_based_recommend = true
+enable_item_based_recommend = true
+enable_collaborative_recommend = true
 
 [recommend.data_source]
-# ACTUAL feedback types being sent by our system
-# POSITIVE FEEDBACK (High intent/commitment signals)
 positive_feedback_types = [
-    "purchase",    # Highest value - actual conversion
-    "cart_add"     # Medium-high intent - user interested
+    "purchase",
+    "high_value_purchase",
+    "checkout_completed",
+    "ready_to_buy",
+    "strong_affinity",
+    "conversion_session",
+    "search_conversion"
 ]
 
-# READ FEEDBACK (Engagement/interest signals)  
 read_feedback_types = [
-    "view",         # Basic interest
-    "cart_view"     # Shopping intent - user viewing cart
+    "product_viewed",
+    "product_added_to_cart",
+    "checkout_started",
+    "progressing_interest",
+    "high_engagement_session",
+    "search_engagement",
+    "basic_interest"
 ]
 
-# NEGATIVE FEEDBACK (Negative signals)
 negative_feedback_types = [
-    "cart_remove"   # User removed item - negative signal
+    "refund",
+    "product_removed_from_cart",
+    "bounce",
+    "session_bounce",
+    "recommendation_declined",
+    "recommendation_declined_high_confidence",
+    "recommendation_declined_similar"
 ]
 
 positive_feedback_ttl = 0
 item_ttl = 0
 
-# Feedback weights for ACTUAL feedback types we send
-# Higher weights = stronger signals for recommendations
-[recommend.feedback_weights]
-# POSITIVE FEEDBACK WEIGHTS (Industry Standard)
-purchase = 10.0              # Highest weight - actual conversion
-cart_add = 5.0               # High - clear purchase intent
-
-# READ FEEDBACK WEIGHTS (Engagement signals)
-view = 1.0                   # Base weight - basic interest
-cart_view = 2.0              # Higher - shopping intent
-
-# NEGATIVE FEEDBACK WEIGHTS (Penalty signals)
-cart_remove = -2.0           # Negative weight - user rejected item
-
 [recommend.popular]
-popular_window = "168h"  # 7 days for trending
-
-# Remove the non-personalized sections - they have syntax errors
-# Use the API to get these instead
-
-[[recommend.item-to-item]]
-name = "similar_products"
-type = "users"
-column = ""
-
-[[recommend.item-to-item]]
-name = "category_similar"
-type = "tags"
-column = "item.Labels.category"
-
-# [[recommend.item-to-item]]
-# name = "embedding_similar"
-# type = "embedding"
-# column = "item.Labels.embedding"  # Not using embeddings currently
-
-[[recommend.user-to-user]]
-name = "similar_customers"
-type = "items"
-
-[[recommend.user-to-user]]
-name = "category_similar_users"
-type = "tags"
-column = "user.Labels.preferred_category"  # From CustomerBehaviorFeatures
+popular_window = "168h"
 
 [recommend.collaborative]
 enable_index = true
-index_recall = 0.8
-index_fit_epoch = 10
-model_fit_period = "30m"  # Industry standard: 30-60 minutes
-model_search_period = "2h"  # Industry standard: 2-6 hours
-model_search_epoch = 50
-model_search_trials = 20
+index_recall = 0.90
+index_fit_epoch = 200
+model_fit_period = "45m"
+model_search_period = "3h"
+model_search_epoch = 75
+model_search_trials = 30
 enable_model_size_search = true
 
 [recommend.ranking]
-model = "svd++"  # SVD++ for ranking without deep learning
-factors = 32  # Number of latent factors
-epochs = 20  # Training epochs
-learning_rate = 0.005  # Learning rate
-reg = 0.02  # Regularization to prevent overfitting
-enable_user_features = true  # Use GorseUsers.labels (e.g., engagementScore, topCategories)
-enable_item_features = true  # Use GorseItems.labels (e.g., popularityScore, trendingScore)
-fit_period = "30m"  # Industry standard: 30-60 minutes
-search_period = "2h"  # Industry standard: 2-6 hours
-search_trials = 20  # Number of hyperparameter trials
-search_epoch = 20  # Epochs for hyperparameter search
+model = "fm"
+factors = 64
+epochs = 40
+learning_rate = 0.003
+reg = 0.01
+alpha = 0.01
+enable_user_features = true
+enable_item_features = true
+fit_period = "45m"
+search_period = "3h"
+search_trials = 30
+search_epoch = 30
 
 [recommend.replacement]
 enable_replacement = true
-positive_replacement_decay = 0.85  # Slightly faster decay
-read_replacement_decay = 0.7
+positive_replacement_decay = 0.80
+read_replacement_decay = 0.65
 
 [recommend.offline]
-check_recommend_period = "15m"  # Industry standard: 15-30 minutes
-refresh_recommend_period = "6h"  # Industry standard: 6-24 hours
+check_recommend_period = "20m"
+refresh_recommend_period = "8h"
 enable_latest_recommend = true
 enable_popular_recommend = true
 enable_user_based_recommend = true
 enable_item_based_recommend = true
 enable_collaborative_recommend = true
 enable_click_through_prediction = true
-explore_recommend = { popular = 0.1, latest = 0.3 }  # Increased latest for new products
 
 [recommend.online]
-# Industry-standard fallback chain for e-commerce
-# Order matters: try most personalized first, fall back to general
 fallback_recommend = [
-    "collaborative",      # 1st: Personalized based on similar users
-    "item_based",         # 2nd: Similar products to what user likes
-    "popular",            # 3rd: Popular items in user's categories
-    "latest"              # 4th: Newest items as last resort
+    "collaborative",
+    "item_based",
+    "user_based",
+    "popular",
+    "latest"
 ]
-num_feedback_fallback_item_based = 10
-
-# E-commerce specific online recommendation settings
+num_feedback_fallback_item_based = 15
 enable_realtime_recommend = true
 enable_session_recommend = true
-session_recommend_cache_size = 1000
-session_recommend_cache_expire = "30m"
+session_recommend_cache_size = 2000
+session_recommend_cache_expire = "45m"
 
 [tracing]
 enable_tracing = false
-# exporter = "otlp"
-# collector_endpoint = "http://localhost:4317"  # Update to actual OTLP endpoint
-# sampler = "ratio"
-# ratio = 0.1  # Sample 10% of traces for performance
 
 [experimental]
 enable_deep_learning = false
-deep_learning_batch_size = 256
+deep_learning_batch_size = 512
 
 [oidc]
-
-# Enable OpenID Connect (OIDC) authentication. The default value is false.
 enable = false
-
-# The issuer of the OAuth provider.
-issuer = ""
-
-# Public identifier of the OAuth application.
-client_id = ""
-
-# Token access to the OAuth application.
-client_secret = ""
-
-# URL used by the OAuth provider to redirect users after they are successfully authenticated
-# (also referred to as the callback URL). You should set this to the concatenation of the 
-# Gorse dashboard URL and "/callback/oauth2". For example, if the Gorse dashboard URL is 
-# http://localhost:8088, the redirect URL should be: http://localhost:8088/callback/oauth2
-redirect_url = ""
-
-# [openai]
-# base_url = "https://api.production-endpoint.com/v1"  # Not using OpenAI currently
-# auth_token = "secure_ollama_token"
-# chat_completion_model = "qwen2.5"
-# chat_completion_rpm = 15000
-# chat_completion_tpm = 1200000
-# embedding_model = "mxbai-embed-large"
-# embedding_dimensions = 1024
-# embedding_rpm = 1800
-# embedding_tpm = 1200000
-# log_file = "openai.log"
 
 [opentelemetry]
 enabled = false

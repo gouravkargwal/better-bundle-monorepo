@@ -19,18 +19,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
   try {
-    // Get shop ID from database
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: session.shop },
     });
 
     let extensions: Record<string, any> = {};
     if (shop) {
-      // Get active extensions by checking recent user sessions that used extensions
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - 24);
 
-      // Get recent sessions that used extensions
       const recentSessions = await prisma.user_sessions.findMany({
         where: {
           shop_id: shop.id,

@@ -15,9 +15,18 @@ from .enums import (
     BillingPlanStatus,
     BillingCycle,
     InvoiceStatus,
-    BillingEventType,
     ExtensionType,
     AppBlockTarget,
+    # New enums for redesigned billing system
+    SubscriptionPlanType,
+    SubscriptionStatus,
+    BillingCycleStatus,
+    TrialStatus,
+    ShopifySubscriptionStatus,
+    AdjustmentReason,
+    BillingPhase,
+    CommissionStatus,
+    ChargeType,
 )
 
 # Core business models
@@ -36,10 +45,6 @@ from .raw_data import (
     RawCollection,
 )
 
-# Watermark models
-from .watermarks import (
-    PipelineWatermark,
-)
 
 # Feature models
 from .features import (
@@ -61,15 +66,24 @@ from .user_session import UserSession
 from .user_interaction import UserInteraction
 from .purchase_attribution import PurchaseAttribution
 
-# Refund models
-from .refund_attribution import RefundAttribution
 
-# Billing models
-from .billing import (
-    BillingPlan,
-    BillingInvoice,
-    BillingEvent,
-)
+# Billing models (legacy - removed)
+# Old billing models have been replaced with new subscription system
+
+# New redesigned billing models
+from .subscription_plan import SubscriptionPlan
+from .pricing_tier import PricingTier
+from .shop_subscription import ShopSubscription
+from .subscription_trial import SubscriptionTrial
+from .billing_cycle import BillingCycle
+from .billing_cycle_adjustment import BillingCycleAdjustment
+from .billing_invoice import BillingInvoice
+from .shopify_subscription import ShopifySubscription
+
+# Commission models
+from .commission import CommissionRecord
+
+# Trial configuration models
 
 # Extension models
 
@@ -84,9 +98,18 @@ __all__ = [
     "BillingPlanStatus",
     "BillingCycle",
     "InvoiceStatus",
-    "BillingEventType",
     "ExtensionType",
     "AppBlockTarget",
+    # New enums for redesigned billing system
+    "SubscriptionPlanType",
+    "SubscriptionStatus",
+    "BillingCycleStatus",
+    "TrialStatus",
+    "ShopifySubscriptionStatus",
+    "AdjustmentReason",
+    "BillingPhase",
+    "CommissionStatus",
+    "ChargeType",
     # Core models
     "Shop",
     "Session",
@@ -100,8 +123,6 @@ __all__ = [
     "RawProduct",
     "RawCustomer",
     "RawCollection",
-    # Watermark models
-    "PipelineWatermark",
     # Feature models
     "UserFeatures",
     "ProductFeatures",
@@ -117,11 +138,15 @@ __all__ = [
     "UserSession",
     "UserInteraction",
     "PurchaseAttribution",
-    # Refund models
-    "RefundAttribution",
-    # Billing models
-    "BillingPlan",
-    "BillingInvoice",
-    "BillingEvent",
+    # New redesigned billing models
+    "SubscriptionPlan",
+    "PricingTier",
+    "ShopSubscription",
+    "SubscriptionTrial",
+    "BillingCycle",
+    "BillingCycleAdjustment",
+    "ShopifySubscription",
+    "CommissionRecord",
+    # Trial configuration models
     # Extension models
 ]

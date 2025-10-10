@@ -56,20 +56,7 @@ class InvoiceStatus(str, Enum):
     OVERDUE = "overdue"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
-
-
-class BillingEventType(str, Enum):
-    """Billing event types"""
-
-    PLAN_CREATED = "plan_created"
-    PLAN_UPDATED = "plan_updated"
-    METRICS_CALCULATED = "metrics_calculated"
-    INVOICE_GENERATED = "invoice_generated"
-    PAYMENT_RECEIVED = "payment_received"
-    PAYMENT_FAILED = "payment_failed"
-    REFUND_PROCESSED = "refund_processed"
-    BILLING_SUSPENDED = "billing_suspended"
-    BILLING_REACTIVATED = "billing_reactivated"
+    FAILED = "failed"
 
 
 class ExtensionType(str, Enum):
@@ -94,3 +81,102 @@ class AppBlockTarget(str, Enum):
     CHECKOUT_POST_PURCHASE = "checkout_post_purchase"
     THEME_APP_EXTENSION = "theme_app_extension"
     WEB_PIXEL_EXTENSION = "web_pixel_extension"
+
+
+class BillingPhase(str, Enum):
+    """Billing phase enum"""
+
+    TRIAL = "trial"
+    PAID = "paid"
+
+
+class CommissionStatus(str, Enum):
+    """Commission record status"""
+
+    # Trial phase statuses
+    TRIAL_PENDING = "trial_pending"  # Tracked during trial, not charged
+    TRIAL_COMPLETED = "trial_completed"  # Trial ended, moved to paid phase
+
+    # Paid phase statuses
+    PENDING = "pending"  # Ready to be sent to Shopify
+    RECORDED = "recorded"  # Successfully sent to Shopify
+    INVOICED = "invoiced"  # Included in monthly invoice
+
+    # Error/rejection statuses
+    REJECTED = "rejected"  # Cap reached, couldn't charge
+    FAILED = "failed"  # Failed to send to Shopify
+    CAPPED = "capped"  # Partial charge due to cap
+
+
+class ChargeType(str, Enum):
+    """Type of charge"""
+
+    FULL = "full"  # Full commission charged
+    PARTIAL = "partial"  # Partial due to cap
+    OVERFLOW_ONLY = "overflow_only"  # Only overflow tracked
+    TRIAL = "trial"  # During trial period
+    REJECTED = "rejected"  # Not charged
+
+
+# ============= NEW ENUMS FOR REDESIGNED BILLING SYSTEM =============
+
+
+class SubscriptionPlanType(str, Enum):
+    """Subscription plan types"""
+
+    USAGE_BASED = "usage_based"
+    TIERED = "tiered"
+    FLAT_RATE = "flat_rate"
+    HYBRID = "hybrid"
+
+
+class SubscriptionStatus(str, Enum):
+    """Shop subscription status"""
+
+    TRIAL = "trial"  # In trial period
+    PENDING_APPROVAL = (
+        "pending_approval"  # Trial ended, waiting for subscription approval
+    )
+    TRIAL_COMPLETED = "trial_completed"  # Trial done, awaiting user setup
+    ACTIVE = "active"  # Active subscription
+    SUSPENDED = "suspended"  # Suspended (payment issues, etc.)
+    CANCELLED = "cancelled"  # Cancelled by user
+    EXPIRED = "expired"  # Expired (end date reached)
+
+
+class BillingCycleStatus(str, Enum):
+    """Billing cycle status"""
+
+    ACTIVE = "active"  # Current billing cycle
+    COMPLETED = "completed"  # Cycle ended normally
+    CANCELLED = "cancelled"  # Cycle cancelled (subscription ended)
+    SUSPENDED = "suspended"  # Cycle suspended
+
+
+class TrialStatus(str, Enum):
+    """Trial status"""
+
+    ACTIVE = "active"  # Trial in progress
+    COMPLETED = "completed"  # Trial completed (threshold reached)
+    EXPIRED = "expired"  # Trial expired (time limit reached)
+    CANCELLED = "cancelled"  # Trial cancelled
+
+
+class ShopifySubscriptionStatus(str, Enum):
+    """Shopify subscription status"""
+
+    PENDING = "pending"  # Awaiting merchant approval
+    ACTIVE = "active"  # Active and billing
+    DECLINED = "declined"  # Merchant declined
+    CANCELLED = "cancelled"  # Cancelled
+    EXPIRED = "expired"  # Expired
+
+
+class AdjustmentReason(str, Enum):
+    """Billing cycle adjustment reasons"""
+
+    CAP_INCREASE = "cap_increase"  # User requested cap increase
+    PLAN_UPGRADE = "plan_upgrade"  # Upgraded to higher tier
+    ADMIN_ADJUSTMENT = "admin_adjustment"  # Admin adjustment
+    PROMOTION = "promotion"  # Promotional adjustment
+    DISPUTE_RESOLUTION = "dispute_resolution"  # Dispute resolution
