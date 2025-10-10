@@ -18,7 +18,54 @@ logger = get_logger(__name__)
 
 
 class RecentlyViewedService:
-    """Service to get recently viewed products for returning visitors"""
+    """
+    Service for getting recently viewed products with multiple images support
+    """
+
+    def _extract_images_from_media(
+        self, media_data: Any, fallback_title: str
+    ) -> List[Dict[str, str]] | None:
+        """Extract all image URLs and alt text from media JSON data"""
+        if not media_data or not isinstance(media_data, list) or len(media_data) == 0:
+            return None
+
+        images = []
+        for i, media_item in enumerate(media_data):
+            if isinstance(media_item, dict):
+                # Check for direct image properties
+                if "image" in media_item and isinstance(media_item["image"], dict):
+                    image_data = media_item["image"]
+                    images.append(
+                        {
+                            "url": image_data.get("url", ""),
+                            "alt_text": image_data.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
+                # Check for direct URL properties
+                elif "url" in media_item:
+                    images.append(
+                        {
+                            "url": media_item.get("url", ""),
+                            "alt_text": media_item.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
+
+        return images if images else None
+
+    def _extract_image_from_media(
+        self, media_data: Any, fallback_title: str
+    ) -> Dict[str, str] | None:
+        """Extract first image URL and alt text from media JSON data (backward compatibility)"""
+        images = self._extract_images_from_media(media_data, fallback_title)
+        return images[0] if images else None
 
     async def get_recently_viewed_products(
         self,
@@ -172,12 +219,11 @@ class RecentlyViewedService:
                             "price": {
                                 "amount": str(product.price),
                             },
-                            "image": (
-                                {
-                                    "url": product.image_url,
-                                }
-                                if product.image_url
-                                else None
+                            "image": self._extract_image_from_media(
+                                product.media, product.title
+                            ),
+                            "images": self._extract_images_from_media(
+                                product.media, product.title
                             ),
                             "available": product.available,
                             "url": f"/products/{product.handle}",

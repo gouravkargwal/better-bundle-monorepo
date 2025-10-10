@@ -7,6 +7,41 @@ import {
 import { analyticsApi } from "../api/analytics";
 import { useApi } from "@shopify/ui-extensions-react/customer-account";
 
+// Format price using the same logic as the Remix app
+const formatPrice = (amount: string, currencyCode: string): string => {
+  try {
+    const numericAmount = parseFloat(amount);
+
+    // Use Intl.NumberFormat for proper currency formatting (same as Remix app)
+    const formatter = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits:
+        currencyCode === "JPY" || currencyCode === "KRW" ? 0 : 2,
+      maximumFractionDigits:
+        currencyCode === "JPY" || currencyCode === "KRW" ? 0 : 2,
+    });
+
+    return formatter.format(numericAmount);
+  } catch (error) {
+    // Fallback to simple symbol + amount
+    const currencySymbols: { [key: string]: string } = {
+      USD: "$",
+      EUR: "€",
+      GBP: "£",
+      CAD: "C$",
+      AUD: "A$",
+      JPY: "¥",
+      INR: "₹",
+      KRW: "₩",
+      BRL: "R$",
+      MXN: "$",
+    };
+    const symbol = currencySymbols[currencyCode] || currencyCode;
+    return `${symbol}${amount}`;
+  }
+};
+
 interface Product {
   id: string;
   title: string;
@@ -16,6 +51,12 @@ interface Product {
     url: string;
     alt_text?: string;
   } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   inStock: boolean;
   url: string;
   variant_id?: string;
@@ -154,10 +195,12 @@ export function useRecommendations({
               id: rec.id,
               title: rec.title,
               handle: rec.handle,
-              price: `${rec.price.currency_code} ${rec.price.amount}`,
+              price: formatPrice(rec.price.amount, rec.price.currency_code),
               image: rec.image,
+              images: (rec as any).images,
               inStock: rec.available ?? true,
               url: rec.url,
+              variants: (rec as any).variants || [],
             }),
           );
 

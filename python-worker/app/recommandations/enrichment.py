@@ -63,33 +63,50 @@ class ProductEnrichment:
 
         return enhanced_recommendations
 
-    def _extract_image_from_media(
+    def _extract_images_from_media(
         self, media_data: Any, fallback_title: str
-    ) -> Dict[str, str] | None:
-        """Extract image URL and alt text from media JSON data"""
+    ) -> List[Dict[str, str]] | None:
+        """Extract all image URLs and alt text from media JSON data"""
         if not media_data or not isinstance(media_data, list) or len(media_data) == 0:
             return None
 
-        # Get the first media item (usually the main product image)
-        first_media = media_data[0]
+        images = []
+        for i, media_item in enumerate(media_data):
+            if isinstance(media_item, dict):
+                # Check for direct image properties
+                if "image" in media_item and isinstance(media_item["image"], dict):
+                    image_data = media_item["image"]
+                    images.append(
+                        {
+                            "url": image_data.get("url", ""),
+                            "alt_text": image_data.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
+                # Check for direct URL properties
+                elif "url" in media_item:
+                    images.append(
+                        {
+                            "url": media_item.get("url", ""),
+                            "alt_text": media_item.get(
+                                "altText", f"{fallback_title} - Image {i+1}"
+                            ),
+                            "type": "main" if i == 0 else "additional",
+                            "position": i,
+                        }
+                    )
 
-        # Handle different media structures
-        if isinstance(first_media, dict):
-            # Check for direct image properties
-            if "image" in first_media and isinstance(first_media["image"], dict):
-                image_data = first_media["image"]
-                return {
-                    "url": image_data.get("url", ""),
-                    "alt_text": image_data.get("altText", fallback_title),
-                }
-            # Check for direct URL properties
-            elif "url" in first_media:
-                return {
-                    "url": first_media.get("url", ""),
-                    "alt_text": first_media.get("altText", fallback_title),
-                }
+        return images if images else None
 
-        return None
+    def _extract_image_from_media(
+        self, media_data: Any, fallback_title: str
+    ) -> Dict[str, str] | None:
+        """Extract first image URL and alt text from media JSON data (backward compatibility)"""
+        images = self._extract_images_from_media(media_data, fallback_title)
+        return images[0] if images else None
 
     async def enrich_items(
         self,
@@ -318,6 +335,9 @@ class ProductEnrichment:
                                 "amount": str(product.price),
                             },
                             "image": self._extract_image_from_media(
+                                product.media, product.title
+                            ),
+                            "images": self._extract_images_from_media(
                                 product.media, product.title
                             ),
                             "vendor": product.vendor or "",

@@ -10,6 +10,12 @@ interface Product {
     url: string;
     alt_text?: string;
   } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   inStock: boolean;
   url: string;
   variant_id?: string;

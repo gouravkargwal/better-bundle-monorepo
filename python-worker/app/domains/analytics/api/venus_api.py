@@ -6,6 +6,7 @@ Venus runs on customer profile pages, order status pages, and order index pages.
 """
 
 from typing import Optional, Dict, Any
+import time
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
@@ -78,12 +79,19 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for customer")
 
+        # Generate a browser session ID for Venus if not provided
+        # Venus doesn't have browser session tracking, so we create one
+        browser_session_id = (
+            request.browser_session_id
+            or f"venus_{request.customer_id}_{int(time.time())}"
+        )
+
         # Get or create unified session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=None,  # Venus doesn't have this
-            client_id=None,
+            browser_session_id=browser_session_id,
+            client_id=request.client_id,
             user_agent=request.user_agent,
             ip_address=request.ip_address,
             referrer=request.referrer,

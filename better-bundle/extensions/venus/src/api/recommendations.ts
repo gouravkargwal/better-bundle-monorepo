@@ -42,6 +42,12 @@ export interface ProductRecommendation {
     url: string;
     alt_text?: string;
   } | null;
+  images?: Array<{
+    url: string;
+    alt_text?: string;
+    type?: string;
+    position?: number;
+  }>;
   vendor?: string;
   product_type?: string;
   tags?: string[];
