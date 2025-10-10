@@ -405,6 +405,12 @@ class ShopifyGraphQLSeeder:
                 for variant_node in product["variants"]["nodes"]:
                     variant_ids.append(variant_node["id"])
 
+                # Add media to the product if available
+                if product_data.get("media", {}).get("edges"):
+                    self._add_media_to_product(
+                        product["id"], product_data["media"]["edges"]
+                    )
+
                 self.created_products[f"product_{i}"] = {
                     "id": product["id"],
                     "handle": product["handle"],
@@ -798,6 +804,63 @@ class ShopifyGraphQLSeeder:
         )
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
+
+    def _add_media_to_product(self, product_id: str, media_edges: List[Dict]) -> None:
+        """Add media files to a product using productCreateMedia with original source URLs."""
+        media_inputs = []
+
+        for media_edge in media_edges:
+            media_node = media_edge["node"]
+
+            if media_node.get("image"):
+                # Use original source URLs directly with productCreateMedia
+                media_inputs.append(
+                    {
+                        "originalSource": media_node["image"]["url"],
+                        "mediaContentType": "IMAGE",
+                        "alt": media_node["image"].get("altText", ""),
+                    }
+                )
+                print(f"    📸 Preparing media: {media_node['image']['url']}")
+
+        # Attach all media to product in one call
+        if media_inputs:
+            self._attach_media_to_product(product_id, media_inputs)
+
+    def _attach_media_to_product(
+        self, product_id: str, media_inputs: List[Dict]
+    ) -> None:
+        """Attach media to product using productCreateMedia mutation (2024-01+ API)."""
+        mutation = """
+        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+            productCreateMedia(productId: $productId, media: $media) {
+                media {
+                    id
+                    alt
+                    status
+                }
+                mediaUserErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        variables = {"productId": product_id, "media": media_inputs}
+
+        try:
+            result = self._graphql_request(mutation, variables)
+            if result["data"]["productCreateMedia"]["mediaUserErrors"]:
+                print(
+                    f"    ⚠️ Failed to attach media: {result['data']['productCreateMedia']['mediaUserErrors']}"
+                )
+            else:
+                print(
+                    f"    📸 Added {len(media_inputs)} media files to product {product_id}"
+                )
+        except Exception as e:
+            print(f"    ⚠️ Failed to attach media: {e}")
 
 
 async def main() -> bool:

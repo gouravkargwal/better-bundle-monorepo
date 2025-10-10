@@ -92,8 +92,43 @@ async def generate_events_from_real_data(products, customers, orders):
         f"📊 Using {len(product_variant_ids)} real products and {len(customer_ids)} real customers"
     )
 
-    # Generate events
-    events = event_gen.generate_events(product_variant_ids, customer_ids)
+    # Generate simple events instead of using complex event generator
+    events = []
+
+    # Generate simple page view events
+    for customer_id in customer_ids[:10]:  # First 10 customers
+        events.append(
+            {
+                "event_type": "page_view",
+                "customer_id": customer_id,
+                "timestamp": "2025-10-10T10:00:00Z",
+                "page_url": "/products",
+            }
+        )
+
+    # Generate product view events
+    for i, product_id in enumerate(product_variant_ids[:15]):  # First 15 products
+        customer_id = customer_ids[i % len(customer_ids)]
+        events.append(
+            {
+                "event_type": "product_view",
+                "customer_id": customer_id,
+                "product_id": product_id,
+                "timestamp": "2025-10-10T10:00:00Z",
+            }
+        )
+
+    # Generate cart events
+    for i, product_id in enumerate(product_variant_ids[:10]):  # First 10 products
+        customer_id = customer_ids[i % len(customer_ids)]
+        events.append(
+            {
+                "event_type": "add_to_cart",
+                "customer_id": customer_id,
+                "product_id": product_id,
+                "timestamp": "2025-10-10T10:00:00Z",
+            }
+        )
 
     # Analyze event types
     event_types = {}
@@ -149,7 +184,7 @@ async def run_feature_engineering(shop_id: str):
 async def main():
     """Main function to seed events from real database data"""
 
-    shop_id = "536c8a91-cab0-4e92-babc-58680d81c7b3"
+    shop_id = "1db1c3fd-4186-493a-914b-8a615d019442"
 
     print("🚀 Seeding events from real database data...")
     print("📋 Prerequisites:")

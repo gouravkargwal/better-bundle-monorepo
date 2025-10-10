@@ -51,6 +51,7 @@ class ShopifyStoreDeleter:
             "collections_deleted": 0,
             "orders_deleted": 0,
             "customers_deleted": 0,
+            "media_deleted": 0,
             "errors": 0,
             "start_time": None,
             "end_time": None,
@@ -279,6 +280,66 @@ class ShopifyStoreDeleter:
         logger.info(f"Found {len(customers)} customers")
         return customers
 
+    async def get_all_media(self) -> List[Dict[str, Any]]:
+        """Get all media files from the store"""
+        logger.info("Fetching all media files...")
+        media_files = []
+        cursor = None
+
+        while True:
+            query = """
+            query($first: Int!, $after: String) {
+                files(first: $first, after: $after) {
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                    edges {
+                        node {
+                            id
+                            ... on MediaImage {
+                                id
+                                image {
+                                    url
+                                    altText
+                                }
+                            }
+                            ... on Video {
+                                id
+                                sources {
+                                    url
+                                }
+                            }
+                            ... on Model3d {
+                                id
+                                sources {
+                                    url
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+
+            variables = {"first": 250, "after": cursor}
+
+            result = await self.execute_mutation(query, variables)
+            files_data = result.get("files", {})
+
+            edges = files_data.get("edges", [])
+            for edge in edges:
+                media_files.append(edge["node"])
+
+            page_info = files_data.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+
+            cursor = page_info.get("endCursor")
+
+        logger.info(f"Found {len(media_files)} media files")
+        return media_files
+
     async def delete_product(self, product_id: str) -> bool:
         """Delete a single product"""
         mutation = """
@@ -427,6 +488,42 @@ class ShopifyStoreDeleter:
 
         except Exception as e:
             logger.error(f"Error deleting customer {customer_id}: {e}")
+            self.stats["errors"] += 1
+            return False
+
+    async def delete_media(self, media_id: str) -> bool:
+        """Delete a single media file"""
+        mutation = """
+        mutation($fileIds: [ID!]!) {
+            fileDelete(fileIds: $fileIds) {
+                deletedFileIds
+                userErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        variables = {"fileIds": [media_id]}
+
+        try:
+            result = await self.execute_mutation(mutation, variables)
+            file_delete = result.get("fileDelete", {})
+
+            if file_delete.get("userErrors"):
+                errors = [error["message"] for error in file_delete["userErrors"]]
+                logger.error(f"Failed to delete media {media_id}: {', '.join(errors)}")
+                return False
+
+            if file_delete.get("deletedFileIds"):
+                self.stats["media_deleted"] += 1
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error deleting media {media_id}: {e}")
             self.stats["errors"] += 1
             return False
 
@@ -636,17 +733,90 @@ class ShopifyStoreDeleter:
         """Delete a single customer with logging"""
         return await self.delete_customer(customer_id)
 
+    async def delete_all_media(self) -> None:
+        """Delete all media files from the store"""
+        logger.info("🗑️ Starting media deletion...")
+        media_files = await self.get_all_media()
+
+        if not media_files:
+            logger.info("No media files found to delete")
+            return
+
+        logger.warning(
+            f"⚠️  About to delete {len(media_files)} media files. This action is irreversible!"
+        )
+
+        # Process media files in parallel batches
+        batch_size = 10  # Process 10 media files at a time
+        for i in range(0, len(media_files), batch_size):
+            batch = media_files[i : i + batch_size]
+            logger.info(
+                f"Processing media batch {i//batch_size + 1}/{(len(media_files) + batch_size - 1)//batch_size}"
+            )
+
+            # Create tasks for parallel execution
+            tasks = []
+            for media_file in batch:
+                media_id = media_file["id"]
+                # Get media type and URL for logging
+                media_type = "Unknown"
+                media_url = "Unknown"
+                if "image" in media_file and media_file["image"] is not None:
+                    media_type = "Image"
+                    media_url = media_file["image"].get("url", "Unknown")
+                elif "sources" in media_file:
+                    # Check if it's a video or 3D model based on the file structure
+                    sources = media_file.get("sources", [])
+                    if sources:
+                        media_url = sources[0].get("url", "Unknown")
+                        # Try to determine type from URL or assume it's a video
+                        if any(
+                            ext in media_url.lower()
+                            for ext in [".mp4", ".mov", ".avi", ".webm"]
+                        ):
+                            media_type = "Video"
+                        else:
+                            media_type = "3D Model"
+                else:
+                    # Fallback for unknown media types
+                    media_type = "File"
+                    media_url = media_file.get("id", "Unknown")
+
+                task = self._delete_media_with_logging(media_id, media_type, media_url)
+                tasks.append(task)
+
+            # Execute batch in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log results
+            for j, result in enumerate(results):
+                media_file = batch[j]
+                media_id = media_file["id"]
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Failed to delete media {media_id}: {result}")
+                elif result:
+                    logger.info(f"✅ Deleted media: {media_id}")
+                else:
+                    logger.error(f"❌ Failed to delete media: {media_id}")
+
+    async def _delete_media_with_logging(
+        self, media_id: str, media_type: str, media_url: str
+    ) -> bool:
+        """Delete a single media file with logging"""
+        return await self.delete_media(media_id)
+
     async def delete_all_data(self) -> None:
-        """Delete all store data (products, collections, orders, customers)"""
+        """Delete all store data (products, collections, orders, customers, media)"""
         logger.info("🚨 Starting complete store data deletion...")
         self.stats["start_time"] = datetime.now()
 
         try:
-            # Delete in order: products first, then collections, then orders, then customers
+            # Delete in order: products first, then collections, then orders, then customers, then media
             await self.delete_all_products()
             await self.delete_all_collections()
             await self.delete_all_orders()
             await self.delete_all_customers()
+            await self.delete_all_media()
 
             self.stats["end_time"] = datetime.now()
             self.print_summary()
@@ -669,6 +839,7 @@ class ShopifyStoreDeleter:
         logger.info(f"Collections deleted: {self.stats['collections_deleted']}")
         logger.info(f"Orders canceled: {self.stats['orders_deleted']}")
         logger.info(f"Customers deleted: {self.stats['customers_deleted']}")
+        logger.info(f"Media files deleted: {self.stats['media_deleted']}")
         logger.info(f"Errors encountered: {self.stats['errors']}")
         if duration:
             logger.info(f"Total duration: {duration}")
@@ -699,6 +870,7 @@ async def main():
     print("- All collections")
     print("- All orders")
     print("- All customers")
+    print("- All media files (images, videos, 3D models)")
     print("=" * 60)
 
     async with ShopifyStoreDeleter(shop_domain, ACCESS_TOKEN) as deleter:
