@@ -1,12 +1,24 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log("🔍 Orders/edited webhook endpoint accessed via GET");
+  return json({
+    message: "Orders/edited webhook endpoint is active",
+    timestamp: new Date().toISOString(),
+  });
+};
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
 
   console.log("🔔 Order edited webhook triggered");
+  console.log(
+    "🔔 Order edited webhook triggered - TIMESTAMP:",
+    new Date().toISOString(),
+  );
 
   try {
     const authResult = await authenticate.webhook(request);

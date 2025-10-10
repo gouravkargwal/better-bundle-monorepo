@@ -456,7 +456,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         // Get signed token from backend
         console.log("Apollo: Requesting signed token from backend");
         const tokenResponse = await fetch(
-          `https://black-ace-porter-upon.trycloudflare.com/api/sign-changeset`,
+          `https://interests-gravity-msgid-green.trycloudflare.com/api/sign-changeset`,
           {
             method: "POST",
             headers: {
