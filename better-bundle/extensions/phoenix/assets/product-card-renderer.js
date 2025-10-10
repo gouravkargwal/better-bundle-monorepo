@@ -76,15 +76,30 @@ class ProductCardRenderer {
       variantOptions = this.createTestVariantSelectors(product);
     }
 
+    // Prepare images array - support both single image and multiple images
+    const images = product.images && product.images.length > 0
+      ? product.images
+      : (product.image ? [product.image] : []);
+
+    const mainImage = images[0] || { url: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg==", alt_text: "No Image" };
+
     slide.innerHTML = `
-      <div class="product-card" data-product-id="${product.id}">
-        <img
-          class="product-card__image"
-          src="${product.image?.url || "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=="}"
-          alt="${product.image?.alt_text || product.title}"
-          loading="lazy"
-          onclick="productCardManager.handleProductClick('${product.id}', ${index + 1}, '${product.url || ''}', '${sessionId || ''}')"
-        >
+      <div class="product-card" data-product-id="${product.id}" data-images='${JSON.stringify(images)}'>
+        <div class="product-card__image-container">
+          <img
+            class="product-card__image"
+            src="${mainImage.url}"
+            alt="${mainImage.alt_text || product.title}"
+            loading="lazy"
+            data-product-id="${product.id}"
+            data-product-index="${index + 1}"
+            data-product-url="${product.url || ''}"
+            data-session-id="${sessionId || ''}"
+          >
+          ${images.length > 1 ? `
+            <div class="mobile-hint">Tap to see more</div>
+          ` : ''}
+        </div>
         <div class="product-card__body">
           <h4 class="product-card__title">${product.title}</h4>
           
