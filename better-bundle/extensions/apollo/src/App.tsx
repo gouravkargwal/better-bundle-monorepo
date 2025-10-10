@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import type { StorageData, ProductRecommendationAPI } from "./types";
 import { isProductEligible, getShopifyErrorMessage } from "./utils/utils";
 import { apolloAnalytics } from "./api/analytics";
+import { ImageCarousel } from "./components/ImageCarousel";
 import {
   BlockStack,
   Button,
@@ -15,7 +16,6 @@ import {
   Separator,
   Layout,
   View,
-  Image,
   Select,
   Text,
 } from "@shopify/post-purchase-ui-extensions-react";
@@ -489,7 +489,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         // Get signed token from backend
         console.log("Apollo: Requesting signed token from backend");
         const tokenResponse = await fetch(
-          `https://poster-salaries-hispanic-overhead.trycloudflare.com/api/sign-changeset`,
+          `https://collectible-equation-dock-highs.trycloudflare.com/api/sign-changeset`,
           {
             method: "POST",
             headers: {
@@ -736,18 +736,18 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
       <Layout
         maxInlineSize={0.95}
         media={[
-          { viewportSize: "small", sizes: [1, 30, 1] },
-          { viewportSize: "medium", sizes: [300, 30, 0.5] },
-          { viewportSize: "large", sizes: [400, 30, 0.33] },
+          { viewportSize: "small", sizes: [1, 20, 1] },
+          { viewportSize: "medium", sizes: [400, 20, 0.4] },
+          { viewportSize: "large", sizes: [500, 20, 0.3] },
         ]}
       >
-        {/* Product Image */}
+        {/* Product Image Carousel */}
         {/* @ts-ignore */}
         <View>
           {/* @ts-ignore */}
-          <Image
-            source={product.image?.url || ""}
-            description={product.title}
+          <ImageCarousel
+            images={product.images || (product.image ? [product.image] : [])}
+            productTitle={product.title}
           />
         </View>
 

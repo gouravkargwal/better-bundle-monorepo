@@ -11,6 +11,10 @@ interface ProductRecommendationAPI {
     url: string;
     alt_text?: string;
   } | null;
+  images?: {
+    url: string;
+    alt_text?: string;
+  }[];
   vendor: string;
   product_type: string;
   available: boolean;
