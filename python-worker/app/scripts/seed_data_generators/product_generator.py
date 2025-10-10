@@ -1126,86 +1126,61 @@ class ProductGenerator(BaseGenerator):
         return options
 
     def _build_media_edges(self, product_index: int, config: Dict) -> List[Dict]:
-        """Build media edges for product with real image URLs."""
+        """Build media edges for product with random Unsplash image URLs."""
         media_edges = []
 
-        # Real image URLs for different product categories
-        real_images = {
-            # Clothing images
-            "clothing": [
-                "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1571945153237-4929e783af4a?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1583743814966-8936f37f0c7e?w=800&h=800&fit=crop",
-            ],
-            # Accessories images
-            "accessories": [
-                "https://images.unsplash.com/photo-1511499767150-a48a237f0cfe?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1583394838336-acd977736f90?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1583394838336-acd977736f90?w=800&h=800&fit=crop",
-            ],
-            # Electronics images
-            "electronics": [
-                "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1601972602288-d1bcf3b5b8b5?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=800&h=800&fit=crop",
-            ],
-            # Home & Garden images
-            "home": [
-                "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&h=800&fit=crop",
-            ],
-            # Sports & Fitness images
-            "sports": [
-                "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&h=800&fit=crop",
-                "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&h=800&fit=crop",
-            ],
+        # Define search terms for different product categories
+        search_terms = {
+            "clothing": ["fashion", "clothing", "apparel", "style", "outfit"],
+            "accessories": ["accessories", "jewelry", "bag", "sunglasses", "watch"],
+            "electronics": ["technology", "gadgets", "electronics", "devices", "tech"],
+            "home": ["home", "decor", "furniture", "interior", "lifestyle"],
+            "sports": ["fitness", "sports", "workout", "gym", "athletic"],
         }
 
-        # Determine product category and select appropriate images
+        # Determine product category and select appropriate search terms
         product_type = config.get("productType", "Clothing").lower()
         if "clothing" in product_type or "apparel" in product_type:
-            category_images = real_images["clothing"]
+            category_terms = search_terms["clothing"]
         elif (
             "accessories" in product_type
             or "bag" in product_type
             or "sunglasses" in product_type
         ):
-            category_images = real_images["accessories"]
+            category_terms = search_terms["accessories"]
         elif (
             "electronics" in product_type
             or "tech" in product_type
             or "gadget" in product_type
         ):
-            category_images = real_images["electronics"]
+            category_terms = search_terms["electronics"]
         elif (
             "home" in product_type
             or "garden" in product_type
             or "decor" in product_type
         ):
-            category_images = real_images["home"]
+            category_terms = search_terms["home"]
         elif (
             "sports" in product_type
             or "fitness" in product_type
             or "athletic" in product_type
         ):
-            category_images = real_images["sports"]
+            category_terms = search_terms["sports"]
         else:
-            category_images = real_images["clothing"]  # Default to clothing
+            category_terms = search_terms["clothing"]  # Default to clothing
+
+        def get_random_unsplash_url(
+            search_term: str, width: int = 800, height: int = 800
+        ) -> str:
+            """Generate a random image URL using picsum.photos for reliable random images."""
+            # Use picsum.photos for reliable random images
+            # This service provides random images and is more reliable than source.unsplash.com
+            random_seed = random.randint(1000, 9999)
+            return f"https://picsum.photos/{width}/{height}?random={random_seed}"
 
         # Add main product image
-        main_image_url = category_images[product_index % len(category_images)]
+        main_search_term = random.choice(category_terms)
+        main_image_url = get_random_unsplash_url(main_search_term)
         media_edges.append(
             {
                 "node": {
@@ -1222,9 +1197,8 @@ class ProductGenerator(BaseGenerator):
 
         # Add additional product images (2-3 more)
         for i in range(1, 4):
-            additional_image_url = category_images[
-                (product_index + i) % len(category_images)
-            ]
+            additional_search_term = random.choice(category_terms)
+            additional_image_url = get_random_unsplash_url(additional_search_term)
             media_edges.append(
                 {
                     "node": {

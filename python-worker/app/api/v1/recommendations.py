@@ -138,6 +138,22 @@ async def fetch_recommendations_logic(
         request.metadata = request.metadata or {}
         request.metadata["post_purchase"] = True
 
+    # Mercury checkout context handling
+    if request.context == "checkout_page":
+        logger.info(
+            f"Processing Mercury checkout recommendations for shop {shop_domain}"
+        )
+        request.metadata = request.metadata or {}
+        request.metadata["mercury_checkout"] = True
+        request.metadata["checkout_type"] = "one_page"  # Default to one-page checkout
+        # Add Mercury-specific metadata for checkout optimization
+        if hasattr(request, "cart_value") and request.cart_value:
+            request.metadata["cart_value"] = request.cart_value
+        if hasattr(request, "cart_items") and request.cart_items:
+            request.metadata["cart_items"] = request.cart_items
+        if hasattr(request, "checkout_step") and request.checkout_step:
+            request.metadata["checkout_step"] = request.checkout_step
+
     valid_contexts = [
         "product_page",
         "product_page_similar",
@@ -147,7 +163,7 @@ async def fetch_recommendations_logic(
         "cart",
         "collection_page",
         "profile",
-        "checkout",
+        "checkout_page",
         "order_history",
         "order_status",
         "post_purchase",
@@ -263,39 +279,6 @@ async def fetch_recommendations_logic(
     )
     result = None
 
-    # Note: The original logic had a potential flaw where contexts like 'product_page'
-    # would never hit the hybrid service. This refactoring preserves that original flow.
-    # The condition `request.context != "checkout"` takes precedence.
-    if request.context != "checkout":
-        enhanced_metadata = request.metadata or {}
-        if effective_user_id:
-            session_data = (
-                await services.session.extract_session_data_from_behavioral_events(
-                    effective_user_id, shop.id
-                )
-            )
-            enhanced_metadata.update(session_data)
-
-        effective_category = services.session.get_effective_category_for_mixed_cart(
-            category, enhanced_metadata.get("product_types", [])
-        )
-
-        result = await services.hybrid.blend_recommendations(
-            context=request.context,
-            shop_id=shop.id,
-            product_ids=request.product_ids,
-            user_id=effective_user_id,
-            session_id=request.session_id,
-            category=effective_category,
-            limit=request.limit,
-            metadata=enhanced_metadata,
-            exclude_items=final_exclude_items,
-        )
-        if not result["success"] or len(result.get("items", [])) < request.limit // 2:
-            logger.warning("⚠️ Hybrid recommendations insufficient, falling back.")
-            result = None  # Reset result to trigger fallback
-
-    # If hybrid wasn't used, was insufficient, or context is 'checkout'
     if result is None:
         if request.context == "product_page":
             result = (
@@ -327,7 +310,21 @@ async def fetch_recommendations_logic(
                 user_id=effective_user_id,
                 limit=request.limit,
             )
-        else:  # Default fallback for other contexts (including checkout)
+        elif request.context == "checkout_page":
+            # Mercury checkout-specific recommendations
+            logger.info(
+                f"🎯 Mercury: Generating checkout recommendations for shop {shop_domain}"
+            )
+            result = await services.smart_selection.get_smart_checkout_recommendation(
+                shop_id=shop.id,
+                cart_items=request.product_ids
+                or request.metadata.get("cart_items", []),
+                cart_value=request.metadata.get("cart_value"),
+                user_id=effective_user_id,
+                limit=request.limit,
+                checkout_step=request.metadata.get("checkout_step"),
+            )
+        else:  # Default fallback for other contexts
             result = await services.executor.execute_fallback_chain(
                 context=request.context,
                 shop_id=shop.id,

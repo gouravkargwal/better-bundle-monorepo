@@ -1,0 +1,19 @@
+{
+  "attributeChangesAreNotSupported": "Mercury recommendations are not supported in this checkout context.",
+  "shopifyPlusRequired": "Mercury checkout recommendations require Shopify Plus. Please upgrade your plan to use this feature.",
+  "loadingRecommendations": "Loading Mercury recommendations...",
+  "noRecommendations": "No recommendations available at this time.",
+  "personalizedRecommendations": "Personalized Recommendations",
+  "mercuryRecommendations": "Mercury found {count} recommendation{count, plural, one {} other {s}} for you",
+  "addToCart": "Add to Cart",
+  "outOfStock": "Out of Stock",
+  "adding": "Adding...",
+  "mercuryTitle": "Mercury - Personalized Recommendations",
+  "mercurySubtitle": "Smart recommendations to increase your order value",
+  "recommendationReason": "Recommended because you're buying {reason}",
+  "frequentlyBoughtTogether": "Frequently bought together",
+  "similarProducts": "Similar products",
+  "popularInCategory": "Popular in this category",
+  "personalizedForYou": "Personalized for you",
+  "checkoutUpsell": "Complete your order with these recommendations"
+}

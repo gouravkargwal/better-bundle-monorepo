@@ -1,0 +1,13 @@
+{
+  "welcome": "Welcome to the {{target}} extension!",
+  "iWouldLikeAFreeGiftWithMyOrder": "I would like to receive a free gift with my order",
+  "addAFreeGiftToMyOrder": "Add a free gift to my order",
+  "attributeChangesAreNotSupported": "Attribute changes are not supported in this checkout",
+  "mercuryRecommendations": "We found {{count}} personalized recommendations for you",
+  "loadingRecommendations": "Loading personalized recommendations...",
+  "noRecommendations": "No recommendations available at this time",
+  "shopifyPlusRequired": "Mercury checkout recommendations require Shopify Plus plan",
+  "addToCart": "Add to Cart",
+  "outOfStock": "Out of Stock",
+  "personalizedRecommendations": "Personalized Recommendations"
+}

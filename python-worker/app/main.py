@@ -92,6 +92,7 @@ from app.domains.analytics.api import (
     atlas_router,
     phoenix_router,
     apollo_router,
+    mercury_router,
     session_router,
 )
 
@@ -99,6 +100,7 @@ app.include_router(venus_router)
 app.include_router(atlas_router)
 app.include_router(phoenix_router)
 app.include_router(apollo_router)
+app.include_router(mercury_router)
 app.include_router(session_router)
 # Add CORS middleware
 app.add_middleware(
