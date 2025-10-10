@@ -121,8 +121,11 @@ class HybridRecommendationService:
                     continue
 
                 # Calculate how many items to get from this source
-                source_limit = max(1, int(limit * ratio))
-                logger.debug(
+                # Ensure we get enough items for diversity, even with small ratios
+                source_limit = max(
+                    3, int(limit * ratio * 2)
+                )  # Request at least 3 items per source
+                logger.info(
                     f"🎯 Getting {source} recommendations | ratio={ratio} | source_limit={source_limit}"
                 )
 
@@ -179,8 +182,8 @@ class HybridRecommendationService:
                             "ratio": ratio,
                             "success": True,
                         }
-                        logger.debug(
-                            f"✅ {source} source successful | items={len(source_result['items'])}"
+                        logger.info(
+                            f"✅ {source} source successful | items={len(source_result['items'])} | items={source_result['items'][:3]}..."
                         )
                     else:
                         source_info[source] = {
@@ -215,9 +218,20 @@ class HybridRecommendationService:
                 blended_items, context, user_id
             )
 
+            # Log detailed source information
+            successful_sources = [s for s in source_info.values() if s["success"]]
+            failed_sources = [s for s in source_info.values() if not s["success"]]
+
             logger.info(
-                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len([s for s in source_info.values() if s['success']])}"
+                f"✅ Hybrid blend complete | final_count={len(blended_items)} | sources_used={len(successful_sources)}"
             )
+            logger.info(
+                f"📊 Source details - Successful: {[(k, v['count']) for k, v in source_info.items() if v['success']]}"
+            )
+            if failed_sources:
+                logger.info(
+                    f"📊 Source details - Failed: {[(k, v['error']) for k, v in source_info.items() if not v['success']]}"
+                )
 
             return {
                 "success": True,
@@ -523,6 +537,15 @@ class HybridRecommendationService:
             user_neighbors_service = UserNeighborsService()
             return await user_neighbors_service.get_neighbor_recommendations(
                 user_id=user_id, shop_id=shop_id, limit=limit, category=category
+            )
+
+        elif source == "recently_viewed" and user_id:
+            # Use the RecentlyViewedService for recently viewed products
+            from app.recommandations.recently_viewed import RecentlyViewedService
+
+            recently_viewed_service = RecentlyViewedService()
+            return await recently_viewed_service.get_recently_viewed_products(
+                shop_id=shop_id, user_id=user_id, limit=limit
             )
 
         else:

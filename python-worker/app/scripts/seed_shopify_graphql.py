@@ -642,8 +642,8 @@ class ShopifyGraphQLSeeder:
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
-        # Create orders following the original customer journey (12 orders)
-        for i in range(1, 13):  # Create 12 orders to match original seed script
+        # Create orders following the enhanced customer journey (40 orders)
+        for i in range(1, 41):  # Create 40 orders for comprehensive ML training
             try:
                 # Pick random customer and products
                 customer_id = random.choice(customer_ids)

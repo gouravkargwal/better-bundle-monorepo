@@ -16,7 +16,7 @@ class OrderGenerator(BaseGenerator):
         product_variant_ids: List[str],
         product_ids: List[str],
     ) -> List[Dict[str, Any]]:
-        """Generate 20 diverse orders with realistic patterns."""
+        """Generate 40 diverse orders with realistic patterns for better ML training."""
         order_configs = [
             # Alice (VIP) - Multiple orders showing loyalty
             {
@@ -237,10 +237,12 @@ class OrderGenerator(BaseGenerator):
                 zip(config["products"], config["quantities"])
             ):
                 line_item_id = self.dynamic_ids[f"line_item_{len(line_items) + 1}_id"]
-                variant_id = product_variant_ids[product_index]
+                # Ensure product_index is within bounds
+                safe_product_index = product_index % len(product_variant_ids)
+                variant_id = product_variant_ids[safe_product_index]
 
                 # Get product details (simplified pricing)
-                price = self._get_product_price(product_index)
+                price = self._get_product_price(safe_product_index)
                 line_total = price * quantity
                 total_amount += line_total
 

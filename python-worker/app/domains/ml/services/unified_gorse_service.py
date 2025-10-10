@@ -31,6 +31,7 @@ from app.domains.ml.transformers.gorse_interaction_transformer import (
 )
 
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from app.core.database.models import (
     UserFeatures,
     ProductFeatures,
@@ -515,15 +516,17 @@ class UnifiedGorseService:
 
             async with get_session_context() as session:
                 while True:
+                    # Load orders with line items to avoid lazy loading issues
                     stmt = (
                         select(OrderData)
+                        .options(joinedload(OrderData.line_items))
                         .where(OrderData.shop_id == shop_id)
                         .order_by(OrderData.order_date.asc())
                         .offset(offset)
                         .limit(self.batch_size)
                     )
                     result = await session.execute(stmt)
-                    orders = result.scalars().all()
+                    orders = result.unique().scalars().all()
 
                     if not orders:
                         break

@@ -87,10 +87,20 @@ class GorseFeedbackTransformer:
                 else:
                     product_id = getattr(item, "product_id", "")
                     quantity = getattr(item, "quantity", 1)
-                    line_total = float(getattr(item, "line_total", 0.0))
+                    # Try to get line_total, if not available, calculate from price * quantity
+                    if hasattr(item, "line_total"):
+                        line_total = float(getattr(item, "line_total", 0.0))
+                    elif hasattr(item, "price"):
+                        line_total = float(getattr(item, "price", 0.0)) * quantity
+                    else:
+                        line_total = 0.0
 
                 if not product_id:
                     continue
+
+                # If line_total is 0, estimate it from order total and line item count
+                if line_total == 0.0 and total_amount > 0 and len(line_items) > 0:
+                    line_total = total_amount / len(line_items)
 
                 # Calculate item-level confidence
                 item_confidence = self._calculate_item_confidence(
@@ -702,7 +712,21 @@ class GorseFeedbackTransformer:
         all_feedback = []
 
         for order in orders_list:
-            feedback_list = self.transform_order_to_feedback(order, shop_id)
+            # Convert SQLAlchemy object to dict format if needed
+            if hasattr(order, "__dict__"):
+                order_dict = {
+                    "customer_id": getattr(order, "customer_id", ""),
+                    "order_date": getattr(order, "order_date", None),
+                    "line_items": getattr(order, "line_items", []),
+                    "financial_status": getattr(order, "financial_status", ""),
+                    "total_amount": getattr(order, "total_amount", 0.0),
+                    "total_refunded_amount": getattr(
+                        order, "total_refunded_amount", 0.0
+                    ),
+                }
+                feedback_list = self.transform_order_to_feedback(order_dict, shop_id)
+            else:
+                feedback_list = self.transform_order_to_feedback(order, shop_id)
             all_feedback.extend(feedback_list)
 
         # Sort by timestamp for better Gorse ingestion
