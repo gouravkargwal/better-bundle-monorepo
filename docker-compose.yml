@@ -66,7 +66,48 @@ services:
       KAFKA_REST_BOOTSTRAP_SERVERS: "kafka_b:9093"
       KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
 
+  redis:
+    image: redis/redis-stack:7.2.0-v18
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+      - "8002:8001"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gorse:
+    image: zhenghaoz/gorse-in-one:latest
+    restart: unless-stopped
+    ports:
+      - "8086:8086" # gRPC port
+      - "8088:8088" # HTTP port
+    environment:
+      GORSE_CACHE_STORE: redis://redis:6379/0
+      GORSE_DATA_STORE: postgresql://postgres:postgres@host.docker.internal:5433/betterbundle?sslmode=disable
+      GORSE_MASTER_HOST: 0.0.0.0
+      GORSE_LOG_LEVEL: debug
+      GORSE_API_KEY: secure_random_key_123
+    command:
+      - -c
+      - /etc/gorse/config.toml
+      - --log-path
+      - /var/log/gorse/master.log
+      - --cache-path
+      - /var/lib/gorse/master_cache.data
+    volumes:
+      - ./config.toml:/etc/gorse/config.toml
+      - gorse_logs:/var/log/gorse
+      - gorse_cache:/var/lib/gorse
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
+  gorse_logs:
+  gorse_cache:
   kafka_data:
     driver: local
   postgres_data:
