@@ -17,35 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ADD CLICKHOUSE FOR ANALYTICS
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: betterbundle-clickhouse-dev
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-    environment:
-      CLICKHOUSE_DB: analytics
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: "" # Empty password for development
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:8123/ping",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   kafka_b:
     image: bitnami/kafka:latest
     container_name: kafka_b_dev
