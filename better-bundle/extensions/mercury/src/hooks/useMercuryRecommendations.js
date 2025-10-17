@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "preact/hooks";
+import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import {
   recommendationApi,
 } from "../api/recommendations";
@@ -54,6 +54,7 @@ export function useRecommendations({
   const [products, setProducts] = useState([]);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const hasFetchedRecommendations = useRef(false);
 
   useEffect(() => {
     const initializeSession = async () => {
@@ -144,6 +145,12 @@ export function useRecommendations({
       console.log("⏳ Mercury: Waiting for session initialization");
       return;
     }
+
+    if (hasFetchedRecommendations.current) {
+      console.log("⏳ Mercury: Recommendations already fetched");
+      return;
+    }
+
     const fetchRecommendations = async () => {
       try {
         setLoading(true);
@@ -181,11 +188,26 @@ export function useRecommendations({
               images: rec.images,
               inStock: rec.available ?? true,
               url: rec.url,
-              variants: rec.variants || [],
+              // Transform variants to have 'id' instead of 'variant_id'
+              variants: (rec.variants || []).map(variant => ({
+                id: variant.variant_id,
+                title: variant.title,
+                price: variant.price,
+                compare_at_price: variant.compare_at_price,
+                sku: variant.sku,
+                barcode: variant.barcode,
+                inventory: variant.inventory,
+                currency_code: variant.currency_code
+              })),
+              // Also include the selected variant ID for easy access
+              selectedVariantId: rec.selectedVariantId || rec.variant_id,
+              // Include options for dropdowns
+              options: rec.options || [],
             }),
           );
 
           setProducts(transformedProducts);
+          hasFetchedRecommendations.current = true;
         } else {
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
