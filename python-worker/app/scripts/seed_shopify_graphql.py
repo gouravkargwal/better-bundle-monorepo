@@ -47,8 +47,9 @@ class ShopifyGraphQLSeeder:
         self.created_orders: Dict[str, Dict[str, Any]] = {}
         self.created_collections: Dict[str, Dict[str, Any]] = {}
 
-        # Cache for publication ID
+        # Cache for publication ID and location ID
         self._online_store_publication_id: Optional[str] = None
+        self._store_location_id: Optional[str] = None
 
     def _graphql_request(
         self,
@@ -143,6 +144,42 @@ class ShopifyGraphQLSeeder:
             # Fallback to hardcoded ID
             self._online_store_publication_id = "gid://shopify/Publication/1"
             return self._online_store_publication_id
+
+    def _get_store_location_id(self) -> str:
+        """Fetch the first available location ID for this shop."""
+        if self._store_location_id:
+            return self._store_location_id
+
+        query = """
+        query {
+            locations(first: 10) {
+                nodes {
+                    id
+                    name
+                }
+            }
+        }
+        """
+
+        try:
+            result = self._graphql_request(query)
+            locations = result["data"]["locations"]["nodes"]
+
+            # Use the first available location
+            if locations:
+                self._store_location_id = locations[0]["id"]
+                print(
+                    f"    📍 Using location: {locations[0]['name']} ({locations[0]['id']})"
+                )
+                return self._store_location_id
+            else:
+                raise Exception("No locations found")
+
+        except Exception as e:
+            print(f"    ⚠️ Failed to fetch locations: {e}")
+            # Fallback to hardcoded ID (this should be updated with actual location)
+            self._store_location_id = "gid://shopify/Location/1"
+            return self._store_location_id
 
     def _batch_publish_products(
         self, product_ids: List[str], publication_id: str
@@ -367,7 +404,7 @@ class ShopifyGraphQLSeeder:
                             },
                             "inventoryQuantities": [
                                 {
-                                    "locationId": "gid://shopify/Location/78228324491",
+                                    "locationId": self._get_store_location_id(),
                                     "name": "available",
                                     "quantity": variant_data["inventoryQuantity"],
                                 }
@@ -433,13 +470,6 @@ class ShopifyGraphQLSeeder:
         customers = self.customer_generator.generate_customers()
         for i, customer_data in enumerate(customers, 1):
             try:
-                # Make email unique by adding timestamp
-                import time
-
-                original_email = customer_data["email"]
-                unique_email = f"{original_email.split('@')[0]}+{int(time.time())}@{original_email.split('@')[1]}"
-                customer_data["email"] = unique_email
-
                 # Prepare addresses
                 addresses = []
                 if customer_data.get("defaultAddress"):
@@ -463,7 +493,6 @@ class ShopifyGraphQLSeeder:
                     customerCreate(input: $input) {
                         customer {
                             id
-                            email
                             displayName
                         }
                         userErrors {
@@ -478,7 +507,7 @@ class ShopifyGraphQLSeeder:
                     "input": {
                         "firstName": customer_data["firstName"],
                         "lastName": customer_data["lastName"],
-                        "email": customer_data["email"],
+                        # "email": customer_data["email"],  # Removed due to protected customer data restrictions
                         "tags": customer_data.get("tags", []),
                         "addresses": addresses,
                     }
@@ -496,9 +525,12 @@ class ShopifyGraphQLSeeder:
                 customer = result["data"]["customerCreate"]["customer"]
                 self.created_customers[f"customer_{i}"] = {
                     "id": customer["id"],
-                    "email": customer["email"],
+                    "displayName": customer.get(
+                        "displayName",
+                        f"{customer_data['firstName']} {customer_data['lastName']}",
+                    ),
                 }
-                print(f"  ✅ Customer: {customer['email']} ({customer['id']})")
+
             except Exception as e:
                 print(f"  ❌ Customer {i} failed: {e}")
         return self.created_customers
@@ -695,7 +727,6 @@ class ShopifyGraphQLSeeder:
                     "input": {
                         "lineItems": line_items,
                         "customerId": customer_id,
-                        "email": f"order{i}@example.com",
                         "tags": ["Test Order", f"Order-{i}"],
                     }
                 }
@@ -770,13 +801,9 @@ class ShopifyGraphQLSeeder:
     async def run(self) -> bool:
         print(f"🚀 Seeding Shopify store with GraphQL: {self.shop_domain}")
 
-        # Create products and customers in parallel since they're independent
-        print("📦 Creating products and customers in parallel...")
-        products_task = asyncio.create_task(self.create_products())
-        customers_task = asyncio.create_task(self.create_customers())
-
+        await self.create_products()
         # Wait for both to complete
-        await asyncio.gather(products_task, customers_task)
+        await self.create_customers()
 
         # Create collections after products are ready
         print("📚 Creating collections...")
@@ -864,23 +891,11 @@ class ShopifyGraphQLSeeder:
 
 
 async def main() -> bool:
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Seed Shopify store with test data")
-    parser.add_argument("--shop", help="Shop domain (e.g., your-store.myshopify.com)")
-    parser.add_argument("--token", help="Shopify access token")
-    args = parser.parse_args()
-    
+
     # Get shop details from arguments or environment variables
-    shop_domain = args.shop or os.getenv("SHOP_DOMAIN")
-    access_token = args.token or os.getenv("SHOPIFY_ACCESS_TOKEN")
-    
-    if not shop_domain or not access_token:
-        print("❌ Missing required parameters!")
-        print("Please provide shop domain and access token either:")
-        print("  - As command line arguments: --shop your-store.myshopify.com --token shpat_...")
-        print("  - As environment variables: SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN")
-        return False
-    
+    shop_domain = "gk-sphere.myshopify.com"
+    access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+
     seeder = ShopifyGraphQLSeeder(shop_domain, access_token)
     return await seeder.run()
 

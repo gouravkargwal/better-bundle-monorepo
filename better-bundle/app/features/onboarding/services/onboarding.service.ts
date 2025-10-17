@@ -138,6 +138,9 @@ export class OnboardingService {
         email: shopData.email,
         plan_type: shopData.plan.displayName,
         is_active: true,
+        shopify_plus:
+          shopData.plan.displayName.includes("Plus") ||
+          shopData.plan.displayName.includes("plus"),
         // For reinstalls, preserve onboarding status if it was completed
         ...(isReinstall && existingShop.onboarding_completed
           ? {}
@@ -151,6 +154,9 @@ export class OnboardingService {
         plan_type: shopData.plan.displayName,
         is_active: true,
         onboarding_completed: false,
+        shopify_plus:
+          shopData.plan.displayName.includes("Plus") ||
+          shopData.plan.displayName.includes("plus"),
       },
     });
   }
