@@ -27,7 +27,7 @@ function Extension() {
   const [quantities, setQuantities] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
   const hasTrackedView = useRef(false);
-
+  const [selectedImageIndex, setSelectedImageIndex] = useState({});
   const { lines, cost, buyerIdentity, storage } = shopify;
   const shopDomain = shopify.shop.myshopifyDomain;
   const customerId = buyerIdentity?.customer?.value?.id || null;
@@ -148,7 +148,7 @@ function Extension() {
   }
 
   function getSelectedImageIndex(productId) {
-    return 0; // Always show first image for now
+    return selectedImageIndex[productId] || 0;
   }
 
   // Carousel functions
@@ -281,14 +281,23 @@ function Extension() {
                     {/* Product Gallery with Thumbnails - Only show if multiple images */}
                     {hasMultipleImages && (
                       <s-scroll-box>
-                        <s-modal></s-modal>
                         <s-stack direction="inline" gap="small-100">
                           {images.map((image, index) => (
-                            <s-product-thumbnail
+                            <s-link
                               key={index}
-                              src={image.url}
-                              alt={`${product.title} - Image ${index + 1}`}
-                            />
+                              onClick={() =>
+                                setSelectedImageIndex((prev) => ({
+                                  ...prev,
+                                  [product.id]: index,
+                                }))
+                              }
+                            >
+                              <s-product-thumbnail
+                                key={index}
+                                src={image.url}
+                                alt={`${product.title} - Image ${index + 1}`}
+                              />
+                            </s-link>
                           ))}
                         </s-stack>
                       </s-scroll-box>
