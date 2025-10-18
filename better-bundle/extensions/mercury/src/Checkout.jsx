@@ -26,7 +26,6 @@ function Extension() {
   const [selectedVariants, setSelectedVariants] = useState({});
   const [quantities, setQuantities] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
-  const [currentImageIndex, setCurrentImageIndex] = useState({});
   const hasTrackedView = useRef(false);
 
   const { lines, cost, buyerIdentity, storage } = shopify;
@@ -42,8 +41,9 @@ function Extension() {
   }, [lines.value]);
 
   const cartValue = useMemo(() => {
-    return parseFloat(cost.totalAmount?.amount || "0");
-  }, [cost.totalAmount?.amount]);
+    const amount = cost.totalAmount?.value?.amount;
+    return parseFloat(amount ? String(amount) : "0");
+  }, [cost.totalAmount?.value?.amount]);
 
   const {
     loading,
@@ -147,30 +147,16 @@ function Extension() {
     return quantities[productId] || 1;
   }
 
+  function getSelectedImageIndex(productId) {
+    return 0; // Always show first image for now
+  }
+
   // Carousel functions
   function getProductImages(product) {
     if (!product.images || product.images.length === 0) {
       return product.image?.url ? [{ url: product.image.url }] : [];
     }
     return product.images;
-  }
-
-  function nextImage(productId, totalImages) {
-    setCurrentImageIndex((prev) => ({
-      ...prev,
-      [productId]: ((prev[productId] || 0) + 1) % totalImages,
-    }));
-  }
-
-  function prevImage(productId, totalImages) {
-    setCurrentImageIndex((prev) => ({
-      ...prev,
-      [productId]: ((prev[productId] || 0) - 1 + totalImages) % totalImages,
-    }));
-  }
-
-  function getCurrentImageIndex(productId) {
-    return currentImageIndex[productId] || 0;
   }
 
   function getAvailableOptions(product, selectedOptions = {}) {
@@ -266,10 +252,9 @@ function Extension() {
 
   return (
     <s-section heading="Recommended for you">
-      <s-stack direction="block" gap="base">
+      <s-stack direction="inline" gap="base">
         {availableProducts.map((product, index) => {
           const images = getProductImages(product);
-          const currentIndex = getCurrentImageIndex(product.id);
           const hasMultipleImages = images.length > 1;
 
           return (
@@ -277,50 +262,38 @@ function Extension() {
               key={product.id}
               padding="base"
               border="base"
-              border-radius="base"
+              borderRadius="base"
+              borderWidth="base"
             >
               <s-stack direction="block" gap="base">
                 {/* Image at the top - Phoenix style */}
                 <s-box>
-                  {images.length > 0 ? (
-                    <s-stack direction="block" gap="small-100">
-                      {/* Main Image */}
+                  <s-stack direction="block" gap="small-100">
+                    {/* Main Product Image */}
+                    <s-box>
                       <s-image
-                        src={images[currentIndex].url}
+                        src={images[getSelectedImageIndex(product.id)]?.url}
                         alt={product.title}
-                        aspectRatio="16/9"
+                        aspectRatio="1"
                       />
-
-                      {/* Carousel Controls - Only show if multiple images */}
-                      {hasMultipleImages && (
-                        <s-stack
-                          direction="inline"
-                          gap="small-100"
-                          justify-content="space-between"
-                        >
-                          <s-button
-                            onClick={() => prevImage(product.id, images.length)}
-                            disabled={adding[product.id]}
-                          >
-                            ‹
-                          </s-button>
-                          <s-text size="small">
-                            {currentIndex + 1}/{images.length}
-                          </s-text>
-                          <s-button
-                            onClick={() => nextImage(product.id, images.length)}
-                            disabled={adding[product.id]}
-                          >
-                            ›
-                          </s-button>
-                        </s-stack>
-                      )}
-                    </s-stack>
-                  ) : (
-                    <s-box border="base" border-radius="base" padding="base">
-                      <s-text size="small">No image</s-text>
                     </s-box>
-                  )}
+
+                    {/* Product Gallery with Thumbnails - Only show if multiple images */}
+                    {hasMultipleImages && (
+                      <s-scroll-box>
+                        <s-modal></s-modal>
+                        <s-stack direction="inline" gap="small-100">
+                          {images.map((image, index) => (
+                            <s-product-thumbnail
+                              key={index}
+                              src={image.url}
+                              alt={`${product.title} - Image ${index + 1}`}
+                            />
+                          ))}
+                        </s-stack>
+                      </s-scroll-box>
+                    )}
+                  </s-stack>
                 </s-box>
 
                 {/* Content - Phoenix style layout */}
@@ -350,12 +323,13 @@ function Extension() {
                         value={getQuantity(product.id)}
                         min={1}
                         max={10}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const value = e.currentTarget.value;
                           handleQuantityChange(
                             product.id,
-                            parseInt(e.target.value) || 1,
-                          )
-                        }
+                            parseInt(value) || 1,
+                          );
+                        }}
                       />
                       <s-button
                         onClick={() => incrementQuantity(product.id)}
@@ -369,13 +343,9 @@ function Extension() {
                   </s-stack>
 
                   <s-box>
-                    {/* Variant Options - Phoenix style (stacked vertically) */}
+                    {/* Variant Options - Responsive layout */}
                     {product.options && product.options.length > 0 && (
-                      <s-stack
-                        direction="inline"
-                        gap="small"
-                        justifyContent="space-between"
-                      >
+                      <s-stack direction="block" gap="small">
                         {getAvailableOptions(
                           product,
                           selectedVariants[product.id] || {},
@@ -386,13 +356,14 @@ function Extension() {
                             value={
                               selectedVariants[product.id]?.[option.name] || ""
                             }
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const value = e.currentTarget.value;
                               handleOptionChange(
                                 product.id,
                                 option.name,
-                                e.target.value,
-                              )
-                            }
+                                value,
+                              );
+                            }}
                           >
                             <s-option value="">Select {option.name}</s-option>
                             {option.values.map((value) => (
