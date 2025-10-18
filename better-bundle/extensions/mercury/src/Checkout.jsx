@@ -2,10 +2,8 @@ import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { useRecommendations } from "./hooks/useMercuryRecommendations.js";
 
-// Track add to cart function
 const trackAddToCart = async (productId, position, variantId) => {
   try {
-    // Simple console log for now - analytics will be handled by the hook
     console.log("Mercury: Product added to cart", {
       productId,
       position,
@@ -16,11 +14,9 @@ const trackAddToCart = async (productId, position, variantId) => {
   }
 };
 
-// Check if Shopify Plus is validated
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
 
-// 1. Export the extension
 export default async () => {
   render(<Extension />, document.body);
 };
@@ -30,19 +26,13 @@ function Extension() {
   const [selectedVariants, setSelectedVariants] = useState({});
   const [quantities, setQuantities] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
+  const [currentImageIndex, setCurrentImageIndex] = useState({});
   const hasTrackedView = useRef(false);
 
-  // Get checkout data
   const { lines, cost, buyerIdentity, storage } = shopify;
-  console.log("lines", lines);
-  console.log("cost", cost);
-  console.log("buyerIdentity", buyerIdentity);
-  console.log("storage", storage);
-
   const shopDomain = shopify.shop.myshopifyDomain;
   const customerId = buyerIdentity?.customer?.value?.id || null;
 
-  // Get cart data for context - memoized to prevent infinite re-renders
   const cartItems = useMemo(() => {
     return (
       lines.value
@@ -55,7 +45,6 @@ function Extension() {
     return parseFloat(cost.totalAmount?.amount || "0");
   }, [cost.totalAmount?.amount]);
 
-  // Use Mercury recommendations hook with cart data
   const {
     loading,
     products,
@@ -68,13 +57,11 @@ function Extension() {
     customerId,
     shopDomain,
     storage,
-    // Pass cart data for better recommendations
     cartItems: cartItems,
     cartValue: cartValue,
-    checkoutStep: "order_summary", // Current checkout step
+    checkoutStep: "order_summary",
   });
 
-  // Track product views when loaded (only once)
   useEffect(() => {
     if (
       products &&
@@ -89,10 +76,8 @@ function Extension() {
 
   async function handleAddToCart(variantId, productId, position) {
     try {
-      // Set loading state for this specific product
       setAdding((prev) => ({ ...prev, [productId]: true }));
 
-      // Check if variantId is valid
       if (!variantId) {
         console.error(
           "❌ Mercury: No variant ID available for product",
@@ -101,7 +86,6 @@ function Extension() {
         return;
       }
 
-      // Convert numeric ID to Shopify GID format
       const merchandiseId = variantId.startsWith("gid://")
         ? variantId
         : `gid://shopify/ProductVariant/${variantId}`;
@@ -116,11 +100,7 @@ function Extension() {
 
       if (result.type === "success") {
         console.log("✅ Mercury: Product added to cart");
-
-        // Mark product as added to prevent showing it again
         setAddedProducts((prev) => new Set([...prev, productId]));
-
-        // Track recommendation click only after successful add to cart
         await trackRecommendationClick(productId, position, null);
         await trackAddToCart(productId, position, variantId);
       } else {
@@ -129,7 +109,6 @@ function Extension() {
     } catch (err) {
       console.error("❌ Mercury: Error adding to cart:", err);
     } finally {
-      // Clear loading state for this specific product
       setAdding((prev) => ({ ...prev, [productId]: false }));
     }
   }
@@ -150,7 +129,7 @@ function Extension() {
   function handleQuantityChange(productId, newQuantity) {
     setQuantities((prev) => ({
       ...prev,
-      [productId]: Math.max(1, Math.min(10, newQuantity)), // Limit between 1-10
+      [productId]: Math.max(1, Math.min(10, newQuantity)),
     }));
   }
 
@@ -168,25 +147,45 @@ function Extension() {
     return quantities[productId] || 1;
   }
 
+  // Carousel functions
+  function getProductImages(product) {
+    if (!product.images || product.images.length === 0) {
+      return product.image?.url ? [{ url: product.image.url }] : [];
+    }
+    return product.images;
+  }
+
+  function nextImage(productId, totalImages) {
+    setCurrentImageIndex((prev) => ({
+      ...prev,
+      [productId]: ((prev[productId] || 0) + 1) % totalImages,
+    }));
+  }
+
+  function prevImage(productId, totalImages) {
+    setCurrentImageIndex((prev) => ({
+      ...prev,
+      [productId]: ((prev[productId] || 0) - 1 + totalImages) % totalImages,
+    }));
+  }
+
+  function getCurrentImageIndex(productId) {
+    return currentImageIndex[productId] || 0;
+  }
+
   function getAvailableOptions(product, selectedOptions = {}) {
     if (!product.options || !product.variants) return product.options || [];
-
     return product.options.map((option) => {
       const availableValues = new Set();
-
-      // Find all variants that match currently selected options
       const matchingVariants = product.variants.filter((variant) => {
         return Object.keys(selectedOptions).every((optionName) => {
-          if (optionName === option.name) return true; // Skip current option
+          if (optionName === option.name) return true;
           const selectedValue = selectedOptions[optionName];
           return variant.title && variant.title.includes(selectedValue);
         });
       });
-
-      // Get available values for this option from matching variants
       matchingVariants.forEach((variant) => {
         if (variant.inventory > 0) {
-          // Only include in-stock variants
           const optionValue = getOptionValueFromVariant(
             variant,
             option.name,
@@ -197,7 +196,6 @@ function Extension() {
           }
         }
       });
-
       return {
         ...option,
         values: option.values.filter((value) => availableValues.has(value)),
@@ -206,16 +204,11 @@ function Extension() {
   }
 
   function getOptionValueFromVariant(variant, optionName, product) {
-    // Find the option in the product options to get its position
     const option = product.options?.find((opt) => opt.name === optionName);
     if (!option) return null;
-
-    // Extract option value from variant title based on option position
     const title = variant.title || "";
     const parts = title.split(" / ");
-
-    // Use the option position to determine which part of the title to extract
-    const optionIndex = option.position - 1; // position is 1-based
+    const optionIndex = option.position - 1;
     return parts[optionIndex] || null;
   }
 
@@ -229,46 +222,30 @@ function Extension() {
           : null)
       );
     }
-
-    // Find variant that matches all selected options
     const matchingVariant = product.variants.find((variant) => {
       return Object.keys(selected).every((optionName) => {
         const optionValue = selected[optionName];
         return variant.title && variant.title.includes(optionValue);
       });
     });
-
     return matchingVariant ? matchingVariant.id : product.selectedVariantId;
   }
 
   function isVariantInStock(product) {
     const selectedVariantId = getSelectedVariant(product);
     if (!selectedVariantId || !product.variants) return true;
-
     const variant = product.variants.find((v) => v.id === selectedVariantId);
     return variant ? variant.inventory > 0 : true;
   }
 
-  // Check feature availability
-  if (!shopify.instructions.value.attributes.canUpdateAttributes) {
-    return (
-      <s-banner heading="Mercury" tone="warning">
-        {shopify.i18n.translate("attributeChangesAreNotSupported")}
-      </s-banner>
-    );
-  }
-
-  // Don't render if not Shopify Plus
   if (!shopifyPlusValidated && !loading) {
     return null;
   }
 
-  // Show loading state
   if (loading) {
     return (
       <s-section heading="Recommended for you">
-        <s-stack direction="block">
-          <s-skeleton-paragraph></s-skeleton-paragraph>
+        <s-stack direction="block" gap="base">
           <s-skeleton-paragraph></s-skeleton-paragraph>
           <s-skeleton-paragraph></s-skeleton-paragraph>
         </s-stack>
@@ -276,139 +253,112 @@ function Extension() {
     );
   }
 
-  // Show error state
   if (error) {
-    return null; // Silent fail for better UX
+    return null;
   }
 
-  // Filter out products that have been added to cart
   const availableProducts =
     products?.filter((product) => !addedProducts.has(product.id)) || [];
 
-  // Don't render if no products
   if (availableProducts.length === 0) {
     return null;
   }
 
-  // Render recommendations - Order Summary Style
   return (
     <s-section heading="Recommended for you">
-      <s-stack direction="block" rowGap="large-200">
-        {availableProducts.map((product, index) => (
-          <s-box key={product.id} padding="none">
-            {/* Main Product Layout - Horizontal like Order Summary */}
-            <s-stack
-              direction="inline"
-              block-alignment="start"
-              gap="base large-100"
-              borderWidth="base base base base"
+      <s-stack direction="block" gap="base">
+        {availableProducts.map((product, index) => {
+          const images = getProductImages(product);
+          const currentIndex = getCurrentImageIndex(product.id);
+          const hasMultipleImages = images.length > 1;
+
+          return (
+            <s-box
+              key={product.id}
+              padding="base"
+              border="base"
+              border-radius="base"
             >
-              {/* Product Thumbnail - Fixed Width on Left (64px like order summary) */}
-              <s-box
-                min-inline-size="64px"
-                max-inline-size="64px"
-                // borderWidth="base base base base"
-              >
-                {product.image?.url ? (
-                  <s-product-thumbnail
-                    src={product.image.url}
-                    alt={product.title}
-                  ></s-product-thumbnail>
-                ) : (
-                  <s-box border="base" border-radius="base" padding="base">
-                    <s-text>No Image</s-text>
-                  </s-box>
-                )}
-              </s-box>
+              <s-stack direction="block" gap="base">
+                {/* Image at the top - Phoenix style */}
+                <s-box>
+                  {images.length > 0 ? (
+                    <s-stack direction="block" gap="small-100">
+                      {/* Main Image */}
+                      <s-image
+                        src={images[currentIndex].url}
+                        alt={product.title}
+                        aspectRatio="16/9"
+                      />
 
-              {/* Product Details - Flexible Width on Right */}
-              <s-box>
-                <s-stack direction="block" gap="base small-100">
-                  {/* Product Title and Price */}
-                  <s-stack
-                    direction="inline"
-                    justifyContent="space-between"
-                    borderWidth="base base base base"
-                  >
-                    <s-text>{product.title}</s-text>
-                    <s-text>{product.price}</s-text>
-                  </s-stack>
-
-                  {/* Option Selects - Compact */}
-                  {product.options && product.options.length > 0 && (
-                    <s-stack
-                      direction="inline"
-                      justifyContent="space-between"
-                      gap="base large-300"
-                    >
-                      {getAvailableOptions(
-                        product,
-                        selectedVariants[product.id] || {},
-                      ).map((option) => (
-                        <s-select
-                          key={option.id}
-                          label={option.name}
-                          value={
-                            selectedVariants[product.id]?.[option.name] || ""
-                          }
-                          onChange={(e) =>
-                            handleOptionChange(
-                              product.id,
-                              option.name,
-                              e.target.value || "",
-                            )
-                          }
+                      {/* Carousel Controls - Only show if multiple images */}
+                      {hasMultipleImages && (
+                        <s-stack
+                          direction="inline"
+                          gap="small-100"
+                          justify-content="space-between"
                         >
-                          <s-option value="">Select {option.name}</s-option>
-                          {option.values.map((value) => (
-                            <s-option key={value} value={value}>
-                              {value}
-                            </s-option>
-                          ))}
-                        </s-select>
-                      ))}
+                          <s-button
+                            onClick={() => prevImage(product.id, images.length)}
+                            disabled={adding[product.id]}
+                          >
+                            ‹
+                          </s-button>
+                          <s-text size="small">
+                            {currentIndex + 1}/{images.length}
+                          </s-text>
+                          <s-button
+                            onClick={() => nextImage(product.id, images.length)}
+                            disabled={adding[product.id]}
+                          >
+                            ›
+                          </s-button>
+                        </s-stack>
+                      )}
                     </s-stack>
+                  ) : (
+                    <s-box border="base" border-radius="base" padding="base">
+                      <s-text size="small">No image</s-text>
+                    </s-box>
                   )}
+                </s-box>
 
-                  {/* Out of Stock Warning */}
-                  {!isVariantInStock(product) && (
-                    <s-banner tone="critical">
-                      Selected combination is out of stock
-                    </s-banner>
-                  )}
+                {/* Content - Phoenix style layout */}
+                <s-stack direction="block" gap="small">
+                  {/* Title */}
+                  <s-text>{product.title}</s-text>
 
-                  {/* Quantity and Add to Cart - Inline */}
+                  {/* Price and Quantity on same line - Phoenix style */}
                   <s-stack
                     direction="inline"
-                    block-alignment="center"
-                    gap="base large-300"
+                    gap="base"
+                    justifyContent="space-between"
+                    alignItems="center"
                   >
-                    {/* Quantity Controls - Using Buttons */}
-                    <s-stack
-                      direction="inline"
-                      block-alignment="center"
-                      alignItems="center"
-                      gap="base small-100"
-                    >
+                    <s-text type="strong">{product.price}</s-text>
+                    <s-stack direction="inline" gap="small">
                       <s-button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          decrementQuantity(product.id);
-                        }}
+                        onClick={() => decrementQuantity(product.id)}
                         disabled={
                           adding[product.id] || getQuantity(product.id) <= 1
                         }
+                        inlineSize="fit-content"
                       >
-                        -
+                        −
                       </s-button>
-
-                      <s-text>{getQuantity(product.id)}</s-text>
-
+                      <s-number-field
+                        value={getQuantity(product.id)}
+                        min={1}
+                        max={10}
+                        onChange={(e) =>
+                          handleQuantityChange(
+                            product.id,
+                            parseInt(e.target.value) || 1,
+                          )
+                        }
+                      />
                       <s-button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          incrementQuantity(product.id);
-                        }}
+                        onClick={() => incrementQuantity(product.id)}
                         disabled={
                           adding[product.id] || getQuantity(product.id) >= 10
                         }
@@ -416,29 +366,68 @@ function Extension() {
                         +
                       </s-button>
                     </s-stack>
+                  </s-stack>
 
-                    {/* Add to Cart Button */}
+                  <s-box>
+                    {/* Variant Options - Phoenix style (stacked vertically) */}
+                    {product.options && product.options.length > 0 && (
+                      <s-stack
+                        direction="inline"
+                        gap="small"
+                        justifyContent="space-between"
+                      >
+                        {getAvailableOptions(
+                          product,
+                          selectedVariants[product.id] || {},
+                        ).map((option) => (
+                          <s-select
+                            key={option.id}
+                            label={option.name}
+                            value={
+                              selectedVariants[product.id]?.[option.name] || ""
+                            }
+                            onChange={(e) =>
+                              handleOptionChange(
+                                product.id,
+                                option.name,
+                                e.target.value,
+                              )
+                            }
+                          >
+                            <s-option value="">Select {option.name}</s-option>
+                            {option.values.map((value) => (
+                              <s-option key={value} value={value}>
+                                {value}
+                              </s-option>
+                            ))}
+                          </s-select>
+                        ))}
+                      </s-stack>
+                    )}
+                  </s-box>
+                  {/* Add to Cart Button - Phoenix style (full width) */}
+                  <s-box>
                     <s-button
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      inlineSize="fill"
+                      onClick={() => {
                         const variantId = getSelectedVariant(product);
                         handleAddToCart(variantId, product.id, index);
                       }}
-                      loading={adding[product.id] || false}
+                      loading={adding[product.id]}
                       disabled={
                         adding[product.id] || !isVariantInStock(product)
                       }
                     >
                       {!isVariantInStock(product)
                         ? "Out of Stock"
-                        : "Add to order"}
+                        : "Add to cart"}
                     </s-button>
-                  </s-stack>
+                  </s-box>
                 </s-stack>
-              </s-box>
-            </s-stack>
-          </s-box>
-        ))}
+              </s-stack>
+            </s-box>
+          );
+        })}
       </s-stack>
     </s-section>
   );
