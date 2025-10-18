@@ -276,6 +276,7 @@ function Extension() {
                         src={images[getSelectedImageIndex(product.id)]?.url}
                         alt={product.title}
                         aspectRatio="16/9"
+                        loading="lazy"
                       />
                     </s-box>
 
@@ -295,6 +296,10 @@ function Extension() {
                                   ...prev,
                                   [product.id]: index,
                                 }))
+                              }
+                              aria-label={`View image ${index + 1} of ${images.length}`}
+                              aria-pressed={
+                                selectedImageIndex[product.id] === index
                               }
                             >
                               <s-product-thumbnail
