@@ -264,7 +264,6 @@ function Extension() {
               border="base"
               borderRadius="base"
               borderWidth="base"
-              minInlineSize="280px"
               inlineSize="100%"
             >
               <s-stack direction="block" gap="base">
@@ -360,7 +359,11 @@ function Extension() {
                   <s-box>
                     {/* Variant Options - Responsive layout */}
                     {product.options && product.options.length > 0 && (
-                      <s-stack direction="block" gap="small">
+                      <s-stack
+                        direction="inline"
+                        gap="small"
+                        justifyContent="space-between"
+                      >
                         {getAvailableOptions(
                           product,
                           selectedVariants[product.id] || {},
