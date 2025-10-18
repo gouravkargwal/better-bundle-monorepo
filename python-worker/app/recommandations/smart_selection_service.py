@@ -270,9 +270,8 @@ class SmartSelectionService:
         # Mercury checkout-specific recommendation priority
         recommendation_types = [
             "frequently_bought_together",  # Primary: Complementary products (high AOV impact)
-            "item_neighbors",  # Secondary: Similar alternatives
-            "user_recommendations",  # Tertiary: Personalized based on history
             "popular_category",  # Fallback: Category-based popular items
+            "user_recommendations",  # Tertiary: Personalized based on history
             "popular",  # Final fallback: General popular items
         ]
 
@@ -282,7 +281,6 @@ class SmartSelectionService:
             recommendation_types = [
                 "frequently_bought_together",
                 "user_recommendations",
-                "item_neighbors",
                 "popular_category",
                 "popular",
             ]
@@ -290,7 +288,6 @@ class SmartSelectionService:
             # Payment step: focus on last-minute essentials
             recommendation_types = [
                 "frequently_bought_together",
-                "item_neighbors",
                 "popular_category",
                 "user_recommendations",
                 "popular",

@@ -139,27 +139,27 @@ class FrequentlyBoughtTogetherService:
     ) -> List[str]:
         """Get order IDs that contain the target product"""
         try:
-            # Get orders where the product was purchased
-            # Since order_id and product_id are stored in interaction_metadata JSON
+            # Query actual order data instead of interaction events
+            from app.core.database.models.order_data import OrderData, LineItemData
+
+            # Find orders that contain the target product
             result = await session.execute(
-                select(UserInteraction.interaction_metadata).where(
+                select(OrderData.id)
+                .join(LineItemData)
+                .where(
                     and_(
-                        UserInteraction.shop_id == shop_id,
-                        UserInteraction.interaction_type == "checkout_completed",
+                        OrderData.shop_id == shop_id,
+                        LineItemData.product_id == product_id,
+                        OrderData.financial_status == "paid",  # Only paid orders
                     )
                 )
             )
 
-            order_ids = []
-            for row in result.fetchall():
-                metadata = row[0] or {}
-                # Check if this order contains the target product
-                if self._order_contains_product(metadata, product_id):
-                    order_id = metadata.get("order_id")
-                    if order_id:
-                        order_ids.append(str(order_id))
-
-            return list(set(order_ids))  # Remove duplicates
+            order_ids = [str(row[0]) for row in result.fetchall()]
+            logger.info(
+                f"Found {len(order_ids)} orders containing product {product_id}"
+            )
+            return order_ids
 
         except Exception as e:
             logger.error(f"Error getting orders with product: {str(e)}")
@@ -175,32 +175,40 @@ class FrequentlyBoughtTogetherService:
     ) -> List[Dict[str, Any]]:
         """Find products frequently bought together in the same orders"""
         try:
-            # Get all checkout completed events for the shop
+            # Query actual order line items instead of interaction events
+            from app.core.database.models.order_data import OrderData, LineItemData
+
+            # Get all line items from orders that contain the target product
             result = await session.execute(
-                select(UserInteraction.interaction_metadata).where(
+                select(LineItemData.product_id, OrderData.id)
+                .join(OrderData)
+                .where(
                     and_(
-                        UserInteraction.shop_id == shop_id,
-                        UserInteraction.interaction_type == "checkout_completed",
+                        OrderData.shop_id == shop_id,
+                        OrderData.id.in_(order_ids),
+                        OrderData.financial_status == "paid",
                     )
                 )
             )
 
             # Count co-occurrences of products in the same orders
             product_co_occurrences = {}
+            order_products = {}  # Track products per order
 
             for row in result.fetchall():
-                metadata = row[0] or {}
-                order_id = metadata.get("order_id")
+                product_id, order_id = row[0], str(row[1])
 
-                if order_id and str(order_id) in order_ids:
-                    # Extract products from this order
-                    products = self._extract_products_from_order(metadata)
+                if order_id not in order_products:
+                    order_products[order_id] = set()
+                order_products[order_id].add(product_id)
 
-                    for product_id in products:
-                        if product_id != target_product_id:
-                            if product_id not in product_co_occurrences:
-                                product_co_occurrences[product_id] = 0
-                            product_co_occurrences[product_id] += 1
+            # Count co-occurrences
+            for order_id, products in order_products.items():
+                for product_id in products:
+                    if product_id != target_product_id:
+                        if product_id not in product_co_occurrences:
+                            product_co_occurrences[product_id] = 0
+                        product_co_occurrences[product_id] += 1
 
             # Filter by minimum co-occurrences and sort
             co_purchased = []
@@ -220,6 +228,96 @@ class FrequentlyBoughtTogetherService:
         except Exception as e:
             logger.error(f"Error finding co-purchased products: {str(e)}")
             return []
+
+    async def diagnose_data_availability(
+        self, shop_id: str, product_id: str
+    ) -> Dict[str, Any]:
+        """Diagnose why no co-purchase data is found"""
+        try:
+            async with get_transaction_context() as session:
+                from app.core.database.models.order_data import OrderData, LineItemData
+
+                # Check 1: Total orders in database
+                total_orders = await session.execute(
+                    select(func.count(OrderData.id)).where(OrderData.shop_id == shop_id)
+                )
+                order_count = total_orders.scalar() or 0
+
+                # Check 2: Orders containing this product
+                orders_with_product = await session.execute(
+                    select(func.count(OrderData.id.distinct()))
+                    .join(LineItemData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            LineItemData.product_id == product_id,
+                            OrderData.financial_status == "paid",
+                        )
+                    )
+                )
+                product_order_count = orders_with_product.scalar() or 0
+
+                # Check 3: Total line items for this product
+                product_line_items = await session.execute(
+                    select(func.count(LineItemData.id))
+                    .join(OrderData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            LineItemData.product_id == product_id,
+                            OrderData.financial_status == "paid",
+                        )
+                    )
+                )
+                line_item_count = product_line_items.scalar() or 0
+
+                # Check 4: Other products in same orders
+                other_products = await session.execute(
+                    select(LineItemData.product_id, func.count(LineItemData.product_id))
+                    .join(OrderData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            OrderData.id.in_(
+                                select(OrderData.id)
+                                .join(LineItemData)
+                                .where(
+                                    and_(
+                                        OrderData.shop_id == shop_id,
+                                        LineItemData.product_id == product_id,
+                                        OrderData.financial_status == "paid",
+                                    )
+                                )
+                            ),
+                            LineItemData.product_id != product_id,
+                        )
+                    )
+                    .group_by(LineItemData.product_id)
+                    .order_by(func.count(LineItemData.product_id).desc())
+                )
+
+                co_purchase_data = []
+                for row in other_products.fetchall():
+                    co_purchase_data.append(
+                        {"product_id": row[0], "co_occurrences": row[1]}
+                    )
+
+                return {
+                    "total_orders": order_count,
+                    "orders_with_product": product_order_count,
+                    "product_line_items": line_item_count,
+                    "co_purchase_candidates": len(co_purchase_data),
+                    "top_co_purchases": co_purchase_data[:5],  # Top 5
+                    "diagnosis": (
+                        "✅ Data available"
+                        if product_order_count > 0
+                        else "❌ No orders found for this product"
+                    ),
+                }
+
+        except Exception as e:
+            logger.error(f"Error in diagnosis: {str(e)}")
+            return {"error": str(e)}
 
     async def _get_product_details(
         self, session: AsyncSession, shop_id: str, co_purchased: List[Dict[str, Any]]
