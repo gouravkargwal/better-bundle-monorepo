@@ -241,6 +241,14 @@ async def fetch_recommendations_logic(
                 f"⚠️ Failed to get exclusions for user {effective_user_id}: {e}"
             )
 
+    # Add current cart items to exclusion list (from request metadata)
+    current_cart_items = (
+        request.metadata.get("cart_items", []) if request.metadata else []
+    )
+    if current_cart_items:
+        exclude_items.extend(current_cart_items)
+        logger.info(f"🚫 Excluding current cart items: {current_cart_items}")
+
     final_exclude_items = list(set(exclude_items)) if exclude_items else None
 
     # 5. Cache Check

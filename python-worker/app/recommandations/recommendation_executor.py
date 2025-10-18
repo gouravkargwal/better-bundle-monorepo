@@ -26,6 +26,17 @@ class RecommendationExecutor:
         self.gorse_client = gorse_client
         self.user_neighbors_service = UserNeighborsService()
 
+    def _extract_numeric_id(self, gid: str) -> Optional[str]:
+        """Extract numeric ID from GID format"""
+        if not gid or not isinstance(gid, str):
+            return None
+        try:
+            if gid.startswith("gid://shopify/"):
+                return gid.split("/")[-1]
+            return gid
+        except Exception:
+            return None
+
     async def execute_recommendation_level(
         self,
         level: str,
@@ -124,14 +135,26 @@ class RecommendationExecutor:
         exclude_items: Optional[List[str]],
     ) -> Dict[str, Any]:
         """Execute item neighbors recommendation"""
+        # Extract numeric ID from GID format if needed
+        clean_product_id = self._extract_numeric_id(product_id)
+        if not clean_product_id:
+            logger.warning(f"⚠️ Invalid product ID format: {product_id}")
+            return {
+                "success": False,
+                "items": [],
+                "source": "gorse_item_neighbors_invalid_id",
+            }
+
         # Apply shop prefix for multi-tenancy
-        prefixed_item_id = f"shop_{shop_id}_{product_id}"
+        prefixed_item_id = f"shop_{shop_id}_{clean_product_id}"
         # Convert exclude_items to Gorse format (with shop prefix)
         gorse_exclude_items = None
         if exclude_items:
-            gorse_exclude_items = [
-                f"shop_{shop_id}_{item_id}" for item_id in exclude_items
-            ]
+            gorse_exclude_items = []
+            for item_id in exclude_items:
+                clean_id = self._extract_numeric_id(item_id)
+                if clean_id:
+                    gorse_exclude_items.append(f"shop_{shop_id}_{clean_id}")
 
         result = await self.gorse_client.get_item_neighbors(
             item_id=prefixed_item_id,
@@ -161,9 +184,11 @@ class RecommendationExecutor:
         # Convert exclude_items to Gorse format (with shop prefix)
         gorse_exclude_items = None
         if exclude_items:
-            gorse_exclude_items = [
-                f"shop_{shop_id}_{item_id}" for item_id in exclude_items
-            ]
+            gorse_exclude_items = []
+            for item_id in exclude_items:
+                clean_id = self._extract_numeric_id(item_id)
+                if clean_id:
+                    gorse_exclude_items.append(f"shop_{shop_id}_{clean_id}")
 
         result = await self.gorse_client.get_recommendations(
             user_id=prefixed_user_id,

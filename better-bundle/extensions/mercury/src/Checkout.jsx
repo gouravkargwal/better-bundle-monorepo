@@ -35,7 +35,15 @@ function Extension() {
   const cartItems = useMemo(() => {
     return (
       lines.value
-        ?.map((line) => line.merchandise?.product?.id)
+        ?.map((line) => {
+          const productId = line.merchandise?.product?.id;
+          if (!productId) return null;
+          // Extract numeric ID from GID format (gid://shopify/Product/123456 -> 123456)
+          if (productId.startsWith("gid://shopify/Product/")) {
+            return productId.split("/").pop();
+          }
+          return productId;
+        })
         .filter(Boolean) || []
     );
   }, [lines.value]);
