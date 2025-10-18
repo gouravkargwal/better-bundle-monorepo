@@ -264,6 +264,8 @@ function Extension() {
               border="base"
               borderRadius="base"
               borderWidth="base"
+              minInlineSize="280px"
+              inlineSize="100%"
             >
               <s-stack direction="block" gap="base">
                 {/* Image at the top - Phoenix style */}
@@ -274,14 +276,18 @@ function Extension() {
                       <s-image
                         src={images[getSelectedImageIndex(product.id)]?.url}
                         alt={product.title}
-                        aspectRatio="1"
+                        aspectRatio="16/9"
                       />
                     </s-box>
 
                     {/* Product Gallery with Thumbnails - Only show if multiple images */}
                     {hasMultipleImages && (
                       <s-scroll-box>
-                        <s-stack direction="inline" gap="small-100">
+                        <s-stack
+                          direction="inline"
+                          gap="small-100"
+                          justifyContent="center"
+                        >
                           {images.map((image, index) => (
                             <s-link
                               key={index}
