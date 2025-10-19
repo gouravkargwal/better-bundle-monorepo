@@ -79,10 +79,10 @@ class HybridRecommendationService:
             "popular": 0.1,  # 10% general popular items
         },
         "post_purchase": {
-            "popular_category": 0.5,  # 50% popular in same category (most relevant)
-            "item_neighbors": 0.3,  # 30% similar products to purchased items
-            "frequently_bought_together": 0.15,  # 15% cross-sell (if data available)
-            "user_recommendations": 0.05,  # 5% personalized based on user history
+            "frequently_bought_together": 0.4,  # 40% FBT for cross-sell (industry standard)
+            "user_recommendations": 0.25,  # 25% personalized (enhanced personalization)
+            "item_neighbors": 0.2,  # 20% similar products to purchased items
+            "popular_category": 0.15,  # 15% popular in same category (fallback)
         },
     }
 
