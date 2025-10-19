@@ -2,18 +2,32 @@
 Kafka configuration settings
 """
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 
 
 class KafkaSettings(BaseSettings):
     """Kafka configuration settings"""
 
     # Connection settings
-    bootstrap_servers: List[str] = Field(
-        default=["localhost:9092"], env="KAFKA_BOOTSTRAP_SERVERS"
+    bootstrap_servers: str = Field(
+        default="localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS"
     )
+
+    @property
+    def bootstrap_servers_list(self) -> List[str]:
+        """Convert bootstrap_servers string to list"""
+        if isinstance(self.bootstrap_servers, str):
+            return [self.bootstrap_servers]
+        return self.bootstrap_servers
+
+    def model_dump(self) -> Dict[str, Any]:
+        """Override model_dump to use bootstrap_servers_list"""
+        data = super().model_dump()
+        data["bootstrap_servers"] = self.bootstrap_servers_list
+        return data
+
     client_id: str = Field(default="betterbundle", env="KAFKA_CLIENT_ID")
     worker_id: str = Field(default="worker-1", env="KAFKA_WORKER_ID")
 
