@@ -1,6 +1,6 @@
 """
 Frequently Bought Together Recommendation Service
-Analyzes purchase patterns to find products commonly bought together
+High-performance FBT using FP-Growth algorithm (Layer 1 of three-layer system)
 """
 
 from typing import Dict, Any, List, Optional
@@ -10,14 +10,22 @@ from app.core.logging import get_logger
 from app.core.database.models.user_interaction import UserInteraction
 from app.core.database.models.product_data import ProductData
 from app.core.database.session import get_transaction_context
+from app.recommandations.fp_growth_engine import FPGrowthEngine, FPGrowthConfig
 
 logger = get_logger(__name__)
 
 
 class FrequentlyBoughtTogetherService:
     """
-    Service for getting frequently bought together products with multiple images support
+    High-performance FBT service using FP-Growth algorithm
+
+    Layer 1: FP-Growth base engine (70% quality)
+    Uses existing OrderData and LineItemData tables - no new tables needed.
     """
+
+    def __init__(self):
+        """Initialize with FP-Growth engine"""
+        self.fp_engine = FPGrowthEngine()
 
     def _extract_images_from_media(
         self, media_data: Any, fallback_title: str
@@ -70,19 +78,70 @@ class FrequentlyBoughtTogetherService:
         product_id: str,
         limit: int = 4,
         min_co_occurrences: int = 2,
+        cart_value: float = 0.0,
     ) -> Dict[str, Any]:
         """
-        Find products frequently bought together with the given product
+        High-performance FBT using FP-Growth algorithm
 
         Args:
             shop_id: Shop ID
             product_id: Product ID to find co-purchased items for
             limit: Maximum number of recommendations
-            min_co_occurrences: Minimum number of co-purchases required
+            min_co_occurrences: Minimum number of co-purchases required (legacy param)
 
         Returns:
             Dict with frequently bought together recommendations
         """
+        try:
+            logger.info(
+                f"🎯 Getting FBT recommendations for product {product_id} in shop {shop_id}"
+            )
+
+            # Use FP-Growth engine for high-performance recommendations
+            result = await self.fp_engine.get_recommendations(
+                shop_id=shop_id,
+                cart_items=[product_id],  # Single product as cart
+                limit=limit,
+                cart_value=cart_value,
+            )
+
+            if not result["success"]:
+                logger.warning(
+                    f"FP-Growth failed: {result.get('error', 'Unknown error')}"
+                )
+                # Fallback to legacy method if FP-Growth fails
+                return await self._legacy_fbt_method(
+                    shop_id, product_id, limit, min_co_occurrences
+                )
+
+            # Enrich with product details
+            enriched_items = await self._enrich_recommendations(
+                shop_id, result["items"]
+            )
+
+            return {
+                "success": True,
+                "items": enriched_items,
+                "source": "fp_growth_engine",
+                "count": len(enriched_items),
+                "rules_matched": result.get("rules_matched", 0),
+            }
+
+        except Exception as e:
+            logger.error(f"Error in FP-Growth FBT: {str(e)}")
+            # Fallback to legacy method
+            return await self._legacy_fbt_method(
+                shop_id, product_id, limit, min_co_occurrences
+            )
+
+    async def _legacy_fbt_method(
+        self,
+        shop_id: str,
+        product_id: str,
+        limit: int,
+        min_co_occurrences: int,
+    ) -> Dict[str, Any]:
+        """Legacy FBT method as fallback"""
         try:
             async with get_transaction_context() as session:
                 # Get all orders that contain the target product
@@ -121,12 +180,12 @@ class FrequentlyBoughtTogetherService:
                 return {
                     "success": True,
                     "items": recommendations,
-                    "source": "frequently_bought_together",
+                    "source": "legacy_fbt",
                     "count": len(recommendations),
                 }
 
         except Exception as e:
-            logger.error(f"Error getting frequently bought together: {str(e)}")
+            logger.error(f"Error in legacy FBT: {str(e)}")
             return {
                 "success": False,
                 "items": [],
@@ -318,6 +377,109 @@ class FrequentlyBoughtTogetherService:
         except Exception as e:
             logger.error(f"Error in diagnosis: {str(e)}")
             return {"error": str(e)}
+
+    async def _enrich_recommendations(
+        self, shop_id: str, recommendations: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enrich FP-Growth recommendations with product details"""
+        try:
+            async with get_transaction_context() as session:
+                enriched_items = []
+
+                for rec in recommendations:
+                    product_id = rec["id"]
+
+                    # Get product details from database
+                    result = await session.execute(
+                        select(ProductData).where(
+                            and_(
+                                ProductData.shop_id == shop_id,
+                                ProductData.product_id == product_id,
+                            )
+                        )
+                    )
+                    product = result.scalar_one_or_none()
+
+                    if product:
+                        enriched_item = {
+                            "id": product_id,
+                            "title": product.title or "Unknown Product",
+                            "handle": product.handle or "",
+                            "price": {
+                                "amount": str(product.price or 0),
+                                "currency_code": product.currency_code or "USD",
+                            },
+                            "image": self._extract_image_from_media(
+                                product.media, product.title or "Product"
+                            ),
+                            "images": self._extract_images_from_media(
+                                product.media, product.title or "Product"
+                            ),
+                            "available": (
+                                product.available
+                                if product.available is not None
+                                else True
+                            ),
+                            "url": (
+                                f"/products/{product.handle}" if product.handle else ""
+                            ),
+                            "score": rec["score"],
+                            "reason": rec["reason"],
+                            "source": rec["source"],
+                        }
+                        enriched_items.append(enriched_item)
+
+                return enriched_items
+
+        except Exception as e:
+            logger.error(f"Error enriching recommendations: {str(e)}")
+            return []
+
+    async def train_fp_growth_model(self, shop_id: str) -> Dict[str, Any]:
+        """
+        Train FP-Growth model for the shop
+
+        This should be called periodically (daily) to retrain the model
+        """
+        try:
+            logger.info(f"🧠 Training FP-Growth model for shop {shop_id}")
+            result = await self.fp_engine.train_model(shop_id)
+
+            if result["success"]:
+                logger.info(
+                    f"✅ FP-Growth training completed: {result['association_rules']} rules generated"
+                )
+            else:
+                logger.error(f"❌ FP-Growth training failed: {result.get('error')}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error training FP-Growth model: {str(e)}")
+            return {"success": False, "error": str(e), "shop_id": shop_id}
+
+    async def train_embeddings_model(self, shop_id: str) -> Dict[str, Any]:
+        """
+        Train product embeddings model for semantic similarity
+
+        This should be called periodically (weekly) to retrain embeddings
+        """
+        try:
+            logger.info(f"🧠 Training embeddings model for shop {shop_id}")
+            result = await self.fp_engine.train_embeddings(shop_id)
+
+            if result["success"]:
+                logger.info(
+                    f"✅ Embeddings training completed: {result['products_embedded']} products embedded"
+                )
+            else:
+                logger.error(f"❌ Embeddings training failed: {result.get('error')}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error training embeddings model: {str(e)}")
+            return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def _get_product_details(
         self, session: AsyncSession, shop_id: str, co_purchased: List[Dict[str, Any]]
