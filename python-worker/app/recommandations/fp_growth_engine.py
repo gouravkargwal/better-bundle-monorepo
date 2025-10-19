@@ -158,39 +158,75 @@ class FPGrowthEngine:
     async def _train_with_mlxtend(
         self, transactions: List[List[str]]
     ) -> List[AssociationRule]:
-        """Train using mlxtend (correct way)"""
+        """Train using mlxtend (corrected implementation)"""
         from mlxtend.frequent_patterns import fpgrowth, association_rules
         from mlxtend.preprocessing import TransactionEncoder
         import pandas as pd
 
+        # Validate input
+        if not transactions or len(transactions) < 10:
+            logger.warning("Insufficient transactions for training")
+            return []
+
+        # Clean and validate transactions
+        clean_transactions = []
+        for transaction in transactions:
+            # Remove duplicates and filter empty
+            clean_transaction = list(set([str(item) for item in transaction if item]))
+            if len(clean_transaction) >= 2:  # Need at least 2 items
+                clean_transactions.append(clean_transaction)
+
+        if len(clean_transactions) < 10:
+            logger.warning("Insufficient clean transactions for training")
+            return []
+
         # Convert transactions to binary DataFrame
         te = TransactionEncoder()
-        te_ary = te.fit(transactions).transform(transactions)
-        df = pd.DataFrame(te_ary, columns=te.columns_)
+        try:
+            te_ary = te.fit(clean_transactions).transform(clean_transactions)
+            df = pd.DataFrame(te_ary, columns=te.columns_)
+        except Exception as e:
+            logger.error(f"Transaction encoding failed: {e}")
+            return []
 
         logger.info(f"📊 Created transaction matrix: {df.shape}")
 
-        # Mine frequent itemsets
-        frequent_itemsets_df = fpgrowth(
-            df,
-            min_support=self.config.min_support,
-            use_colnames=True,
-            max_len=3,  # Limit to 3-item combinations
-        )
+        # Mine frequent itemsets with better error handling
+        try:
+            # Use adaptive min_support to ensure we get some results
+            adaptive_min_support = max(
+                self.config.min_support, 1.0 / len(clean_transactions)
+            )
+            frequent_itemsets_df = fpgrowth(
+                df,
+                min_support=adaptive_min_support,
+                use_colnames=True,
+                max_len=3,
+            )
+        except Exception as e:
+            logger.error(f"FP-Growth mining failed: {e}")
+            return []
 
-        logger.info(f"🔍 Found {len(frequent_itemsets_df)} frequent itemsets")
-
-        if len(frequent_itemsets_df) == 0:
+        if frequent_itemsets_df.empty:
             logger.warning("No frequent itemsets found")
             return []
 
-        # Generate association rules DIRECTLY from fpgrowth output
-        rules_df = association_rules(
-            frequent_itemsets_df,  # ✅ Correct format
-            metric="confidence",
-            min_threshold=self.config.min_confidence,
-            num_itemsets=len(frequent_itemsets_df),
-        )
+        logger.info(f"🔍 Found {len(frequent_itemsets_df)} frequent itemsets")
+
+        # Generate association rules with proper error handling
+        try:
+            rules_df = association_rules(
+                frequent_itemsets_df,
+                metric="confidence",
+                min_threshold=self.config.min_confidence,
+            )
+        except Exception as e:
+            logger.error(f"Association rule generation failed: {e}")
+            return []
+
+        if rules_df.empty:
+            logger.warning("No association rules generated")
+            return []
 
         # Filter by lift
         rules_df = rules_df[rules_df["lift"] >= self.config.min_lift]
@@ -200,16 +236,20 @@ class FPGrowthEngine:
         # Convert to AssociationRule objects
         rules = []
         for _, row in rules_df.iterrows():
-            rule = AssociationRule(
-                antecedent=list(row["antecedents"]),
-                consequent=list(row["consequents"]),
-                support=float(row["support"]),
-                confidence=float(row["confidence"]),
-                lift=float(row["lift"]),
-                recency_weight=1.0,
-                final_score=float(row["confidence"] * row["lift"]),
-            )
-            rules.append(rule)
+            try:
+                rule = AssociationRule(
+                    antecedent=list(row["antecedents"]),
+                    consequent=list(row["consequents"]),
+                    support=float(row["support"]),
+                    confidence=float(row["confidence"]),
+                    lift=float(row["lift"]),
+                    recency_weight=1.0,
+                    final_score=float(row["confidence"] * row["lift"]),
+                )
+                rules.append(rule)
+            except Exception as e:
+                logger.warning(f"Failed to create rule from row: {e}")
+                continue
 
         return rules
 
@@ -217,12 +257,11 @@ class FPGrowthEngine:
         self, transactions: List[List[str]]
     ) -> List[AssociationRule]:
         """
-        Fallback when mlxtend not available
+        Improved fallback when mlxtend not available
 
-        WARNING: This generates lower quality rules (only 1->1 rules)
-        For production, ALWAYS install mlxtend!
+        Generates both 1->1 and 2->1 rules for better quality
         """
-        logger.warning("⚠️ Using fallback - quality will be reduced")
+        logger.warning("⚠️ Using improved fallback - quality will be reduced")
 
         # Count single items
         item_counts = Counter()
@@ -231,8 +270,10 @@ class FPGrowthEngine:
                 item_counts[item] += 1
 
         min_support_count = int(len(transactions) * self.config.min_support)
+        total_transactions = len(transactions)
+        rules = []
 
-        # Count pairs
+        # Generate 1->1 rules (A -> B)
         pair_counts = Counter()
         for transaction in transactions:
             items = list(transaction)
@@ -243,10 +284,6 @@ class FPGrowthEngine:
                     else:
                         pair = (items[j], items[i])
                     pair_counts[pair] += 1
-
-        # Generate simple rules: A -> B
-        rules = []
-        total_transactions = len(transactions)
 
         for (item_a, item_b), pair_count in pair_counts.items():
             if pair_count < min_support_count:
@@ -299,7 +336,58 @@ class FPGrowthEngine:
                         )
                     )
 
-        logger.info(f"📋 Fallback generated {len(rules)} rules")
+        # Generate 2->1 rules (A,B -> C) for better FBT quality
+        triplet_counts = Counter()
+        for transaction in transactions:
+            items = list(transaction)
+            if len(items) >= 3:  # Need at least 3 items for triplets
+                for i in range(len(items)):
+                    for j in range(i + 1, len(items)):
+                        for k in range(j + 1, len(items)):
+                            # Create ordered triplet
+                            triplet = tuple(sorted([items[i], items[j], items[k]]))
+                            triplet_counts[triplet] += 1
+
+        for triplet, count in triplet_counts.items():
+            if count < min_support_count:
+                continue
+
+            # Generate rules: A,B -> C
+            for i in range(len(triplet)):
+                antecedent = [triplet[j] for j in range(len(triplet)) if j != i]
+                consequent = [triplet[i]]
+
+                # Count antecedent support
+                antecedent_count = 0
+                for transaction in transactions:
+                    if all(item in transaction for item in antecedent):
+                        antecedent_count += 1
+
+                if antecedent_count > 0:
+                    support = count / total_transactions
+                    confidence = count / antecedent_count
+                    consequent_count = item_counts[consequent[0]]
+                    lift = confidence / (consequent_count / total_transactions)
+
+                    if (
+                        confidence >= self.config.min_confidence
+                        and lift >= self.config.min_lift
+                    ):
+                        rules.append(
+                            AssociationRule(
+                                antecedent=antecedent,
+                                consequent=consequent,
+                                support=support,
+                                confidence=confidence,
+                                lift=lift,
+                                recency_weight=1.0,
+                                final_score=confidence * lift,
+                            )
+                        )
+
+        logger.info(
+            f"📋 Improved fallback generated {len(rules)} rules (1->1 and 2->1)"
+        )
         return rules
 
     async def train_embeddings(self, shop_id: str) -> Dict[str, Any]:
@@ -415,12 +503,12 @@ class FPGrowthEngine:
             }
 
     async def _load_transactions(self, shop_id: str) -> List[List[str]]:
-        """Load order transactions from database"""
+        """Load order transactions with better validation"""
         transactions = []
         cutoff_date = datetime.now() - timedelta(days=self.config.days_back)
 
         async with get_transaction_context() as session:
-            # Get orders with line items from last N days
+            # Get orders with line items from last N days with better filtering
             result = await session.execute(
                 select(OrderData.id, LineItemData.product_id, OrderData.order_date)
                 .join(LineItemData)
@@ -430,38 +518,81 @@ class FPGrowthEngine:
                         OrderData.order_date >= cutoff_date,
                         OrderData.financial_status == "paid",
                         OrderData.total_amount >= self.config.min_order_value,
+                        LineItemData.product_id.isnot(None),  # Ensure valid product IDs
                     )
                 )
                 .order_by(OrderData.order_date.desc())
             )
 
-            # Group by order
+            # Group by order with validation
             order_items = defaultdict(set)
             for row in result.fetchall():
                 order_id, product_id, order_date = row
-                order_items[order_id].add(product_id)
+                # Validate and clean product_id
+                if product_id and str(product_id).strip():
+                    order_items[order_id].add(str(product_id))
 
-            # Convert to transaction format
+            # Convert to transaction format with filtering
             for order_id, products in order_items.items():
-                if len(products) <= self.config.max_items_per_order:
+                # Need at least 2 items for meaningful rules
+                if 2 <= len(products) <= self.config.max_items_per_order:
                     transactions.append(list(products))
 
+        logger.info(f"📊 Loaded {len(transactions)} valid transactions")
         return transactions
 
     async def _apply_recency_weighting(
         self, rules: List[AssociationRule], shop_id: str
     ) -> List[AssociationRule]:
-        """Apply recency weighting to rules based on order dates"""
-        # This is a simplified version - in production, you'd weight based on actual order dates
-        weighted_rules = []
+        """Apply actual recency weighting based on order dates"""
+        try:
+            async with get_transaction_context() as session:
+                # Get recent order frequency for each product (last 30 days)
+                cutoff_date = datetime.now() - timedelta(days=30)
 
-        for rule in rules:
-            # Apply recency weight (simplified - all get 1.0 for now)
-            rule.recency_weight = 1.0
-            rule.final_score = rule.confidence * rule.lift * rule.recency_weight
-            weighted_rules.append(rule)
+                result = await session.execute(
+                    select(LineItemData.product_id, func.count(OrderData.id))
+                    .join(OrderData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            OrderData.order_date >= cutoff_date,
+                            OrderData.financial_status == "paid",
+                        )
+                    )
+                    .group_by(LineItemData.product_id)
+                )
 
-        return weighted_rules
+                recent_counts = dict(result.fetchall())
+
+                # Apply recency weights to rules
+                weighted_rules = []
+                for rule in rules:
+                    # Calculate recency weight based on how recently items appeared
+                    recency_weight = 1.0
+                    for item in rule.antecedent + rule.consequent:
+                        if item in recent_counts:
+                            # Boost based on recent frequency (capped at 2x)
+                            recency_weight *= min(
+                                1.2, 1.0 + (recent_counts[item] / 100)
+                            )
+
+                    rule.recency_weight = min(recency_weight, 2.0)  # Cap at 2x
+                    rule.final_score = rule.confidence * rule.lift * rule.recency_weight
+                    weighted_rules.append(rule)
+
+                logger.info(
+                    f"⚖️ Applied recency weighting to {len(weighted_rules)} rules"
+                )
+                return weighted_rules
+
+        except Exception as e:
+            logger.warning(f"⚠️ Error applying recency weighting: {str(e)}")
+            # Fallback to simple weighting
+            for rule in rules:
+                rule.recency_weight = 1.0
+                rule.final_score = rule.confidence * rule.lift
+            return rules
 
     async def _cache_rules(self, shop_id: str, rules: List[AssociationRule]) -> None:
         """Cache rules in Redis for fast inference"""

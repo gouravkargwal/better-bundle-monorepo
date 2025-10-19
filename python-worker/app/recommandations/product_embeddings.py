@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
-from app.core.database.connection import get_transaction_context
+from app.core.database.session import get_transaction_context
 from app.core.database.models.order_data import OrderData, LineItemData
 from app.core.database.models.product_data import ProductData
 from app.core.logging import get_logger

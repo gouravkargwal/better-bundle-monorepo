@@ -319,19 +319,49 @@ async def fetch_recommendations_logic(
                 limit=request.limit,
             )
         elif request.context == "checkout_page":
-            # Mercury checkout-specific recommendations
+            # Mercury checkout-specific recommendations - FBT ONLY
             logger.info(
-                f"🎯 Mercury: Generating checkout recommendations for shop {shop_domain}"
+                f"🎯 Mercury: Generating FBT-only checkout recommendations for shop {shop_domain}"
             )
-            result = await services.smart_selection.get_smart_checkout_recommendation(
-                shop_id=shop.id,
-                cart_items=request.product_ids
-                or request.metadata.get("cart_items", []),
-                cart_value=request.metadata.get("cart_value"),
-                user_id=effective_user_id,
-                limit=request.limit,
-                checkout_step=request.metadata.get("checkout_step"),
+
+            # Use FBT directly for checkout recommendations
+            from app.recommandations.frequently_bought_together import (
+                FrequentlyBoughtTogetherService,
             )
+
+            fbt_service = FrequentlyBoughtTogetherService()
+            cart_items = request.product_ids or request.metadata.get("cart_items", [])
+            cart_value = request.metadata.get("cart_value", 0.0)
+
+            # For FBT, we need at least one product in cart
+            if not cart_items:
+                result = {
+                    "success": False,
+                    "items": [],
+                    "source": "fbt_no_cart_items",
+                    "error": "No cart items provided for FBT recommendations",
+                }
+            else:
+                # Use the first cart item for FBT recommendations
+                primary_product = cart_items[0]
+                result = await fbt_service.get_frequently_bought_together(
+                    shop_id=shop.id,
+                    product_id=primary_product,
+                    limit=request.limit,
+                    cart_value=cart_value,
+                )
+
+                # Add Mercury-specific metadata
+                if result.get("success"):
+                    result["smart_selection"] = {
+                        "selected_type": "frequently_bought_together",
+                        "visitor_type": ("returning" if effective_user_id else "new"),
+                        "checkout_context": "mercury_fbt_only",
+                        "cart_value": cart_value,
+                        "checkout_step": request.metadata.get("checkout_step"),
+                        "reason": "fbt_complementary_upsells",
+                        "primary_product": primary_product,
+                    }
         else:  # Default fallback for other contexts
             result = await services.executor.execute_fallback_chain(
                 context=request.context,
