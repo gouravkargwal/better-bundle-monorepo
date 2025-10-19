@@ -1,6 +1,6 @@
 [database]
-cache_store = "redis://localhost:6379/0"
-data_store = "postgresql://postgres:postgres@host.docker.internal:5433/betterbundle?sslmode=disable"
+cache_store = "${GORSE_CACHE_STORE}"
+data_store = "${GORSE_DATA_STORE}"
 
 [database.mysql]
 isolation_level = "READ-UNCOMMITTED"
@@ -15,7 +15,7 @@ meta_timeout = "120s"
 
 [server]
 default_n = 25
-api_key = "secure_random_key_123"
+api_key = "${GORSE_API_KEY}"
 cache_expire = "2h"
 auto_insert_user = true
 auto_insert_item = true

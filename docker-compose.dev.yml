@@ -1,53 +1,115 @@
 services:
-  postgres:
-    image: postgres:15
-    container_name: betterbundle-postgres-dev
+  # ==================== REMIX APPLICATION ====================
+  remix-app:
+    build:
+      context: ./better-bundle
+      dockerfile: Dockerfile.dev
+    container_name: betterbundle-remix-dev
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.dev
     environment:
-      POSTGRES_DB: betterbundle
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true # Enable file watching in Docker
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./better-bundle:/app
+      - /app/node_modules
+    command: ["npm", "run", "dev"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka_b:
+        condition: service_healthy
+      gorse:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=remix-app,env=dev"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ==================== DATABASE ====================
+  postgres:
+    image: postgres:17
+    container_name: betterbundle-postgres-dev
+    env_file:
+      - .env.dev
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=postgres,env=dev"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # ==================== KAFKA ====================
   kafka_b:
-    image: bitnami/kafka:latest
+    image: confluentinc/cp-kafka:7.8.0 # Use specific version
     container_name: kafka_b_dev
     ports:
       - "9092:9092"
     volumes:
-      - kafka_data:/bitnami/kafka
+      - kafka_data:/var/lib/kafka/data
+    env_file:
+      - .env.dev
     environment:
-      - KAFKA_CFG_NODE_ID=1
-      - KAFKA_CFG_PROCESS_ROLES=broker,controller
-      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka_b:9094
-      - KAFKA_CFG_LISTENERS=INTERNAL://:9093,EXTERNAL://:9092,CONTROLLER://:9094
-      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka_b:9093,EXTERNAL://localhost:9092
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INTERNAL
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
-      - KAFKA_CFG_NUM_PARTITIONS=4
-      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=1
+      - KAFKA_NODE_ID=1
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka_b:9093,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka_b:29093
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9093,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=kafka,env=dev"
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "kafka-topics.sh --bootstrap-server localhost:9092 --list",
+          "CMD",
+          "kafka-broker-api-versions",
+          "--bootstrap-server",
+          "localhost:9092",
         ]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 40s
 
+  # ==================== KAFKA UI ====================
   kafka-ui:
     container_name: kafka-ui-dev
     image: provectuslabs/kafka-ui:latest
@@ -55,11 +117,20 @@ services:
       - kafka_b
     ports:
       - "8080:8080"
+    env_file:
+      - .env.dev
     environment:
       KAFKA_CLUSTERS_0_NAME: local-kafka-kraft
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka_b:9093
       DYNAMIC_CONFIG_ENABLED: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+        labels: "service=kafka-ui,env=dev"
 
+  # ==================== KAFKA REST PROXY ====================
   rest-proxy:
     image: confluentinc/cp-kafka-rest:latest
     depends_on:
@@ -68,41 +139,53 @@ services:
       - "8082:8082"
     hostname: rest-proxy
     container_name: rest-proxy-dev
+    env_file:
+      - .env.dev
     environment:
       KAFKA_REST_HOST_NAME: rest-proxy
       KAFKA_REST_BOOTSTRAP_SERVERS: "kafka_b:9093"
       KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+        labels: "service=rest-proxy,env=dev"
 
+  # ==================== REDIS ====================
   redis:
     image: redis/redis-stack:7.2.0-v18
     container_name: betterbundle-redis-dev
     restart: unless-stopped
     ports:
       - "6379:6379"
-      - "8002:8001" # Redis Insight UI
+      - "8002:8001"
     volumes:
       - redis_data:/data
+    env_file:
+      - .env.dev
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=redis,env=dev"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # UPDATED GORSE - Connect to both PostgreSQL and ClickHouse
+  # ==================== GORSE ====================
   gorse:
     image: zhenghaoz/gorse-in-one:latest
     container_name: betterbundle-gorse-dev
     restart: unless-stopped
     ports:
-      - "8086:8086" # gRPC port
-      - "8088:8088" # HTTP port
-    environment:
-      GORSE_CACHE_STORE: redis://redis:6379/0
-      # Use PostgreSQL for Gorse's internal data
-      GORSE_DATA_STORE: postgresql://postgres:postgres@postgres:5432/betterbundle?sslmode=disable
-      GORSE_MASTER_HOST: 0.0.0.0
-      GORSE_LOG_LEVEL: debug
-      GORSE_API_KEY: secure_random_key_123
+      - "8086:8086"
+      - "8088:8088"
+    env_file:
+      - .env.dev
     command:
       - -c
       - /etc/gorse/config.toml
@@ -114,16 +197,135 @@ services:
       - ./config.toml:/etc/gorse/config.toml
       - gorse_logs:/var/log/gorse
       - gorse_cache:/var/lib/gorse
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=gorse,env=dev"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
+  # ==================== PYTHON WORKER ====================
+  python-worker:
+    build:
+      context: ./python-worker
+      dockerfile: Dockerfile.dev
+    container_name: betterbundle-python-worker-dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.dev
+    volumes:
+      - ./python-worker:/app
+      - /app/__pycache__
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka_b:
+        condition: service_healthy
+      gorse:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=python-worker,env=dev"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ==================== LOGGING STACK ====================
+
+  # Loki - Log Aggregation
+  loki:
+    image: grafana/loki:3.4.1
+    container_name: betterbundle-loki-dev
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3100/ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Promtail - Log Collector
+  promtail:
+    image: grafana/promtail:3.4.1
+    container_name: betterbundle-promtail-dev
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: betterbundle-grafana-dev
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning # Mount entire directory
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   postgres_data:
-  clickhouse_data:
   redis_data:
   kafka_data:
   gorse_logs:
   gorse_cache:
+  loki_data:
+  grafana_data:
