@@ -159,6 +159,14 @@ class LoggingSettings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_FORMAT: str = Field(default="console", env="LOG_FORMAT")
 
+    # Grafana Loki settings
+    GF_SECURITY_ENABLED: bool = Field(default=False, env="GF_SECURITY_ENABLED")
+    GF_SECURITY_URL: str = Field(default="http://loki:3100", env="GF_SECURITY_URL")
+    GF_SECURITY_ADMIN_USER: str = Field(default="admin", env="GF_SECURITY_ADMIN_USER")
+    GF_SECURITY_ADMIN_PASSWORD: str = Field(
+        default="admin", env="GF_SECURITY_ADMIN_PASSWORD"
+    )
+
     # Comprehensive Logging Configuration
     LOGGING: dict = Field(
         default={
@@ -181,9 +189,14 @@ class LoggingSettings(BaseSettings):
             },
             "grafana": {
                 "enabled": False,
-                "url": "",
-                "username": "",
-                "password": "",
+                "url": "http://loki:3100",
+                "username": "admin",
+                "password": "admin",
+                "service_name": "betterbundle-python-worker",
+                "labels": {
+                    "service": "betterbundle-python-worker",
+                    "env": "development",
+                },
             },
             "telemetry": {
                 "enabled": False,
@@ -204,6 +217,13 @@ class LoggingSettings(BaseSettings):
         },
         env="LOGGING",
     )
+
+    def model_post_init(self, __context):
+        """Update logging config with environment variables after initialization"""
+        self.LOGGING["grafana"]["enabled"] = self.GF_SECURITY_ENABLED
+        self.LOGGING["grafana"]["url"] = self.GF_SECURITY_URL
+        self.LOGGING["grafana"]["username"] = self.GF_SECURITY_ADMIN_USER
+        self.LOGGING["grafana"]["password"] = self.GF_SECURITY_ADMIN_PASSWORD
 
 
 class Settings(BaseSettings):

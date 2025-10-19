@@ -11,6 +11,8 @@ services:
       - .env.dev
     environment:
       - NODE_ENV=development
+      - LOKI_URL=http://loki:3100
+      - GRAFANA_LOKI_ENABLED=true
       - CHOKIDAR_USEPOLLING=true # Enable file watching in Docker
       - WATCHPACK_POLLING=true
     volumes:

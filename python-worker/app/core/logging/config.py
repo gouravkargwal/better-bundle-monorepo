@@ -39,10 +39,10 @@ class PrometheusHandlerConfig:
 
 @dataclass
 class GrafanaConfig:
-    """Grafana configuration"""
+    """Grafana Loki configuration"""
 
     enabled: bool = False
-    url: str = ""
+    url: str = "http://loki:3100"  # Default Loki URL
     username: str = ""
     password: str = ""
 
