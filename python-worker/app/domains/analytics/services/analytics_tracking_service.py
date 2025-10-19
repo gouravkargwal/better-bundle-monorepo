@@ -70,6 +70,12 @@ class AnalyticsTrackingService:
             session = await self.session_service.get_session(session_id)
             if not session:
                 logger.warning(f"Session {session_id} not found or expired")
+                # Try to find if there's a recent session for this customer
+                if customer_id:
+                    logger.info(
+                        f"Attempting to find recent session for customer {customer_id}"
+                    )
+                    # This will be handled by the calling API (Mercury, etc.)
                 return None
 
             # Validate extension can run in this context

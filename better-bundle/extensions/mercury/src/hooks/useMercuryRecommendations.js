@@ -59,9 +59,11 @@ export function useRecommendations({
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // 1. Try reading from storage first (fastest)
+        // 1. Try reading from storage first (fastest) - with expiration check
         const cachedSessionId = await storage.read("unified_session_id");
-        if (cachedSessionId) {
+        const cachedExpiry = await storage.read("unified_session_expires_at");
+
+        if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
           console.log(
             "🔗 Mercury: Using cached session_id from storage:",
             cachedSessionId,
@@ -70,13 +72,22 @@ export function useRecommendations({
           return;
         }
 
+        if (cachedSessionId && cachedExpiry) {
+          console.log("⚠️ Mercury: Cached session expired, creating new session");
+        }
+
         // 2. If not in storage, fetch from backend API
         console.log("🌐 Mercury: Fetching session_id from backend");
         const sessionId = await analyticsApi.getOrCreateSession(
           shopDomain,
           customerId,
         );
+
+        // Store session with expiration (30 minutes like Atlas)
+        const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
         await storage.write("unified_session_id", sessionId);
+        await storage.write("unified_session_expires_at", expiresAt.toString());
+
         console.log("✨ Mercury: Session initialized from backend:", sessionId);
         setSessionId(sessionId);
       } catch (err) {
@@ -100,8 +111,8 @@ export function useRecommendations({
     position,
     productUrl,
   ) => {
-    analyticsApi
-      .trackRecommendationClick(
+    try {
+      const success = await analyticsApi.trackRecommendationClick(
         shopDomain,
         context,
         productId,
@@ -109,10 +120,20 @@ export function useRecommendations({
         sessionId,
         customerId,
         { source: `${context}_recommendation` },
-      )
-      .catch((error) => {
-        console.error(`Failed to track ${context} click:`, error);
-      });
+      );
+
+      if (!success) {
+        // If tracking failed, clear cached session
+        console.warn("⚠️ Mercury: Click tracking failed, clearing cached session");
+        await storage.remove("unified_session_id");
+        setSessionId(null);
+      }
+    } catch (error) {
+      console.error(`Failed to track ${context} click:`, error);
+      // Clear cached session on error
+      await storage.remove("unified_session_id");
+      setSessionId(null);
+    }
 
     return productUrl;
   };
@@ -125,7 +146,7 @@ export function useRecommendations({
 
     try {
       const productIds = products.map((product) => product.id);
-      await analyticsApi.trackRecommendationView(
+      const success = await analyticsApi.trackRecommendationView(
         shopDomain,
         context,
         sessionId,
@@ -133,9 +154,21 @@ export function useRecommendations({
         productIds,
         { source: `${context}_page` },
       );
-      console.log(`✅ Mercury: Recommendation view tracked for ${context}`);
+
+      if (success) {
+        console.log(`✅ Mercury: Recommendation view tracked for ${context}`);
+      } else {
+        // If tracking failed, clear cached session and retry
+        console.warn("⚠️ Mercury: Tracking failed, clearing cached session");
+        await storage.remove("unified_session_id");
+        setSessionId(null);
+        // The useEffect will automatically create a new session
+      }
     } catch (error) {
       console.error(`❌ Mercury: Failed to track recommendation view:`, error);
+      // Clear cached session on error
+      await storage.remove("unified_session_id");
+      setSessionId(null);
     }
   };
 

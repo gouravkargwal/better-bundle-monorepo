@@ -118,6 +118,9 @@ class UnifiedSessionService:
             current_time = now_utc()
 
             async with get_transaction_context() as session:
+                # Trigger cleanup periodically (every time we access sessions)
+                await self._cleanup_expired_sessions()
+
                 # ✅ SCENARIO 18: Cross-Device Session Linking
                 # Step 1: Try to find existing active session
                 existing_session = await self._find_existing_session(

@@ -1,18 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { useRecommendations } from "./hooks/useMercuryRecommendations.js";
-
-const trackAddToCart = async (productId, position, variantId) => {
-  try {
-    console.log("Mercury: Product added to cart", {
-      productId,
-      position,
-      variantId,
-    });
-  } catch (error) {
-    console.error("Failed to track add to cart:", error);
-  }
-};
+import { analyticsApi } from "./api/analytics.js";
 
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
@@ -53,22 +42,17 @@ function Extension() {
     return parseFloat(amount ? String(amount) : "0");
   }, [cost.totalAmount?.value?.amount]);
 
-  const {
-    loading,
-    products,
-    error,
-    trackRecommendationClick,
-    trackRecommendationView,
-  } = useRecommendations({
-    context: "checkout_page",
-    limit: 3,
-    customerId,
-    shopDomain,
-    storage,
-    cartItems: cartItems,
-    cartValue: cartValue,
-    checkoutStep: "order_summary",
-  });
+  const { loading, products, error, trackRecommendationView } =
+    useRecommendations({
+      context: "checkout_page",
+      limit: 3,
+      customerId,
+      shopDomain,
+      storage,
+      cartItems: cartItems,
+      cartValue: cartValue,
+      checkoutStep: "order_summary",
+    });
 
   useEffect(() => {
     if (
@@ -109,8 +93,23 @@ function Extension() {
       if (result.type === "success") {
         console.log("✅ Mercury: Product added to cart");
         setAddedProducts((prev) => new Set([...prev, productId]));
-        await trackRecommendationClick(productId, position, null);
-        await trackAddToCart(productId, position, variantId);
+
+        // Track add to cart event (not click event)
+        await analyticsApi.trackAddToCart(
+          shopDomain,
+          "checkout_page",
+          productId,
+          variantId,
+          position,
+          customerId,
+          {
+            source: "mercury_recommendation",
+            cart_product_count: cartItems.length,
+            quantity: quantity,
+            checkout_step: "order_summary",
+            cart_value: cartValue,
+          },
+        );
       } else {
         console.error("❌ Mercury: Failed to add product to cart");
       }
@@ -419,6 +418,7 @@ function Extension() {
                       disabled={
                         adding[product.id] || !isVariantInStock(product)
                       }
+                      variant="primary"
                     >
                       {!isVariantInStock(product)
                         ? "Out of Stock"

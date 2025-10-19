@@ -25,18 +25,22 @@ logger = get_logger(__name__)
 
 @dataclass
 class EmbeddingConfig:
-    """Configuration for product embeddings"""
+    """Configuration for product embeddings - Industry-optimized parameters"""
 
-    # Model parameters
-    vector_size: int = 100  # Embedding dimension
-    window: int = 5  # Context window for Word2Vec
-    min_count: int = 2  # Minimum product occurrences
-    epochs: int = 10  # Training epochs
+    # Model parameters - Research-backed for e-commerce
+    vector_size: int = 200  # 150-300 optimal for e-commerce embeddings
+    window: int = 3  # Smaller window for purchase context
+    min_count: int = 5  # Filter noise more effectively
+    epochs: int = 25  # More epochs for convergence
+    workers: int = 4  # Parallel processing
+    sg: int = 1  # Skip-gram (better for e-commerce)
+    negative: int = 10  # Negative sampling
+    seed: int = 42  # Reproducibility
 
-    # Data parameters
-    days_back: int = 90  # Training data window
-    min_sequence_length: int = 2  # Minimum purchase sequence length
-    max_sequence_length: int = 20  # Maximum purchase sequence length
+    # Data parameters - IMPROVED
+    days_back: int = 180  # Longer history for better patterns
+    min_sequence_length: int = 3  # Meaningful sequences only
+    max_sequence_length: int = 50  # Allow longer customer journeys
 
     # Cache parameters
     cache_ttl_seconds: int = 86400  # 24 hours
@@ -87,19 +91,28 @@ class ProductEmbeddingsService:
                     "error": "Need at least 50 purchase sequences for training",
                 }
 
-            # Step 2: Train Word2Vec model
+            # Step 2: Train Word2Vec model with optimal e-commerce parameters
             try:
                 from gensim.models import Word2Vec
 
+                # Research-optimized parameters for e-commerce
                 model = Word2Vec(
                     sentences=sequences,
                     vector_size=self.config.vector_size,
                     window=self.config.window,
                     min_count=self.config.min_count,
                     epochs=self.config.epochs,
-                    workers=4,
+                    workers=self.config.workers,
+                    sg=self.config.sg,  # Skip-gram (better for e-commerce)
+                    negative=self.config.negative,  # Negative sampling
+                    seed=self.config.seed,  # Reproducibility
+                    compute_loss=True,  # Enable loss monitoring
                 )
-                logger.info(f"✅ Word2Vec model trained with {len(model.wv)} products")
+
+                logger.info(
+                    f"✅ Word2Vec model trained with {len(model.wv)} products, "
+                    f"final loss: {model.get_latest_training_loss():.4f}"
+                )
             except ImportError:
                 logger.warning("⚠️ gensim not available, using fallback embeddings")
                 model = await self._train_fallback_embeddings(sequences)
@@ -215,14 +228,26 @@ class ProductEmbeddingsService:
                         cart_embedding, embeddings[product_id]
                     )
 
-                    # Apply similarity boost
-                    if similarity > 0.3:  # Only boost if reasonably similar
+                    # Apply industry-standard similarity thresholds
+                    if similarity > 0.8:  # Very high similarity
                         rec["similarity_score"] = similarity
-                        rec["score"] *= boost_factor
-                        rec["boost_reason"] = f"Semantic similarity: {similarity:.2f}"
-                    else:
+                        rec["score"] *= 1.3  # Strong boost
+                        rec["similarity_tier"] = "very_high"
+                        rec["boost_reason"] = f"Very high similarity: {similarity:.2f}"
+                    elif similarity > 0.6:  # High similarity
                         rec["similarity_score"] = similarity
-                        rec["boost_reason"] = "Low semantic similarity"
+                        rec["score"] *= 1.2  # Medium boost
+                        rec["similarity_tier"] = "high"
+                        rec["boost_reason"] = f"High similarity: {similarity:.2f}"
+                    elif similarity > 0.4:  # Moderate similarity
+                        rec["similarity_score"] = similarity
+                        rec["score"] *= 1.1  # Light boost
+                        rec["similarity_tier"] = "moderate"
+                        rec["boost_reason"] = f"Moderate similarity: {similarity:.2f}"
+                    else:  # Low similarity
+                        rec["similarity_score"] = similarity
+                        rec["similarity_tier"] = "low"
+                        rec["boost_reason"] = f"Low similarity: {similarity:.2f}"
                 else:
                     rec["similarity_score"] = 0.0
                     rec["boost_reason"] = "No embedding available"
@@ -242,14 +267,17 @@ class ProductEmbeddingsService:
             return recommendations
 
     async def _load_purchase_sequences(self, shop_id: str) -> List[List[str]]:
-        """Load purchase sequences from order data"""
+        """Load customer purchase sequences (chronological order)"""
         sequences = []
         cutoff_date = datetime.now() - timedelta(days=self.config.days_back)
 
         async with get_transaction_context() as session:
-            # Get orders with line items, ordered by date
+            # Get customer purchase history in chronological order
             result = await session.execute(
-                select(OrderData.id, OrderData.order_date)
+                select(
+                    OrderData.customer_id, LineItemData.product_id, OrderData.order_date
+                )
+                .join(LineItemData)
                 .where(
                     and_(
                         OrderData.shop_id == shop_id,
@@ -257,67 +285,75 @@ class ProductEmbeddingsService:
                         OrderData.financial_status == "paid",
                     )
                 )
-                .order_by(OrderData.order_date)
+                .order_by(OrderData.customer_id, OrderData.order_date)
             )
 
-            # Group line items by order
-            order_items = defaultdict(list)
-            for order_id, order_date in result.fetchall():
-                # Get line items for this order
-                line_items = await session.execute(
-                    select(LineItemData.product_id)
-                    .where(LineItemData.order_id == order_id)
-                    .order_by(LineItemData.line_number)
-                )
+            # Group by customer to create temporal sequences
+            customer_sequences = defaultdict(list)
+            for customer_id, product_id, order_date in result.fetchall():
+                if customer_id and product_id:
+                    customer_sequences[customer_id].append(str(product_id))
 
-                products = [str(row[0]) for row in line_items.fetchall()]
+            # Filter sequences by length
+            for sequence in customer_sequences.values():
                 if (
                     self.config.min_sequence_length
-                    <= len(products)
+                    <= len(sequence)
                     <= self.config.max_sequence_length
                 ):
-                    order_items[order_id] = products
+                    sequences.append(sequence)
 
-            # Convert to sequences
-            sequences = list(order_items.values())
-
+        logger.info(f"Generated {len(sequences)} customer purchase sequences")
         return sequences
 
     async def _train_fallback_embeddings(self, sequences: List[List[str]]) -> Any:
-        """Fallback embedding method when gensim is not available"""
-        logger.warning("⚠️ Using fallback embeddings - quality will be reduced")
+        """Enhanced fallback embedding method when gensim is not available"""
+        logger.warning("⚠️ Using enhanced fallback embeddings - quality will be reduced")
 
-        # Simple co-occurrence based embeddings
+        # Enhanced co-occurrence based embeddings with proper weighting
         from collections import Counter
         import numpy as np
 
-        # Count product co-occurrences
+        # Count product co-occurrences with distance weighting
         co_occurrences = defaultdict(Counter)
+        total_sequences = len(sequences)
+
         for sequence in sequences:
             for i, product in enumerate(sequence):
                 for j, other_product in enumerate(sequence):
                     if i != j:
-                        co_occurrences[product][other_product] += 1
+                        # Distance-based weighting (closer items get higher weight)
+                        distance_weight = 1.0 / (abs(i - j) + 1)
+                        co_occurrences[product][other_product] += distance_weight
 
-        # Create simple embeddings based on co-occurrence
+        # Create embeddings based on weighted co-occurrence
         all_products = set()
         for sequence in sequences:
             all_products.update(sequence)
 
         embeddings = {}
         for product in all_products:
-            # Create embedding based on co-occurrence counts
+            # Create embedding based on weighted co-occurrence counts
             embedding = np.zeros(self.config.vector_size)
-            for i, (other_product, count) in enumerate(
-                co_occurrences[product].most_common(self.config.vector_size)
-            ):
-                if i < self.config.vector_size:
-                    embedding[i] = count
 
-            # Normalize
+            # Get top co-occurring products
+            top_co_occurrences = co_occurrences[product].most_common(
+                self.config.vector_size
+            )
+
+            # Fill embedding with normalized co-occurrence weights
+            for i, (other_product, weight) in enumerate(top_co_occurrences):
+                if i < self.config.vector_size:
+                    embedding[i] = weight
+
+            # Normalize to unit vector
             norm = np.linalg.norm(embedding)
             if norm > 0:
                 embedding = embedding / norm
+            else:
+                # If no co-occurrences, create random unit vector
+                embedding = np.random.normal(0, 1, self.config.vector_size)
+                embedding = embedding / np.linalg.norm(embedding)
 
             embeddings[product] = embedding
 

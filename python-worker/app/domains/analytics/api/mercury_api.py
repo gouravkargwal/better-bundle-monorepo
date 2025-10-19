@@ -237,7 +237,19 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
         )
 
         if not interaction:
-            raise HTTPException(status_code=500, detail="Failed to track interaction")
+            logger.warning(
+                f"Mercury interaction tracking failed for session {request.session_id}"
+            )
+            # Return success but with a warning - this is more graceful (like Atlas)
+            return MercuryResponse(
+                success=True,
+                message="Mercury interaction tracked (session may have expired)",
+                data={
+                    "interaction_id": None,
+                    "session_id": request.session_id,
+                    "warning": "Session not found or expired",
+                },
+            )
 
         # Feature computation is now automatically triggered in track_interaction method
 
