@@ -167,11 +167,9 @@ async def cleanup_services():
         # Kafka consumers are stopped by kafka_consumer_manager in lifespan
 
         # Shutdown database connections
-        from app.core.database.simple_db_client import close_database
         from app.core.database.engine import close_engine
 
-        # Close both Prisma and SQLAlchemy connections
-        await close_database()  # Prisma connection
+        # Close SQLAlchemy connections
         await close_engine()  # SQLAlchemy engine
 
         # Clear services dictionary

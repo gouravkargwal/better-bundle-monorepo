@@ -13,7 +13,7 @@ from app.shared.helpers import now_utc
 from app.core.config.settings import settings
 from app.core.exceptions import DatabaseConnectionError
 from app.core.logging import get_logger
-from .simple_db_client import get_database
+from . import get_database
 
 logger = get_logger(__name__)
 
@@ -68,7 +68,7 @@ async def reconnect_database() -> bool:
     """Reconnect to database with retry logic"""
 
     try:
-        from .simple_db_client import close_database
+        from . import close_database
 
         # Close existing connection
         await close_database()

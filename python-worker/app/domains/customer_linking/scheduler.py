@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from app.core.logging import get_logger
-from app.core.database.simple_db_client import get_database
+from app.core.database import get_database
 from app.shared.helpers.datetime_utils import now_utc
 
 logger = get_logger(__name__)

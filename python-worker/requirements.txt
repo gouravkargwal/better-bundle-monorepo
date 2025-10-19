@@ -6,7 +6,9 @@ pydantic-settings==2.1.0
 
 # Database
 asyncpg==0.29.0
-prisma==0.15.0
+
+# Redis
+redis==5.0.1
 
 # SQLAlchemy async support
 sqlalchemy[asyncio]==2.0.23
