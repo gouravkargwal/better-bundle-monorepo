@@ -82,8 +82,12 @@ class GraphQLOrderAdapter(BaseAdapter):
             currency_code = None
 
             # First try direct price field (from your raw data)
-            if node.get("original_unit_price"):
-                original_unit_price = _to_float(node.get("original_unit_price"))
+            # Handle both normal and duplicated field names
+            price_field = node.get("original_unit_price") or node.get(
+                "original_unit_original_unit_price"
+            )
+            if price_field:
+                original_unit_price = _to_float(price_field)
                 # Get currency from order level
                 currency_code = payload.get("currency_code")
 

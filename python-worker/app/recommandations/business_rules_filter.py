@@ -88,6 +88,10 @@ class BusinessRulesFilter:
         if not recommendations:
             return recommendations
 
+        # Preserve original FP-Growth scores for debugging
+        for rec in recommendations:
+            rec["original_fp_score"] = rec.get("score", 0)
+
         logger.info(
             f"🎯 Applying business rules to {len(recommendations)} recommendations"
         )
@@ -296,9 +300,10 @@ class BusinessRulesFilter:
 
                     rec["margin"] = margin
                 else:
-                    # No margin data available
+                    # No margin data available - preserve original score
                     rec["margin_boost"] = "unknown"
                     rec["margin"] = None
+                    # Don't modify score if no margin data
 
                 optimized.append(rec)
 
@@ -477,8 +482,9 @@ class BusinessRulesFilter:
                     }
 
                     # Check if product has seasonal tags
-                    if tags:
-                        tags_lower = tags.lower()
+                    if tags and isinstance(tags, list):
+                        # Convert tags list to lowercase string for matching
+                        tags_lower = " ".join(str(tag).lower() for tag in tags)
                         for keyword in seasonal_keywords.get(current_season, []):
                             if keyword in tags_lower:
                                 return 1.3  # 30% boost for seasonal products
@@ -511,10 +517,13 @@ class BusinessRulesFilter:
             recommendations, key=lambda x: x.get("score", 0), reverse=True
         )
 
-        # Add ranking metadata
+        # Add ranking metadata and preserve original FP-Growth score
         for i, rec in enumerate(sorted_recs):
             rec["rank"] = i + 1
             rec["final_score"] = rec.get("score", 0)
+            # Preserve original FP-Growth score for debugging
+            if "original_fp_score" not in rec:
+                rec["original_fp_score"] = rec.get("score", 0)
 
         return sorted_recs
 
@@ -607,7 +616,7 @@ class BusinessRulesFilter:
             async with get_transaction_context() as session:
                 # Get inventory from ProductData table
                 result = await session.execute(
-                    select(ProductData.inventory_quantity).where(
+                    select(ProductData.total_inventory).where(
                         and_(
                             ProductData.shop_id == shop_id,
                             ProductData.product_id == product_id,
@@ -620,9 +629,9 @@ class BusinessRulesFilter:
                 if inventory is not None:
                     return int(inventory)
 
-                # Fallback: Check if product is marked as available
+                # Fallback: Check if product is active
                 result = await session.execute(
-                    select(ProductData.available).where(
+                    select(ProductData.is_active).where(
                         and_(
                             ProductData.shop_id == shop_id,
                             ProductData.product_id == product_id,

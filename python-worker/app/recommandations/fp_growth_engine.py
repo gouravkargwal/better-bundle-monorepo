@@ -115,10 +115,17 @@ class FPGrowthEngine:
             transactions = await self._load_transactions(shop_id)
             logger.info(f"📊 Loaded {len(transactions)} transactions")
 
-            if len(transactions) < 100:
+            # Use configurable minimum orders from settings
+            from app.core.config.settings import settings
+
+            min_orders = getattr(
+                settings.ml, "MIN_ORDERS_FOR_TRAINING", 1
+            )  # Default to 1 for testing
+
+            if len(transactions) < min_orders:
                 return {
                     "success": False,
-                    "error": "Need at least 100 orders for training",
+                    "error": f"Need at least {min_orders} orders for training (found {len(transactions)})",
                 }
 
             # Step 2: Use mlxtend (complete pipeline)
@@ -516,7 +523,8 @@ class FPGrowthEngine:
                     and_(
                         OrderData.shop_id == shop_id,
                         OrderData.order_date >= cutoff_date,
-                        OrderData.financial_status == "paid",
+                        func.lower(OrderData.financial_status)
+                        == "paid",  # Case-insensitive
                         OrderData.total_amount >= self.config.min_order_value,
                         LineItemData.product_id.isnot(None),  # Ensure valid product IDs
                     )
@@ -526,11 +534,17 @@ class FPGrowthEngine:
 
             # Group by order with validation
             order_items = defaultdict(set)
+            raw_count = 0
             for row in result.fetchall():
+                raw_count += 1
                 order_id, product_id, order_date = row
                 # Validate and clean product_id
                 if product_id and str(product_id).strip():
                     order_items[order_id].add(str(product_id))
+
+            logger.info(f"🔍 Debug: Found {raw_count} raw order-lineitem combinations")
+            logger.info(f"🔍 Debug: Cutoff date: {cutoff_date}")
+            logger.info(f"🔍 Debug: Min order value: {self.config.min_order_value}")
 
             # Convert to transaction format with filtering
             for order_id, products in order_items.items():

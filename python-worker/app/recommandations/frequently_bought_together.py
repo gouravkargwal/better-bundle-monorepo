@@ -407,7 +407,7 @@ class FrequentlyBoughtTogetherService:
                             "handle": product.handle or "",
                             "price": {
                                 "amount": str(product.price or 0),
-                                "currency_code": product.currency_code or "USD",
+                                "currency_code": await self._get_shop_currency(shop_id),
                             },
                             "image": self._extract_image_from_media(
                                 product.media, product.title or "Product"
@@ -415,11 +415,7 @@ class FrequentlyBoughtTogetherService:
                             "images": self._extract_images_from_media(
                                 product.media, product.title or "Product"
                             ),
-                            "available": (
-                                product.available
-                                if product.available is not None
-                                else True
-                            ),
+                            "available": product.is_active,
                             "url": (
                                 f"/products/{product.handle}" if product.handle else ""
                             ),
@@ -567,3 +563,18 @@ class FrequentlyBoughtTogetherService:
             return products
         except Exception:
             return []
+
+    async def _get_shop_currency(self, shop_id: str) -> str:
+        """Get shop currency from database"""
+        try:
+            from app.core.database.models.shop import Shop
+
+            async with get_transaction_context() as session:
+                result = await session.execute(
+                    select(Shop.currency_code).where(Shop.id == shop_id)
+                )
+                currency = result.scalar_one_or_none()
+                return currency or "USD"  # Fallback to USD if not found
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting shop currency for {shop_id}: {e}")
+            return "USD"  # Fallback to USD

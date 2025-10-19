@@ -100,7 +100,7 @@ class MLSettings(BaseSettings):
     GORSE_MASTER_KEY: str = Field(default="", env="GORSE_MASTER_KEY")
 
     # Training Configuration
-    MIN_ORDERS_FOR_TRAINING: int = Field(default=50, env="MIN_ORDERS_FOR_TRAINING")
+    MIN_ORDERS_FOR_TRAINING: int = Field(default=1, env="MIN_ORDERS_FOR_TRAINING")
     MIN_PRODUCTS_FOR_TRAINING: int = Field(default=20, env="MIN_PRODUCTS_FOR_TRAINING")
     MAX_RECOMMENDATIONS: int = Field(default=10, env="MAX_RECOMMENDATIONS")
     MIN_CONFIDENCE_THRESHOLD: float = Field(default=0.3, env="MIN_CONFIDENCE_THRESHOLD")
