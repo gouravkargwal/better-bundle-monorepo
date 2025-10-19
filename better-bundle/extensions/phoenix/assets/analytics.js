@@ -36,6 +36,7 @@ class AnalyticsApiClient {
 
   async getOrCreateSession(shopDomain, customerId) {
     try {
+      // Always try to get client_id from storage first
       if (!this.clientId) {
         this.clientId = this.getClientIdFromStorage();
       }
@@ -78,7 +79,7 @@ class AnalyticsApiClient {
 
       // Create AbortController for timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
       const response = await fetch(url, {
         method: "POST",
@@ -105,10 +106,10 @@ class AnalyticsApiClient {
         this.currentSessionId = sessionId;
         this.sessionExpiresAt = expiresAt;
 
-        // ✅ NEW: Store client_id from backend response
-        if (result.data.client_id && !this.clientId) {
+        // ✅ Store client_id from backend response (always update if provided)
+        if (result.data.client_id) {
           this.clientId = result.data.client_id;
-          // Also store in sessionStorage for other extensions
+          // Store in sessionStorage for other extensions
           try {
             sessionStorage.setItem("unified_client_id", this.clientId);
             console.log("📱 Phoenix: Stored client_id from backend:", this.clientId.substring(0, 16) + "...");

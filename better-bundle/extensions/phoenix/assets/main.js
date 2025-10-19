@@ -36,7 +36,7 @@ class RecommendationCarousel {
       showArrows: window.showArrows || true,
       showPagination: window.showPagination || true,
       limit: window.recommendationLimit || 4,
-      context: window.context || 'cart' // Dynamic context from Liquid template
+      context: window.context || 'homepage' // Use context from block system
     };
   }
 
@@ -81,9 +81,9 @@ class RecommendationCarousel {
       const loadingTimeout = setTimeout(() => {
         console.warn('⏰ Phoenix: Loading timeout reached, hiding carousel');
         this.hideCarousel();
-      }, 10000); // 10 second timeout
+      }, 15000); // 15 second timeout
 
-      // Get or create session ID from analytics API
+      // Get or create session ID from analytics API with better error handling
       let sessionId;
       if (this.analyticsApi && this.config.shopDomain) {
         try {
@@ -95,15 +95,13 @@ class RecommendationCarousel {
           console.log('✅ Phoenix: Session ID obtained from analytics API:', sessionId);
         } catch (error) {
           console.error('❌ Phoenix: Failed to get session from analytics API:', error);
-          clearTimeout(loadingTimeout);
-          this.hideCarousel();
-          return;
+          // Try fallback session ID from window or generate one
+          sessionId = window.sessionId || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          console.log('🔄 Phoenix: Using fallback session ID:', sessionId);
         }
       } else {
-        console.error('❌ Phoenix: Analytics API not available');
-        clearTimeout(loadingTimeout);
-        this.hideCarousel();
-        return;
+        console.warn('⚠️ Phoenix: Analytics API not available, using fallback session');
+        sessionId = window.sessionId || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       }
 
       // Show skeleton loading before API call
@@ -227,8 +225,9 @@ document.addEventListener('DOMContentLoaded', function () {
         show_pagination: window.showPagination
       };
 
-      // Initialize Swiper for design mode
+      // Initialize Swiper for design mode with proper horizontal layout
       const swiper = new window.Swiper('.swiper', {
+        direction: 'horizontal', // Explicitly set horizontal direction
         slidesPerView: 1,
         spaceBetween: 20,
         loop: true,
@@ -259,6 +258,9 @@ document.addEventListener('DOMContentLoaded', function () {
             spaceBetween: 20,
           },
         },
+        // Ensure proper horizontal layout
+        watchSlidesProgress: true,
+        watchSlidesVisibility: true,
       });
 
       window.swiper = swiper;
@@ -272,8 +274,9 @@ document.addEventListener('DOMContentLoaded', function () {
         show_pagination: window.showPagination
       };
 
-      // Initialize Swiper for skeleton loading
+      // Initialize Swiper for skeleton loading with proper horizontal layout
       const swiper = new window.Swiper('.swiper', {
+        direction: 'horizontal', // Explicitly set horizontal direction
         slidesPerView: 1,
         spaceBetween: 20,
         loop: true,
@@ -304,6 +307,9 @@ document.addEventListener('DOMContentLoaded', function () {
             spaceBetween: 20,
           },
         },
+        // Ensure proper horizontal layout
+        watchSlidesProgress: true,
+        watchSlidesVisibility: true,
       });
 
       window.swiper = swiper;
