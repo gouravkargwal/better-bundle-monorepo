@@ -1,0 +1,129 @@
+name: Create OCI Ampere A1 Instance
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_name:
+        description: "Instance name (optional)"
+        required: false
+        default: "better-bundle-ampere"
+      ocpu_count:
+        description: "Number of OCPUs (1-4)"
+        required: false
+        default: "4"
+      memory_gb:
+        description: "Memory in GB (6-24)"
+        required: false
+        default: "24"
+      max_retries:
+        description: "Maximum retry attempts for capacity errors"
+        required: false
+        default: "20"
+      retry_interval:
+        description: "Seconds to wait between retries"
+        required: false
+        default: "60"
+  schedule:
+    # Run every 30 minutes
+    - cron: "*/30 * * * *"
+
+jobs:
+  create-instance:
+    runs-on: ubuntu-latest
+    outputs:
+      instance_id: ${{ steps.create.outputs.instance_id }}
+      public_ip: ${{ steps.create.outputs.public_ip }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install OCI CLI
+        run: |
+          bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_CONFIG }}" | base64 -d > ~/.oci/config
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" | base64 -d > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+
+          # Fix the key_file path in config to point to container location
+          sed -i 's|key_file=.*|key_file=~/.oci/oci_api_key.pem|g' ~/.oci/config
+
+          echo "OCI Config file:"
+          cat ~/.oci/config
+          echo ""
+          echo "Checking key file..."
+          ls -la ~/.oci/oci_api_key.pem
+
+      - name: Check if instance already exists
+        id: check
+        continue-on-error: true
+        run: |
+          # Check if instance with name pattern exists and is running
+          INSTANCE_COUNT=$(oci compute instance list \
+            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+            --lifecycle-state RUNNING \
+            --shape "VM.Standard.A1.Flex" \
+            --query 'length(data)' \
+            --raw-output 2>/dev/null || echo "0")
+
+          echo "Found $INSTANCE_COUNT running Ampere A1 instances"
+
+          if [[ "$INSTANCE_COUNT" -gt 0 ]]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Instance already exists and is running. Skipping creation."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No running instance found. Proceeding with creation."
+          fi
+
+      - name: Create OCI Instance
+        id: create
+        if: steps.check.outputs.exists != 'true'
+        env:
+          OCI_COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+          OCI_AVAILABILITY_DOMAIN: ${{ secrets.OCI_AVAILABILITY_DOMAIN }}
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          INSTANCE_NAME: ${{ github.event.inputs.instance_name || 'better-bundle-ampere' }}-${{ github.run_number }}
+          MAX_RETRIES: ${{ github.event.inputs.max_retries || '20' }}
+          RETRY_INTERVAL: ${{ github.event.inputs.retry_interval || '60' }}
+        run: |
+          echo "Checking if script exists..."
+          ls -la infrastructure/scripts/create-oci-instance.sh
+
+          echo "Making script executable..."
+          chmod +x infrastructure/scripts/create-oci-instance.sh
+
+          echo "Running instance creation script..."
+          echo "Environment variables:"
+          echo "  COMPARTMENT_ID: ${OCI_COMPARTMENT_ID:0:20}..."
+          echo "  AVAILABILITY_DOMAIN: $OCI_AVAILABILITY_DOMAIN"
+          echo "  INSTANCE_NAME: $INSTANCE_NAME"
+          echo "  MAX_RETRIES: $MAX_RETRIES"
+          echo ""
+
+          # Run the script with explicit bash
+          bash infrastructure/scripts/create-oci-instance.sh
+
+      - name: Output Instance Details
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          echo "Instance created successfully!"
+          echo "Instance ID: ${{ steps.create.outputs.instance_id }}"
+          echo "Public IP: ${{ steps.create.outputs.public_ip }}"
+          echo ""
+          echo "SSH Connection:"
+          echo "ssh ubuntu@${{ steps.create.outputs.public_ip }}"
+          echo ""
+          echo "⚠️ IMPORTANT: Disable the cron schedule in the workflow file now that instance is created!"
+
+      - name: Instance Already Exists
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "✅ Instance already exists and is running."
+          echo "⚠️ Cron job will continue running. Consider disabling it in the workflow file."
