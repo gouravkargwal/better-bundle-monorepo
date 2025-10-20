@@ -11,9 +11,7 @@ class KafkaSettings(BaseSettings):
     """Kafka configuration settings"""
 
     # Connection settings
-    bootstrap_servers: str = Field(
-        default="localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS"
-    )
+    bootstrap_servers: str = Field(default="kafka:9092", env="KAFKA_BOOTSTRAP_SERVERS")
 
     @property
     def bootstrap_servers_list(self) -> List[str]:
