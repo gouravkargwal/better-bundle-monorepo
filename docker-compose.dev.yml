@@ -166,6 +166,13 @@ services:
       - redis_data:/data
     env_file:
       - .env.dev
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     logging:
       driver: json-file
       options:
@@ -173,7 +180,7 @@ services:
         max-file: "3"
         labels: "service=redis,env=dev"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5

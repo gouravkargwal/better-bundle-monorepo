@@ -5,12 +5,17 @@ let redisClient: RedisClientType | null = null;
 
 export async function getRedisClient(): Promise<RedisClientType> {
   if (!redisClient) {
-    const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+    // Support both REDIS_URL and individual Redis configuration
+    const redisUrl = process.env.REDIS_URL;
+    const redisHost = process.env.REDIS_HOST || "localhost";
+    const redisPort = parseInt(process.env.REDIS_PORT || "6379");
+    const redisPassword = process.env.REDIS_PASSWORD;
+    const redisDb = parseInt(process.env.REDIS_DB || "0");
 
-    redisClient = createClient({
-      url: redisUrl,
+    // Build Redis configuration
+    const redisConfig: any = {
       socket: {
-        reconnectStrategy: (retries) => {
+        reconnectStrategy: (retries: number) => {
           console.log(`🔄 Redis reconnection attempt ${retries}`);
           if (retries > 10) {
             console.error("Redis connection failed after 10 retries");
@@ -19,7 +24,24 @@ export async function getRedisClient(): Promise<RedisClientType> {
           return Math.min(retries * 100, 3000);
         },
       },
-    });
+    };
+
+    // Use REDIS_URL if provided, otherwise build from individual components
+    if (redisUrl) {
+      redisConfig.url = redisUrl;
+    } else {
+      redisConfig.socket = {
+        ...redisConfig.socket,
+        host: redisHost,
+        port: redisPort,
+      };
+      redisConfig.database = redisDb;
+      if (redisPassword) {
+        redisConfig.password = redisPassword;
+      }
+    }
+
+    redisClient = createClient(redisConfig);
 
     redisClient.on("error", (err) => {
       console.error("❌ Redis Client Error:", err);
