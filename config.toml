@@ -1,0 +1,134 @@
+[database]
+cache_store = "${GORSE_CACHE_STORE}"
+data_store = "${GORSE_DATA_STORE}"
+
+[database.mysql]
+isolation_level = "READ-UNCOMMITTED"
+
+[master]
+port = 8086
+host = "0.0.0.0"
+http_port = 8088
+http_host = "0.0.0.0"
+n_jobs = 8
+meta_timeout = "120s"
+
+[server]
+default_n = 25
+api_key = "${GORSE_API_KEY}"
+cache_expire = "2h"
+auto_insert_user = true
+auto_insert_item = true
+
+[recommend]
+cache_size = 100000
+cache_expire = "4h"
+active_user_ttl = 0
+enable_hot_recommend = true
+enable_latest_recommend = true
+enable_user_based_recommend = true
+enable_item_based_recommend = true
+enable_collaborative_recommend = true
+
+[recommend.data_source]
+positive_feedback_types = [
+    "purchase",
+    "high_value_purchase",
+    "checkout_completed",
+    "ready_to_buy",
+    "strong_affinity",
+    "conversion_session",
+    "search_conversion"
+]
+
+read_feedback_types = [
+    "product_viewed",
+    "product_added_to_cart",
+    "checkout_started",
+    "progressing_interest",
+    "high_engagement_session",
+    "search_engagement",
+    "basic_interest"
+]
+
+negative_feedback_types = [
+    "refund",
+    "product_removed_from_cart",
+    "bounce",
+    "session_bounce",
+    "recommendation_declined",
+    "recommendation_declined_high_confidence",
+    "recommendation_declined_similar"
+]
+
+positive_feedback_ttl = 0
+item_ttl = 0
+
+[recommend.popular]
+popular_window = "168h"
+
+[recommend.collaborative]
+enable_index = true
+index_recall = 0.90
+index_fit_epoch = 200
+model_fit_period = "45m"
+model_search_period = "3h"
+model_search_epoch = 75
+model_search_trials = 30
+enable_model_size_search = true
+
+[recommend.ranking]
+model = "fm"
+factors = 64
+epochs = 40
+learning_rate = 0.003
+reg = 0.01
+alpha = 0.01
+enable_user_features = true
+enable_item_features = true
+fit_period = "45m"
+search_period = "3h"
+search_trials = 30
+search_epoch = 30
+
+[recommend.replacement]
+enable_replacement = true
+positive_replacement_decay = 0.80
+read_replacement_decay = 0.65
+
+[recommend.offline]
+check_recommend_period = "20m"
+refresh_recommend_period = "8h"
+enable_latest_recommend = true
+enable_popular_recommend = true
+enable_user_based_recommend = true
+enable_item_based_recommend = true
+enable_collaborative_recommend = true
+enable_click_through_prediction = true
+
+[recommend.online]
+fallback_recommend = [
+    "collaborative",
+    "item_based",
+    "user_based",
+    "popular",
+    "latest"
+]
+num_feedback_fallback_item_based = 15
+enable_realtime_recommend = true
+enable_session_recommend = true
+session_recommend_cache_size = 2000
+session_recommend_cache_expire = "45m"
+
+[tracing]
+enable_tracing = false
+
+[experimental]
+enable_deep_learning = false
+deep_learning_batch_size = 512
+
+[oidc]
+enable = false
+
+[opentelemetry]
+enabled = false

@@ -1,6 +1,6 @@
 """
 Frequently Bought Together Recommendation Service
-Analyzes purchase patterns to find products commonly bought together
+High-performance FBT using FP-Growth algorithm (Layer 1 of three-layer system)
 """
 
 from typing import Dict, Any, List, Optional
@@ -10,14 +10,22 @@ from app.core.logging import get_logger
 from app.core.database.models.user_interaction import UserInteraction
 from app.core.database.models.product_data import ProductData
 from app.core.database.session import get_transaction_context
+from app.recommandations.fp_growth_engine import FPGrowthEngine, FPGrowthConfig
 
 logger = get_logger(__name__)
 
 
 class FrequentlyBoughtTogetherService:
     """
-    Service for getting frequently bought together products with multiple images support
+    High-performance FBT service using FP-Growth algorithm
+
+    Layer 1: FP-Growth base engine (70% quality)
+    Uses existing OrderData and LineItemData tables - no new tables needed.
     """
+
+    def __init__(self):
+        """Initialize with FP-Growth engine"""
+        self.fp_engine = FPGrowthEngine()
 
     def _extract_images_from_media(
         self, media_data: Any, fallback_title: str
@@ -70,19 +78,70 @@ class FrequentlyBoughtTogetherService:
         product_id: str,
         limit: int = 4,
         min_co_occurrences: int = 2,
+        cart_value: float = 0.0,
     ) -> Dict[str, Any]:
         """
-        Find products frequently bought together with the given product
+        High-performance FBT using FP-Growth algorithm
 
         Args:
             shop_id: Shop ID
             product_id: Product ID to find co-purchased items for
             limit: Maximum number of recommendations
-            min_co_occurrences: Minimum number of co-purchases required
+            min_co_occurrences: Minimum number of co-purchases required (legacy param)
 
         Returns:
             Dict with frequently bought together recommendations
         """
+        try:
+            logger.info(
+                f"🎯 Getting FBT recommendations for product {product_id} in shop {shop_id}"
+            )
+
+            # Use FP-Growth engine for high-performance recommendations
+            result = await self.fp_engine.get_recommendations(
+                shop_id=shop_id,
+                cart_items=[product_id],  # Single product as cart
+                limit=limit,
+                cart_value=cart_value,
+            )
+
+            if not result["success"]:
+                logger.warning(
+                    f"FP-Growth failed: {result.get('error', 'Unknown error')}"
+                )
+                # Fallback to legacy method if FP-Growth fails
+                return await self._legacy_fbt_method(
+                    shop_id, product_id, limit, min_co_occurrences
+                )
+
+            # Enrich with product details
+            enriched_items = await self._enrich_recommendations(
+                shop_id, result["items"]
+            )
+
+            return {
+                "success": True,
+                "items": enriched_items,
+                "source": "fp_growth_engine",
+                "count": len(enriched_items),
+                "rules_matched": result.get("rules_matched", 0),
+            }
+
+        except Exception as e:
+            logger.error(f"Error in FP-Growth FBT: {str(e)}")
+            # Fallback to legacy method
+            return await self._legacy_fbt_method(
+                shop_id, product_id, limit, min_co_occurrences
+            )
+
+    async def _legacy_fbt_method(
+        self,
+        shop_id: str,
+        product_id: str,
+        limit: int,
+        min_co_occurrences: int,
+    ) -> Dict[str, Any]:
+        """Legacy FBT method as fallback"""
         try:
             async with get_transaction_context() as session:
                 # Get all orders that contain the target product
@@ -121,12 +180,12 @@ class FrequentlyBoughtTogetherService:
                 return {
                     "success": True,
                     "items": recommendations,
-                    "source": "frequently_bought_together",
+                    "source": "legacy_fbt",
                     "count": len(recommendations),
                 }
 
         except Exception as e:
-            logger.error(f"Error getting frequently bought together: {str(e)}")
+            logger.error(f"Error in legacy FBT: {str(e)}")
             return {
                 "success": False,
                 "items": [],
@@ -139,27 +198,27 @@ class FrequentlyBoughtTogetherService:
     ) -> List[str]:
         """Get order IDs that contain the target product"""
         try:
-            # Get orders where the product was purchased
-            # Since order_id and product_id are stored in interaction_metadata JSON
+            # Query actual order data instead of interaction events
+            from app.core.database.models.order_data import OrderData, LineItemData
+
+            # Find orders that contain the target product
             result = await session.execute(
-                select(UserInteraction.interaction_metadata).where(
+                select(OrderData.id)
+                .join(LineItemData)
+                .where(
                     and_(
-                        UserInteraction.shop_id == shop_id,
-                        UserInteraction.interaction_type == "checkout_completed",
+                        OrderData.shop_id == shop_id,
+                        LineItemData.product_id == product_id,
+                        OrderData.financial_status == "paid",  # Only paid orders
                     )
                 )
             )
 
-            order_ids = []
-            for row in result.fetchall():
-                metadata = row[0] or {}
-                # Check if this order contains the target product
-                if self._order_contains_product(metadata, product_id):
-                    order_id = metadata.get("order_id")
-                    if order_id:
-                        order_ids.append(str(order_id))
-
-            return list(set(order_ids))  # Remove duplicates
+            order_ids = [str(row[0]) for row in result.fetchall()]
+            logger.info(
+                f"Found {len(order_ids)} orders containing product {product_id}"
+            )
+            return order_ids
 
         except Exception as e:
             logger.error(f"Error getting orders with product: {str(e)}")
@@ -175,32 +234,40 @@ class FrequentlyBoughtTogetherService:
     ) -> List[Dict[str, Any]]:
         """Find products frequently bought together in the same orders"""
         try:
-            # Get all checkout completed events for the shop
+            # Query actual order line items instead of interaction events
+            from app.core.database.models.order_data import OrderData, LineItemData
+
+            # Get all line items from orders that contain the target product
             result = await session.execute(
-                select(UserInteraction.interaction_metadata).where(
+                select(LineItemData.product_id, OrderData.id)
+                .join(OrderData)
+                .where(
                     and_(
-                        UserInteraction.shop_id == shop_id,
-                        UserInteraction.interaction_type == "checkout_completed",
+                        OrderData.shop_id == shop_id,
+                        OrderData.id.in_(order_ids),
+                        OrderData.financial_status == "paid",
                     )
                 )
             )
 
             # Count co-occurrences of products in the same orders
             product_co_occurrences = {}
+            order_products = {}  # Track products per order
 
             for row in result.fetchall():
-                metadata = row[0] or {}
-                order_id = metadata.get("order_id")
+                product_id, order_id = row[0], str(row[1])
 
-                if order_id and str(order_id) in order_ids:
-                    # Extract products from this order
-                    products = self._extract_products_from_order(metadata)
+                if order_id not in order_products:
+                    order_products[order_id] = set()
+                order_products[order_id].add(product_id)
 
-                    for product_id in products:
-                        if product_id != target_product_id:
-                            if product_id not in product_co_occurrences:
-                                product_co_occurrences[product_id] = 0
-                            product_co_occurrences[product_id] += 1
+            # Count co-occurrences
+            for order_id, products in order_products.items():
+                for product_id in products:
+                    if product_id != target_product_id:
+                        if product_id not in product_co_occurrences:
+                            product_co_occurrences[product_id] = 0
+                        product_co_occurrences[product_id] += 1
 
             # Filter by minimum co-occurrences and sort
             co_purchased = []
@@ -220,6 +287,195 @@ class FrequentlyBoughtTogetherService:
         except Exception as e:
             logger.error(f"Error finding co-purchased products: {str(e)}")
             return []
+
+    async def diagnose_data_availability(
+        self, shop_id: str, product_id: str
+    ) -> Dict[str, Any]:
+        """Diagnose why no co-purchase data is found"""
+        try:
+            async with get_transaction_context() as session:
+                from app.core.database.models.order_data import OrderData, LineItemData
+
+                # Check 1: Total orders in database
+                total_orders = await session.execute(
+                    select(func.count(OrderData.id)).where(OrderData.shop_id == shop_id)
+                )
+                order_count = total_orders.scalar() or 0
+
+                # Check 2: Orders containing this product
+                orders_with_product = await session.execute(
+                    select(func.count(OrderData.id.distinct()))
+                    .join(LineItemData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            LineItemData.product_id == product_id,
+                            OrderData.financial_status == "paid",
+                        )
+                    )
+                )
+                product_order_count = orders_with_product.scalar() or 0
+
+                # Check 3: Total line items for this product
+                product_line_items = await session.execute(
+                    select(func.count(LineItemData.id))
+                    .join(OrderData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            LineItemData.product_id == product_id,
+                            OrderData.financial_status == "paid",
+                        )
+                    )
+                )
+                line_item_count = product_line_items.scalar() or 0
+
+                # Check 4: Other products in same orders
+                other_products = await session.execute(
+                    select(LineItemData.product_id, func.count(LineItemData.product_id))
+                    .join(OrderData)
+                    .where(
+                        and_(
+                            OrderData.shop_id == shop_id,
+                            OrderData.id.in_(
+                                select(OrderData.id)
+                                .join(LineItemData)
+                                .where(
+                                    and_(
+                                        OrderData.shop_id == shop_id,
+                                        LineItemData.product_id == product_id,
+                                        OrderData.financial_status == "paid",
+                                    )
+                                )
+                            ),
+                            LineItemData.product_id != product_id,
+                        )
+                    )
+                    .group_by(LineItemData.product_id)
+                    .order_by(func.count(LineItemData.product_id).desc())
+                )
+
+                co_purchase_data = []
+                for row in other_products.fetchall():
+                    co_purchase_data.append(
+                        {"product_id": row[0], "co_occurrences": row[1]}
+                    )
+
+                return {
+                    "total_orders": order_count,
+                    "orders_with_product": product_order_count,
+                    "product_line_items": line_item_count,
+                    "co_purchase_candidates": len(co_purchase_data),
+                    "top_co_purchases": co_purchase_data[:5],  # Top 5
+                    "diagnosis": (
+                        "✅ Data available"
+                        if product_order_count > 0
+                        else "❌ No orders found for this product"
+                    ),
+                }
+
+        except Exception as e:
+            logger.error(f"Error in diagnosis: {str(e)}")
+            return {"error": str(e)}
+
+    async def _enrich_recommendations(
+        self, shop_id: str, recommendations: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enrich FP-Growth recommendations with product details"""
+        try:
+            async with get_transaction_context() as session:
+                enriched_items = []
+
+                for rec in recommendations:
+                    product_id = rec["id"]
+
+                    # Get product details from database
+                    result = await session.execute(
+                        select(ProductData).where(
+                            and_(
+                                ProductData.shop_id == shop_id,
+                                ProductData.product_id == product_id,
+                            )
+                        )
+                    )
+                    product = result.scalar_one_or_none()
+
+                    if product:
+                        enriched_item = {
+                            "id": product_id,
+                            "title": product.title or "Unknown Product",
+                            "handle": product.handle or "",
+                            "price": {
+                                "amount": str(product.price or 0),
+                                "currency_code": await self._get_shop_currency(shop_id),
+                            },
+                            "image": self._extract_image_from_media(
+                                product.media, product.title or "Product"
+                            ),
+                            "images": self._extract_images_from_media(
+                                product.media, product.title or "Product"
+                            ),
+                            "available": product.is_active,
+                            "url": (
+                                f"/products/{product.handle}" if product.handle else ""
+                            ),
+                            "score": rec["score"],
+                            "reason": rec["reason"],
+                            "source": rec["source"],
+                        }
+                        enriched_items.append(enriched_item)
+
+                return enriched_items
+
+        except Exception as e:
+            logger.error(f"Error enriching recommendations: {str(e)}")
+            return []
+
+    async def train_fp_growth_model(self, shop_id: str) -> Dict[str, Any]:
+        """
+        Train FP-Growth model for the shop
+
+        This should be called periodically (daily) to retrain the model
+        """
+        try:
+            logger.info(f"🧠 Training FP-Growth model for shop {shop_id}")
+            result = await self.fp_engine.train_model(shop_id)
+
+            if result["success"]:
+                logger.info(
+                    f"✅ FP-Growth training completed: {result['association_rules']} rules generated"
+                )
+            else:
+                logger.error(f"❌ FP-Growth training failed: {result.get('error')}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error training FP-Growth model: {str(e)}")
+            return {"success": False, "error": str(e), "shop_id": shop_id}
+
+    async def train_embeddings_model(self, shop_id: str) -> Dict[str, Any]:
+        """
+        Train product embeddings model for semantic similarity
+
+        This should be called periodically (weekly) to retrain embeddings
+        """
+        try:
+            logger.info(f"🧠 Training embeddings model for shop {shop_id}")
+            result = await self.fp_engine.train_embeddings(shop_id)
+
+            if result["success"]:
+                logger.info(
+                    f"✅ Embeddings training completed: {result['products_embedded']} products embedded"
+                )
+            else:
+                logger.error(f"❌ Embeddings training failed: {result.get('error')}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error training embeddings model: {str(e)}")
+            return {"success": False, "error": str(e), "shop_id": shop_id}
 
     async def _get_product_details(
         self, session: AsyncSession, shop_id: str, co_purchased: List[Dict[str, Any]]
@@ -307,3 +563,18 @@ class FrequentlyBoughtTogetherService:
             return products
         except Exception:
             return []
+
+    async def _get_shop_currency(self, shop_id: str) -> str:
+        """Get shop currency from database"""
+        try:
+            from app.core.database.models.shop import Shop
+
+            async with get_transaction_context() as session:
+                result = await session.execute(
+                    select(Shop.currency_code).where(Shop.id == shop_id)
+                )
+                currency = result.scalar_one_or_none()
+                return currency or "USD"  # Fallback to USD if not found
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting shop currency for {shop_id}: {e}")
+            return "USD"  # Fallback to USD

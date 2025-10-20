@@ -3,7 +3,7 @@ venv/
 env/
 ENV/
 .venv/
-.env/
+.env.*
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,6 +24,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.secrets
 MANIFEST
 
 # Node.js

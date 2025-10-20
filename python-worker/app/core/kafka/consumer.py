@@ -11,15 +11,9 @@ from typing import Dict, Any, List, Optional, AsyncIterator
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 from aiokafka.errors import (
-    KafkaError,
     KafkaTimeoutError,
     ConsumerStoppedError,
-    KafkaConnectionError,
-    KafkaProtocolError,
-    IllegalGenerationError,
-    RebalanceInProgressError,
 )
-import asyncio
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.domains.customer_linking.scheduler import customer_linking_scheduler
-from app.core.database.simple_db_client import get_database
+from app.core.database import get_database
 
 logger = get_logger(__name__)
 

@@ -605,7 +605,9 @@ class ProductGenerator(BaseGenerator):
                 if size == "M":
                     inventory = base_inventory + random.randint(5, 10)
                 elif size in ["XS", "XXL"]:
-                    inventory = max(1, base_inventory - random.randint(3, 8))
+                    inventory = max(
+                        5, base_inventory - random.randint(2, 5)
+                    )  # Minimum 5 units
                 else:
                     inventory = base_inventory
 
@@ -658,7 +660,9 @@ class ProductGenerator(BaseGenerator):
                 # Inventory varies by storage (higher capacity = lower stock)
                 base_inventory = random.randint(*product_config["inventory_range"])
                 if storage in ["1TB", "512GB"]:
-                    inventory = max(1, base_inventory - random.randint(3, 6))
+                    inventory = max(
+                        5, base_inventory - random.randint(2, 4)
+                    )  # Minimum 5 units
                 else:
                     inventory = base_inventory
 
@@ -715,7 +719,9 @@ class ProductGenerator(BaseGenerator):
                 # Inventory varies by material
                 base_inventory = random.randint(*product_config["inventory_range"])
                 if material == "Leather":
-                    inventory = max(1, base_inventory - random.randint(2, 5))
+                    inventory = max(
+                        5, base_inventory - random.randint(1, 3)
+                    )  # Minimum 5 units
                 else:
                     inventory = base_inventory
 
@@ -770,7 +776,9 @@ class ProductGenerator(BaseGenerator):
                 # Inventory varies by size
                 base_inventory = random.randint(*product_config["inventory_range"])
                 if size == "Extra Large":
-                    inventory = max(1, base_inventory - random.randint(2, 4))
+                    inventory = max(
+                        5, base_inventory - random.randint(1, 3)
+                    )  # Minimum 5 units
                 else:
                     inventory = base_inventory
 
@@ -829,7 +837,9 @@ class ProductGenerator(BaseGenerator):
                     # Inventory varies by resistance level
                     base_inventory = random.randint(*product_config["inventory_range"])
                     if resistance in ["Extra Heavy", "Light"]:
-                        inventory = max(1, base_inventory - random.randint(2, 4))
+                        inventory = max(
+                            5, base_inventory - random.randint(1, 3)
+                        )  # Minimum 5 units
                     else:
                         inventory = base_inventory
 
@@ -875,7 +885,9 @@ class ProductGenerator(BaseGenerator):
                     if size == "M":
                         inventory = base_inventory + random.randint(3, 8)
                     elif size in ["XS", "XXL"]:
-                        inventory = max(1, base_inventory - random.randint(2, 5))
+                        inventory = max(
+                            5, base_inventory - random.randint(1, 3)
+                        )  # Minimum 5 units
                     else:
                         inventory = base_inventory
 

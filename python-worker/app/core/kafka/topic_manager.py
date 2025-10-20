@@ -23,7 +23,7 @@ class KafkaTopicManager:
         """Initialize the admin client"""
         try:
             self.admin_client = AIOKafkaAdminClient(
-                bootstrap_servers=kafka_settings.bootstrap_servers,
+                bootstrap_servers=kafka_settings.bootstrap_servers_list,
                 client_id=f"{kafka_settings.client_id}-admin",
                 **kafka_settings.admin_config,
             )

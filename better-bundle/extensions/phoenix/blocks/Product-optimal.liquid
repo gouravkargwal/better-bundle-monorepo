@@ -7,7 +7,21 @@
   | split: '|'
 %}
 
-{% render 'recommendation-base', context: 'product_page', product_id: product.id, dummy_data: dummy_data %}
+{% comment %}
+  Smart Product Block - Auto-detects context based on page type
+  Can be used on any page and will automatically use the correct context
+{% endcomment %}
+
+{% assign block_context = 'product_page' %}
+{% if template.name == 'index' or template.name == 'page' %}
+  {% assign block_context = 'homepage' %}
+{% elsif template.name == 'cart' %}
+  {% assign block_context = 'cart' %}
+{% elsif template.name == 'collection' %}
+  {% assign block_context = 'collection_page' %}
+{% endif %}
+
+{% render 'recommendation-base', context: block_context, product_id: product.id, dummy_data: dummy_data %}
 
 {% schema %}
 {

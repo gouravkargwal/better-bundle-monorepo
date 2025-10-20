@@ -147,13 +147,32 @@ class PrometheusHandler:
 
 
 class GrafanaHandler:
-    """Grafana logging handler (placeholder for future implementation)"""
+    """Grafana Loki logging handler for sending logs to Loki"""
 
     @staticmethod
     def create_handler(url: str, username: str, password: str):
-        """Create Grafana handler"""
-        # This is a placeholder for future Grafana integration
-        return None
+        """Create Grafana Loki handler"""
+        try:
+            import requests
+            from .loki_handler import LokiHandler
+
+            # Parse the URL to get Loki endpoint
+            if not url:
+                return None
+
+            # Ensure URL ends with /loki/api/v1/push
+            if not url.endswith("/loki/api/v1/push"):
+                if url.endswith("/"):
+                    url = url.rstrip("/")
+                url = f"{url}/loki/api/v1/push"
+
+            return LokiHandler(url=url, username=username, password=password)
+        except ImportError:
+            print("Warning: requests library not available for Grafana Loki handler")
+            return None
+        except Exception as e:
+            print(f"Warning: Failed to create Grafana Loki handler: {e}")
+            return None
 
 
 class TelemetryHandler:

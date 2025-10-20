@@ -24,6 +24,17 @@ class HybridRecommendationService:
     def __init__(self):
         self.gorse_client = gorse_client
 
+    def _extract_numeric_id(self, gid: str) -> Optional[str]:
+        """Extract numeric ID from GID format"""
+        if not gid or not isinstance(gid, str):
+            return None
+        try:
+            if gid.startswith("gid://shopify/"):
+                return gid.split("/")[-1]
+            return gid
+        except Exception:
+            return None
+
     # Context-specific blending ratios
     BLENDING_RATIOS = {
         "product_page": {
@@ -68,10 +79,10 @@ class HybridRecommendationService:
             "popular": 0.1,  # 10% general popular items
         },
         "post_purchase": {
-            "popular_category": 0.5,  # 50% popular in same category (most relevant)
-            "item_neighbors": 0.3,  # 30% similar products to purchased items
-            "frequently_bought_together": 0.15,  # 15% cross-sell (if data available)
-            "user_recommendations": 0.05,  # 5% personalized based on user history
+            "frequently_bought_together": 0.4,  # 40% FBT for cross-sell (industry standard)
+            "user_recommendations": 0.25,  # 25% personalized (enhanced personalization)
+            "item_neighbors": 0.2,  # 20% similar products to purchased items
+            "popular_category": 0.15,  # 15% popular in same category (fallback)
         },
     }
 
@@ -278,13 +289,21 @@ class HybridRecommendationService:
                 :5
             ]:  # Limit to 5 products to avoid too many API calls
                 try:
-                    prefixed_item_id = f"shop_{shop_id}_{pid}"
+                    # Extract numeric ID from GID format if needed
+                    clean_pid = self._extract_numeric_id(pid)
+                    if not clean_pid:
+                        logger.warning(f"⚠️ Invalid product ID format: {pid}")
+                        continue
+
+                    prefixed_item_id = f"shop_{shop_id}_{clean_pid}"
                     # Convert exclude_items to Gorse format (with shop prefix)
                     gorse_exclude_items = None
                     if exclude_items:
-                        gorse_exclude_items = [
-                            f"shop_{shop_id}_{item_id}" for item_id in exclude_items
-                        ]
+                        gorse_exclude_items = []
+                        for item_id in exclude_items:
+                            clean_id = self._extract_numeric_id(item_id)
+                            if clean_id:
+                                gorse_exclude_items.append(f"shop_{shop_id}_{clean_id}")
 
                     result = await self.gorse_client.get_item_neighbors(
                         item_id=prefixed_item_id,

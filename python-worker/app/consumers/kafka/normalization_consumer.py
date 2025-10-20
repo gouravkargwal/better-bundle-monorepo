@@ -135,8 +135,82 @@ class NormalizationKafkaConsumer:
                 await self.normalization_service.feature_service.trigger_feature_computation(
                     shop_id, data_type
                 )
+
+                # Trigger FBT model retraining for order-related data
+                await self._trigger_fbt_retraining_if_needed(shop_id, data_type)
             else:
                 logger.error(f"❌ Normalization failed for {data_type}")
         except Exception as e:
             logger.error(f"Normalization failed: {e}")
             raise
+
+    async def _trigger_fbt_retraining_if_needed(self, shop_id: str, data_type: str):
+        """
+        Trigger FBT model retraining for order-related data changes
+
+        This ensures FBT recommendations stay up-to-date with latest purchase data
+        """
+        try:
+            # Only retrain FBT for order-related data types
+            order_related_types = [
+                "orders",  # Main data type from normalization
+                "order",
+                "order_data", 
+                "line_item",
+                "line_item_data",
+                "order_paid",
+                "order_updated",
+                "order_created",
+            ]
+
+            if data_type.lower() not in order_related_types:
+                return  # Skip FBT retraining for non-order data
+
+            logger.info(
+                f"🔄 Triggering FBT retraining for {data_type} in shop {shop_id}"
+            )
+
+            # Import FBT service
+            from app.recommandations.frequently_bought_together import (
+                FrequentlyBoughtTogetherService,
+            )
+
+            fbt_service = FrequentlyBoughtTogetherService()
+
+            # Trigger FBT model retraining in background
+            # This is non-blocking to avoid slowing down normalization
+            import asyncio
+
+            asyncio.create_task(
+                self._retrain_fbt_model(fbt_service, shop_id, data_type)
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to trigger FBT retraining: {e}")
+            # Don't raise - this shouldn't break normalization flow
+
+    async def _retrain_fbt_model(self, fbt_service, shop_id: str, data_type: str):
+        """
+        Background task to retrain FBT model
+        """
+        try:
+            logger.info(
+                f"🧠 Starting FBT model retraining for shop {shop_id} (triggered by {data_type})"
+            )
+
+            # Train FP-Growth model
+            result = await fbt_service.train_fp_growth_model(shop_id)
+
+            if result.get("success"):
+                logger.info(
+                    f"✅ FBT model retrained successfully for shop {shop_id}: "
+                    f"{result.get('association_rules', 0)} rules generated"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ FBT model retraining failed for shop {shop_id}: "
+                    f"{result.get('error', 'Unknown error')}"
+                )
+
+        except Exception as e:
+            logger.error(f"❌ FBT model retraining error for shop {shop_id}: {e}")

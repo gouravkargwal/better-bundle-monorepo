@@ -32,7 +32,7 @@ class ShopifyGraphQLSeeder:
     def __init__(self, shop_domain: str, access_token: str):
         self.shop_domain = shop_domain
         self.access_token = access_token
-        self.api_version = "2024-01"
+        self.api_version = "2025-01"  # Use latest stable version
         self.base_url = f"https://{shop_domain}/admin/api/{self.api_version}"
 
         # Generators
@@ -47,8 +47,9 @@ class ShopifyGraphQLSeeder:
         self.created_orders: Dict[str, Dict[str, Any]] = {}
         self.created_collections: Dict[str, Dict[str, Any]] = {}
 
-        # Cache for publication ID
+        # Cache for publication ID and location ID
         self._online_store_publication_id: Optional[str] = None
+        self._store_location_id: Optional[str] = None
 
     def _graphql_request(
         self,
@@ -144,6 +145,219 @@ class ShopifyGraphQLSeeder:
             self._online_store_publication_id = "gid://shopify/Publication/1"
             return self._online_store_publication_id
 
+    def _get_store_location_id(self) -> str:
+        """Fetch the first available location ID for this shop."""
+        if self._store_location_id:
+            return self._store_location_id
+
+        query = """
+        query {
+            locations(first: 10) {
+                nodes {
+                    id
+                    name
+                }
+            }
+        }
+        """
+
+        try:
+            result = self._graphql_request(query)
+            locations = result["data"]["locations"]["nodes"]
+
+            # Use the first available location
+            if locations:
+                self._store_location_id = locations[0]["id"]
+                print(
+                    f"    📍 Using location: {locations[0]['name']} ({locations[0]['id']})"
+                )
+                return self._store_location_id
+            else:
+                raise Exception("No locations found")
+
+        except Exception as e:
+            print(f"    ⚠️ Failed to fetch locations: {e}")
+            # Fallback to hardcoded ID
+            self._store_location_id = "gid://shopify/Location/1"
+            return self._store_location_id
+
+    def _create_staged_upload(
+        self, filename: str, mime_type: str, file_size: str
+    ) -> Dict[str, Any]:
+        """Create a staged upload target for an image file."""
+        mutation = """
+        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+            stagedUploadsCreate(input: $input) {
+                stagedTargets {
+                    url
+                    resourceUrl
+                    parameters {
+                        name
+                        value
+                    }
+                }
+                userErrors {
+                    field
+                    message
+                }
+            }
+        }
+        """
+
+        variables = {
+            "input": [
+                {
+                    "filename": filename,
+                    "mimeType": mime_type,
+                    "resource": "IMAGE",
+                    "fileSize": file_size,
+                    "httpMethod": "POST",
+                }
+            ]
+        }
+
+        result = self._graphql_request(mutation, variables)
+
+        if result["data"]["stagedUploadsCreate"]["userErrors"]:
+            errors = [
+                error["message"]
+                for error in result["data"]["stagedUploadsCreate"]["userErrors"]
+            ]
+            raise Exception(f"Staging upload error: {', '.join(errors)}")
+
+        return result["data"]["stagedUploadsCreate"]["stagedTargets"][0]
+
+    def _upload_to_staged_target(
+        self, staged_target: Dict[str, Any], image_url: str
+    ) -> str:
+        """Download image from external URL and upload to Shopify's staged target."""
+        try:
+            # Download the image from external URL
+            print(f"      📥 Downloading image from: {image_url}")
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()
+            image_data = response.content
+
+            # Prepare form data with staging parameters
+            form_data = {}
+            for param in staged_target["parameters"]:
+                form_data[param["name"]] = param["value"]
+
+            # Upload the file to staged target
+            files = {"file": image_data}
+            print(f"      📤 Uploading to Shopify staged storage...")
+            upload_response = requests.post(
+                staged_target["url"], data=form_data, files=files, timeout=60
+            )
+            upload_response.raise_for_status()
+
+            print(f"      ✅ Upload successful")
+            return staged_target["resourceUrl"]
+
+        except requests.exceptions.RequestException as e:
+            print(f"      ❌ Upload failed: {e}")
+            raise
+
+    def _attach_media_to_product(
+        self, product_id: str, media_inputs: List[Dict[str, Any]]
+    ) -> None:
+        """Attach media to product using productCreateMedia mutation."""
+        if not media_inputs:
+            return
+
+        mutation = """
+        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+            productCreateMedia(productId: $productId, media: $media) {
+                media {
+                    id
+                    alt
+                    mediaContentType
+                    status
+                }
+                mediaUserErrors {
+                    field
+                    message
+                    code
+                }
+            }
+        }
+        """
+
+        variables = {"productId": product_id, "media": media_inputs}
+
+        try:
+            result = self._graphql_request(mutation, variables)
+
+            if result["data"]["productCreateMedia"]["mediaUserErrors"]:
+                errors = [
+                    f"{error.get('code', 'ERROR')}: {error['message']}"
+                    for error in result["data"]["productCreateMedia"]["mediaUserErrors"]
+                ]
+                print(f"    ⚠️ Media attachment errors: {', '.join(errors)}")
+            else:
+                media_count = len(result["data"]["productCreateMedia"]["media"])
+                print(f"    📸 Successfully attached {media_count} image(s)")
+
+        except Exception as e:
+            print(f"    ⚠️ Failed to attach media: {e}")
+
+    def _add_media_to_product_from_urls(
+        self, product_id: str, media_edges: List[Dict]
+    ) -> None:
+        """
+        Process external image URLs through staged uploads and attach to product.
+        This is the proper way to add images from external URLs.
+        """
+        media_inputs = []
+
+        for i, media_edge in enumerate(media_edges, 1):
+            media_node = media_edge["node"]
+
+            if media_node.get("image"):
+                try:
+                    image_url = media_node["image"]["url"]
+                    filename = (
+                        image_url.split("/")[-1].split("?")[0] or f"image_{i}.jpg"
+                    )
+
+                    # Download image to get file size
+                    print(f"    📸 Processing image {i}: {filename}")
+                    response = requests.head(image_url, timeout=10)
+                    file_size = response.headers.get("Content-Length", "0")
+
+                    # Determine MIME type
+                    content_type = response.headers.get("Content-Type", "image/jpeg")
+                    if not content_type.startswith("image/"):
+                        content_type = "image/jpeg"
+
+                    # Step 1: Create staged upload target
+                    print(f"      🎯 Creating staged upload target...")
+                    staged_target = self._create_staged_upload(
+                        filename, content_type, file_size
+                    )
+
+                    # Step 2: Upload image to staged target
+                    resource_url = self._upload_to_staged_target(
+                        staged_target, image_url
+                    )
+
+                    # Step 3: Prepare media input with resourceUrl
+                    media_inputs.append(
+                        {
+                            "originalSource": resource_url,  # Use staged resourceUrl
+                            "mediaContentType": "IMAGE",
+                            "alt": media_node["image"].get("altText", filename),
+                        }
+                    )
+
+                except Exception as e:
+                    print(f"    ⚠️ Failed to process image {i}: {e}")
+                    continue
+
+        # Attach all successfully processed media
+        if media_inputs:
+            self._attach_media_to_product(product_id, media_inputs)
+
     def _batch_publish_products(
         self, product_ids: List[str], publication_id: str
     ) -> bool:
@@ -153,7 +367,6 @@ class ShopifyGraphQLSeeder:
 
         print(f"  📡 Publishing {len(product_ids)} products to Online Store...")
 
-        # Create batch publish mutation
         mutation = """
         mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
             publishablePublish(id: $id, input: $input) {
@@ -207,7 +420,6 @@ class ShopifyGraphQLSeeder:
 
         print(f"  📡 Publishing {len(collection_ids)} collections to Online Store...")
 
-        # Create batch publish mutation for collections
         mutation = """
         mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
             publishablePublish(id: $id, input: $input) {
@@ -288,7 +500,7 @@ class ShopifyGraphQLSeeder:
                         }
                     )
 
-                # Create product with variants using productSet mutation
+                # Create product mutation (without media)
                 mutation = """
                 mutation productSet($input: ProductSetInput!) {
                     productSet(input: $input) {
@@ -367,7 +579,7 @@ class ShopifyGraphQLSeeder:
                             },
                             "inventoryQuantities": [
                                 {
-                                    "locationId": "gid://shopify/Location/78228324491",
+                                    "locationId": self._get_store_location_id(),
                                     "name": "available",
                                     "quantity": variant_data["inventoryQuantity"],
                                 }
@@ -405,9 +617,10 @@ class ShopifyGraphQLSeeder:
                 for variant_node in product["variants"]["nodes"]:
                     variant_ids.append(variant_node["id"])
 
-                # Add media to the product if available
+                # Add media after product is created using staged uploads
                 if product_data.get("media", {}).get("edges"):
-                    self._add_media_to_product(
+                    print(f"  🖼️  Adding media to product: {product['title']}")
+                    self._add_media_to_product_from_urls(
                         product["id"], product_data["media"]["edges"]
                     )
 
@@ -419,6 +632,7 @@ class ShopifyGraphQLSeeder:
                 }
                 created_product_ids.append(product["id"])
                 print(f"  ✅ Product: {product['title']} ({product['id']})")
+
             except Exception as e:
                 print(f"  ❌ Product {i} failed: {e}")
 
@@ -433,13 +647,6 @@ class ShopifyGraphQLSeeder:
         customers = self.customer_generator.generate_customers()
         for i, customer_data in enumerate(customers, 1):
             try:
-                # Make email unique by adding timestamp
-                import time
-
-                original_email = customer_data["email"]
-                unique_email = f"{original_email.split('@')[0]}+{int(time.time())}@{original_email.split('@')[1]}"
-                customer_data["email"] = unique_email
-
                 # Prepare addresses
                 addresses = []
                 if customer_data.get("defaultAddress"):
@@ -463,7 +670,6 @@ class ShopifyGraphQLSeeder:
                     customerCreate(input: $input) {
                         customer {
                             id
-                            email
                             displayName
                         }
                         userErrors {
@@ -478,7 +684,6 @@ class ShopifyGraphQLSeeder:
                     "input": {
                         "firstName": customer_data["firstName"],
                         "lastName": customer_data["lastName"],
-                        "email": customer_data["email"],
                         "tags": customer_data.get("tags", []),
                         "addresses": addresses,
                     }
@@ -496,9 +701,13 @@ class ShopifyGraphQLSeeder:
                 customer = result["data"]["customerCreate"]["customer"]
                 self.created_customers[f"customer_{i}"] = {
                     "id": customer["id"],
-                    "email": customer["email"],
+                    "displayName": customer.get(
+                        "displayName",
+                        f"{customer_data['firstName']} {customer_data['lastName']}",
+                    ),
                 }
-                print(f"  ✅ Customer: {customer['email']} ({customer['id']})")
+                print(f"  ✅ Customer: {customer['displayName']}")
+
             except Exception as e:
                 print(f"  ❌ Customer {i} failed: {e}")
         return self.created_customers
@@ -509,12 +718,9 @@ class ShopifyGraphQLSeeder:
         collections = []
 
         # Use timestamp to make handles unique
-        import time
-
         timestamp = int(time.time())
 
-        # Split products more evenly - first 10 products for Summer Essentials
-        # Remaining products for Tech Gear (should be around 10 as well)
+        # Split products evenly
         mid_point = len(product_ids) // 2
 
         collections.append(
@@ -648,8 +854,8 @@ class ShopifyGraphQLSeeder:
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
-        # Create orders following the enhanced customer journey (40 orders)
-        for i in range(1, 41):  # Create 40 orders for comprehensive ML training
+        # Create orders (40 orders for comprehensive ML training)
+        for i in range(1, 41):
             try:
                 # Pick random customer and products
                 customer_id = random.choice(customer_ids)
@@ -695,7 +901,6 @@ class ShopifyGraphQLSeeder:
                     "input": {
                         "lineItems": line_items,
                         "customerId": customer_id,
-                        "email": f"order{i}@example.com",
                         "tags": ["Test Order", f"Order-{i}"],
                     }
                 }
@@ -760,7 +965,7 @@ class ShopifyGraphQLSeeder:
                     "financialStatus": order["displayFinancialStatus"],
                 }
                 print(
-                    f"  ✅ Order: {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']}) ({order['id']})"
+                    f"  ✅ Order: {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']})"
                 )
 
             except Exception as e:
@@ -770,20 +975,9 @@ class ShopifyGraphQLSeeder:
     async def run(self) -> bool:
         print(f"🚀 Seeding Shopify store with GraphQL: {self.shop_domain}")
 
-        # Create products and customers in parallel since they're independent
-        print("📦 Creating products and customers in parallel...")
-        products_task = asyncio.create_task(self.create_products())
-        customers_task = asyncio.create_task(self.create_customers())
-
-        # Wait for both to complete
-        await asyncio.gather(products_task, customers_task)
-
-        # Create collections after products are ready
-        print("📚 Creating collections...")
+        await self.create_products()
+        await self.create_customers()
         await self.create_collections()
-
-        # Create orders after products and customers are ready
-        print("📋 Creating orders...")
         await self.create_orders()
 
         print("\n🎯 Seeding Summary:")
@@ -805,82 +999,12 @@ class ShopifyGraphQLSeeder:
         print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
         return bool(self.created_products and self.created_customers)
 
-    def _add_media_to_product(self, product_id: str, media_edges: List[Dict]) -> None:
-        """Add media files to a product using productCreateMedia with original source URLs."""
-        media_inputs = []
-
-        for media_edge in media_edges:
-            media_node = media_edge["node"]
-
-            if media_node.get("image"):
-                # Use original source URLs directly with productCreateMedia
-                media_inputs.append(
-                    {
-                        "originalSource": media_node["image"]["url"],
-                        "mediaContentType": "IMAGE",
-                        "alt": media_node["image"].get("altText", ""),
-                    }
-                )
-                print(f"    📸 Preparing media: {media_node['image']['url']}")
-
-        # Attach all media to product in one call
-        if media_inputs:
-            self._attach_media_to_product(product_id, media_inputs)
-
-    def _attach_media_to_product(
-        self, product_id: str, media_inputs: List[Dict]
-    ) -> None:
-        """Attach media to product using productCreateMedia mutation (2024-01+ API)."""
-        mutation = """
-        mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-            productCreateMedia(productId: $productId, media: $media) {
-                media {
-                    id
-                    alt
-                    status
-                }
-                mediaUserErrors {
-                    field
-                    message
-                }
-            }
-        }
-        """
-
-        variables = {"productId": product_id, "media": media_inputs}
-
-        try:
-            result = self._graphql_request(mutation, variables)
-            if result["data"]["productCreateMedia"]["mediaUserErrors"]:
-                print(
-                    f"    ⚠️ Failed to attach media: {result['data']['productCreateMedia']['mediaUserErrors']}"
-                )
-            else:
-                print(
-                    f"    📸 Added {len(media_inputs)} media files to product {product_id}"
-                )
-        except Exception as e:
-            print(f"    ⚠️ Failed to attach media: {e}")
-
 
 async def main() -> bool:
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Seed Shopify store with test data")
-    parser.add_argument("--shop", help="Shop domain (e.g., your-store.myshopify.com)")
-    parser.add_argument("--token", help="Shopify access token")
-    args = parser.parse_args()
-    
     # Get shop details from arguments or environment variables
-    shop_domain = args.shop or os.getenv("SHOP_DOMAIN")
-    access_token = args.token or os.getenv("SHOPIFY_ACCESS_TOKEN")
-    
-    if not shop_domain or not access_token:
-        print("❌ Missing required parameters!")
-        print("Please provide shop domain and access token either:")
-        print("  - As command line arguments: --shop your-store.myshopify.com --token shpat_...")
-        print("  - As environment variables: SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN")
-        return False
-    
+    shop_domain = "gk-sphere.myshopify.com"
+    access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+
     seeder = ShopifyGraphQLSeeder(shop_domain, access_token)
     return await seeder.run()
 

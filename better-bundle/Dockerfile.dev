@@ -1,0 +1,32 @@
+FROM node:22-alpine
+
+# Install openssl for Node.js crypto operations
+RUN apk add --no-cache openssl
+
+# Set working directory
+WORKDIR /app
+
+# Set environment to development
+ENV NODE_ENV=development
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install all dependencies (including dev dependencies for development)
+RUN npm install
+
+# Install Shopify CLI globally for development
+RUN npm install -g @shopify/cli
+
+# Copy source code
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
+
+# Start development server (override docker-start for dev)
+CMD ["npm", "run", "dev"]

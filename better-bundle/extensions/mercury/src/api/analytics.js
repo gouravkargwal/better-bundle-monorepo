@@ -202,6 +202,52 @@ class AnalyticsApiClient {
       return false;
     }
   }
+
+  /**
+   * Track add to cart action (following Phoenix pattern)
+   */
+  async trackAddToCart(shopDomain, context, productId, variantId, position, customerId, metadata) {
+    try {
+      const request = {
+        session_id: "", // Will be set by trackUnifiedInteraction
+        shop_domain: shopDomain,
+        context: context,
+        interaction_type: "recommendation_add_to_cart", // Use custom recommendation event
+        customer_id: customerId ? String(customerId) : undefined,
+        product_id: productId,
+        page_url: null,
+        referrer: null,
+        metadata: {
+          ...metadata,
+          extension_type: "mercury",
+          source: "mercury_checkout_extension",
+          // Standard structure expected by adapters
+          data: {
+            cartLine: {
+              merchandise: {
+                id: variantId,
+                product: {
+                  id: productId  // Use productId instead of variantId for product_id
+                }
+              },
+              quantity: metadata?.quantity || 1
+            },
+            type: "recommendation",
+            position: position,
+            widget: "mercury_recommendation",
+            algorithm: "mercury_algorithm",
+            // ✅ Add quantity tracking for proper attribution
+            selected_quantity: metadata?.quantity || 1
+          }
+        },
+      };
+
+      return await this.trackUnifiedInteraction(request);
+    } catch (error) {
+      console.error("Failed to track add to cart:", error);
+      return false;
+    }
+  }
 }
 
 // Default instance

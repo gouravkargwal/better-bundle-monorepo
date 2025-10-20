@@ -16,7 +16,34 @@
   window.shopDomain = {{ shop.permanent_domain | json }};
   window.customerId = {{ customer.id | json }};
   window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
-  window.context = '{{ context }}';
+  // Smart context detection - override block context if needed
+  {% assign detected_context = context %}
+
+  {% comment %} Auto-detect context based on page type if context is 'cart' {% endcomment %}
+  {% if context == 'cart' %}
+    {% if template.name == 'index' or template.name == 'page' %}
+      {% assign detected_context = 'homepage' %}
+    {% elsif template.name == 'product' %}
+      {% assign detected_context = 'product_page' %}
+    {% elsif template.name == 'collection' %}
+      {% assign detected_context = 'collection_page' %}
+    {% endif %}
+  {% endif %}
+
+  window.context = '{{ detected_context }}';
+
+  // Add context-specific data from blocks
+  {% if detected_context == 'homepage' %}
+    window.visitorStrategy = '{{ block.settings.visitor_strategy | default: "auto" }}';
+  {% endif %}
+
+  {% if detected_context == 'product_page' %}
+    window.productId = {{ product.id | json }};
+  {% endif %}
+
+  {% if detected_context == 'collection_page' %}
+    window.collectionId = {{ collection.id | json }};
+  {% endif %}
 
   {% if product_id %}
     window.productId = {{ product_id | json }};

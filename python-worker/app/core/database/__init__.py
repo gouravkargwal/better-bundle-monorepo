@@ -1,20 +1,8 @@
 """
 Database module for BetterBundle Python Worker
 
-Supports both Prisma (legacy) and SQLAlchemy async (new) database access patterns.
+Uses SQLAlchemy async for all database operations.
 """
-
-# Legacy Prisma imports (for backward compatibility)
-from .simple_db_client import (
-    get_database as get_prisma_database,
-    close_database as close_prisma_database,
-    check_database_health as check_prisma_database_health,
-    with_database_retry as prisma_with_database_retry,
-    get_or_create_shop as prisma_get_or_create_shop,
-    clear_shop_data as prisma_clear_shop_data,
-    update_shop_last_analysis as prisma_update_shop_last_analysis,
-    get_latest_timestamps as prisma_get_latest_timestamps,
-)
 
 # New SQLAlchemy async imports
 from .engine import (
@@ -65,13 +53,4 @@ __all__ = [
     "check_database_health",
     # Health monitoring
     "reconnect_database",
-    # Legacy Prisma (explicit imports)
-    "get_prisma_database",
-    "close_prisma_database",
-    "check_prisma_database_health",
-    "prisma_with_database_retry",
-    "prisma_get_or_create_shop",
-    "prisma_clear_shop_data",
-    "prisma_update_shop_last_analysis",
-    "prisma_get_latest_timestamps",
 ]

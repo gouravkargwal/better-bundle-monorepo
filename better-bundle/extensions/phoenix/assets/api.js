@@ -6,7 +6,7 @@ class RecommendationAPI {
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
-      const context = window.context || 'cart';
+      const context = window.context || 'homepage';
       const shopDomain = window.shopDomain || '';
 
       if (!shopDomain) {
@@ -38,6 +38,12 @@ class RecommendationAPI {
         requestBody.collection_id = String(window.collectionId);
       }
 
+      // Add homepage-specific visitor strategy
+      if (context === 'homepage' && window.visitorStrategy) {
+        requestBody.metadata = requestBody.metadata || {};
+        requestBody.metadata.visitor_strategy = window.visitorStrategy;
+      }
+
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings
       if (customerId) requestBody.user_id = String(customerId); // Convert to string as backend expects string
@@ -57,9 +63,9 @@ class RecommendationAPI {
       console.log('📦 Request body:', requestBody);
       console.log('🔗 Backend URL:', this.baseUrl);
 
-      // Create AbortController for timeout
+      // Create AbortController for timeout with retry logic
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -67,7 +73,8 @@ class RecommendationAPI {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-        signal: controller.signal
+        signal: controller.signal,
+        keepalive: true // Keep connection alive for better performance
       });
 
       clearTimeout(timeoutId);
