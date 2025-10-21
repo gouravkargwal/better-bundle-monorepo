@@ -90,7 +90,7 @@ jobs:
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
           INSTANCE_NAME: ${{ github.event.inputs.instance_name || 'better-bundle-ampere' }}-${{ github.run_number }}
-          MAX_RETRIES: ${{ github.event.inputs.max_retries || '20' }}
+          MAX_RETRIES: ${{ github.event.inputs.max_retries || '3' }}
           RETRY_INTERVAL: ${{ github.event.inputs.retry_interval || '60' }}
         run: |
           echo "Checking if script exists..."
