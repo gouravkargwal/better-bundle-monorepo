@@ -15,10 +15,10 @@ class RedisConnectionConfig:
     port: int = 6379
     password: Optional[str] = None
     db: int = 0
-    tls: bool = True
+    tls: bool = False
     decode_responses: bool = True
-    socket_connect_timeout: float = 60.0
-    socket_timeout: float = 60.0
+    socket_connect_timeout: float = 5.0
+    socket_timeout: float = 5.0
     socket_keepalive: bool = True
     retry_on_timeout: bool = True
     health_check_interval: int = 30
