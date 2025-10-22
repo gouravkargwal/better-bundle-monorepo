@@ -539,6 +539,7 @@ services:
       - npm_letsencrypt:/etc/letsencrypt
     networks:
       - frontend
+      - backend
     restart: unless-stopped
     deploy:
       resources:
