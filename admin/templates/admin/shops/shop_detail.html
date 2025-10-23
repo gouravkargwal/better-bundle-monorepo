@@ -1,0 +1,220 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block page_title %}{{ shop.shop_domain }} - Shop Details{% endblock %}
+
+{% block page_actions %}
+<div class="btn-group" role="group">
+    <a href="{% url 'shops:shop_subscription' shop.id %}" class="btn btn-sm btn-info">
+        <i class="fas fa-credit-card"></i> Subscription
+    </a>
+    <a href="{% url 'shops:shop_billing' shop.id %}" class="btn btn-sm btn-warning">
+        <i class="fas fa-file-invoice"></i> Billing
+    </a>
+    <a href="{% url 'shops:shop_revenue' shop.id %}" class="btn btn-sm btn-success">
+        <i class="fas fa-chart-line"></i> Revenue
+    </a>
+    <a href="{% url 'shops:shop_analytics' shop.id %}" class="btn btn-sm btn-primary">
+        <i class="fas fa-chart-bar"></i> Analytics
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Shop Overview -->
+<div class="row mb-4">
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Shop Information</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>{{ shop.shop_domain }}</h5>
+                        {% if shop.custom_domain %}
+                            <p class="text-muted">Custom Domain: {{ shop.custom_domain }}</p>
+                        {% endif %}
+                        {% if shop.email %}
+                            <p class="text-muted">Email: {{ shop.email }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Plan:</strong> {{ shop.plan_type }}</p>
+                        <p><strong>Status:</strong> 
+                            {% if shop.is_active %}
+                                <span class="badge badge-success">Active</span>
+                            {% else %}
+                                <span class="badge badge-danger">Inactive</span>
+                            {% endif %}
+                        </p>
+                        <p><strong>Onboarding:</strong> 
+                            {% if shop.onboarding_completed %}
+                                <span class="badge badge-success">Completed</span>
+                            {% else %}
+                                <span class="badge badge-warning">Pending</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Quick Stats</h6>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="h4 text-primary">{{ total_orders }}</div>
+                        <div class="text-muted">Orders</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="h4 text-success">{{ total_products }}</div>
+                        <div class="text-muted">Products</div>
+                    </div>
+                </div>
+                <hr>
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="h4 text-info">{{ total_customers }}</div>
+                        <div class="text-muted">Customers</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="h4 text-warning">${{ total_commission|floatformat:2 }}</div>
+                        <div class="text-muted">Revenue</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Subscription Information -->
+{% if subscription %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Subscription Information</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Plan:</strong> {{ subscription.subscription_plan.name }}</p>
+                        <p><strong>Status:</strong> 
+                            <span class="badge badge-{{ subscription.status|lower }}">{{ subscription.status }}</span>
+                        </p>
+                        <p><strong>Start Date:</strong> {{ subscription.start_date|date:"M d, Y" }}</p>
+                        {% if subscription.end_date %}
+                            <p><strong>End Date:</strong> {{ subscription.end_date|date:"M d, Y" }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Auto Renew:</strong> 
+                            {% if subscription.auto_renew %}
+                                <span class="badge badge-success">Yes</span>
+                            {% else %}
+                                <span class="badge badge-warning">No</span>
+                            {% endif %}
+                        </p>
+                        {% if subscription.user_chosen_cap_amount %}
+                            <p><strong>Cap Amount:</strong> ${{ subscription.user_chosen_cap_amount|floatformat:2 }}</p>
+                        {% endif %}
+                        {% if subscription.activated_at %}
+                            <p><strong>Activated:</strong> {{ subscription.activated_at|date:"M d, Y" }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent Activity -->
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Recent Orders</h6>
+            </div>
+            <div class="card-body">
+                {% if recent_orders %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Date</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in recent_orders %}
+                                <tr>
+                                    <td>{{ order.order_id }}</td>
+                                    <td>{{ order.order_date|date:"M d" }}</td>
+                                    <td>${{ order.total_amount|floatformat:2 }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ order.financial_status|lower }}">
+                                            {{ order.financial_status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted">No recent orders</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Recent Commissions</h6>
+            </div>
+            <div class="card-body">
+                {% if recent_commissions %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Date</th>
+                                    <th>Commission</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for commission in recent_commissions %}
+                                <tr>
+                                    <td>{{ commission.order_id }}</td>
+                                    <td>{{ commission.order_date|date:"M d" }}</td>
+                                    <td>${{ commission.commission_earned|floatformat:2 }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ commission.status|lower }}">
+                                            {{ commission.status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted">No recent commissions</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

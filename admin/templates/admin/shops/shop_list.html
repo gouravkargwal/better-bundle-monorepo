@@ -1,0 +1,57 @@
+{% extends 'admin/base_dashboard.html' %}
+{% block dashboard_content %}
+<!-- Shops-specific content -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h6 class="card-title mb-0">Shop Statistics</h6>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-3">
+            <div class="text-center">
+              <h4 class="text-primary">{{ total_shops }}</h4>
+              <p class="mb-0">Total Shops</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-center">
+              <h4 class="text-success">{{ active_shops }}</h4>
+              <p class="mb-0">Active Shops</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-center">
+              <h4 class="text-warning">{{ onboarded_shops }}</h4>
+              <p class="mb-0">Onboarded Shops</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="text-center">
+              <h4 class="text-danger">{{ suspended_shops }}</h4>
+              <p class="mb-0">Suspended Shops</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h6 class="card-title mb-0">Shop List</h6>
+      </div>
+      <div class="card-body">
+        <div class="alert alert-light text-center">
+          <i class="fas fa-table me-2"></i>
+          Shop data table will be implemented here with search and filtering
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

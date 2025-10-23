@@ -1,0 +1,63 @@
+{% extends 'admin/base.html' %}
+
+{% block title %}Dashboard - BetterBundle Admin{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+  <!-- Status Cards -->
+  <div class="col-md-6 mb-4">
+    <div class="card border-info">
+      <div class="card-body text-center">
+        <i class="fas fa-store fa-2x text-info mb-2"></i>
+        <h5 class="card-title">Active Shops</h5>
+        <p class="card-text text-info">0 Shops</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 mb-4">
+    <div class="card border-primary">
+      <div class="card-body text-center">
+        <i class="fas fa-chart-line fa-2x text-primary mb-2"></i>
+        <h5 class="card-title">Revenue Today</h5>
+        <p class="card-text text-primary">0.00</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="card-title mb-0">
+          <i class="fas fa-bolt me-2"></i>Quick Actions
+        </h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-3 mb-3">
+            <a href="{% url 'shops:shop_list' %}" class="btn btn-outline-primary w-100">
+              <i class="fas fa-store me-2"></i>Manage Shops
+            </a>
+          </div>
+          <div class="col-md-3 mb-3">
+            <a href="{% url 'billing:billing_dashboard' %}" class="btn btn-outline-success w-100">
+              <i class="fas fa-credit-card me-2"></i>Billing Dashboard
+            </a>
+          </div>
+          <div class="col-md-3 mb-3">
+            <a href="{% url 'revenue:revenue_dashboard' %}" class="btn btn-outline-info w-100">
+              <i class="fas fa-chart-line me-2"></i>Revenue Analytics
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
