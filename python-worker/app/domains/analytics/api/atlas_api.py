@@ -186,7 +186,7 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
     except Exception as e:
         # Log full traceback and request context
         try:
-            ctx = request.dict()
+            ctx = request.model_dump()
         except Exception:
             ctx = None
         logger.exception("Error creating Atlas session")

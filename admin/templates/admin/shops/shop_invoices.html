@@ -1,0 +1,126 @@
+{% extends 'admin/base_dashboard.html' %}
+{% block dashboard_content %}
+<!-- Shop Invoices Content -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <div class="row align-items-center">
+          <div class="col">
+            <h6 class="card-title mb-0">{{ shop.shop_domain }} - Invoices</h6>
+            <small class="text-muted">Invoice Management</small>
+          </div>
+          <div class="col-auto">
+            <a href="{% url 'shops:shop_detail' shop.id %}" class="btn btn-sm btn-outline-secondary">
+              <i class="fas fa-arrow-left"></i> Back to Shop
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if invoices %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Invoice #</th>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Due Date</th>
+                <th>Description</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for invoice in invoices %}
+              <tr>
+                <td>
+                  <strong>{{ invoice.invoice_number|default:"N/A" }}</strong>
+                </td>
+                <td>{{ invoice.created_at|date:"M d, Y" }}</td>
+                <td>
+                  <strong>${{ invoice.amount|floatformat:2|default:"0.00" }}</strong>
+                </td>
+                <td>
+                  <span
+                    class="badge bg-{% if invoice.status == 'paid' %}success{% elif invoice.status == 'pending' %}warning{% elif invoice.status == 'overdue' %}danger{% else %}secondary{% endif %}">
+                    {{ invoice.status|default:"Unknown" }}
+                  </span>
+                </td>
+                <td>{{ invoice.due_date|date:"M d, Y" }}</td>
+                <td>{{ invoice.description|default:"N/A" }}</td>
+                <td>
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-primary">
+                      <i class="fas fa-download"></i> Download
+                    </button>
+                    <button class="btn btn-sm btn-outline-info">
+                      <i class="fas fa-envelope"></i> Send
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Summary Statistics -->
+        <div class="row mt-4">
+          <div class="col-md-3">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-primary">{{ invoices|length }}</h4>
+                <p class="mb-0">Total Invoices</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-success">
+                  {% for invoice in invoices %}
+                  {% if invoice.status == 'paid' %}{{ forloop.counter0|add:1 }}{% endif %}
+                  {% endfor %}
+                </h4>
+                <p class="mb-0">Paid</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-warning">
+                  {% for invoice in invoices %}
+                  {% if invoice.status == 'pending' %}{{ forloop.counter0|add:1 }}{% endif %}
+                  {% endfor %}
+                </h4>
+                <p class="mb-0">Pending</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-danger">
+                  {% for invoice in invoices %}
+                  {% if invoice.status == 'overdue' %}{{ forloop.counter0|add:1 }}{% endif %}
+                  {% endfor %}
+                </h4>
+                <p class="mb-0">Overdue</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="alert alert-info text-center">
+          <i class="fas fa-info-circle me-2"></i>
+          No invoices found for this shop.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -154,4 +154,4 @@ class GraphQLProductAdapter(BaseAdapter):
             extras={},
         )
 
-        return model.dict()
+        return model.model_dump()

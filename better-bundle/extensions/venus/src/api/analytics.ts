@@ -80,7 +80,7 @@ export interface UnifiedResponse {
 class AnalyticsApiClient {
   private baseUrl: string;
   constructor() {
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
+    this.baseUrl = process.env.BACKEND_URL;
   }
 
   async getOrCreateSession(

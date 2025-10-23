@@ -1,6 +1,6 @@
 class AnalyticsApiClient {
   constructor() {
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
+    this.baseUrl = process.env.BACKEND_URL; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
     this.clientId = null;  // ✅ Store client_id in memory

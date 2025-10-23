@@ -242,7 +242,7 @@ class UnifiedSessionService:
                     return None
 
                 # Prepare update data
-                update_dict = update_data.dict(exclude_unset=True)
+                update_dict = update_data.model_dump(exclude_unset=True)
                 if "last_active" not in update_dict:
                     update_dict["last_active"] = now_utc()
 

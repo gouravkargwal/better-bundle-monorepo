@@ -142,7 +142,7 @@ class RecentlyViewedService:
             # Get recent product views, ordered by most recent
             result = await session.execute(
                 select(
-                    UserInteraction.product_id,
+                    UserInteraction.interaction_metadata,
                     UserInteraction.created_at,
                     UserInteraction.interaction_type,
                 )
@@ -151,7 +151,9 @@ class RecentlyViewedService:
                         UserInteraction.shop_id == shop_id,
                         UserInteraction.customer_id == user_id,
                         UserInteraction.interaction_type == "product_viewed",
-                        UserInteraction.product_id.isnot(None),
+                        UserInteraction.interaction_metadata["productId"].astext.isnot(
+                            None
+                        ),
                         UserInteraction.created_at >= cutoff_date,
                     )
                 )
@@ -163,7 +165,9 @@ class RecentlyViewedService:
             seen_products = set()
 
             for row in result.fetchall():
-                product_id = row.product_id
+                # Extract product_id from interaction metadata
+                metadata = row.interaction_metadata or {}
+                product_id = metadata.get("productId")
                 if product_id and product_id not in seen_products:
                     viewed_products.append(
                         {

@@ -14,7 +14,7 @@ if __name__ == "__main__":
     django.setup()
 
     # Get port and host from environment
-    port = os.environ.get("PORT", "8001")
+    port = os.environ.get("PORT", "8000")
     host = os.environ.get("HOST", "127.0.0.1")
 
     print(f"🚀 Starting BetterBundle Admin Dashboard...")

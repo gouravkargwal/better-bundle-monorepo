@@ -1,0 +1,166 @@
+{% extends 'admin/base_dashboard.html' %}
+{% block dashboard_content %}
+<!-- Shop Subscription Content -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <div class="row align-items-center">
+          <div class="col">
+            <h6 class="card-title mb-0">{{ shop.shop_domain }} - Subscription</h6>
+            <small class="text-muted">Subscription Management</small>
+          </div>
+          <div class="col-auto">
+            <a href="{% url 'shops:shop_detail' shop.id %}" class="btn btn-sm btn-outline-secondary">
+              <i class="fas fa-arrow-left"></i> Back to Shop
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if subscription %}
+        <div class="row">
+          <div class="col-md-6">
+            <h6>Subscription Details</h6>
+            <table class="table table-sm">
+              <tr>
+                <td><strong>Status:</strong></td>
+                <td>
+                  <span
+                    class="badge bg-{% if subscription.status == 'active' %}success{% elif subscription.status == 'trial' %}warning{% else %}secondary{% endif %}">
+                    {{ subscription.status|title }}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Plan:</strong></td>
+                <td>{{ subscription.plan_name|default:"N/A" }}</td>
+              </tr>
+              <tr>
+                <td><strong>Price:</strong></td>
+                <td>${{ subscription.price|floatformat:2|default:"0.00" }}/{{
+                  subscription.billing_interval|default:"month" }}</td>
+              </tr>
+              <tr>
+                <td><strong>Created:</strong></td>
+                <td>{{ subscription.created_at|date:"M d, Y" }}</td>
+              </tr>
+              {% if subscription.trial_ends_at %}
+              <tr>
+                <td><strong>Trial Ends:</strong></td>
+                <td>{{ subscription.trial_ends_at|date:"M d, Y" }}</td>
+              </tr>
+              {% endif %}
+            </table>
+          </div>
+          <div class="col-md-6">
+            <h6>Billing Information</h6>
+            <table class="table table-sm">
+              <tr>
+                <td><strong>Next Billing:</strong></td>
+                <td>
+                  {% if subscription.next_billing_date %}
+                  {{ subscription.next_billing_date|date:"M d, Y" }}
+                  {% else %}
+                  <span class="text-muted">N/A</span>
+                  {% endif %}
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Billing Cycles:</strong></td>
+                <td>{{ billing_cycles|length }} cycles</td>
+              </tr>
+              <tr>
+                <td><strong>Recent Invoices:</strong></td>
+                <td>{{ recent_invoices|length }} invoices</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Billing Cycles -->
+        {% if billing_cycles %}
+        <div class="row mt-4">
+          <div class="col-12">
+            <h6>Recent Billing Cycles</h6>
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Cycle</th>
+                    <th>Status</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for cycle in billing_cycles %}
+                  <tr>
+                    <td>{{ cycle.cycle_number|default:"N/A" }}</td>
+                    <td>
+                      <span
+                        class="badge bg-{% if cycle.status == 'ACTIVE' %}success{% elif cycle.status == 'COMPLETED' %}primary{% else %}secondary{% endif %}">
+                        {{ cycle.status|default:"Unknown" }}
+                      </span>
+                    </td>
+                    <td>{{ cycle.start_date|date:"M d, Y" }}</td>
+                    <td>{{ cycle.end_date|date:"M d, Y" }}</td>
+                    <td>${{ cycle.amount|floatformat:2|default:"0.00" }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Recent Invoices -->
+        {% if recent_invoices %}
+        <div class="row mt-4">
+          <div class="col-12">
+            <h6>Recent Invoices</h6>
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Due Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for invoice in recent_invoices %}
+                  <tr>
+                    <td>{{ invoice.invoice_number|default:"N/A" }}</td>
+                    <td>{{ invoice.created_at|date:"M d, Y" }}</td>
+                    <td>${{ invoice.amount|floatformat:2|default:"0.00" }}</td>
+                    <td>
+                      <span
+                        class="badge bg-{% if invoice.status == 'paid' %}success{% elif invoice.status == 'pending' %}warning{% else %}secondary{% endif %}">
+                        {{ invoice.status|default:"Unknown" }}
+                      </span>
+                    </td>
+                    <td>{{ invoice.due_date|date:"M d, Y" }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-info text-center">
+          <i class="fas fa-info-circle me-2"></i>
+          No subscription information available for this shop.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

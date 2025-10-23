@@ -111,7 +111,7 @@ class ApolloRecommendationClient {
 
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
+    this.baseUrl = process.env.BACKEND_URL;
   }
 
   /**

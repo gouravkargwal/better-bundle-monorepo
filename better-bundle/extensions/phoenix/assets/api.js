@@ -1,6 +1,6 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
+    this.baseUrl = process.env.BACKEND_URL; // Update this to your actual backend URL
     this.shopifyBaseUrl = window.location.origin;
   }
 

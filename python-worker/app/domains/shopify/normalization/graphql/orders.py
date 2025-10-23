@@ -220,7 +220,7 @@ class GraphQLOrderAdapter(BaseAdapter):
             extras={},
         )
 
-        result = model.dict()
+        result = model.model_dump()
         return result
 
     def _convert_address_ids(

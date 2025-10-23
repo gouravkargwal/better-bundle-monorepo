@@ -1,0 +1,128 @@
+{% extends 'admin/base_dashboard.html' %}
+{% block dashboard_content %}
+<!-- Shop Revenue Content -->
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <div class="row align-items-center">
+          <div class="col">
+            <h6 class="card-title mb-0">{{ shop.shop_domain }} - Revenue</h6>
+            <small class="text-muted">Revenue Analytics & Commission Tracking</small>
+          </div>
+          <div class="col-auto">
+            <a href="{% url 'shops:shop_detail' shop.id %}" class="btn btn-sm btn-outline-secondary">
+              <i class="fas fa-arrow-left"></i> Back to Shop
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <!-- Revenue Summary -->
+        <div class="row">
+          <div class="col-md-4">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-success">${{ total_attributed|floatformat:2|default:"0.00" }}</h4>
+                <p class="mb-0">Total Attributed Revenue</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-primary">${{ total_commission|floatformat:2|default:"0.00" }}</h4>
+                <p class="mb-0">Total Commission Earned</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card text-center">
+              <div class="card-body">
+                <h4 class="text-warning">${{ total_charged|floatformat:2|default:"0.00" }}</h4>
+                <p class="mb-0">Total Commission Charged</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Commissions -->
+        {% if recent_commissions %}
+        <div class="row mt-4">
+          <div class="col-12">
+            <h6>Recent Commission Records</h6>
+            <div class="table-responsive">
+              <table class="table table-hover">
+                <thead>
+                  <tr>
+                    <th>Order Date</th>
+                    <th>Order ID</th>
+                    <th>Attributed Revenue</th>
+                    <th>Commission Earned</th>
+                    <th>Commission Charged</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for commission in recent_commissions %}
+                  <tr>
+                    <td>{{ commission.order_date|date:"M d, Y" }}</td>
+                    <td>
+                      <code>{{ commission.order_id|truncatechars:15 }}</code>
+                    </td>
+                    <td>
+                      <strong>${{ commission.attributed_revenue|floatformat:2|default:"0.00" }}</strong>
+                    </td>
+                    <td>
+                      <span class="text-success">${{ commission.commission_earned|floatformat:2|default:"0.00" }}</span>
+                    </td>
+                    <td>
+                      <span class="text-warning">${{ commission.commission_charged|floatformat:2|default:"0.00"
+                        }}</span>
+                    </td>
+                    <td>
+                      <span
+                        class="badge bg-{% if commission.status == 'completed' %}success{% elif commission.status == 'pending' %}warning{% else %}secondary{% endif %}">
+                        {{ commission.status|default:"Unknown" }}
+                      </span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="row mt-4">
+          <div class="col-12">
+            <div class="alert alert-info text-center">
+              <i class="fas fa-info-circle me-2"></i>
+              No commission records found for this shop.
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Revenue Chart Placeholder -->
+        <div class="row mt-4">
+          <div class="col-12">
+            <div class="card">
+              <div class="card-header">
+                <h6 class="m-0 font-weight-bold text-primary">Revenue Trends</h6>
+              </div>
+              <div class="card-body">
+                <div class="text-center py-5">
+                  <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+                  <p class="text-muted">Revenue chart will be implemented here</p>
+                  <small class="text-muted">This will show commission trends over time</small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

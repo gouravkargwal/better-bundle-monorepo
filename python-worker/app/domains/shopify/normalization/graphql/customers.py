@@ -79,7 +79,7 @@ class GraphQLCustomerAdapter(BaseAdapter):
             extras={},
         )
 
-        return model.dict()
+        return model.model_dump()
 
     def _convert_address_ids(
         self, address: Optional[Dict[str, Any]]

@@ -38,13 +38,19 @@ class ShopListView(BaseListView):
         search = self.request.GET.get("search")
         if search:
             queryset = queryset.filter(
-                Q(shop_domain__icontains=search) | Q(shop_name__icontains=search)
+                Q(shop_domain__icontains=search)
+                | Q(custom_domain__icontains=search)
+                | Q(email__icontains=search)
             )
 
         # Filter by status
         status = self.request.GET.get("status")
-        if status:
-            queryset = queryset.filter(status=status)
+        if status == "active":
+            queryset = queryset.filter(is_active=True, suspended_at__isnull=True)
+        elif status == "inactive":
+            queryset = queryset.filter(is_active=False)
+        elif status == "suspended":
+            queryset = queryset.filter(suspended_at__isnull=False)
 
         return queryset.order_by("-created_at")
 
@@ -66,6 +72,21 @@ class ShopListView(BaseListView):
             context["active_shops"] = 0
             context["onboarded_shops"] = 0
             context["suspended_shops"] = 0
+
+        # Add filter state for template
+        context["current_status"] = self.request.GET.get("status", "")
+        context["current_search"] = self.request.GET.get("search", "")
+
+        # Add selected states for template (formatter-safe)
+        context["active_selected"] = (
+            " selected" if context["current_status"] == "active" else ""
+        )
+        context["inactive_selected"] = (
+            " selected" if context["current_status"] == "inactive" else ""
+        )
+        context["suspended_selected"] = (
+            " selected" if context["current_status"] == "suspended" else ""
+        )
 
         return context
 
@@ -99,24 +120,70 @@ class ShopDetailView(DetailView):
             context["billing_cycles"] = []
             context["recent_invoices"] = []
 
-        # Get analytics data
-        context["total_orders"] = shop.order_data.count()
-        context["total_products"] = shop.product_data.count()
-        context["total_customers"] = shop.customer_data.count()
+        # Get analytics data - with error handling
+        try:
+            context["total_orders"] = shop.order_data.count()
+        except Exception as e:
+            context["total_orders"] = 0
+            print(f"Error counting orders: {e}")
 
-        # Revenue data
-        revenue_data = shop.commission_records.aggregate(
-            total_commission=Sum("commission_earned"),
-            total_attributed=Sum("attributed_revenue"),
-            total_charged=Sum("commission_charged"),
-        )
-        context.update(revenue_data)
+        try:
+            context["total_products"] = shop.product_data.count()
+        except Exception as e:
+            context["total_products"] = 0
+            print(f"Error counting products: {e}")
 
-        # Recent activity
-        context["recent_orders"] = shop.order_data.order_by("-order_date")[:10]
-        context["recent_commissions"] = shop.commission_records.order_by("-created_at")[
-            :10
-        ]
+        try:
+            context["total_customers"] = shop.customer_data.count()
+        except Exception as e:
+            context["total_customers"] = 0
+            print(f"Error counting customers: {e}")
+
+        # Revenue data - with error handling
+        try:
+            revenue_data = shop.commission_records.aggregate(
+                total_commission=Sum("commission_earned"),
+                total_attributed=Sum("attributed_revenue"),
+                total_charged=Sum("commission_charged"),
+            )
+            context.update(revenue_data)
+        except Exception as e:
+            context["total_commission"] = 0
+            context["total_attributed"] = 0
+            context["total_charged"] = 0
+            print(f"Error fetching revenue data: {e}")
+
+        # Recent activity - with comprehensive error handling for JSON fields
+        context["recent_orders"] = []
+        context["recent_commissions"] = []
+
+        try:
+            # Use values() to avoid JSON field parsing issues
+            recent_orders_data = shop.order_data.values(
+                "id",
+                "order_id",
+                "order_date",
+                "total_amount",
+                "order_status",
+                "financial_status",
+            ).order_by("-order_date")[:10]
+            context["recent_orders"] = list(recent_orders_data)
+        except Exception as e:
+            print(f"Error fetching recent orders: {e}")
+
+        try:
+            # Use values() to avoid JSON field parsing issues
+            recent_commissions_data = shop.commission_records.values(
+                "id",
+                "order_date",
+                "commission_earned",
+                "attributed_revenue",
+                "commission_charged",
+                "status",
+            ).order_by("-created_at")[:10]
+            context["recent_commissions"] = list(recent_commissions_data)
+        except Exception as e:
+            print(f"Error fetching recent commissions: {e}")
 
         return context
 
@@ -233,50 +300,45 @@ class ShopRevenueView(DetailView):
         if end_date:
             commissions = commissions.filter(order_date__lte=end_date)
 
-        # Revenue summary
-        context["total_attributed"] = (
-            commissions.aggregate(total=Sum("attributed_revenue"))["total"] or 0
-        )
-        context["total_commission"] = (
-            commissions.aggregate(total=Sum("commission_earned"))["total"] or 0
-        )
-        context["total_charged"] = (
-            commissions.aggregate(total=Sum("commission_charged"))["total"] or 0
-        )
+        # Revenue summary - with error handling
+        try:
+            context["total_attributed"] = (
+                commissions.aggregate(total=Sum("attributed_revenue"))["total"] or 0
+            )
+        except Exception as e:
+            context["total_attributed"] = 0
+            print(f"Error calculating total attributed: {e}")
 
-        # Recent commissions
-        context["recent_commissions"] = commissions.order_by("-order_date")[:20]
+        try:
+            context["total_commission"] = (
+                commissions.aggregate(total=Sum("commission_earned"))["total"] or 0
+            )
+        except Exception as e:
+            context["total_commission"] = 0
+            print(f"Error calculating total commission: {e}")
 
-        return context
+        try:
+            context["total_charged"] = (
+                commissions.aggregate(total=Sum("commission_charged"))["total"] or 0
+            )
+        except Exception as e:
+            context["total_charged"] = 0
+            print(f"Error calculating total charged: {e}")
 
-
-@method_decorator(staff_member_required, name="dispatch")
-class ShopAnalyticsView(DetailView):
-    """
-    Shop analytics
-    """
-
-    model = Shop
-    template_name = "admin/shops/shop_analytics.html"
-    context_object_name = "shop"
-    pk_url_kwarg = "shop_id"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        shop = self.get_object()
-
-        # Analytics data
-        context["total_orders"] = shop.order_data.count()
-        context["total_products"] = shop.product_data.count()
-        context["total_customers"] = shop.customer_data.count()
-
-        # Revenue analytics
-        context["total_revenue"] = (
-            shop.commission_records.aggregate(total=Sum("commission_earned"))["total"]
-            or 0
-        )
-
-        # Recent orders
-        context["recent_orders"] = shop.order_data.order_by("-order_date")[:10]
+        # Recent commissions - with error handling for JSON fields
+        context["recent_commissions"] = []
+        try:
+            # Use values() to avoid JSON field parsing issues
+            recent_commissions_data = commissions.values(
+                "id",
+                "order_date",
+                "commission_earned",
+                "attributed_revenue",
+                "commission_charged",
+                "status",
+            ).order_by("-order_date")[:20]
+            context["recent_commissions"] = list(recent_commissions_data)
+        except Exception as e:
+            print(f"Error fetching recent commissions: {e}")
 
         return context

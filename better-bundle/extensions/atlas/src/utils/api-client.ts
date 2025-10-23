@@ -1,5 +1,6 @@
 // Unified Analytics API endpoints
-const UNIFIED_ANALYTICS_BASE_URL = "https://c5da58a2ed7b.ngrok-free.app";
+// const UNIFIED_ANALYTICS_BASE_URL = "https://c5da58a2ed7b.ngrok-free.app";
+const UNIFIED_ANALYTICS_BASE_URL = process.env.BACKEND_URL;
 
 /**
  * Get unified browser session ID (shared across ALL extensions)

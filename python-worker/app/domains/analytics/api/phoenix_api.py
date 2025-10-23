@@ -198,7 +198,7 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
 
     except Exception as e:
         logger.error(f"Error tracking Phoenix interaction: {str(e)}", exc_info=True)
-        logger.error(f"Request data: {request.dict()}")
+        logger.error(f"Request data: {request.model_dump()}")
         raise HTTPException(
             status_code=500, detail=f"Failed to track interaction: {str(e)}"
         )

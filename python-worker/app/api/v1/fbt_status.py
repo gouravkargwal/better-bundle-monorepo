@@ -24,7 +24,7 @@ class FBTStatusResponse(BaseModel):
     """FBT status response model"""
 
     shop_id: str
-    model_status: str
+    status: str  # Renamed from model_status to avoid protected namespace conflict
     last_training: Optional[str] = None
     association_rules_count: int = 0
     training_success: bool = False
@@ -77,10 +77,10 @@ async def get_fbt_status(shop_id: str):
 
         # Determine model status
         if rules_count > 0:
-            model_status = "trained"
+            status = "trained"
             recommendations_available = True
         else:
-            model_status = "not_trained"
+            status = "not_trained"
             recommendations_available = False
 
         # Get last training timestamp from cache metadata
@@ -96,7 +96,7 @@ async def get_fbt_status(shop_id: str):
 
         return FBTStatusResponse(
             shop_id=shop_id,
-            model_status=model_status,
+            status=status,
             last_training=last_training,
             association_rules_count=rules_count,
             training_success=rules_count > 0,
