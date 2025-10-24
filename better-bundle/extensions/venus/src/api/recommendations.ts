@@ -67,14 +67,11 @@ export interface RecommendationResponse {
   timestamp: string;
 }
 
-const RECOMMENDATION_API_BASE =
-  "https://c5da58a2ed7b.ngrok-free.app/api/v1/recommendations";
-
 export class RecommendationApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = RECOMMENDATION_API_BASE) {
-    this.baseUrl = baseUrl;
+  constructor() {
+    this.baseUrl = process.env.BACKEND_URL;
   }
 
   async getRecommendations(

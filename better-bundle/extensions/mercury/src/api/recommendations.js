@@ -13,12 +13,9 @@ export function buildMercuryMetadata(
   };
 }
 
-const RECOMMENDATION_API_BASE =
-  "https://c5da58a2ed7b.ngrok-free.app/api/v1/recommendations";
-
 export class RecommendationApiClient {
-  constructor(baseUrl = RECOMMENDATION_API_BASE) {
-    this.baseUrl = baseUrl;
+  constructor() {
+    this.baseUrl = process.env.BACKEND_URL;
   }
 
   async getRecommendations(request) {
