@@ -78,7 +78,7 @@ export class RecommendationApiClient {
     request: RecommendationRequest,
   ): Promise<RecommendationResponse> {
     try {
-      const response = await fetch(`${this.baseUrl}/`, {
+      const response = await fetch(`${this.baseUrl}/api/v1/recommendations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -97,18 +97,6 @@ export class RecommendationApiClient {
       throw error;
     }
   }
-
-  async getHealthCheck(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
-    } catch (error) {
-      console.error("Health check failed:", error);
-      return false;
-    }
-  }
-
-  // Analytics methods moved to separate service: /api/analytics.ts
 }
 
 // Default instance
