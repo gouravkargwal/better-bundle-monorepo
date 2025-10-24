@@ -75,12 +75,26 @@ export interface UnifiedResponse {
     client_id?: string;
     [key: string]: any;
   };
+  // Session recovery information
+  session_recovery?: {
+    original_session_id: string;
+    new_session_id: string;
+    recovery_reason: string;
+    recovered_at: string;
+  };
 }
 
 class AnalyticsApiClient {
   private baseUrl: string;
   constructor() {
     this.baseUrl = process.env.BACKEND_URL;
+  }
+
+  /**
+   * Get current session ID from localStorage
+   */
+  getCurrentSessionId(): string | null {
+    return localStorage.getItem("unified_session_id");
   }
 
   async getOrCreateSession(
@@ -120,6 +134,8 @@ class AnalyticsApiClient {
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
         console.log("✅ Venus: Session created/retrieved:", sessionId);
+        // Store session ID for future use (unified with other extensions)
+        localStorage.setItem("unified_session_id", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
@@ -158,6 +174,17 @@ class AnalyticsApiClient {
           "✅ Venus interaction tracked:",
           result.data?.interaction_id,
         );
+
+        // Handle session recovery if it occurred
+        if (result.session_recovery) {
+          console.log("🔄 Session recovered:", result.session_recovery);
+          // Update stored session ID with the new one (unified with other extensions)
+          localStorage.setItem(
+            "unified_session_id",
+            result.session_recovery.new_session_id,
+          );
+        }
+
         return true;
       } else {
         throw new Error(result.message || "Failed to track interaction");

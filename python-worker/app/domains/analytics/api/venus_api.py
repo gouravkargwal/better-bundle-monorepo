@@ -127,7 +127,7 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
 @router.post("/track-interaction", response_model=VenusResponse)
 async def track_venus_interaction(request: VenusInteractionRequest):
     """
-    Track user interaction from Venus extension
+    Track user interaction from Venus extension with automatic session recovery
 
     Venus can track:
     - Profile views
@@ -150,7 +150,7 @@ async def track_venus_interaction(request: VenusInteractionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for customer")
 
-        # Track interaction using unified analytics
+        # Try to track interaction with the original session
         interaction = await analytics_service.track_interaction(
             session_id=request.session_id,
             extension_type=ExtensionType.VENUS,
@@ -160,20 +160,87 @@ async def track_venus_interaction(request: VenusInteractionRequest):
             interaction_metadata=enhanced_metadata,
         )
 
+        # Check if session recovery is needed
+        session_recovery_info = None
         if not interaction:
-            raise HTTPException(status_code=500, detail="Failed to track interaction")
+            logger.warning(
+                f"Session {request.session_id} not found, attempting recovery..."
+            )
 
-        # Feature computation is now automatically triggered in track_interaction method
+            # Try to find recent session for same customer
+            if request.customer_id:
+                recent_session = await session_service._find_recent_customer_session(
+                    request.customer_id, shop_id, minutes_back=30
+                )
+
+                if recent_session:
+                    logger.info(f"✅ Recovered recent session: {recent_session.id}")
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": recent_session.id,
+                        "recovery_reason": "recent_session_found",
+                        "recovered_at": recent_session.last_active.isoformat(),
+                    }
+
+                    # Try tracking with recovered session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=recent_session.id,
+                        extension_type=ExtensionType.VENUS,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+            # If still no interaction, create new session
+            if not interaction:
+                logger.info("Creating new session as fallback...")
+                new_session = await session_service.get_or_create_session(
+                    shop_id=shop_id,
+                    customer_id=request.customer_id,
+                    browser_session_id=f"recovered_{request.session_id}",
+                )
+
+                if new_session:
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": new_session.id,
+                        "recovery_reason": "new_session_created",
+                        "recovered_at": new_session.created_at.isoformat(),
+                    }
+
+                    # Try tracking with new session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=new_session.id,
+                        extension_type=ExtensionType.VENUS,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+        if not interaction:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to track interaction even with session recovery",
+            )
+
+        # Log session recovery if it occurred
+        if session_recovery_info:
+            logger.info(
+                f"🔄 Session recovered: {session_recovery_info['original_session_id']} → {session_recovery_info['new_session_id']}"
+            )
 
         return VenusResponse(
             success=True,
             message="Venus interaction tracked successfully",
             data={
                 "interaction_id": interaction.id,
-                "session_id": interaction.session_id,
+                "session_id": interaction.session_id,  # This will be the recovered session ID
                 "interaction_type": request.interaction_type,
                 "timestamp": interaction.created_at.isoformat(),
             },
+            session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
     except HTTPException:
