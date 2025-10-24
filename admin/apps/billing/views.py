@@ -41,7 +41,7 @@ class BillingDashboardView(BaseDashboardView):
 
     def get_billing_stats(self):
         """
-        Get billing statistics
+        Get billing statistics with currency conversion to USD
         """
         try:
             # Billing cycle statistics
@@ -55,12 +55,12 @@ class BillingDashboardView(BaseDashboardView):
             overdue_invoices = BillingInvoice.objects.filter(status="OVERDUE").count()
             failed_invoices = BillingInvoice.objects.filter(status="FAILED").count()
 
-            # Revenue statistics
-            total_billed = (
+            # Revenue statistics - convert to USD for global view
+            total_billed = self._convert_to_usd(
                 BillingInvoice.objects.aggregate(total=Sum("total_amount"))["total"]
                 or 0
             )
-            total_paid = (
+            total_paid = self._convert_to_usd(
                 BillingInvoice.objects.aggregate(total=Sum("amount_paid"))["total"] or 0
             )
             total_outstanding = total_billed - total_paid
@@ -73,12 +73,12 @@ class BillingDashboardView(BaseDashboardView):
                     "color": "warning",
                 },
                 {
-                    "label": "Total Billed",
+                    "label": "Total Billed (USD)",
                     "value": f"${total_billed:.2f}",
                     "color": "primary",
                 },
                 {
-                    "label": "Outstanding",
+                    "label": "Outstanding (USD)",
                     "value": f"${total_outstanding:.2f}",
                     "color": "danger",
                 },
@@ -88,9 +88,27 @@ class BillingDashboardView(BaseDashboardView):
             return [
                 {"label": "Active Cycles", "value": "0", "color": "success"},
                 {"label": "Pending Invoices", "value": "0", "color": "warning"},
-                {"label": "Total Billed", "value": "$0.00", "color": "primary"},
-                {"label": "Outstanding", "value": "$0.00", "color": "danger"},
+                {"label": "Total Billed (USD)", "value": "$0.00", "color": "primary"},
+                {"label": "Outstanding (USD)", "value": "$0.00", "color": "danger"},
             ]
+
+    def _convert_to_usd(self, amount, from_currency="USD"):
+        """
+        Convert amount to USD for global dashboard
+        For now, assume amounts are already in USD or use simple conversion
+        TODO: Implement proper currency conversion with exchange rates
+        """
+        # Simple conversion rates (you should use real-time rates in production)
+        conversion_rates = {
+            "USD": 1.0,
+            "INR": 0.012,  # 1 INR = 0.012 USD (approximate)
+            "EUR": 1.08,  # 1 EUR = 1.08 USD (approximate)
+            "GBP": 1.25,  # 1 GBP = 1.25 USD (approximate)
+            "CAD": 0.74,  # 1 CAD = 0.74 USD (approximate)
+        }
+
+        rate = conversion_rates.get(from_currency, 1.0)
+        return amount * rate
 
 
 @method_decorator(staff_member_required, name="dispatch")

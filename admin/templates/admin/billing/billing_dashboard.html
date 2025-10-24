@@ -1,6 +1,12 @@
 {% extends 'admin/base_dashboard.html' %}
 {% block dashboard_content %}
 <!-- Billing-specific content -->
+<div class="alert alert-info mb-3">
+  <i class="fas fa-info-circle me-2"></i>
+  <strong>Global Billing Dashboard:</strong> This dashboard shows aggregated billing data from all shops converted to
+  USD for comparison.
+  Individual shop pages show amounts in each shop's native currency (INR, EUR, etc.).
+</div>
 <div class="row">
   <div class="col-md-6">
     <div class="card">

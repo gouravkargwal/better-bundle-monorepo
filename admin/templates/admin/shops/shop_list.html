@@ -133,14 +133,9 @@
                 </td>
                 <td>{{ shop.created_at|date:"M d, Y" }}</td>
                 <td>
-                  <div class="btn-group" role="group">
-                    <a href="{% url 'shops:shop_detail' shop.id %}" class="btn btn-sm btn-outline-primary">
-                      <i class="fas fa-eye"></i> View
-                    </a>
-                    <a href="{% url 'shops:shop_subscription' shop.id %}" class="btn btn-sm btn-outline-info">
-                      <i class="fas fa-credit-card"></i> Subscription
-                    </a>
-                  </div>
+                  <a href="{% url 'shops:shop_detail' shop.id %}" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-eye"></i> View
+                  </a>
                 </td>
               </tr>
               {% endfor %}

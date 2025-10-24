@@ -19,6 +19,13 @@
       </div>
       <div class="card-body">
         {% if subscription %}
+        <!-- Currency Indicator -->
+        <div class="alert alert-info mb-3">
+          <i class="fas fa-info-circle me-2"></i>
+          <strong>Currency:</strong> <span class="badge bg-info">{{ shop.currency_code|default:"N/A" }}</span>
+          <small class="text-muted ms-2">(All amounts shown in this currency)</small>
+        </div>
+
         <div class="row">
           <div class="col-md-6">
             <h6>Subscription Details</h6>
@@ -38,7 +45,7 @@
               </tr>
               <tr>
                 <td><strong>Price:</strong></td>
-                <td>${{ subscription.price|floatformat:2|default:"0.00" }}/{{
+                <td>{{ subscription.price|floatformat:2|default:"0.00" }}/{{
                   subscription.billing_interval|default:"month" }}</td>
               </tr>
               <tr>
@@ -106,7 +113,7 @@
                     </td>
                     <td>{{ cycle.start_date|date:"M d, Y" }}</td>
                     <td>{{ cycle.end_date|date:"M d, Y" }}</td>
-                    <td>${{ cycle.amount|floatformat:2|default:"0.00" }}</td>
+                    <td>{{ cycle.amount|floatformat:2|default:"0.00" }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -137,7 +144,7 @@
                   <tr>
                     <td>{{ invoice.invoice_number|default:"N/A" }}</td>
                     <td>{{ invoice.created_at|date:"M d, Y" }}</td>
-                    <td>${{ invoice.amount|floatformat:2|default:"0.00" }}</td>
+                    <td>{{ invoice.amount|floatformat:2|default:"0.00" }}</td>
                     <td>
                       <span
                         class="badge bg-{% if invoice.status == 'paid' %}success{% elif invoice.status == 'pending' %}warning{% else %}secondary{% endif %}">

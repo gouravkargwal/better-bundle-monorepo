@@ -86,7 +86,10 @@
                             {% endif %}
                             <tr>
                                 <td><strong>Currency:</strong></td>
-                                <td>{{ shop.currency_code|default:"N/A" }}</td>
+                                <td>
+                                    <span class="badge bg-info">{{ shop.currency_code|default:"N/A" }}</span>
+                                    <small class="text-muted ms-2">(All amounts shown in this currency)</small>
+                                </td>
                             </tr>
                             <tr>
                                 <td><strong>Last Analysis:</strong></td>
@@ -139,7 +142,7 @@
     <div class="col-md-3">
         <div class="card text-center">
             <div class="card-body">
-                <h4 class="text-warning">${{ total_commission|floatformat:2|default:"0.00" }}</h4>
+                <h4 class="text-warning">{{ total_commission|floatformat:2|default:"0.00" }}</h4>
                 <p class="mb-0">Total Commission</p>
             </div>
         </div>
@@ -170,7 +173,7 @@
                             <tr>
                                 <td>{{ order.order_id }}</td>
                                 <td>{{ order.order_date|date:"M d, Y" }}</td>
-                                <td>${{ order.total_amount|floatformat:2 }}</td>
+                                <td>{{ order.total_amount|floatformat:2 }}</td>
                                 <td>
                                     <span
                                         class="badge bg-{% if order.order_status == 'fulfilled' %}success{% elif order.order_status == 'pending' %}warning{% else %}secondary{% endif %}">
@@ -209,8 +212,8 @@
                             {% for commission in recent_commissions %}
                             <tr>
                                 <td>{{ commission.order_date|date:"M d, Y" }}</td>
-                                <td>${{ commission.commission_earned|floatformat:2 }}</td>
-                                <td>${{ commission.attributed_revenue|floatformat:2 }}</td>
+                                <td>{{ commission.commission_earned|floatformat:2 }}</td>
+                                <td>{{ commission.attributed_revenue|floatformat:2 }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
