@@ -202,7 +202,18 @@ export const trackInteraction = async (
     if (!response.ok) {
       throw new Error(`Interaction tracking failed: ${response.status}`);
     }
-    await response.json();
+
+    const result = await response.json();
+
+    // Handle session recovery if it occurred
+    if (result.session_recovery) {
+      console.log("🔄 Atlas: Session recovered:", result.session_recovery);
+      // Update stored session ID with the new one (unified with other extensions)
+      await sessionStorage.setItem(
+        "unified_session_id",
+        result.session_recovery.new_session_id,
+      );
+    }
   } catch (error) {
     throw error;
   }

@@ -34,7 +34,7 @@ export class RecommendationApiClient {
         },
       };
 
-      const response = await fetch(`${this.baseUrl}/`, {
+      const response = await fetch(`${this.baseUrl}/api/v1/recommendations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

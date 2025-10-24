@@ -91,10 +91,10 @@ class AnalyticsApiClient {
   }
 
   /**
-   * Get current session ID from localStorage
+   * Get current session ID from sessionStorage
    */
   getCurrentSessionId(): string | null {
-    return localStorage.getItem("unified_session_id");
+    return sessionStorage.getItem("unified_session_id");
   }
 
   async getOrCreateSession(
@@ -135,7 +135,7 @@ class AnalyticsApiClient {
         const sessionId = result.data.session_id;
         console.log("✅ Venus: Session created/retrieved:", sessionId);
         // Store session ID for future use (unified with other extensions)
-        localStorage.setItem("unified_session_id", sessionId);
+        sessionStorage.setItem("unified_session_id", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
@@ -179,7 +179,7 @@ class AnalyticsApiClient {
         if (result.session_recovery) {
           console.log("🔄 Session recovered:", result.session_recovery);
           // Update stored session ID with the new one (unified with other extensions)
-          localStorage.setItem(
+          sessionStorage.setItem(
             "unified_session_id",
             result.session_recovery.new_session_id,
           );

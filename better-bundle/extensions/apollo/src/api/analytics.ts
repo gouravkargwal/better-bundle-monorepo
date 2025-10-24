@@ -67,6 +67,13 @@ interface UnifiedResponse {
     interaction_id?: string;
     [key: string]: any;
   };
+  // Session recovery information
+  session_recovery?: {
+    original_session_id: string;
+    new_session_id: string;
+    recovery_reason: string;
+    recovered_at: string;
+  };
 }
 
 // ============================================================================
@@ -125,6 +132,17 @@ class ApolloAnalyticsClient {
           interactionType,
           result.data?.interaction_id,
         );
+
+        // Handle session recovery if it occurred
+        if (result.session_recovery) {
+          console.log("🔄 Session recovered:", result.session_recovery);
+          // Update stored session ID with the new one (unified with other extensions)
+          localStorage.setItem(
+            "unified_session_id",
+            result.session_recovery.new_session_id,
+          );
+        }
+
         return true;
       } else {
         throw new Error(result.message || "Failed to track interaction");
