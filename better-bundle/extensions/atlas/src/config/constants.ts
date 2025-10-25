@@ -41,4 +41,4 @@ export const API_ENDPOINTS = {
   TRACK_SEARCH: "/api/atlas/track-search",
   TRACK_FORM_SUBMISSION: "/api/atlas/track-form-submission",
 } as const;
-export const BACKEND_URL = "https://betterbundle-dev.loca.lt" as const;
+export const BACKEND_URL = "https://72b8c96abd5939.lhr.life" as const;

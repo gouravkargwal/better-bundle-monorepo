@@ -1,1 +1,1 @@
-export const BACKEND_URL = "https://betterbundle-dev.loca.lt"
+export const BACKEND_URL = "https://72b8c96abd5939.lhr.life"

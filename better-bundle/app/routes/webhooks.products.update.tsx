@@ -5,11 +5,14 @@ import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
+    console.log("🔍 Products update webhook received");
     const { payload, session } = await authenticate.webhook(request);
 
     if (!session) {
       return json({ error: "Authentication failed" }, { status: 401 });
     }
+
+    console.log("🔍 Products update webhook authentication successful");
 
     // Extract product data from payload
     const product = payload as any;
@@ -20,6 +23,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No product ID found" }, { status: 400 });
     }
 
+    console.log("🔍 Product ID found in payload:", productId);
+
     // Publish Kafka event with shop_domain - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {
@@ -29,7 +34,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
+    console.log("🔍 Publishing Kafka event:", event);
+
     await producer.publishShopifyEvent(event);
+
+    console.log("🔍 Kafka event published successfully");
 
     return json({
       success: true,

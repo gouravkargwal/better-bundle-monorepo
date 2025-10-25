@@ -1,6 +1,6 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = "https://betterbundle-dev.loca.lt"; // Update this to your actual backend URL
+    this.baseUrl = "https://72b8c96abd5939.lhr.life"; // Update this to your actual backend URL
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {

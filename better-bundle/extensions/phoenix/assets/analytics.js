@@ -1,6 +1,6 @@
 class AnalyticsApiClient {
   constructor() {
-    this.baseUrl = "https://betterbundle-dev.loca.lt"; // Update this to your actual backend URL
+    this.baseUrl = "https://72b8c96abd5939.lhr.life"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
     this.clientId = null;  // ✅ Store client_id in memory

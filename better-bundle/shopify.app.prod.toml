@@ -7,7 +7,7 @@ embedded = true
 handle = "better-bundle-1"
 
 [webhooks]
-api_version = "2024-01"
+api_version = "2024-07"
 
 [[webhooks.subscriptions]]
 topics = ["customers/update"]
@@ -87,4 +87,4 @@ redirect_urls = [
 embedded = false
 
 [build]
-automatically_update_urls_on_dev = true
+automatically_update_urls_on_dev = false
