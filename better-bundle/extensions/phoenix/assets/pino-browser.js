@@ -1,9 +1,9 @@
 /**
- * Pino Browser Implementation for Phoenix Extension
- * Custom browser-compatible Pino logger with Loki transport
+ * Simple Browser Logger for Phoenix Extension
+ * Just sends logs to our backend API
  */
 
-// Simple Pino-compatible logger for browser
+// Simple logger for browser
 function createPinoLogger(options = {}) {
   const {
     level = 'info',
@@ -63,111 +63,54 @@ function createPinoLogger(options = {}) {
   };
 }
 
-// Loki transport for browser
-function createLokiTransport(options = {}) {
+// Simple API transport - just sends logs to backend
+function createApiTransport(options = {}) {
   const {
-    host = 'https://nonconscientious-annette-saddeningly.ngrok-free.dev:3100',
-    labels = {},
-    batchSize = 10,
-    interval = 5000
+    batchSize = 5,
+    interval = 3000
   } = options;
-
-  // Test connectivity to Loki
-  console.log('🔍 Testing Loki connectivity to:', host);
-
-  // First, test if the ngrok URL is reachable at all
-  fetch(`${host}`, {
-    method: 'GET',
-    mode: 'no-cors' // Try without CORS first
-  })
-    .then(response => {
-      console.log('✅ ngrok URL is reachable (no-cors):', response.type);
-    })
-    .catch(error => {
-      console.error('❌ ngrok URL not reachable (no-cors):', error);
-    });
-
-  // Then test the Loki endpoint
-  fetch(`${host}/ready`, {
-    method: 'GET',
-    mode: 'cors',
-    headers: {
-      'Accept': 'application/json'
-    }
-  })
-    .then(response => {
-      console.log('✅ Loki is reachable:', response.status, response.statusText);
-      return response.text();
-    })
-    .then(text => {
-      console.log('📄 Loki response body:', text);
-    })
-    .catch(error => {
-      console.error('❌ Loki connectivity test failed:', error);
-      console.error('❌ Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
-    });
 
   let logBuffer = [];
   let batchTimeout = null;
 
-  function sendBatch() {
+  function sendLogs() {
     if (logBuffer.length === 0) return;
 
-    const payload = {
-      streams: [{
-        stream: labels,
-        values: logBuffer.map(log => [
-          (new Date(log.time).getTime() * 1000000).toString(), // nanoseconds
-          JSON.stringify(log)
-        ])
-      }]
-    };
+    const baseUrl = window.getBaseUrl ? window.getBaseUrl() : 'https://nonconscientious-annette-saddeningly.ngrok-free.dev';
+    const apiUrl = `${baseUrl}/logs`;
 
-    console.log('🚀 Sending logs to Loki:', {
-      url: `${host}/loki/api/v1/push`,
-      payload: payload,
+    console.log('🚀 Sending logs to API:', {
+      url: apiUrl,
       logCount: logBuffer.length
     });
 
-    // Add timeout to fetch request
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-    fetch(`${host}/loki/api/v1/push`, {
+    fetch(apiUrl, {
       method: 'POST',
       mode: 'cors',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(payload),
-      signal: controller.signal
+      body: JSON.stringify({
+        logs: logBuffer,
+        source: 'phoenix-extension',
+        timestamp: new Date().toISOString()
+      })
     })
       .then(response => {
-        clearTimeout(timeoutId);
-        console.log('📊 Loki response status:', response.status, response.statusText);
+        console.log('📊 API response status:', response.status, response.statusText);
         if (!response.ok) {
           return response.text().then(text => {
-            console.error('❌ Loki error response:', text);
-            throw new Error(`Loki error: ${response.status} ${text}`);
+            console.error('❌ API error response:', text);
           });
         }
         return response.text();
       })
       .then(responseText => {
-        console.log('✅ Loki success response:', responseText);
+        console.log('✅ API success response:', responseText);
       })
       .catch(error => {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          console.error('⏰ Loki request timed out after 10 seconds');
-        } else {
-          console.error('❌ Failed to send logs to Loki:', error);
-        }
+        console.error('❌ Failed to send logs to API:', error);
       });
 
     logBuffer = [];
@@ -175,17 +118,17 @@ function createLokiTransport(options = {}) {
 
   return {
     send: (logEntry) => {
-      console.log('📝 Loki transport received log:', logEntry);
+      console.log('📝 API transport received log:', logEntry);
       logBuffer.push(logEntry);
 
       if (logBuffer.length >= batchSize) {
         console.log('📦 Batch size reached, sending immediately');
-        sendBatch();
+        sendLogs();
       } else if (!batchTimeout) {
         console.log('⏰ Setting batch timeout for', interval, 'ms');
         batchTimeout = setTimeout(() => {
           console.log('⏰ Batch timeout reached, sending logs');
-          sendBatch();
+          sendLogs();
           batchTimeout = null;
         }, interval);
       }
@@ -195,4 +138,20 @@ function createLokiTransport(options = {}) {
 
 // Export for global use
 window.pino = createPinoLogger;
-window.createLokiTransport = createLokiTransport;
+window.createApiTransport = createApiTransport;
+
+// Create a global logger instance
+const globalLogger = createPinoLogger({
+  level: 'info',
+  base: {
+    service: 'phoenix-extension',
+    env: 'development'
+  },
+  transport: createApiTransport({
+    batchSize: 5,
+    interval: 3000
+  })
+});
+
+// Make logger available globally
+window.phoenixLogger = globalLogger;

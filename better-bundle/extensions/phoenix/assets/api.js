@@ -1,6 +1,7 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
+    // Use config for base URL
+    this.baseUrl = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
     this.logger = window.phoenixLogger || console; // Use the global logger with fallback
   }
 
