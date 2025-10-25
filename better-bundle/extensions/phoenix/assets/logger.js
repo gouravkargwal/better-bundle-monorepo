@@ -38,35 +38,36 @@ function waitForPino() {
 async function createPhoenixLogger() {
   const pino = await waitForPino();
 
-  // Create transport configuration
-  const transport = PHOENIX_LOGGING_CONFIG.loki.enabled
-    ? {
-      target: "pino-loki",
-      options: {
-        batching: true,
-        interval: 5,
-        host: PHOENIX_LOGGING_CONFIG.loki.url,
-        labels: PHOENIX_LOGGING_CONFIG.loki.labels,
-      },
-    }
-    : {
-      target: "pino-pretty",
-      options: {
-        colorize: PHOENIX_LOGGING_CONFIG.console.colorize,
-        translateTime: PHOENIX_LOGGING_CONFIG.console.translateTime,
-        ignore: "pid,hostname",
-        singleLine: PHOENIX_LOGGING_CONFIG.console.singleLine,
-      },
-    };
+  // Create transport configuration for browser
+  let transport = null;
 
-  // Create Pino logger
+  console.log('🔧 Logger config:', {
+    lokiEnabled: PHOENIX_LOGGING_CONFIG.loki.enabled,
+    hasCreateLokiTransport: !!window.createLokiTransport,
+    lokiUrl: PHOENIX_LOGGING_CONFIG.loki.url
+  });
+
+  if (PHOENIX_LOGGING_CONFIG.loki.enabled && window.createLokiTransport) {
+    console.log('🚀 Creating Loki transport...');
+    transport = window.createLokiTransport({
+      host: PHOENIX_LOGGING_CONFIG.loki.url,
+      labels: PHOENIX_LOGGING_CONFIG.loki.labels,
+      batchSize: 5,
+      interval: 3000
+    });
+    console.log('✅ Loki transport created:', transport);
+  } else {
+    console.log('⚠️ Loki transport not created - using console only');
+  }
+
+  // Create Pino logger with browser-compatible transport
   const logger = pino({
     level: PHOENIX_LOGGING_CONFIG.level,
-    transport: PHOENIX_LOGGING_CONFIG.loki.enabled ? transport : undefined,
     base: {
       service: PHOENIX_LOGGING_CONFIG.loki.labels.service,
       env: PHOENIX_LOGGING_CONFIG.loki.labels.env,
     },
+    transport: transport
   });
 
   return logger;
@@ -158,5 +159,3 @@ if (document.readyState === 'loading') {
   initializeLogger();
 }
 
-// Export for use in other scripts
-export default phoenixLogger;
