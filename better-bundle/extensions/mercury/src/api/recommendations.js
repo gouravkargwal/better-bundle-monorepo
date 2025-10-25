@@ -1,3 +1,5 @@
+import { BACKEND_URL } from "../constant";
+
 export function buildMercuryMetadata(
   checkoutStep,
   cartValue,
@@ -15,7 +17,7 @@ export function buildMercuryMetadata(
 
 export class RecommendationApiClient {
   constructor() {
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL;
   }
 
   async getRecommendations(request) {

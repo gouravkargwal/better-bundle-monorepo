@@ -35,7 +35,7 @@ export function BillingPlan({
       case "trial_active":
         return (
           <TrialActive
-            trialData={billingState.trialData!}
+            trialData={billingState.trialData}
             shopCurrency={shopCurrency}
           />
         );

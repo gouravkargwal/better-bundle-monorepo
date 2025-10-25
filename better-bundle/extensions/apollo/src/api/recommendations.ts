@@ -11,6 +11,8 @@
  * - Error handling with detailed logging
  */
 
+import { BACKEND_URL } from "../constant";
+
 // ============================================================================
 // TYPES - Match Backend API Response Structure
 // ============================================================================
@@ -111,7 +113,7 @@ class ApolloRecommendationClient {
 
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL as string;
   }
 
   /**

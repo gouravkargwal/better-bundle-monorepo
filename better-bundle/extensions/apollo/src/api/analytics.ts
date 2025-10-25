@@ -12,6 +12,8 @@
  * - Proper error handling and retry logic
  */
 
+import { BACKEND_URL } from "../constant";
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -85,7 +87,7 @@ class ApolloAnalyticsClient {
 
   constructor() {
     // Use the unified analytics service URL
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL as string;
   }
 
   /**

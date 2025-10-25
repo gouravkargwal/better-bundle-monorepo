@@ -1,6 +1,8 @@
+import { BACKEND_URL } from "../constant";
+
 class AnalyticsApiClient {
   constructor() {
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL;
   }
 
   async getOrCreateSession(shopDomain, customerId) {

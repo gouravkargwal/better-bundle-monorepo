@@ -1,4 +1,4 @@
-const UNIFIED_ANALYTICS_BASE_URL = process.env.BACKEND_URL;
+import { BACKEND_URL } from "../config/constants";
 
 /**
  * Get unified browser session ID (shared across ALL extensions)
@@ -89,7 +89,7 @@ export const getOrCreateSession = async (
 
   sessionCreationPromise = (async () => {
     try {
-      const url = `${UNIFIED_ANALYTICS_BASE_URL}/api/atlas/get-or-create-session`;
+      const url = `${BACKEND_URL}/api/atlas/get-or-create-session`;
       const browserSessionId = await getBrowserSessionId(sessionStorage);
 
       const payload = {
@@ -188,7 +188,7 @@ export const trackInteraction = async (
     };
 
     // Send to unified analytics endpoint
-    const url = `${UNIFIED_ANALYTICS_BASE_URL}/api/atlas/track-interaction`;
+    const url = `${BACKEND_URL}/api/atlas/track-interaction`;
 
     const response = await fetch(url, {
       method: "POST",
@@ -225,7 +225,7 @@ const updateClientIdInBackground = async (
   shopDomain: string,
 ): Promise<void> => {
   try {
-    const url = `${UNIFIED_ANALYTICS_BASE_URL}/api/session/update-client-id`;
+    const url = `${BACKEND_URL}/api/session/update-client-id`;
 
     await fetch(url, {
       method: "POST",

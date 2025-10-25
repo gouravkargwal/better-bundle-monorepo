@@ -5,6 +5,8 @@
  * Follows proper separation of concerns and single responsibility principle.
  */
 
+import { BACKEND_URL } from "../constant";
+
 // Unified Analytics Types
 export type ExtensionContext =
   | "homepage"
@@ -87,7 +89,7 @@ export interface UnifiedResponse {
 class AnalyticsApiClient {
   private baseUrl: string;
   constructor() {
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL;
   }
 
   /**

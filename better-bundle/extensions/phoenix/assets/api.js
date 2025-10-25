@@ -1,7 +1,6 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = process.env.BACKEND_URL; // Update this to your actual backend URL
-    this.shopifyBaseUrl = window.location.origin;
+    this.baseUrl = "https://7ba064320ace.ngrok-free.app"; // Update this to your actual backend URL
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {

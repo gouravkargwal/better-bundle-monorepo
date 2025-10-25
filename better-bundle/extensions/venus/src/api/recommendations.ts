@@ -1,5 +1,7 @@
 // API client for recommendation endpoints
 
+import { BACKEND_URL } from "../constant";
+
 export type ExtensionContext =
   | "homepage"
   | "product_page"
@@ -71,7 +73,7 @@ export class RecommendationApiClient {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.BACKEND_URL;
+    this.baseUrl = BACKEND_URL;
   }
 
   async getRecommendations(
