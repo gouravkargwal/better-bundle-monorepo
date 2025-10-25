@@ -1,1 +1,1 @@
-export const BACKEND_URL = "https://7ba064320ace.ngrok-free.app" as const;
+export const BACKEND_URL = "https://betterbundle-dev.loca.lt" as const;
