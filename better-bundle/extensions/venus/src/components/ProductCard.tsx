@@ -8,6 +8,7 @@ import {
   BlockStack,
 } from "@shopify/ui-extensions-react/customer-account";
 import { useState, useEffect, useRef } from "react";
+import { logger } from "../utils/logger";
 
 interface Product {
   id: string;
@@ -137,7 +138,12 @@ export function ProductCard({
             try {
               await onShopNow(product.id, position, product.url);
             } catch (error) {
-              console.error("Failed to handle shop now:", error);
+              logger.error(
+                {
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                "Failed to track recommendation click",
+              );
             }
           }}
         >

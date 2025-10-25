@@ -1,6 +1,7 @@
 // API client for recommendation endpoints
 
 import { BACKEND_URL } from "../constant";
+import { type Logger, logger } from "../utils/logger";
 
 export type ExtensionContext =
   | "homepage"
@@ -71,9 +72,10 @@ export interface RecommendationResponse {
 
 export class RecommendationApiClient {
   private baseUrl: string;
-
+  private logger: Logger;
   constructor() {
     this.baseUrl = BACKEND_URL;
+    this.logger = logger;
   }
 
   async getRecommendations(
@@ -89,13 +91,26 @@ export class RecommendationApiClient {
       });
 
       if (!response.ok) {
+        this.logger.error(
+          {
+            error: new Error(`HTTP error! status: ${response.status}`),
+            shop_domain: request.shop_domain,
+          },
+          "Failed to fetch recommendations",
+        );
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error("Failed to fetch recommendations:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: request.shop_domain,
+        },
+        "Failed to fetch recommendations",
+      );
       throw error;
     }
   }

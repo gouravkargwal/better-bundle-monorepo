@@ -6,6 +6,7 @@
  */
 
 import { BACKEND_URL } from "../constant";
+import { type Logger, logger } from "../utils/logger";
 
 // Unified Analytics Types
 export type ExtensionContext =
@@ -88,8 +89,10 @@ export interface UnifiedResponse {
 
 class AnalyticsApiClient {
   private baseUrl: string;
+  private logger: Logger;
   constructor() {
     this.baseUrl = BACKEND_URL;
+    this.logger = logger;
   }
 
   /**
@@ -115,11 +118,6 @@ class AnalyticsApiClient {
         referrer: undefined,
       };
 
-      console.log("🌐 Venus: Creating session with:", {
-        shop_domain: shopDomain,
-        customer_id: customerId,
-      });
-
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -137,14 +135,25 @@ class AnalyticsApiClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        console.log("✅ Venus: Session created/retrieved:", sessionId);
-        // Note: Session storage is handled by the calling component using Shopify storage API
         return sessionId;
       } else {
+        this.logger.error(
+          {
+            message: result.message,
+            shop_domain: shopDomain,
+          },
+          "Failed to create session",
+        );
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Venus: Session creation error:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Session creation error",
+      );
       throw error;
     }
   }
@@ -173,20 +182,28 @@ class AnalyticsApiClient {
       const result: UnifiedResponse = await response.json();
 
       if (result.success) {
-        console.log(
-          "✅ Venus interaction tracked:",
-          result.data?.interaction_id,
-        );
-
         return {
           success: true,
           sessionRecovery: result.session_recovery || null,
         };
       } else {
+        this.logger.error(
+          {
+            message: result.message,
+            shop_domain: request.shop_domain,
+          },
+          "Failed to track interaction",
+        );
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Venus interaction tracking error:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: request.shop_domain,
+        },
+        "Interaction tracking error",
+      );
       return { success: false };
     }
   }
@@ -269,7 +286,13 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation view:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation view",
+      );
       return { success: false };
     }
   }
@@ -316,7 +339,13 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation click:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation click",
+      );
       return { success: false };
     }
   }

@@ -6,6 +6,7 @@ import {
 } from "../api/recommendations";
 import { analyticsApi } from "../api/analytics";
 import { useApi } from "@shopify/ui-extensions-react/customer-account";
+import { logger } from "../utils/logger";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount: string, currencyCode: string): string => {
@@ -94,27 +95,26 @@ export function useRecommendations({
         // 1. Try reading from storage first (fastest)
         const cachedSessionId =
           await storage.read<string>("unified_session_id");
-
         if (cachedSessionId) {
-          console.log(
-            "🔗 Venus: Using cached session_id from storage:",
-            cachedSessionId,
-          );
           setSessionId(cachedSessionId);
           return;
         }
 
         // 2. If not in storage, fetch from backend API
-        console.log("🌐 Venus: Fetching session_id from backend");
         const sessionId = await analyticsApi.getOrCreateSession(
           shopDomain,
           customerId,
         );
         await storage.write("unified_session_id", sessionId);
-        console.log("✨ Venus: Session initialized from backend:", sessionId);
         setSessionId(sessionId);
       } catch (err) {
-        console.error("❌ Venus: Failed to initialize session:", err);
+        logger.error(
+          {
+            error: err instanceof Error ? err.message : String(err),
+            shop_domain: shopDomain,
+          },
+          "Failed to initialize session",
+        );
         setError("Failed to initialize session");
       }
     };
@@ -143,10 +143,6 @@ export function useRecommendations({
 
       // Handle session recovery if the API returned a new session
       if (result.success && result.sessionRecovery) {
-        console.log(
-          "🔄 Venus: Session recovered, updating storage:",
-          result.sessionRecovery.new_session_id,
-        );
         await storage.write(
           "unified_session_id",
           result.sessionRecovery.new_session_id,
@@ -154,7 +150,13 @@ export function useRecommendations({
         setSessionId(result.sessionRecovery.new_session_id);
       }
     } catch (error) {
-      console.error(`Failed to track ${context} click:`, error);
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation click",
+      );
     }
 
     return productUrl;
@@ -179,27 +181,32 @@ export function useRecommendations({
 
       // Handle session recovery if the API returned a new session
       if (result.success && result.sessionRecovery) {
-        console.log(
-          "🔄 Venus: Session recovered, updating storage:",
-          result.sessionRecovery.new_session_id,
-        );
         await storage.write(
           "unified_session_id",
           result.sessionRecovery.new_session_id,
         );
         setSessionId(result.sessionRecovery.new_session_id);
       }
-
-      console.log(`✅ Venus: Recommendation view tracked for ${context}`);
     } catch (error) {
-      console.error(`❌ Venus: Failed to track recommendation view:`, error);
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation view",
+      );
     }
   };
 
   // Fetch recommendations
   useEffect(() => {
     if (!sessionId) {
-      console.log("⏳ Venus: Waiting for session initialization");
+      logger.error(
+        {
+          shop_domain: shopDomain,
+        },
+        "Waiting for session initialization",
+      );
       return;
     }
     const fetchRecommendations = async () => {
@@ -240,8 +247,14 @@ export function useRecommendations({
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
       } catch (err) {
-        console.error(`Error fetching ${context} recommendations:`, err);
-        setError(`Failed to load recommendations`);
+        logger.error(
+          {
+            error: err instanceof Error ? err.message : String(err),
+            shop_domain: shopDomain,
+          },
+          "Failed to fetch recommendations",
+        );
+        setError("Failed to load recommendations");
       } finally {
         setLoading(false);
       }
