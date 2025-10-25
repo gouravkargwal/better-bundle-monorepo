@@ -19,7 +19,8 @@ import {
   Select,
   Text,
 } from "@shopify/post-purchase-ui-extensions-react";
-
+import { logger } from "./utils/logger";
+import { SHOPIFY_APP_URL } from "./constant";
 function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   // State management
   const [isLoading, setIsLoading] = useState(false);
@@ -119,7 +120,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   // Handle quantity change
   const handleQuantityChange = useCallback(
     (productId: string, quantity: number) => {
-      console.log("Apollo: Quantity changed", { productId, quantity });
       setQuantities((prev) => ({
         ...prev,
         [productId]: Math.max(1, quantity),
@@ -191,10 +191,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
   // Handle declining an offer - show next product or complete
   const handleDecline = useCallback(async () => {
-    console.log(
-      `Apollo: Customer declined offer ${currentOfferIndex + 1}/${recommendations.length}`,
-    );
-
     // Track decline
     if (shopDomain && sessionId && currentProduct) {
       await apolloAnalytics.trackRecommendationDecline(
@@ -223,16 +219,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
       // Show next offer
       setCurrentOfferIndex(nextIndex);
       setError(null);
-      console.log(`Apollo: Showing offer ${nextIndex + 1}`);
     } else {
-      // No more offers or max reached, complete the flow
-      console.log(
-        "Apollo: Max offers reached or no more products, completing flow",
-      );
-
-      // No need to track implicit declines - user never saw these products
-      // Only track actual user interactions (views, clicks, explicit declines)
-
       await done();
     }
   }, [
@@ -275,30 +262,16 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
   // Real-time pricing calculation
   useEffect(() => {
-    console.log("Apollo: useEffect triggered for pricing calculation", {
-      currentProduct: currentProduct?.id,
-      hasCurrentProduct: !!currentProduct,
-      selectedOptions,
-      quantities,
-      currentQuantity: currentProduct
-        ? getCurrentQuantity(currentProduct.id)
-        : 0,
-    });
-
     async function calculatePricing() {
       if (
         !currentProduct ||
         !getCurrentVariant(currentProduct) ||
         getCurrentQuantity(currentProduct.id) <= 0
       ) {
-        console.log(
-          "Apollo: Skipping pricing calculation - missing requirements",
-        );
         setCalculatedPurchase(null);
         return;
       }
 
-      console.log("Apollo: Starting pricing calculation");
       setIsCalculating(true);
 
       try {
@@ -310,12 +283,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           setCalculatedPurchase(null);
           return;
         }
-
-        console.log("Apollo: Calculating real-time pricing for:", {
-          productId: product.id,
-          variantId: currentVariant.variant_id,
-          quantity: currentQuantity,
-        });
 
         const changeset = {
           changes: [
@@ -331,19 +298,11 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
         if (calculationResult.status === "processed") {
           setCalculatedPurchase(calculationResult.calculatedPurchase);
-          console.log(
-            "Apollo: Real-time pricing calculated:",
-            calculationResult.calculatedPurchase,
-          );
         } else {
-          console.warn(
-            "Apollo: Pricing calculation failed:",
-            calculationResult.errors,
-          );
           setCalculatedPurchase(null);
         }
       } catch (error) {
-        console.error("Apollo: Error calculating real-time pricing:", error);
+        logger.error("Error calculating real-time pricing:", error);
         setCalculatedPurchase(null);
       } finally {
         setIsCalculating(false);
@@ -364,7 +323,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   const handleAddToOrder = useCallback(
     async (product: ProductRecommendationAPI, position: number) => {
       if (addedProducts.has(product.id)) {
-        console.log("Product already added");
         return;
       }
 
@@ -455,22 +413,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           throw new Error("Invalid changeset: missing required fields");
         }
 
-        console.log(
-          "Apollo: Calculating changeset for variant:",
-          selectedVariant.variant_id,
-          "quantity:",
-          quantity,
-        );
-        console.log(
-          "Apollo: Full changeset object:",
-          JSON.stringify(changeset, null, 2),
-        );
         const calculationResult = await calculateChangeset(changeset);
-
-        console.log(
-          "Apollo: CalculateChangeset response:",
-          JSON.stringify(calculationResult, null, 2),
-        );
 
         if (calculationResult.status === "unprocessed") {
           const errorMessages = calculationResult.errors
@@ -486,10 +429,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
         // Pricing already calculated in real-time, no need to store again
 
-        // Get signed token from backend
-        console.log("Apollo: Requesting signed token from backend");
         const tokenResponse = await fetch(
-          `https://collectible-equation-dock-highs.trycloudflare.com/api/sign-changeset`,
+          `${SHOPIFY_APP_URL}/api/sign-changeset`,
           {
             method: "POST",
             headers: {
@@ -511,15 +452,9 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           throw new Error("No token received from backend");
         }
 
-        console.log("Apollo: Applying changeset with signed token");
         const applyResult = await applyChangeset(token, {
           buyerConsentToSubscriptions: false,
         });
-
-        console.log(
-          "Apollo: ApplyChangeset response:",
-          JSON.stringify(applyResult, null, 2),
-        );
 
         if (applyResult.status === "unprocessed") {
           const errorMessages = applyResult.errors
@@ -554,12 +489,11 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         }
 
         setAddedProducts((prev) => new Set([...prev, product.id]));
-        console.log(`Apollo: Product ${product.id} added successfully`);
 
         // Auto-continue after adding to order
         await done();
       } catch (error) {
-        console.error("Apollo: Error adding product:", error);
+        logger.error("Error adding product:", error);
         setError((error as Error).message);
       } finally {
         setIsLoading(false);
@@ -656,42 +590,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     ?.amount
     ? parseFloat(calculatedPurchase.totalOutstandingSet.presentmentMoney.amount)
     : subtotal + shipping + tax;
-
-  // Debug logging for pricing calculation
-  console.log("Apollo: Pricing calculation debug:", {
-    hasCalculatedPurchase: !!calculatedPurchase,
-    itemPrice,
-    shipping,
-    tax,
-    subtotal,
-    total,
-    currency:
-      calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.currencyCode ||
-      currentVariant?.currency_code,
-    isCalculating,
-    calculatedPurchaseKeys: calculatedPurchase
-      ? Object.keys(calculatedPurchase)
-      : [],
-    totalPriceSet: calculatedPurchase?.totalPriceSet,
-    totalOutstandingSet: calculatedPurchase?.totalOutstandingSet,
-  });
-
-  // Additional detailed logging for total calculation
-  console.log("Apollo: Total calculation details:", {
-    totalOutstandingAmount:
-      calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.amount,
-    totalPriceAmount:
-      calculatedPurchase?.totalPriceSet?.presentmentMoney?.amount,
-    calculatedTotal: total,
-    manualTotal: subtotal + shipping + tax,
-    usingTotalOutstanding:
-      !!calculatedPurchase?.totalOutstandingSet?.presentmentMoney?.amount,
-    usingTotalPrice:
-      !!calculatedPurchase?.totalPriceSet?.presentmentMoney?.amount,
-    updatedLineItems: calculatedPurchase?.updatedLineItems,
-    addedShippingLines: calculatedPurchase?.addedShippingLines,
-    addedTaxLines: calculatedPurchase?.addedTaxLines,
-  });
 
   // Get currency from calculated purchase or fallback to variant currency
   const currency =
