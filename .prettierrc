@@ -1,0 +1,32 @@
+{
+  "overrides": [
+    {
+      "files": "admin/templates/**/*.html",
+      "options": {
+        "parser": "html",
+        "printWidth": 1000,
+        "htmlWhitespaceSensitivity": "ignore",
+        "singleAttributePerLine": false,
+        "bracketSameLine": true
+      }
+    },
+    {
+      "files": "*.html",
+      "options": {
+        "parser": "html",
+        "htmlWhitespaceSensitivity": "ignore",
+        "printWidth": 1000,
+        "tabWidth": 2,
+        "useTabs": false,
+        "semi": false,
+        "singleQuote": false,
+        "quoteProps": "as-needed",
+        "trailingComma": "none",
+        "bracketSpacing": true,
+        "bracketSameLine": false,
+        "arrowParens": "avoid"
+      }
+    }
+  ],
+  "ignorePath": ".prettierignore"
+}

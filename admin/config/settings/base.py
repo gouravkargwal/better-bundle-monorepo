@@ -193,3 +193,6 @@ DATABASE_APPS_MAPPING = {
     "revenue": "default",
     "core": "default",
 }
+
+# Python Worker API Configuration
+PYTHON_WORKER_API_URL = config("PYTHON_WORKER_API_URL", default="http://localhost:8001")

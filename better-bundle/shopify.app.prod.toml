@@ -18,8 +18,8 @@ topics = ["refunds/create"]
 uri = "/webhooks/refunds/create"
 
 [[webhooks.subscriptions]]
-topics = ["orders/edited"]
-uri = "/webhooks/orders/edited"
+topics = ["orders/updated"]
+uri = "/webhooks/orders/updated"
 
 [[webhooks.subscriptions]]
 topics = ["collections/create"]

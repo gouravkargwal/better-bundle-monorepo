@@ -391,7 +391,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
           );
         }
 
-        // Create changeset - properties are not supported in post-purchase extensions
+        // Create changeset - include session ID in order metafields for attribution
         const variantId = parseInt(selectedVariant.variant_id);
         const changeset = {
           changes: [
@@ -399,6 +399,56 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
               type: "add_variant",
               variantId: variantId,
               quantity: quantity,
+            },
+            // ✅ ADD SESSION ID TO ORDER METAFIELDS FOR ATTRIBUTION (following Phoenix pattern)
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "session_id",
+              value: sessionId,
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "extension",
+              value: "apollo",
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "context",
+              value: "post_purchase",
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "position",
+              value: position.toString(),
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "quantity",
+              value: quantity.toString(),
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "timestamp",
+              value: new Date().toISOString(),
+              valueType: "string",
+            },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "source",
+              value: "betterbundle",
+              valueType: "string",
             },
           ],
         };

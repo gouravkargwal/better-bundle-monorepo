@@ -31,6 +31,7 @@ from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.record_matching import router as record_matching_router
 from app.api.v1.fbt_status import router as fbt_status_router
 from app.api.v1.logs import router as logs_router
+from app.api.v1.data_collection import router as data_collection_router
 from app.domains.billing.api.billing_api import router as billing_api_router
 
 
@@ -88,6 +89,7 @@ app.include_router(recommendations_router)
 app.include_router(record_matching_router)
 app.include_router(fbt_status_router)
 app.include_router(logs_router)
+app.include_router(data_collection_router)
 app.include_router(billing_api_router)
 
 # Include unified analytics routers

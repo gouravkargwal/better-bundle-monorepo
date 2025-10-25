@@ -69,6 +69,14 @@ class BillingServiceV2:
                 # 1. Calculate attribution
                 attribution_result = await self._calculate_attribution(purchase_event)
 
+                # Skip processing if no revenue to attribute
+                if attribution_result.total_attributed_revenue <= 0:
+                    logger.info(
+                        f"⏭️ Skipping billing processing for purchase {purchase_event.order_id}: "
+                        f"no revenue to attribute (${attribution_result.total_attributed_revenue})"
+                    )
+                    return attribution_result
+
                 # 2. Get subscription and check trial completion
                 shop_subscription = await self.billing_repository.get_shop_subscription(
                     shop_id
@@ -296,6 +304,11 @@ class BillingServiceV2:
             from app.core.database.models.purchase_attribution import (
                 PurchaseAttribution,
             )
+            from app.domains.billing.models.attribution_models import (
+                AttributionType,
+                AttributionStatus,
+                AttributionBreakdown,
+            )
 
             query = select(PurchaseAttribution).where(
                 PurchaseAttribution.order_id == str(purchase_event.order_id),
@@ -305,21 +318,62 @@ class BillingServiceV2:
             existing = result.scalar_one_or_none()
 
             if existing:
-                # Return existing attribution result
+                # Convert existing attribution to AttributionResult
+                attribution_breakdown = []
+                if existing.attribution_weights:
+                    for weight_data in existing.attribution_weights:
+                        attribution_breakdown.append(
+                            AttributionBreakdown(
+                                extension_type=weight_data.get("extension_type"),
+                                attributed_amount=Decimal(
+                                    str(weight_data.get("attributed_amount", 0))
+                                ),
+                                attribution_weight=weight_data.get("weight", 0.0),
+                                attribution_type=AttributionType.CROSS_EXTENSION,
+                                interaction_id=weight_data.get("interaction_id"),
+                                metadata=weight_data.get("metadata", {}),
+                            )
+                        )
+
                 return AttributionResult(
-                    attribution_id=existing.id,
+                    order_id=int(purchase_event.order_id),
+                    shop_id=purchase_event.shop_id,
+                    customer_id=purchase_event.customer_id,
+                    session_id=existing.session_id,
                     total_attributed_revenue=existing.total_revenue,
-                    # Add other fields as needed
+                    attribution_breakdown=attribution_breakdown,
+                    attribution_type=AttributionType.CROSS_EXTENSION,
+                    status=AttributionStatus.CALCULATED,
+                    calculated_at=existing.created_at,
+                    metadata=existing.attribution_metadata or {},
                 )
             else:
                 # Fallback - create empty result
                 return AttributionResult(
-                    attribution_id="", total_attributed_revenue=Decimal("0.00")
+                    order_id=int(purchase_event.order_id),
+                    shop_id=purchase_event.shop_id,
+                    customer_id=purchase_event.customer_id,
+                    session_id=None,
+                    total_attributed_revenue=Decimal("0.00"),
+                    attribution_breakdown=[],
+                    attribution_type=AttributionType.DIRECT_CLICK,
+                    status=AttributionStatus.PENDING,
+                    calculated_at=now_utc(),
+                    metadata={},
                 )
         except Exception as e:
             logger.error(f"Error getting existing attribution result: {e}")
             return AttributionResult(
-                attribution_id="", total_attributed_revenue=Decimal("0.00")
+                order_id=int(purchase_event.order_id),
+                shop_id=purchase_event.shop_id,
+                customer_id=purchase_event.customer_id,
+                session_id=None,
+                total_attributed_revenue=Decimal("0.00"),
+                attribution_breakdown=[],
+                attribution_type=AttributionType.DIRECT_CLICK,
+                status=AttributionStatus.PENDING,
+                calculated_at=now_utc(),
+                metadata={},
             )
 
     async def _check_trial_completion(self, shop_id: str, shop_subscription) -> None:

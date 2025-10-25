@@ -7,6 +7,33 @@ Django should NEVER create these tables - they already exist!
 from django.db import models
 from django.db.models import Sum
 from apps.core.models import BaseModel
+import json
+
+
+class SafeJSONField(models.JSONField):
+    """JSON field that handles corrupted data gracefully"""
+
+    def from_db_value(self, value, expression, connection):
+        if value is None:
+            return value
+        try:
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # Return the raw value if it can't be parsed
+            return value
+
+    def to_python(self, value):
+        if value is None:
+            return value
+        try:
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # Return the raw value if it can't be parsed
+            return value
 
 
 class PurchaseAttribution(BaseModel):
@@ -17,15 +44,15 @@ class PurchaseAttribution(BaseModel):
 
     session_id = models.CharField(max_length=255, db_index=True)
     order_id = models.CharField(max_length=255, db_index=True)
-    contributing_extensions = models.JSONField()
-    attribution_weights = models.JSONField()
+    contributing_extensions = SafeJSONField()
+    attribution_weights = SafeJSONField()
     total_revenue = models.DecimalField(max_digits=10, decimal_places=2)
-    attributed_revenue = models.JSONField()
+    attributed_revenue = SafeJSONField()
     total_interactions = models.IntegerField()
-    interactions_by_extension = models.JSONField()
+    interactions_by_extension = SafeJSONField()
     purchase_at = models.DateTimeField(db_index=True)
     attribution_algorithm = models.CharField(max_length=50)
-    metadata = models.JSONField(null=True, blank=True)
+    metadata = SafeJSONField(null=True, blank=True)
     shop = models.ForeignKey(
         "shops.Shop", on_delete=models.CASCADE, related_name="purchase_attributions"
     )
@@ -106,10 +133,10 @@ class CommissionRecord(BaseModel):
         max_length=255, null=True, blank=True, unique=True
     )
     shopify_recorded_at = models.DateTimeField(null=True, blank=True)
-    shopify_response = models.JSONField(null=True, blank=True)
+    shopify_response = SafeJSONField(null=True, blank=True)
     currency = models.CharField(max_length=3)
     notes = models.TextField(null=True, blank=True)
-    commission_metadata = models.JSONField(null=True, blank=True)
+    commission_metadata = SafeJSONField(null=True, blank=True)
     error_count = models.IntegerField(default=0)
     last_error = models.TextField(null=True, blank=True)
     last_error_at = models.DateTimeField(null=True, blank=True)

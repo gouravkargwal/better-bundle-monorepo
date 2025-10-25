@@ -1,0 +1,9 @@
+# Ignore Django templates completely
+admin/templates/
+**/templates/
+*.html
+
+# Ignore other files if needed
+node_modules/
+*.min.js
+*.min.css

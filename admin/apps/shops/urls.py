@@ -1,30 +1,14 @@
 """
-URL patterns for shops app
+URL patterns for shops app - Pure Django Admin Approach
 """
 
-from django.urls import path, include
-from . import views
+from django.urls import path
+from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib import admin
 
 app_name = "shops"
 
 urlpatterns = [
-    path("", views.ShopListView.as_view(), name="shop_list"),
-    path(
-        "<str:shop_id>/",
-        include(
-            [
-                path("", views.ShopDetailView.as_view(), name="shop_detail"),
-                path(
-                    "subscription/",
-                    views.ShopSubscriptionView.as_view(),
-                    name="shop_subscription",
-                ),
-                path("billing/", views.ShopBillingView.as_view(), name="shop_billing"),
-                path(
-                    "invoices/", views.ShopInvoicesView.as_view(), name="shop_invoices"
-                ),
-                path("revenue/", views.ShopRevenueView.as_view(), name="shop_revenue"),
-            ]
-        ),
-    ),
+    # All functionality is handled by Django Admin
+    # No custom views needed
 ]

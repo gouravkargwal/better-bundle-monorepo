@@ -1,15 +1,13 @@
 """
-URL patterns for billing app
+URL patterns for billing app - Pure Django Admin Approach
 """
 
 from django.urls import path
 from . import views
 
-app_name = 'billing'
+app_name = "billing"
 
 urlpatterns = [
-    path('', views.BillingDashboardView.as_view(), name='billing_dashboard'),
-    path('cycles/', views.BillingCycleListView.as_view(), name='billing_cycle_list'),
-    path('invoices/', views.BillingInvoiceListView.as_view(), name='billing_invoice_list'),
-    path('subscriptions/', views.SubscriptionListView.as_view(), name='subscription_list'),
+    # All functionality is handled by Django Admin
+    # No custom views needed
 ]

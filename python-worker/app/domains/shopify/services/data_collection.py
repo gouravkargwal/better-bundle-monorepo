@@ -701,6 +701,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, data_type: str, shop_domain: str, specific_ids: List[str]
     ) -> List[Dict[str, Any]]:
         """Collect specific items by IDs using GraphQL - for webhooks"""
+        # ✅ ADD LOGGING FOR SPECIFIC ITEM COLLECTION
+        logger.info(
+            f"📥 Collecting {data_type} data for IDs: {specific_ids} from {shop_domain}"
+        )
+
         collected_items = []
 
         for item_id in specific_ids:
@@ -720,6 +725,9 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
     ) -> Dict[str, Any]:
         """Collect a single item by ID using existing API client methods with full data traversal"""
         try:
+            # ✅ ADD LOGGING FOR SINGLE ITEM COLLECTION
+            logger.info(f"🔍 Fetching {data_type} {item_id} from {shop_domain}")
+
             if data_type == "products":
                 # Use the modified get_products method with product_ids parameter
                 result = await self.api_client.get_products(

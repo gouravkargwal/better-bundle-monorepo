@@ -116,6 +116,24 @@ class OrderAPIClient(BaseShopifyAPIClient):
                                 end_cursor: endCursor
                             }
                         }
+                        metafields(first: 50) {
+                            edges {
+                                node {
+                                    id
+                                    namespace
+                                    key
+                                    value
+                                    type
+                                    description
+                                    created_at: createdAt
+                                    updated_at: updatedAt
+                                }
+                            }
+                            page_info: pageInfo {
+                                has_next_page: hasNextPage
+                                end_cursor: endCursor
+                            }
+                        }
                         refunds {
                             id
                             created_at: createdAt
@@ -359,6 +377,24 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         has_next_page: hasNextPage
                         has_previous_page: hasPreviousPage
                         start_cursor: startCursor
+                        end_cursor: endCursor
+                    }
+                }
+                metafields(first: 50) {
+                    edges {
+                        node {
+                            id
+                            namespace
+                            key
+                            value
+                            type
+                            description
+                            created_at: createdAt
+                            updated_at: updatedAt
+                        }
+                    }
+                    page_info: pageInfo {
+                        has_next_page: hasNextPage
                         end_cursor: endCursor
                     }
                 }

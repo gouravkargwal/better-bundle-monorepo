@@ -7,7 +7,7 @@ import logger from "../utils/logger";
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
 
-  logger.info("Order edited webhook triggered");
+  logger.info("Order updated webhook triggered");
 
   try {
     const authResult = await authenticate.webhook(request);
@@ -17,44 +17,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     shop = authResult.shop;
     logger.info({ shop, topic }, "Webhook authentication successful");
   } catch (authError) {
-    logger.error({ error: authError }, "Webhook authentication failed");
+    logger.error(
+      {
+        error:
+          authError instanceof Error ? authError.message : String(authError),
+      },
+      "Webhook authentication failed",
+    );
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   if (!session || !shop) {
-    logger.error("Missing session or shop data");
+    logger.error({ session, shop }, "Missing session or shop data");
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   try {
-    // Extract order data from payload
-    // For orders/edited, the payload structure is different
-    const orderEdit = payload.order_edit;
-
-    // The order ID is in order_edit.order_id (not in a nested order object)
-    const orderId = orderEdit?.order_id?.toString();
-
-    console.log("📦 Order edit data received:", {
-      orderId,
-      shop,
-      orderEditKeys: Object.keys(payload),
-      orderEditId: orderEdit?.id,
-      orderEditOrderId: orderEdit?.order_id,
-      orderEditStructure: orderEdit ? Object.keys(orderEdit) : [],
-    });
-
-    // Log the full payload structure for debugging
-    console.log(
-      "🔍 Full orders/edited webhook payload:",
-      JSON.stringify(payload, null, 2),
-    );
+    const orderId = payload.id?.toString();
 
     if (!orderId) {
-      console.error("❌ No order ID found in order edit payload");
-      return json(
-        { error: "No order ID found in order edit" },
-        { status: 400 },
-      );
+      logger.error({ payload }, "No order ID found in payload");
+      return json({ error: "No order ID found in payload" }, { status: 400 });
     }
 
     logger.info("Initializing Kafka producer");
@@ -62,7 +45,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     logger.info("Kafka producer initialized");
 
     const streamData = {
-      event_type: "order_edited",
+      event_type: "order_updated",
       shop_domain: shop,
       shopify_id: orderId,
       timestamp: new Date().toISOString(),
@@ -78,16 +61,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopDomain: shop,
       messageId: messageId,
       message:
-        "Order edited webhook processed - will trigger post-purchase revenue attribution",
+        "Order updated webhook processed - will trigger post-purchase revenue attribution",
     });
   } catch (error) {
-    logger.error({ error, topic, shop }, "Error processing webhook");
-    return json(
+    logger.error(
       {
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error.message : String(error),
+        topic,
+        shop,
       },
-      { status: 500 },
+      "Error processing webhook",
     );
+    return json({ error: "Internal server error" }, { status: 500 });
   }
 };

@@ -7,6 +7,33 @@ Django should NEVER create these tables - they already exist!
 from django.db import models
 from django.db.models import Sum, Count
 from apps.core.models import BaseModel
+import json
+
+
+class SafeJSONField(models.JSONField):
+    """JSON field that handles corrupted data gracefully"""
+
+    def from_db_value(self, value, expression, connection):
+        if value is None:
+            return value
+        try:
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # Return the raw value if it can't be parsed
+            return value
+
+    def to_python(self, value):
+        if value is None:
+            return value
+        try:
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # Return the raw value if it can't be parsed
+            return value
 
 
 class Shop(BaseModel):
@@ -115,16 +142,16 @@ class OrderData(BaseModel):
         max_length=50, null=True, blank=True, db_index=True
     )
     order_status = models.CharField(max_length=50, null=True, blank=True, db_index=True)
-    tags = models.JSONField(null=True, blank=True)
+    tags = SafeJSONField(null=True, blank=True)
     note = models.TextField(null=True, blank=True)
-    note_attributes = models.JSONField(null=True, blank=True)
-    shipping_address = models.JSONField(null=True, blank=True)
-    billing_address = models.JSONField(null=True, blank=True)
-    discount_applications = models.JSONField(null=True, blank=True)
-    metafields = models.JSONField(null=True, blank=True)
-    fulfillments = models.JSONField(null=True, blank=True)
-    transactions = models.JSONField(null=True, blank=True)
-    extras = models.JSONField(null=True, blank=True)
+    note_attributes = SafeJSONField(null=True, blank=True)
+    shipping_address = SafeJSONField(null=True, blank=True)
+    billing_address = SafeJSONField(null=True, blank=True)
+    discount_applications = SafeJSONField(null=True, blank=True)
+    metafields = SafeJSONField(null=True, blank=True)
+    fulfillments = SafeJSONField(null=True, blank=True)
+    transactions = SafeJSONField(null=True, blank=True)
+    extras = SafeJSONField(null=True, blank=True)
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name="order_data")
 
     class Meta:
@@ -149,22 +176,22 @@ class ProductData(BaseModel):
     description = models.TextField(null=True, blank=True)
     product_type = models.CharField(max_length=100, null=True, blank=True)
     vendor = models.CharField(max_length=255, null=True, blank=True)
-    tags = models.JSONField(null=True, blank=True)
+    tags = SafeJSONField(null=True, blank=True)
     status = models.CharField(max_length=50, null=True, blank=True)
     total_inventory = models.IntegerField(null=True, blank=True)
     price = models.FloatField()
     compare_at_price = models.FloatField(null=True, blank=True)
-    price_range = models.JSONField(null=True, blank=True)
-    collections = models.JSONField(null=True, blank=True)
+    price_range = SafeJSONField(null=True, blank=True)
+    collections = SafeJSONField(null=True, blank=True)
     seo_title = models.CharField(max_length=500, null=True, blank=True)
     seo_description = models.TextField(null=True, blank=True)
     template_suffix = models.CharField(max_length=100, null=True, blank=True)
-    variants = models.JSONField(null=True, blank=True)
-    images = models.JSONField(null=True, blank=True)
-    media = models.JSONField(null=True, blank=True)
-    options = models.JSONField(null=True, blank=True)
-    metafields = models.JSONField(null=True, blank=True)
-    extras = models.JSONField(null=True, blank=True)
+    variants = SafeJSONField(null=True, blank=True)
+    images = SafeJSONField(null=True, blank=True)
+    media = SafeJSONField(null=True, blank=True)
+    options = SafeJSONField(null=True, blank=True)
+    metafields = SafeJSONField(null=True, blank=True)
+    extras = SafeJSONField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     shop = models.ForeignKey(
         Shop, on_delete=models.CASCADE, related_name="product_data"
@@ -196,11 +223,11 @@ class CustomerData(BaseModel):
     verified_email = models.BooleanField()
     tax_exempt = models.BooleanField()
     customer_locale = models.CharField(max_length=10, null=True, blank=True)
-    tags = models.JSONField(null=True, blank=True)
+    tags = SafeJSONField(null=True, blank=True)
     state = models.CharField(max_length=50, null=True, blank=True)
-    default_address = models.JSONField(null=True, blank=True)
+    default_address = SafeJSONField(null=True, blank=True)
     is_active = models.BooleanField()
-    extras = models.JSONField(null=True, blank=True)
+    extras = SafeJSONField(null=True, blank=True)
     shop = models.ForeignKey(
         Shop, on_delete=models.CASCADE, related_name="customer_data"
     )
