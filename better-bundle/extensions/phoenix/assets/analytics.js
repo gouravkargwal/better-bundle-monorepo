@@ -1,22 +1,20 @@
 class AnalyticsApiClient {
   constructor() {
-    this.baseUrl = "https://72b8c96abd5939.lhr.life"; // Update this to your actual backend URL
+    this.baseUrl = "https://nonconscientious-annette-saddeningly.ngrok-free.dev"; // Update this to your actual backend URL
     this.currentSessionId = null;
     this.sessionExpiresAt = null;
-    this.clientId = null;  // ✅ Store client_id in memory
+    this.clientId = null; // ✅ Store client_id in memory
     this.trackedEvents = new Map();
     this.deduplicationWindow = 5000; // 5 seconds
+    this.logger = window.phoenixLogger || console; // Use the global logger with fallback
   }
-
 
   async getBrowserSessionId() {
     let sessionId = sessionStorage.getItem("unified_browser_session_id");
     if (!sessionId) {
-      sessionId = "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      sessionId =
+        "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
       sessionStorage.setItem("unified_browser_session_id", sessionId);
-      console.log("🆕 Phoenix: Generated new unified browser_session_id:", sessionId);
-    } else {
-      console.log("♻️ Phoenix: Reusing existing unified browser_session_id:", sessionId);
     }
     return sessionId;
   }
@@ -25,11 +23,13 @@ class AnalyticsApiClient {
     try {
       const clientId = sessionStorage.getItem("unified_client_id");
       if (clientId) {
-        console.log("📱 Phoenix: Found client_id in sessionStorage:", clientId.substring(0, 16) + "...");
         return clientId;
       }
     } catch (error) {
-      console.warn("Phoenix: Failed to read client_id from sessionStorage:", error);
+      this.logger.error(
+        "Phoenix: Failed to read client_id from sessionStorage:",
+        error,
+      );
     }
     return null;
   }
@@ -44,16 +44,21 @@ class AnalyticsApiClient {
       const cachedSessionId = sessionStorage.getItem("unified_session_id");
       const cachedExpiry = sessionStorage.getItem("unified_session_expires_at");
 
-      if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-        console.log("⚡ Phoenix: Session loaded from unified sessionStorage:", cachedSessionId);
-        console.log("📱 Phoenix: Using client_id:", this.clientId ? this.clientId.substring(0, 16) + "..." : "none");
-
+      if (
+        cachedSessionId &&
+        cachedExpiry &&
+        Date.now() < parseInt(cachedExpiry)
+      ) {
         this.currentSessionId = cachedSessionId;
         this.sessionExpiresAt = parseInt(cachedExpiry);
         return cachedSessionId;
       }
 
-      if (this.currentSessionId && this.sessionExpiresAt && Date.now() < this.sessionExpiresAt) {
+      if (
+        this.currentSessionId &&
+        this.sessionExpiresAt &&
+        Date.now() < this.sessionExpiresAt
+      ) {
         return this.currentSessionId;
       }
 
@@ -64,18 +69,12 @@ class AnalyticsApiClient {
         shop_domain: shopDomain,
         customer_id: customerId ? String(customerId) : undefined,
         browser_session_id: browserSessionId,
-        client_id: this.clientId,  // ✅ Include client_id if available
+        client_id: this.clientId, // ✅ Include client_id if available
         user_agent: navigator.userAgent,
         ip_address: null,
         referrer: document.referrer,
         page_url: window.location.href,
       };
-
-      console.log('🔍 Phoenix: Session request:', {
-        url,
-        has_client_id: !!this.clientId,
-        browser_session_id: browserSessionId
-      });
 
       // Create AbortController for timeout
       const controller = new AbortController();
@@ -86,13 +85,15 @@ class AnalyticsApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error(`❌ Analytics: Session creation failed with status ${response.status}`);
+        this.logger.error(
+          `❌ Analytics: Session creation failed with status ${response.status}`,
+        );
         throw new Error(`Session creation failed: ${response.status}`);
       }
 
@@ -112,24 +113,28 @@ class AnalyticsApiClient {
           // Store in sessionStorage for other extensions
           try {
             sessionStorage.setItem("unified_client_id", this.clientId);
-            console.log("📱 Phoenix: Stored client_id from backend:", this.clientId.substring(0, 16) + "...");
+
           } catch (error) {
-            console.warn("Phoenix: Failed to store client_id:", error);
+            this.logger.error("Phoenix: Failed to store client_id:", error);
           }
         }
 
         sessionStorage.setItem("unified_session_id", sessionId);
-        sessionStorage.setItem("unified_session_expires_at", expiresAt.toString());
-        console.log("💾 Phoenix: Session saved to unified sessionStorage:", sessionId);
+        sessionStorage.setItem(
+          "unified_session_expires_at",
+          expiresAt.toString(),
+        );
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      if (error.name === 'AbortError') {
-        console.error("⏰ Analytics: Session creation timed out after 5 seconds");
+      if (error.name === "AbortError") {
+        this.logger.error(
+          "⏰ Analytics: Session creation timed out after 5 seconds",
+        );
       } else {
-        console.error("💥 Phoenix: Session creation error:", error);
+        this.logger.error("💥 Phoenix: Session creation error:", error);
       }
       throw error;
     }
@@ -139,7 +144,7 @@ class AnalyticsApiClient {
     const now = Date.now();
     const lastTracked = this.trackedEvents.get(eventKey);
 
-    if (lastTracked && (now - lastTracked) < this.deduplicationWindow) {
+    if (lastTracked && now - lastTracked < this.deduplicationWindow) {
       return true;
     }
 
@@ -147,17 +152,18 @@ class AnalyticsApiClient {
     return false;
   }
 
-
   async trackUnifiedInteraction(request) {
     try {
-
-      const eventKey = `${request.interaction_type}_${request.context}_${request.shop_domain}_${request.customer_id || 'anon'}`;
+      const eventKey = `${request.interaction_type}_${request.context}_${request.shop_domain}_${request.customer_id || "anon"}`;
 
       if (this.shouldDeduplicateEvent(eventKey)) {
         return true; // Return success but don't actually track
       }
 
-      const sessionId = await this.getOrCreateSession(request.shop_domain, request.customer_id ? String(request.customer_id) : undefined);
+      const sessionId = await this.getOrCreateSession(
+        request.shop_domain,
+        request.customer_id ? String(request.customer_id) : undefined,
+      );
 
       const interactionData = {
         ...request,
@@ -165,8 +171,6 @@ class AnalyticsApiClient {
       };
 
       const url = `${this.baseUrl}/api/phoenix/track-interaction`;
-
-      console.log('📊 Phoenix track-interaction request:', { url, interactionData });
 
       const response = await fetch(url, {
         method: "POST",
@@ -177,13 +181,6 @@ class AnalyticsApiClient {
         keepalive: true,
       });
 
-      console.log('📊 Phoenix track-interaction response:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      });
-
-
       if (!response.ok) {
         throw new Error(`Interaction tracking failed: ${response.status}`);
       }
@@ -193,7 +190,6 @@ class AnalyticsApiClient {
       if (result.success) {
         // Handle session recovery if it occurred
         if (result.session_recovery) {
-          console.log("🔄 Session recovered:", result.session_recovery);
           // Update stored session ID with the new one (unified with other extensions)
           sessionStorage.setItem(
             "unified_session_id",
@@ -206,16 +202,19 @@ class AnalyticsApiClient {
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Phoenix interaction tracking error:", error);
+      this.logger.error("💥 Phoenix interaction tracking error:", error);
       return false;
     }
   }
 
-
-
-  async trackRecommendationView(shopDomain, context, customerId, productIds, metadata) {
+  async trackRecommendationView(
+    shopDomain,
+    context,
+    customerId,
+    productIds,
+    metadata,
+  ) {
     try {
-
       const request = {
         session_id: "",
         shop_domain: shopDomain,
@@ -230,21 +229,22 @@ class AnalyticsApiClient {
           source: "phoenix_theme_extension",
           // Standard structure expected by adapters
           data: {
-            recommendations: productIds?.map((productId, index) => ({
-              id: productId,
-              position: index + 1
-            })) || [],
+            recommendations:
+              productIds?.map((productId, index) => ({
+                id: productId,
+                position: index + 1,
+              })) || [],
             type: "recommendation",
             widget: "phoenix_recommendation",
-            algorithm: "phoenix_algorithm"
-          }
+            algorithm: "phoenix_algorithm",
+          },
         },
       };
 
       const result = await this.trackUnifiedInteraction(request);
       return result;
     } catch (error) {
-      console.error("Failed to track recommendation view:", error);
+      this.logger.error("Failed to track recommendation view:", error);
       return false;
     }
   }
@@ -252,7 +252,14 @@ class AnalyticsApiClient {
   /**
    * Track recommendation click (when user clicks on a recommendation)
    */
-  async trackRecommendationClick(shopDomain, context, productId, position, customerId, metadata) {
+  async trackRecommendationClick(
+    shopDomain,
+    context,
+    productId,
+    position,
+    customerId,
+    metadata,
+  ) {
     try {
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
@@ -270,19 +277,19 @@ class AnalyticsApiClient {
           // Standard structure expected by adapters
           data: {
             product: {
-              id: productId
+              id: productId,
             },
             type: "recommendation",
             position: position,
             widget: "phoenix_recommendation",
-            algorithm: "phoenix_algorithm"
-          }
+            algorithm: "phoenix_algorithm",
+          },
         },
       };
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation click:", error);
+      this.logger.error("Failed to track recommendation click:", error);
       return false;
     }
   }
@@ -290,7 +297,15 @@ class AnalyticsApiClient {
   /**
    * Track add to cart action
    */
-  async trackAddToCart(shopDomain, context, productId, variantId, position, customerId, metadata) {
+  async trackAddToCart(
+    shopDomain,
+    context,
+    productId,
+    variantId,
+    position,
+    customerId,
+    metadata,
+  ) {
     try {
       const request = {
         session_id: "", // Will be set by trackUnifiedInteraction
@@ -311,34 +326,38 @@ class AnalyticsApiClient {
               merchandise: {
                 id: variantId,
                 product: {
-                  id: productId  // Use productId instead of variantId for product_id
-                }
+                  id: productId, // Use productId instead of variantId for product_id
+                },
               },
-              quantity: metadata?.quantity || 1
+              quantity: metadata?.quantity || 1,
             },
             type: "recommendation",
             position: position,
             widget: "phoenix_recommendation",
             algorithm: "phoenix_algorithm",
             // ✅ Add quantity tracking for proper attribution
-            selected_quantity: metadata?.quantity || 1
-          }
+            selected_quantity: metadata?.quantity || 1,
+          },
         },
       };
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track add to cart:", error);
+      this.logger.error("Failed to track add to cart:", error);
       return false;
     }
   }
 
-
-
   /**
    * Store attribution data in cart attributes for order processing
    */
-  async storeCartAttribution(sessionId, productId, context, position, quantity = 1) {
+  async storeCartAttribution(
+    sessionId,
+    productId,
+    context,
+    position,
+    quantity = 1,
+  ) {
     try {
       const response = await fetch("/cart/update.js", {
         method: "POST",
@@ -359,7 +378,7 @@ class AnalyticsApiClient {
 
       return response.ok;
     } catch (error) {
-      console.error("Failed to store cart attribution:", error);
+      this.logger.error("Failed to store cart attribution:", error);
       return false;
     }
   }

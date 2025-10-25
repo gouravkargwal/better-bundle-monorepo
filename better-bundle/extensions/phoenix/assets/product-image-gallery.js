@@ -109,9 +109,8 @@ class ProductImageGallery {
       // Add touch support for mobile
       this.addTouchSupport(productCard);
 
-      console.log(`🖼️ Initialized image gallery for product ${productId} with ${images.length} images`);
     } catch (error) {
-      console.warn('Failed to parse images data:', error);
+      this.logger.warn('Failed to parse images data:', error);
     }
   }
 
@@ -191,7 +190,7 @@ class ProductImageGallery {
       this.imageStates.set(productId, nextIndex);
 
     } catch (error) {
-      console.warn('Failed to switch image:', error);
+      this.logger.warn('Failed to switch image:', error);
     }
   }
 
@@ -212,7 +211,7 @@ class ProductImageGallery {
       this.imageStates.set(productId, prevIndex);
 
     } catch (error) {
-      console.warn('Failed to switch image:', error);
+      this.logger.warn('Failed to switch image:', error);
     }
   }
 

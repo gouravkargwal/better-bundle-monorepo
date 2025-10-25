@@ -1,15 +1,16 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = "https://72b8c96abd5939.lhr.life"; // Update this to your actual backend URL
+    this.baseUrl = "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
+    this.logger = window.phoenixLogger || console; // Use the global logger with fallback
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
       const context = window.context || 'homepage';
       const shopDomain = window.shopDomain || '';
-
+      this.logger.info('API: Fetching recommendations for shop domain:', shopDomain);
       if (!shopDomain) {
-        console.error('❌ API: Shop domain is required but not provided');
+        this.logger.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');
       }
 
@@ -51,16 +52,11 @@ class RecommendationAPI {
       const unifiedSessionId = sessionStorage.getItem('unified_session_id');
       if (unifiedSessionId) {
         requestBody.session_id = unifiedSessionId;
-        console.log('🔗 Phoenix: Using unified session_id:', unifiedSessionId);
       } else if (window.sessionId) {
         requestBody.session_id = String(window.sessionId); // Fallback to window.sessionId
-        console.log('🔗 Phoenix: Using window.sessionId:', window.sessionId);
       }
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
-      console.log('🌐 Fetching recommendations from unified API:', apiUrl);
-      console.log('📦 Request body:', requestBody);
-      console.log('🔗 Backend URL:', this.baseUrl);
 
       // Create AbortController for timeout with retry logic
       const controller = new AbortController();
@@ -79,26 +75,22 @@ class RecommendationAPI {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error(`❌ API: Request failed with status ${response.status}`);
+        this.logger.error(`❌ API: Request failed with status ${response.status}`);
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ API: Recommendations received from unified API:', data);
 
       if (data.success && data.recommendations && data.recommendations.length > 0) {
-        // Backend provides complete product data via webhooks - no need for additional API calls
-        console.log('✅ API: Using recommendations directly from unified backend:', data.recommendations);
         return data.recommendations;
       } else {
-        console.log('⚠️ API: No recommendations available from unified API');
         return [];
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.error('⏰ API: Request timed out after 8 seconds');
+        this.logger.error('⏰ API: Request timed out after 8 seconds');
       } else {
-        console.error('❌ API: Error fetching recommendations from unified API:', error);
+        this.logger.error('❌ API: Error fetching recommendations from unified API:', error);
       }
       return [];
     }
@@ -141,14 +133,13 @@ class RecommendationAPI {
       }
 
       const data = await response.json();
-      console.log('Added to cart:', data);
 
       // Dispatch custom event for theme compatibility
       window.dispatchEvent(new CustomEvent('cart:updated', { detail: data }));
 
       return data;
     } catch (error) {
-      console.error('Error adding to cart:', error);
+      this.logger.error('Error adding to cart:', error);
       throw error;
     }
   }

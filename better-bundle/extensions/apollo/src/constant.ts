@@ -1,1 +1,2 @@
-export const BACKEND_URL = "https://72b8c96abd5939.lhr.life" as const;
+export const BACKEND_URL =
+  "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;

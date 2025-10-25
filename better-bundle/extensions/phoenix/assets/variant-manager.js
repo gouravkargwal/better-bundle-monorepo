@@ -125,7 +125,7 @@ class VariantManager {
   updateVariantPriceFromSelection(variant, productId) {
     const priceElement = document.querySelector(`[data-product-id="${productId}"] .product-card__price`);
     if (!priceElement) {
-      console.error('❌ Price element not found for product:', productId);
+      this.logger.error('❌ Price element not found for product:', productId);
       return;
     }
 
@@ -133,7 +133,7 @@ class VariantManager {
     let priceAmount = variant.price || variant.price_amount || variant.price_original;
 
     if (!priceAmount) {
-      console.error('❌ No price found for variant:', variant);
+      this.logger.error('❌ No price found for variant:', variant);
       return;
     }
 

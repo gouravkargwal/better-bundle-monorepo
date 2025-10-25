@@ -15,8 +15,6 @@ class DropdownManager {
 
     // Check if the selected option is disabled or unavailable
     if (selectedOption && (selectedOption.disabled || selectedOption.classList.contains('unavailable'))) {
-      console.warn('⚠️ BLOCKED: Attempted to select disabled/unavailable option:', selectedValue);
-
       // Store the previous valid value before reverting
       const productCard = document.querySelector(`[data-product-id="${productId}"]`);
       const currentSelections = this.getSelectedOptions(productCard);
@@ -50,8 +48,6 @@ class DropdownManager {
       const isActuallyAvailable = this.variantManager.isVariantAvailable(optionName, selectedValue, productId, currentSelections);
 
       if (!isActuallyAvailable) {
-        console.warn('⚠️ BLOCKED: Option not available in current context:', selectedValue);
-
         // Find first available option
         const availableOptions = Array.from(dropdownElement.querySelectorAll('option:not([disabled]):not(.unavailable):not([value=""])'));
         if (availableOptions.length > 0) {
@@ -259,7 +255,6 @@ class DropdownManager {
       const selectedOption = event.target.querySelector(`option[value="${selectedValue}"]`);
 
       if (selectedOption && (selectedOption.disabled || selectedOption.classList.contains('unavailable'))) {
-        console.warn('⚠️ EVENT BLOCKED: Prevented selection of disabled option:', selectedValue);
         event.preventDefault();
         event.stopPropagation();
 
@@ -293,7 +288,6 @@ class DropdownManager {
     dropdown.addEventListener('mousedown', (event) => {
       const target = event.target;
       if (target.tagName === 'OPTION' && (target.disabled || target.classList.contains('unavailable'))) {
-        console.warn('⚠️ MOUSEDOWN BLOCKED: Prevented click on disabled option:', target.value);
         event.preventDefault();
         event.stopPropagation();
         return false;
@@ -304,7 +298,6 @@ class DropdownManager {
     dropdown.addEventListener('click', (event) => {
       const target = event.target;
       if (target.tagName === 'OPTION' && (target.disabled || target.classList.contains('unavailable'))) {
-        console.warn('⚠️ CLICK BLOCKED: Prevented click on disabled option:', target.value);
         event.preventDefault();
         event.stopPropagation();
         return false;
