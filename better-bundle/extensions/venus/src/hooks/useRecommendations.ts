@@ -130,8 +130,8 @@ export function useRecommendations({
     position: number,
     productUrl: string,
   ): Promise<string> => {
-    analyticsApi
-      .trackRecommendationClick(
+    try {
+      const result = await analyticsApi.trackRecommendationClick(
         shopDomain,
         context,
         productId,
@@ -139,10 +139,23 @@ export function useRecommendations({
         sessionId,
         customerId,
         { source: `${context}_recommendation` },
-      )
-      .catch((error) => {
-        console.error(`Failed to track ${context} click:`, error);
-      });
+      );
+
+      // Handle session recovery if the API returned a new session
+      if (result.success && result.sessionRecovery) {
+        console.log(
+          "🔄 Venus: Session recovered, updating storage:",
+          result.sessionRecovery.new_session_id,
+        );
+        await storage.write(
+          "unified_session_id",
+          result.sessionRecovery.new_session_id,
+        );
+        setSessionId(result.sessionRecovery.new_session_id);
+      }
+    } catch (error) {
+      console.error(`Failed to track ${context} click:`, error);
+    }
 
     return productUrl;
   };
@@ -155,7 +168,7 @@ export function useRecommendations({
 
     try {
       const productIds = products.map((product) => product.id);
-      await analyticsApi.trackRecommendationView(
+      const result = await analyticsApi.trackRecommendationView(
         shopDomain,
         context,
         sessionId,
@@ -163,6 +176,20 @@ export function useRecommendations({
         productIds,
         { source: `${context}_page` },
       );
+
+      // Handle session recovery if the API returned a new session
+      if (result.success && result.sessionRecovery) {
+        console.log(
+          "🔄 Venus: Session recovered, updating storage:",
+          result.sessionRecovery.new_session_id,
+        );
+        await storage.write(
+          "unified_session_id",
+          result.sessionRecovery.new_session_id,
+        );
+        setSessionId(result.sessionRecovery.new_session_id);
+      }
+
       console.log(`✅ Venus: Recommendation view tracked for ${context}`);
     } catch (error) {
       console.error(`❌ Venus: Failed to track recommendation view:`, error);
@@ -197,10 +224,14 @@ export function useRecommendations({
               handle: rec.handle,
               price: formatPrice(rec.price.amount, rec.price.currency_code),
               image: rec.image,
-              images: (rec as any).images,
+              images: rec.images || [],
               inStock: rec.available ?? true,
-              url: rec.url,
-              variants: (rec as any).variants || [],
+              url:
+                rec.url ||
+                (shopDomain
+                  ? `https://${shopDomain}/products/${rec.handle}`
+                  : rec.handle),
+              variants: rec.variants || [],
             }),
           );
 

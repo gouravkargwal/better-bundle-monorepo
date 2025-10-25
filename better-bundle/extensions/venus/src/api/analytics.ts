@@ -94,9 +94,11 @@ class AnalyticsApiClient {
 
   /**
    * Get current session ID from sessionStorage
+   * Note: This method is deprecated - session management is handled by the calling component
    */
   getCurrentSessionId(): string | null {
-    return sessionStorage.getItem("unified_session_id");
+    // Session management is handled by the calling component using Shopify storage API
+    return null;
   }
 
   async getOrCreateSession(
@@ -136,8 +138,7 @@ class AnalyticsApiClient {
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
         console.log("✅ Venus: Session created/retrieved:", sessionId);
-        // Store session ID for future use (unified with other extensions)
-        sessionStorage.setItem("unified_session_id", sessionId);
+        // Note: Session storage is handled by the calling component using Shopify storage API
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
@@ -153,7 +154,7 @@ class AnalyticsApiClient {
    */
   async trackUnifiedInteraction(
     request: UnifiedInteractionRequest,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
       const url = `${this.baseUrl}/api/venus/track-interaction`;
       const response = await fetch(url, {
@@ -177,23 +178,16 @@ class AnalyticsApiClient {
           result.data?.interaction_id,
         );
 
-        // Handle session recovery if it occurred
-        if (result.session_recovery) {
-          console.log("🔄 Session recovered:", result.session_recovery);
-          // Update stored session ID with the new one (unified with other extensions)
-          sessionStorage.setItem(
-            "unified_session_id",
-            result.session_recovery.new_session_id,
-          );
-        }
-
-        return true;
+        return {
+          success: true,
+          sessionRecovery: result.session_recovery || null,
+        };
       } else {
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
       console.error("💥 Venus interaction tracking error:", error);
-      return false;
+      return { success: false };
     }
   }
 
@@ -249,7 +243,7 @@ class AnalyticsApiClient {
     customerId?: string,
     productIds?: string[],
     metadata?: Record<string, any>,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
       const recommendations = (productIds || []).map((id, index) => ({
         id,
@@ -276,7 +270,7 @@ class AnalyticsApiClient {
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
       console.error("Failed to track recommendation view:", error);
-      return false;
+      return { success: false };
     }
   }
 
@@ -291,7 +285,7 @@ class AnalyticsApiClient {
     sessionId: string,
     customerId?: string,
     metadata?: Record<string, any>,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: sessionId,
@@ -323,7 +317,7 @@ class AnalyticsApiClient {
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
       console.error("Failed to track recommendation click:", error);
-      return false;
+      return { success: false };
     }
   }
 }
