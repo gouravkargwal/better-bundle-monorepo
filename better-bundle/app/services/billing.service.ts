@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import logger from "../utils/logger";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 
 export interface TrialRevenueData {
   attributedRevenue: number;
@@ -604,6 +605,13 @@ export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
           updated_at: new Date(),
         },
       });
+
+      // Invalidate suspension cache so fresh data is fetched
+      await invalidateSuspensionCache(shopId);
+      logger.info(
+        { shopId },
+        "Shop reactivated and suspension cache invalidated",
+      );
     }
   } catch (error) {
     logger.error({ error, shopId }, "Error reactivating shop");

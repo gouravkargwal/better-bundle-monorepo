@@ -1,6 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -78,6 +79,18 @@ export async function action({ request }: ActionFunctionArgs) {
         updated_at: new Date(),
       },
     });
+
+    // Invalidate suspension cache for all shops with this domain
+    const shopRecords = await prisma.shops.findMany({
+      where: { shop_domain: shop },
+      select: { id: true },
+    });
+
+    for (const shopRecord of shopRecords) {
+      await invalidateSuspensionCache(shopRecord.id);
+    }
+
+    console.log(`✅ Shop ${shop} reactivated and suspension cache invalidated`);
 
     return json({
       success: true,

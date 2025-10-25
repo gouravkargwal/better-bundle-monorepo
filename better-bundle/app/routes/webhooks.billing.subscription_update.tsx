@@ -6,6 +6,7 @@ import {
   increaseBillingCycleCap,
   reactivateShopIfSuspended,
 } from "../services/billing.service";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -126,6 +127,8 @@ async function handleActiveSubscription(
     } else {
       // Regular activation
       await activateSubscription(shopRecord.id, subscriptionId);
+      // Invalidate cache after activation
+      await invalidateSuspensionCache(shopRecord.id);
     }
   }
 

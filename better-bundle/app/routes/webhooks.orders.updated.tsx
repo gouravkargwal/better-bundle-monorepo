@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
+import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension";
 import logger from "../utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -30,6 +31,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!session || !shop) {
     logger.error({ session, shop }, "Missing session or shop data");
     return json({ error: "Authentication failed" }, { status: 401 });
+  }
+
+  // Check if shop services are suspended
+  try {
+    const suspensionStatus = await checkServiceSuspensionByDomain(shop);
+    if (suspensionStatus.isSuspended) {
+      logger.info(
+        { shop, reason: suspensionStatus.reason },
+        "Skipping order update - shop services suspended"
+      );
+      return json({
+        success: true,
+        message: "Order update skipped - services suspended",
+        suspended: true,
+        reason: suspensionStatus.reason,
+      });
+    }
+  } catch (suspensionError) {
+    logger.warn(
+      { error: suspensionError, shop },
+      "Error checking suspension status, proceeding with order update"
+    );
   }
 
   try {

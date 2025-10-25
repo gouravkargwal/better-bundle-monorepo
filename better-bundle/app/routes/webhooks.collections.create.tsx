@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
+import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
@@ -9,6 +10,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!session) {
       return json({ error: "Authentication failed" }, { status: 401 });
+    }
+
+    // Check if shop services are suspended
+    const suspensionStatus = await checkServiceSuspensionByDomain(session.shop);
+    if (suspensionStatus.isSuspended) {
+      console.log(
+        `⏸️ Skipping collection create for ${session.shop} - services suspended (${suspensionStatus.reason})`,
+      );
+      return json({
+        success: true,
+        message: "Collection create skipped - services suspended",
+        suspended: true,
+        reason: suspensionStatus.reason,
+      });
     }
 
     // Extract collection data from payload

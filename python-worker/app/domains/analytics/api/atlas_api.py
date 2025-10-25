@@ -17,6 +17,7 @@ from app.domains.analytics.models.extension import ExtensionType
 from app.domains.analytics.models.interaction import InteractionType
 from app.core.logging.logger import get_logger
 from app.domains.analytics.services.shop_resolver import shop_resolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -86,6 +87,18 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
 
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for domain")
+
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
 
         # Try to track interaction with the original session
         interaction = await analytics_service.track_interaction(
@@ -217,6 +230,18 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
             raise HTTPException(
                 status_code=400,
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
+            )
+
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
             )
 
         # Get or create session

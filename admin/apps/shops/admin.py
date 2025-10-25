@@ -43,6 +43,7 @@ class ShopAdmin(admin.ModelAdmin):
         "export_shop_data",
         "mark_as_active",
         "mark_as_inactive",
+        "check_and_suspend_trial_completed_shops",
     ]
     fieldsets = (
         (
@@ -355,6 +356,100 @@ class ShopAdmin(admin.ModelAdmin):
         )
 
     mark_as_inactive.short_description = "❌ Mark as Inactive"
+
+    def check_and_suspend_trial_completed_shops(self, request, queryset):
+        """
+        Admin action to check and suspend shops that should be suspended
+        but were accidentally left active after trial completion
+        """
+        from apps.billing.models import ShopSubscription
+        from django.utils import timezone
+
+        # Find shops that should be suspended
+        shops_to_suspend = []
+
+        for shop in queryset:
+            try:
+                # Get shop subscription
+                subscription = ShopSubscription.objects.filter(shop=shop).first()
+
+                if not subscription:
+                    self.message_user(
+                        request,
+                        f"⚠️ {shop.shop_domain}: No subscription found",
+                        level=messages.WARNING,
+                    )
+                    continue
+
+                # Check if shop should be suspended based on subscription status
+                should_suspend = False
+                suspension_reason = None
+
+                if subscription.status == "TRIAL_COMPLETED" and shop.is_active:
+                    should_suspend = True
+                    suspension_reason = "trial_completed_subscription_required"
+                elif subscription.status == "PENDING_APPROVAL" and shop.is_active:
+                    should_suspend = True
+                    suspension_reason = "subscription_pending_approval"
+                elif (
+                    subscription.status in ["SUSPENDED", "CANCELLED"] and shop.is_active
+                ):
+                    should_suspend = True
+                    suspension_reason = f"subscription_{subscription.status.lower()}"
+
+                if should_suspend:
+                    # Suspend the shop
+                    shop.is_active = False
+                    shop.suspended_at = timezone.now()
+                    shop.suspension_reason = suspension_reason
+                    shop.service_impact = "suspended"
+                    shop.updated_at = timezone.now()
+                    shop.save()
+
+                    shops_to_suspend.append(
+                        {
+                            "shop": shop,
+                            "reason": suspension_reason,
+                            "subscription_status": subscription.status,
+                        }
+                    )
+
+                    self.message_user(
+                        request,
+                        f"🛑 {shop.shop_domain}: Suspended (Status: {subscription.status})",
+                        level=messages.SUCCESS,
+                    )
+                else:
+                    self.message_user(
+                        request,
+                        f"✅ {shop.shop_domain}: No action needed (Status: {subscription.status}, Active: {shop.is_active})",
+                        level=messages.INFO,
+                    )
+
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"❌ {shop.shop_domain}: Error - {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        # Summary message
+        if shops_to_suspend:
+            self.message_user(
+                request,
+                f"🎯 Suspended {len(shops_to_suspend)} shops that should have been suspended",
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                "✅ No shops needed suspension",
+                level=messages.INFO,
+            )
+
+    check_and_suspend_trial_completed_shops.short_description = (
+        "🛑 Check & Suspend Trial Completed Shops"
+    )
 
 
 @admin.register(OrderData)

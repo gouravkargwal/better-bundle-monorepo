@@ -17,6 +17,7 @@ from app.domains.analytics.models.extension import ExtensionType, ExtensionConte
 from app.domains.analytics.models.interaction import InteractionType
 from app.core.logging.logger import get_logger
 from app.domains.analytics.services.shop_resolver import shop_resolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -110,6 +111,18 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
         # Get or create unified session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
@@ -166,6 +179,18 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
             raise HTTPException(
                 status_code=400,
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
+            )
+
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
             )
 
         # Add extension type to metadata

@@ -22,6 +22,7 @@ from app.api.v1.recommendations import (
     fetch_recommendations_logic,
     services as recommendation_services,
 )
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,18 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
             raise HTTPException(
                 status_code=400,
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
+            )
+
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
             )
 
         # Step 2: Get or create unified session

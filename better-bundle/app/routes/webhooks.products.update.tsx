@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
+import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension";
 import logger from "app/utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -20,6 +21,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { shop: session.shop },
       "Products update webhook authentication successful",
     );
+
+    // Check if shop services are suspended
+    const suspensionStatus = await checkServiceSuspensionByDomain(session.shop);
+    if (suspensionStatus.isSuspended) {
+      logger.info(
+        { shop: session.shop, reason: suspensionStatus.reason },
+        "Skipping product update - shop services suspended",
+      );
+      return json({
+        success: true,
+        message: "Product update skipped - services suspended",
+        suspended: true,
+        reason: suspensionStatus.reason,
+      });
+    }
 
     // Extract product data from payload
     const product = payload as any;

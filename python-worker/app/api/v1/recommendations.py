@@ -26,6 +26,7 @@ from app.recommandations.recommendation_executor import RecommendationExecutor
 from app.recommandations.smart_selection_service import SmartSelectionService
 from app.recommandations.shop_lookup_service import ShopLookupService
 from app.recommandations.client_id_resolver import ClientIdResolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -449,6 +450,20 @@ async def get_recommendations(request: RecommendationRequest):
     function, handling HTTP-specific concerns like error translation and response modeling.
     """
     try:
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(request.shop_domain):
+            message = await suspension_middleware.get_suspension_message(
+                request.shop_domain
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
         # Pass the request and the bundled services to the core logic function
         result_data = await fetch_recommendations_logic(request, services)
 

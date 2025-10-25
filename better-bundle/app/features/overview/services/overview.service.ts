@@ -1,4 +1,8 @@
 import prisma from "../../../db.server";
+import {
+  checkServiceSuspension,
+  getSuspensionMessage,
+} from "../../../utils/suspensionCheck";
 
 export class OverviewService {
   async getOverviewData(shopDomain: string) {

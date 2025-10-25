@@ -18,6 +18,7 @@ from app.domains.analytics.services.analytics_tracking_service import (
 )
 from app.core.logging.logger import get_logger
 from app.domains.analytics.services.shop_resolver import shop_resolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -152,6 +153,18 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found")
 
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
         # Generate a browser session ID for Mercury if not provided
         browser_session_id = (
             request.browser_session_id
@@ -229,6 +242,18 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
 
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found")
+
+        # Check if shop is suspended (with caching)
+        if not await suspension_middleware.should_process_shop(shop_id):
+            message = await suspension_middleware.get_suspension_message(shop_id)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
 
         # Try to track interaction with the original session
         interaction = await analytics_service.track_interaction(

@@ -2,15 +2,15 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
+import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  let payload, session, topic, shop;
+  let payload, session, shop;
 
   try {
     const authResult = await authenticate.webhook(request);
     payload = authResult.payload;
     session = authResult.session;
-    topic = authResult.topic;
     shop = authResult.shop;
   } catch (authError) {
     return json({ error: "Authentication failed" }, { status: 401 });
@@ -18,6 +18,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (!session || !shop) {
     return json({ error: "Authentication failed" }, { status: 401 });
+  }
+
+  // Check if shop services are suspended
+  try {
+    const suspensionStatus = await checkServiceSuspensionByDomain(shop);
+    if (suspensionStatus.isSuspended) {
+      console.log(
+        `⏸️ Skipping refund processing for ${shop} - services suspended (${suspensionStatus.reason})`,
+      );
+      return json({
+        success: true,
+        message: "Refund processing skipped - services suspended",
+        suspended: true,
+        reason: suspensionStatus.reason,
+      });
+    }
+  } catch (suspensionError) {
+    console.warn(
+      `⚠️ Error checking suspension status for ${shop}, proceeding with refund processing:`,
+      suspensionError,
+    );
   }
 
   try {

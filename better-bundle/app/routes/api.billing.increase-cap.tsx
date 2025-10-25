@@ -1,6 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 
 async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
   try {
@@ -304,6 +305,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       console.log(`✅ Shop ${shop} services reactivated after cap increase`);
+
+      // Invalidate suspension cache so fresh data is fetched
+      await invalidateSuspensionCache(shopRecord.id);
+      console.log(`✅ Suspension cache invalidated for shop ${shop}`);
 
       // ✅ REPROCESS REJECTED COMMISSIONS
       await reprocessRejectedCommissions(shopRecord.id, currentCycle.id);

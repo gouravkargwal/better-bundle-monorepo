@@ -33,6 +33,7 @@ from app.api.v1.fbt_status import router as fbt_status_router
 from app.api.v1.logs import router as logs_router
 from app.api.v1.data_collection import router as data_collection_router
 from app.domains.billing.api.billing_api import router as billing_api_router
+from app.api.v1.suspension import router as suspension_router
 
 
 logger = get_logger(__name__)
@@ -91,6 +92,7 @@ app.include_router(fbt_status_router)
 app.include_router(logs_router)
 app.include_router(data_collection_router)
 app.include_router(billing_api_router)
+app.include_router(suspension_router)
 
 # Include unified analytics routers
 from app.domains.analytics.api import (
