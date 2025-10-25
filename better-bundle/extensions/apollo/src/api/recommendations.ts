@@ -1,132 +1,16 @@
-/**
- * Apollo Recommendations API Client - Fixed Version
- *
- * This client handles fetching personalized product recommendations for post-purchase upsells.
- * Designed specifically for Shopify Post-Purchase Extensions.
- *
- * Key Features:
- * - Combined session creation and recommendation fetching in one API call
- * - Proper handling of session data and browser session IDs
- * - Support for user agent, referrer, and page URL tracking
- * - Error handling with detailed logging
- */
-
 import { BACKEND_URL } from "../constant";
-
-// ============================================================================
-// TYPES - Match Backend API Response Structure
-// ============================================================================
-
-/**
- * Product variant from API response
- * Matches your actual API structure with variant_id, price as number, etc.
- */
-export interface ProductVariant {
-  variant_id: string;
-  title: string;
-  price: number;
-  compare_at_price: number | null;
-  sku: string;
-  barcode: string | null;
-  inventory: number;
-  currency_code: string;
-}
-
-/**
- * Product option (Size, Color, etc.)
- */
-export interface ProductOption {
-  id: string;
-  name: string;
-  position: number;
-  values: string[];
-}
-
-/**
- * Product recommendation from API response
- * Matches the exact structure from your JSON response
- */
-export interface ProductRecommendation {
-  id: string;
-  title: string;
-  handle: string;
-  url: string;
-  price: {
-    amount: string;
-    currency_code: string;
-  };
-  image: {
-    url: string;
-    alt_text?: string;
-  } | null;
-  vendor: string;
-  product_type: string;
-  available: boolean;
-  score: number;
-  variant_id: string;
-  selectedVariantId: string;
-  variants: ProductVariant[];
-  options: ProductOption[];
-  inventory: number;
-  // Optional fields
-  compare_at_price?: {
-    amount: string;
-    currency_code: string;
-  };
-  description?: string;
-  tags?: string[];
-  reason?: string;
-  // Post-purchase compliance fields
-  requires_shipping?: boolean;
-  subscription?: boolean;
-  selling_plan?: any;
-}
-
-/**
- * Session data from API response
- */
-export interface SessionData {
-  session_id: string;
-  customer_id: string | null;
-  client_id: string | null;
-  created_at: string;
-  expires_at: string | null;
-}
-
-/**
- * API Response structure
- */
-export interface CombinedAPIResponse {
-  success: boolean;
-  message: string;
-  session_data: SessionData;
-  recommendations: ProductRecommendation[];
-  recommendation_count: number;
-}
-
-// ============================================================================
-// APOLLO RECOMMENDATIONS CLIENT
-// ============================================================================
+import type { ProductRecommendation, CombinedAPIResponse } from "../types";
+import { type Logger, logger } from "../utils/logger";
 
 class ApolloRecommendationClient {
   private baseUrl: string;
+  private logger: Logger;
 
   constructor() {
-    // Use the unified analytics service URL
     this.baseUrl = BACKEND_URL as string;
+    this.logger = logger;
   }
 
-  /**
-   * Get session and recommendations in a single optimized API call
-   * This is the primary method for Apollo post-purchase extensions
-   *
-   * @param shopDomain - Shop domain (e.g., "mystore.myshopify.com")
-   * @param customerId - Customer ID (optional)
-   * @param orderId - Order ID for post-purchase context
-   * @param purchasedProductIds - Array of product IDs that were just purchased
-   * @param limit - Number of recommendations to return (default: 3, max: 3 for post-purchase)
-   * @param metadata - Additional metadata to pass to the backend
-   */
   async getSessionAndRecommendations(
     shopDomain: string,
     customerId?: string,
@@ -143,25 +27,23 @@ class ApolloRecommendationClient {
     try {
       const url = `${this.baseUrl}/api/apollo/get-session-and-recommendations`;
 
-      // Build the request payload matching backend expectations
       const payload = {
-        // Session creation fields
         shop_domain: shopDomain,
-        customer_id: customerId ? String(customerId) : null, // ✅ Convert to string
-        browser_session_id: undefined, // Post-purchase doesn't have browser session
-        client_id: undefined, // Post-purchase doesn't have client_id
+        customer_id: customerId ? String(customerId) : null,
+        browser_session_id: undefined,
+        client_id: undefined,
         user_agent:
           typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-        ip_address: undefined, // Backend will extract from request
+        ip_address: undefined,
         referrer:
           typeof document !== "undefined" ? document.referrer : undefined,
         page_url:
           typeof window !== "undefined" ? window.location.href : undefined,
 
         // Recommendation fields
-        order_id: orderId ? String(orderId) : null, // ✅ Convert to string
-        purchased_products: purchasedProductIds || [], // Backend expects product_ids array
-        limit: Math.min(Math.max(limit, 1), 3), // Clamp between 1-3 for post-purchase
+        order_id: orderId ? String(orderId) : null,
+        purchased_products: purchasedProductIds || [],
+        limit: Math.min(Math.max(limit, 1), 3),
 
         // Additional metadata
         metadata: {
@@ -171,25 +53,29 @@ class ApolloRecommendationClient {
         },
       };
 
-      console.log("🚀 Apollo: Fetching session + recommendations", {
-        shopDomain,
-        customerId,
-        orderId,
-        productCount: purchasedProductIds?.length,
-        limit,
-      });
-
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
-        keepalive: true, // Ensures request completes even if page unloads
+        keepalive: true,
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+        this.logger.error(
+          {
+            error: new Error(
+              `API call failed with status ${response.status}: ${errorText}`,
+            ),
+            shop_domain: shopDomain,
+            customerId,
+            orderId,
+            purchasedProductIds,
+          },
+          "Failed to get session and recommendations",
+        );
         throw new Error(
           `API call failed with status ${response.status}: ${errorText}`,
         );
@@ -197,23 +83,33 @@ class ApolloRecommendationClient {
 
       const result: CombinedAPIResponse = await response.json();
 
-      // Validate response structure
       if (!result.success) {
+        this.logger.error(
+          {
+            error: new Error(result.message || "API returned success: false"),
+            shop_domain: shopDomain,
+            customerId,
+            orderId,
+            purchasedProductIds,
+          },
+          "Failed to get session and recommendations",
+        );
         throw new Error(result.message || "API returned success: false");
       }
 
       if (!result.session_data || !result.session_data.session_id) {
+        this.logger.error(
+          {
+            error: new Error("Invalid response: missing session data"),
+            shop_domain: shopDomain,
+            customerId,
+            orderId,
+            purchasedProductIds,
+          },
+          "Invalid response: missing session data",
+        );
         throw new Error("Invalid response: missing session data");
       }
-
-      console.log(
-        "✅ Apollo: Session + recommendations retrieved successfully",
-        {
-          sessionId: result.session_data.session_id,
-          recommendationCount: result.recommendation_count,
-          customerId: result.session_data.customer_id,
-        },
-      );
 
       return {
         sessionId: result.session_data.session_id,
@@ -221,9 +117,17 @@ class ApolloRecommendationClient {
         success: true,
       };
     } catch (error) {
-      console.error("💥 Apollo: Combined API call error:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+          customerId,
+          orderId,
+          purchasedProductIds,
+        },
+        "Failed to get session and recommendations",
+      );
 
-      // Return error response instead of throwing
       return {
         sessionId: "",
         recommendations: [],
@@ -234,9 +138,5 @@ class ApolloRecommendationClient {
     }
   }
 }
-
-// ============================================================================
-// EXPORT DEFAULT INSTANCE
-// ============================================================================
 
 export const apolloRecommendationApi = new ApolloRecommendationClient();

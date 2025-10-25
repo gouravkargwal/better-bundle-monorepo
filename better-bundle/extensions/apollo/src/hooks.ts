@@ -5,7 +5,7 @@ import type {
   UseVariantManagementReturn,
 } from "./types";
 import { apolloAnalytics } from "./api/analytics";
-
+import { logger } from "./utils/logger";
 export const useVariantManagement = (): UseVariantManagementReturn => {
   const getVariantById = useCallback(
     (
@@ -26,7 +26,6 @@ export const useVariantManagement = (): UseVariantManagementReturn => {
 
   const getSelectedOptions = useCallback(
     (variant: ProductVariant): Record<string, string> => {
-      // Parse variant title like "S / Green" or "Pink / Medium"
       const options: Record<string, string> = {};
       const parts = variant.title.split(" / ");
       return parts.reduce((acc, part, index) => {
@@ -61,7 +60,6 @@ export const useRecommendationViewTracking = (
 
     const trackViews = async () => {
       try {
-        // Track view for each recommendation
         const trackingPromises = recommendations.map((product, index) =>
           apolloAnalytics.trackRecommendationView(
             shopDomain,
@@ -84,13 +82,19 @@ export const useRecommendationViewTracking = (
 
         await Promise.all(trackingPromises);
         setTracked(true);
-        console.log(
-          "Apollo: Tracked views for",
-          recommendations.length,
-          "recommendations",
-        );
       } catch (error) {
-        console.error("Apollo: Failed to track recommendation views:", error);
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            shop_domain: shopDomain,
+            sessionId,
+            customerId,
+            orderId,
+            recommendations,
+            source,
+          },
+          "Failed to track recommendation view",
+        );
       }
     };
 
