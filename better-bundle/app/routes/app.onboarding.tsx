@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import { getShopOnboardingCompleted } from "../services/shop.service";
 import { OnboardingService } from "../features/onboarding/services/onboarding.service";
 import { OnboardingPage } from "../features/onboarding/components/OnboardingPage";
+import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const {
@@ -26,7 +27,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log("🔥 Onboarding action triggered!"); // Debug log
+  logger.info("Onboarding action triggered");
 
   const {
     session,
@@ -35,13 +36,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } = await authenticate.admin(request);
 
   try {
-    console.log("✅ Starting onboarding completion for:", session.shop);
+    logger.info({ shop: session.shop }, "Starting onboarding completion");
     const onboardingService = new OnboardingService();
     await onboardingService.completeOnboarding(session, admin);
-    console.log("✅ Onboarding completed successfully!");
+    logger.info({ shop: session.shop }, "Onboarding completed successfully");
     return authRedirect("/app");
   } catch (error) {
-    console.error("❌ Failed to complete onboarding:", error);
+    logger.error(
+      { error, shop: session.shop },
+      "Failed to complete onboarding",
+    );
     return json(
       {
         error:
@@ -57,7 +61,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function OnboardingRoute() {
   const data = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  console.log(data, actionData, "------------------>");
 
   return <OnboardingPage data={data} error={actionData} />;
 }

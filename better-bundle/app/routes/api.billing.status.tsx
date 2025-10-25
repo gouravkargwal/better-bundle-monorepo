@@ -1,13 +1,14 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import logger from "../utils/logger";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
-    console.log(`🔍 Getting billing status for shop ${shop}`);
+    logger.info({ shop }, "Getting billing status");
 
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({

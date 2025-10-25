@@ -1,5 +1,6 @@
 import prisma from "app/db.server";
 import type { Session } from "@shopify/shopify-api";
+import logger from "../utils/logger";
 
 const getShopInfoFromShopify = async (admin: any) => {
   try {
@@ -32,7 +33,7 @@ const getShopInfoFromShopify = async (admin: any) => {
     }
     return shop;
   } catch (error) {
-    console.error("Error getting shop info from Shopify:", error);
+    logger.error({ error }, "Error getting shop info from Shopify");
     throw new Error("Failed to fetch shop data from Shopify API");
   }
 };
@@ -55,7 +56,7 @@ const getShopOnboardingCompleted = async (shopDomain: string) => {
     const onboardingStatus = (shop as any)?.onboarding_completed;
     return !!onboardingStatus; // Ensure boolean return
   } catch (error) {
-    console.error("❌ Error getting shop onboarding completed:", error);
+    logger.error({ error }, "Error getting shop onboarding completed");
     return false;
   }
 };
@@ -71,7 +72,7 @@ const getShopifyPlusStatus = async (shopDomain: string) => {
     }
     return shop.shopify_plus || false;
   } catch (error) {
-    console.error("❌ Error getting Shopify Plus status:", error);
+    logger.error({ error }, "Error getting Shopify Plus status");
     return false;
   }
 };
@@ -94,13 +95,9 @@ const createShopAndSetOnboardingCompleted = async (
   const isReinstall = existingShop && !existingShop.is_active;
 
   if (isReinstall) {
-    console.log(`🔄 Reactivating shop: ${shopData.myshopifyDomain}`);
-    console.log(`   - Previous status: inactive`);
-    console.log(
-      `   - Previous onboarding: ${existingShop.onboarding_completed}`,
-    );
+    logger.info({ shopDomain: shopData.myshopifyDomain }, "Reactivating shop");
   } else {
-    console.log(`🆕 Creating new shop: ${shopData.myshopifyDomain}`);
+    logger.info({ shopDomain: shopData.myshopifyDomain }, "Creating new shop");
   }
 
   const shop = await db.shops.upsert({
@@ -188,9 +185,9 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
       createResponseJson.data?.webPixelCreate?.userErrors?.length === 0 &&
       createResponseJson.data?.webPixelCreate?.webPixel
     ) {
-      console.log(
-        "✅ Atlas web pixel created successfully:",
-        createResponseJson.data.webPixelCreate.webPixel.id,
+      logger.info(
+        { pixelId: createResponseJson.data.webPixelCreate.webPixel.id },
+        "Atlas web pixel created successfully",
       );
       return createResponseJson.data.webPixelCreate.webPixel;
     }
@@ -202,7 +199,7 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
       );
 
     if (hasTakenError) {
-      console.log("✅ Web pixel already exists and is active");
+      logger.info("Web pixel already exists and is active");
       // Since we can't query existing pixels due to API limitations,
       // we'll assume it's working if we get a TAKEN error
       return { id: "existing", settings: webPixelSettings };
@@ -211,17 +208,19 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
     // Log other creation errors but don't fail the entire flow
     const errors = createResponseJson.data?.webPixelCreate?.userErrors || [];
     if (errors.length > 0) {
-      console.warn(
-        "⚠️ Web pixel creation had issues:",
-        errors.map((e: any) => `${e.code}: ${e.message}`).join(", "),
+      logger.warn(
+        {
+          errors: errors.map((e: any) => `${e.code}: ${e.message}`).join(", "),
+        },
+        "Web pixel creation had issues",
       );
     }
 
     // Don't throw error - the app can function without the web pixel
-    console.log("ℹ️ Web pixel activation completed with warnings");
+    logger.info("Web pixel activation completed with warnings");
     return null;
   } catch (error) {
-    console.error("❌ Failed to activate Atlas web pixel:", error);
+    logger.error({ error }, "Failed to activate Atlas web pixel");
     // Don't throw the error to prevent breaking the entire afterAuth flow
     // The app can still function without the web pixel
     return null;
@@ -233,8 +232,6 @@ const deactivateShopBilling = async (
   reason: string = "app_uninstalled",
 ) => {
   try {
-    console.log(`🔄 Deactivating billing for shop: ${shopDomain}`);
-
     // 1. Mark shop as inactive
     const updatedShops = await prisma.shops.update({
       where: { shop_domain: shopDomain },
@@ -260,10 +257,7 @@ const deactivateShopBilling = async (
       select: { id: true, shop_id: true },
     });
 
-    console.log(`✅ Successfully deactivated billing for ${shopDomain}:`);
-    console.log(`   - Marked shop as inactive`);
-    console.log(`   - Deactivated ${updatedSubscriptions.count} billing plans`);
-    console.log(`   - Created billing event`);
+    logger.info({ shopDomain }, "Successfully deactivated billing for shop");
 
     return {
       success: true,
@@ -271,10 +265,8 @@ const deactivateShopBilling = async (
       reason,
     };
   } catch (error) {
-    console.error(`❌ Error deactivating billing for ${shopDomain}:`, error);
-    throw new Error(
-      `Failed to deactivate billing for shop: ${error instanceof Error ? error.message : "Unknown error"}`,
-    );
+    logger.error({ error, shopDomain }, "Error deactivating billing for shop");
+    throw new Error("Failed to deactivate billing for shop");
   }
 };
 

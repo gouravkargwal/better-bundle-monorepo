@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { BillingService } from "../features/billing/services/billing.service";
 import { TabbedBillingPage } from "../features/billing/components/TabbedBillingPage";
+import logger from "../utils/logger";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -29,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       billingState,
     });
   } catch (error) {
-    console.error("Billing loader error:", error);
+    logger.error({ error, shop }, "Billing loader error");
     return json({
       error: "Failed to load billing data",
     });

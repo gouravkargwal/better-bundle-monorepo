@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { getCurrencySymbol } from "../utils/currency";
+import logger from "../utils/logger";
 
 export interface PricingTierConfig {
   currency_code: string;
@@ -28,9 +29,7 @@ export async function getPricingTierConfig(
     });
 
     if (!pricingTier) {
-      console.warn(
-        `No pricing tier configuration found for currency: ${shopCurrency}`,
-      );
+      logger.warn({ shopCurrency }, "No pricing tier configuration found");
       return null;
     }
 
@@ -41,7 +40,7 @@ export async function getPricingTierConfig(
         ? JSON.parse(pricingTier.tier_metadata as string)
         : {};
     } catch (e) {
-      console.warn("Failed to parse tier metadata:", e);
+      logger.warn({ error: e }, "Failed to parse tier metadata");
     }
 
     return {
@@ -56,7 +55,7 @@ export async function getPricingTierConfig(
       commission_rate: Number(pricingTier.commission_rate || 0.03),
     };
   } catch (error) {
-    console.error("Error getting pricing tier configuration:", error);
+    logger.error({ error }, "Error getting pricing tier configuration");
     return null;
   }
 }

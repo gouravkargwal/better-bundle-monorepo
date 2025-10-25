@@ -1,11 +1,12 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "app/db.server";
+import logger from "../utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  logger.info({ shop, topic }, "Received app uninstalled webhook");
 
   try {
     // Webhook requests can trigger multiple times and after an app has already been uninstalled.
@@ -44,22 +45,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        console.log(`✅ Successfully processed app uninstall for ${shop}:`);
-        console.log(`   - Deactivated shop subscription`);
-        console.log(`   - Marked shop as inactive`);
+        logger.info({ shop }, "Successfully processed app uninstall");
       }
 
       // 4. Delete sessions (original functionality)
       await prisma.sessions.deleteMany({ where: { shop } });
 
-      console.log(`   - Deleted sessions`);
+      logger.info({ shop }, "Deleted sessions");
     } else {
-      console.log(
-        `⚠️ No session found for ${shop} - app may have been uninstalled previously`,
+      logger.warn(
+        { shop },
+        "No session found - app may have been uninstalled previously",
       );
     }
   } catch (error) {
-    console.error(`❌ Error processing app uninstall for ${shop}:`, error);
+    logger.error({ error, shop }, "Error processing app uninstall");
     // Don't throw the error - we still want to return success to Shopify
     // to prevent webhook retries for uninstall events
   }

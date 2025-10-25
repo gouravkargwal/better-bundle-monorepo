@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import logger from "../utils/logger";
 
 export interface TrialRevenueData {
   attributedRevenue: number;
@@ -92,10 +93,7 @@ export async function getTrialRevenueData(
       commissionEarned: Number(trial.commission_saved),
     };
   } catch (error) {
-    console.error(
-      `Error getting trial revenue data for shop ${shopId}:`,
-      error,
-    );
+    logger.error({ error, shopId }, "Error getting trial revenue data");
     throw error;
   }
 }
@@ -144,10 +142,7 @@ export async function getUsageRevenueData(
       commissionEarned: Number(aggregate._sum?.commission_earned || 0),
     };
   } catch (error) {
-    console.error(
-      `Error getting usage revenue data for shop ${shopId}:`,
-      error,
-    );
+    logger.error({ error, shopId }, "Error getting usage revenue data");
     throw error;
   }
 }
@@ -225,7 +220,7 @@ export async function getCurrentCycleMetrics(
       days_remaining: daysRemaining,
     };
   } catch (error) {
-    console.error("Error fetching current cycle metrics:", error);
+    logger.error({ error, shopId }, "Error fetching current cycle metrics");
     return {
       purchases: { count: 0, total: 0 },
       net_revenue: 0,
@@ -313,7 +308,7 @@ export async function getBillingSummary(
         : undefined,
     };
   } catch (error) {
-    console.error(`Error getting billing summary for shop ${shopId}:`, error);
+    logger.error({ error, shopId }, "Error getting billing summary");
     return null;
   }
 }
@@ -382,10 +377,7 @@ export async function createShopSubscription(
       subscription_trial: subscriptionTrial,
     };
   } catch (error) {
-    console.error(
-      `Error creating shop subscription for shop ${shopId}:`,
-      error,
-    );
+    logger.error({ error, shopId }, "Error creating shop subscription");
     throw error;
   }
 }
@@ -435,7 +427,7 @@ export async function completeTrialAndCreateCycle(
       message: "Trial completed, subscription pending approval",
     };
   } catch (error) {
-    console.error(`Error completing trial for shop ${shopId}:`, error);
+    logger.error({ error, shopId }, "Error completing trial");
     throw error;
   }
 }
@@ -520,7 +512,7 @@ export async function activateSubscription(
       billing_cycle: billingCycle,
     };
   } catch (error) {
-    console.error(`Error activating subscription for shop ${shopId}:`, error);
+    logger.error({ error, shopId }, "Error activating subscription");
     throw error;
   }
 }
@@ -579,7 +571,7 @@ export async function increaseBillingCycleCap(
       message: `Cap increased from $${oldCapAmount} to $${newCapAmount}`,
     };
   } catch (error) {
-    console.error(`Error increasing cap for shop ${shopId}:`, error);
+    logger.error({ error, shopId }, "Error increasing cap");
     throw error;
   }
 }
@@ -596,7 +588,7 @@ export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
     });
 
     if (!shop) {
-      console.log(`⚠️ Shop not found for ID: ${shopId}`);
+      logger.warn({ shopId }, "Shop not found");
       return;
     }
 
@@ -612,13 +604,9 @@ export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
           updated_at: new Date(),
         },
       });
-
-      console.log(`✅ Shop reactivated: ${shop.shop_domain}`);
-    } else {
-      console.log(`ℹ️ Shop already active: ${shop.shop_domain}`);
     }
   } catch (error) {
-    console.error(`Error reactivating shop ${shopId}:`, error);
+    logger.error({ error, shopId }, "Error reactivating shop");
     throw error;
   }
 }

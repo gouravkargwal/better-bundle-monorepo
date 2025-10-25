@@ -4,6 +4,7 @@
 
 import { Kafka, Producer, Consumer, Admin } from "kafkajs";
 import { kafkaConfig } from "../../utils/kafka-config";
+import logger from "../../utils/logger";
 
 export class KafkaClientService {
   private static instance: KafkaClientService;
@@ -34,31 +35,11 @@ export class KafkaClientService {
 
   private async initialize(): Promise<void> {
     try {
-      console.log("🔧 Initializing Kafka client service...");
-      console.log("📋 Kafka config:", {
-        clientId: kafkaConfig.clientId,
-        bootstrapServers: kafkaConfig.bootstrapServers,
-        workerId: kafkaConfig.workerId
-      });
-
-      // Initialize admin client
       this.admin = this.kafka.admin();
-      console.log("🔌 Connecting to Kafka admin...");
       await this.admin.connect();
-
-      // Test connection
-      console.log("🧪 Testing Kafka connection...");
-      await this.testConnection();
       this.connected = true;
-
-      console.log("✅ Kafka client service initialized successfully");
     } catch (error) {
-      console.error("❌ Failed to initialize Kafka client:", error);
-      console.error("Error details:", {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        bootstrapServers: kafkaConfig.bootstrapServers
-      });
+      logger.error({ error }, "Failed to initialize Kafka client");
       throw error;
     }
   }
@@ -69,17 +50,15 @@ export class KafkaClientService {
     }
 
     try {
-      const metadata = await this.admin.describeCluster();
-      console.log(`🔗 Connected to Kafka cluster: ${metadata.clusterId}`);
+      await this.admin.describeCluster();
     } catch (error) {
-      console.error("❌ Kafka connection test failed:", error);
+      logger.error({ error }, "Kafka connection test failed");
       throw error;
     }
   }
 
   public async getProducer(): Promise<Producer> {
     if (!this.producer) {
-      console.log("🔧 Creating Kafka producer...");
       this.producer = this.kafka.producer({
         maxInFlightRequests: 1,
         idempotent: true,
@@ -90,9 +69,7 @@ export class KafkaClientService {
         },
       });
 
-      console.log("🔌 Connecting Kafka producer...");
       await this.producer.connect();
-      console.log("📤 Kafka producer connected successfully");
     }
     return this.producer;
   }
@@ -111,7 +88,6 @@ export class KafkaClientService {
       });
 
       await this.consumer.connect();
-      console.log(`📥 Kafka consumer connected for group: ${groupId}`);
     }
     return this.consumer;
   }
@@ -171,9 +147,8 @@ export class KafkaClientService {
       }
 
       this.connected = false;
-      console.log("🔌 Kafka client service closed");
     } catch (error) {
-      console.error("❌ Error closing Kafka client:", error);
+      logger.error({ error }, "Error closing Kafka client");
     }
   }
 

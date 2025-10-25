@@ -1,11 +1,12 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
 
-  console.log(`💰 Billing success: ${topic} for shop ${shop}`);
+  logger.info({ shop, topic }, "Billing success");
 
   try {
     const billingAttempt = payload.subscription_billing_attempt;
@@ -14,7 +15,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const currency = billingAttempt?.currency;
 
     if (!subscriptionId) {
-      console.error("❌ No billing attempt data in success webhook");
+      logger.error({ shop }, "No billing attempt data in success webhook");
       return json(
         { success: false, error: "No billing data" },
         { status: 400 },
@@ -28,7 +29,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
-      console.log(`⚠️ No shop record found for domain ${shop}`);
+      logger.warn({ shop }, "No shop record found for domain");
       return json({ success: true });
     }
 
@@ -42,7 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopSubscription) {
-      console.log(`⚠️ No active subscription found for shop ${shop}`);
+      logger.warn({ shop }, "No active subscription found for shop");
       return json({ success: true });
     }
 
@@ -61,7 +62,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ? new Date(billingAttempt.due_date)
         : null,
       paid_at: new Date(), // Since this is a success webhook
-      status: "paid" as const,
+      status: "PAID" as const,
       description: `Billing invoice for subscription ${subscriptionId}`,
       line_items: billingAttempt.line_items || [],
       shopify_response: payload,
@@ -76,27 +77,29 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       update: {
         amount_paid: invoiceData.amount_paid,
-        status: "paid",
+        status: "PAID",
         paid_at: invoiceData.paid_at,
         payment_method: invoiceData.payment_method,
         payment_reference: invoiceData.payment_reference,
         shopify_response: invoiceData.shopify_response,
         updated_at: new Date(),
       },
-      create: invoiceData,
+      create: invoiceData as any,
     });
 
-    console.log(
-      `✅ Billing invoice processed: ${invoiceData.shopify_invoice_id} (${upsertResult.id})`,
-    );
-
-    console.log(
-      `✅ Billing successful: $${amount} ${currency} for shop ${shop}`,
+    logger.info(
+      {
+        shop,
+        invoiceId: invoiceData.shopify_invoice_id,
+        amount,
+        currency,
+      },
+      "Billing successful",
     );
 
     return json({ success: true });
   } catch (error) {
-    console.error("❌ Error processing billing success:", error);
+    logger.error({ error, shop }, "Error processing billing success");
     return json(
       { success: false, error: "Webhook processing failed" },
       { status: 500 },

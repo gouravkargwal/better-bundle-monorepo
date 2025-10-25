@@ -1,4 +1,5 @@
 import prisma from "app/db.server";
+import logger from "../utils/logger";
 
 export async function hasActiveSubscription(shopId: string): Promise<boolean> {
   try {
@@ -19,7 +20,7 @@ export async function hasActiveSubscription(shopId: string): Promise<boolean> {
     const config = billingPlan.configuration as any;
     return config.subscription_id && config.subscription_status === "active";
   } catch (error) {
-    console.error("❌ Error checking subscription status:", error);
+    logger.error({ error }, "Error checking subscription status");
     return false;
   }
 }

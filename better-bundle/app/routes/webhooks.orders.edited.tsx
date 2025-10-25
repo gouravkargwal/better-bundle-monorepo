@@ -1,24 +1,13 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
-
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  console.log("🔍 Orders/edited webhook endpoint accessed via GET");
-  return json({
-    message: "Orders/edited webhook endpoint is active",
-    timestamp: new Date().toISOString(),
-  });
-};
+import logger from "../utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
 
-  console.log("🔔 Order edited webhook triggered");
-  console.log(
-    "🔔 Order edited webhook triggered - TIMESTAMP:",
-    new Date().toISOString(),
-  );
+  logger.info("Order edited webhook triggered");
 
   try {
     const authResult = await authenticate.webhook(request);
@@ -26,14 +15,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     session = authResult.session;
     topic = authResult.topic;
     shop = authResult.shop;
-    console.log("✅ Webhook authentication successful", { shop, topic });
+    logger.info({ shop, topic }, "Webhook authentication successful");
   } catch (authError) {
-    console.error("❌ Webhook authentication failed:", authError);
+    logger.error({ error: authError }, "Webhook authentication failed");
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
   if (!session || !shop) {
-    console.error("❌ Missing session or shop data");
+    logger.error("Missing session or shop data");
     return json({ error: "Authentication failed" }, { status: 401 });
   }
 
@@ -68,9 +57,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    console.log("🚀 Initializing Kafka producer...");
+    logger.info("Initializing Kafka producer");
     const kafkaProducer = await KafkaProducerService.getInstance();
-    console.log("✅ Kafka producer initialized");
+    logger.info("Kafka producer initialized");
 
     const streamData = {
       event_type: "order_edited",
@@ -79,9 +68,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
-    console.log("📤 Publishing event to Kafka:", streamData);
+    logger.info({ streamData }, "Publishing event to Kafka");
     const messageId = await kafkaProducer.publishShopifyEvent(streamData);
-    console.log("✅ Event published successfully:", messageId);
+    logger.info({ messageId }, "Event published successfully");
 
     return json({
       success: true,
@@ -92,11 +81,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         "Order edited webhook processed - will trigger post-purchase revenue attribution",
     });
   } catch (error) {
-    console.error(`❌ Error processing ${topic} webhook:`, error);
-    console.error(
-      "Error stack:",
-      error instanceof Error ? error.stack : "No stack trace",
-    );
+    logger.error({ error, topic, shop }, "Error processing webhook");
     return json(
       {
         error: "Internal server error",

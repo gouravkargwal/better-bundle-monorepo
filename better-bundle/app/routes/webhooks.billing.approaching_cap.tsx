@@ -2,11 +2,12 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import logger from "../utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
 
-  console.log(`⚠️ Approaching cap: ${topic} for shop ${shop}`);
+  logger.warn({ shop, topic }, "Approaching cap warning");
 
   try {
     const appSub = payload.app_subscription;
@@ -16,7 +17,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const usagePercentage = (currentUsage / cappedAmount) * 100;
 
     if (!subscriptionId) {
-      console.error("❌ No subscription data in approaching cap webhook");
+      logger.error({ shop }, "No subscription data in approaching cap webhook");
       return json(
         { success: false, error: "No subscription data" },
         { status: 400 },
@@ -30,12 +31,13 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
-      console.log(`⚠️ No shop record found for domain ${shop}`);
+      logger.warn({ shop }, "No shop record found for domain");
       return json({ success: true });
     }
 
-    console.log(
-      `📊 Cap warning: ${usagePercentage.toFixed(1)}% of cap used (${currentUsage}/${cappedAmount})`,
+    logger.warn(
+      { shop, usagePercentage, currentUsage, cappedAmount },
+      "Cap warning triggered",
     );
 
     // Add your warning logic here:
@@ -45,7 +47,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return json({ success: true });
   } catch (error) {
-    console.error("❌ Error processing approaching cap warning:", error);
+    logger.error({ error, shop }, "Error processing approaching cap warning");
     return json(
       { success: false, error: "Webhook processing failed" },
       { status: 500 },

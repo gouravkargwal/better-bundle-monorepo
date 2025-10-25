@@ -6,11 +6,13 @@ import {
   increaseBillingCycleCap,
   reactivateShopIfSuspended,
 } from "../services/billing.service";
+import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
+  const startTime = Date.now();
   const { topic, shop, payload } = await authenticate.webhook(request);
 
-  console.log(`📋 Subscription update: ${topic} for shop ${shop}`);
+  logger.info({ topic, shop }, "Subscription update webhook received");
 
   try {
     const appSub = payload.app_subscription;
@@ -21,12 +23,17 @@ export async function action({ request }: ActionFunctionArgs) {
       lineItems[0]?.plan?.pricing_details?.capped_amount?.amount;
 
     if (!subscriptionId || !status) {
-      console.error("❌ No subscription data in update webhook");
+      logger.error({ payload }, "No subscription data in update webhook");
       return json(
         { success: false, error: "No subscription data" },
         { status: 400 },
       );
     }
+
+    logger.info(
+      { subscriptionId, status, currentCappedAmount },
+      "Processing subscription update",
+    );
 
     // Find shop record
     const shopRecord = await prisma.shops.findUnique({
@@ -35,13 +42,14 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
-      console.log(`⚠️ No shop record found for domain ${shop}`);
+      logger.warn({ shop }, "No shop record found for domain");
       return json({ success: true });
     }
 
     // Route based on status
     switch (status) {
       case "ACTIVE":
+        logger.info({ subscriptionId }, "Handling active subscription");
         await handleActiveSubscription(
           shopRecord,
           subscriptionId,
@@ -49,18 +57,31 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         break;
       case "CANCELLED":
+        logger.info({ subscriptionId }, "Handling cancelled subscription");
         await handleCancelledSubscription(shopRecord, subscriptionId);
         break;
       case "REJECTED":
+        logger.info({ subscriptionId }, "Handling rejected subscription");
         await handleRejectedSubscription(shopRecord, subscriptionId);
         break;
       default:
-        console.log(`⚠️ Unhandled subscription status: ${status}`);
+        logger.warn({ status }, "Unhandled subscription status");
     }
 
+    const duration = Date.now() - startTime;
+    logger.info(
+      { status, duration },
+      "Subscription update processed successfully",
+    );
     return json({ success: true });
   } catch (error) {
-    console.error("❌ Error processing subscription update:", error);
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      "Error processing subscription update",
+    );
     return json(
       { success: false, error: "Webhook processing failed" },
       { status: 500 },

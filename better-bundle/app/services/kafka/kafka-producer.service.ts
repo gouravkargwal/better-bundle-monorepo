@@ -1,10 +1,7 @@
-/**
- * Kafka producer service for BetterBundle
- */
-
-import { Producer, RecordMetadata } from "kafkajs";
+import type { Producer, RecordMetadata } from "kafkajs";
 import { KafkaClientService } from "./kafka-client.service";
 import { kafkaConfig } from "../../utils/kafka-config";
+import logger from "../../utils/logger";
 
 export interface ShopifyEventData {
   event_type: string;
@@ -17,14 +14,10 @@ export interface ShopifyEventData {
 
 export class KafkaProducerService {
   private static instance: KafkaProducerService;
-  private clientService: KafkaClientService;
+  private clientService!: KafkaClientService;
   private producer: Producer | null = null;
   private messageCount = 0;
   private errorCount = 0;
-
-  private constructor() {
-    this.clientService = new KafkaClientService();
-  }
 
   public static async getInstance(): Promise<KafkaProducerService> {
     if (!KafkaProducerService.instance) {
@@ -36,10 +29,10 @@ export class KafkaProducerService {
 
   private async initialize(): Promise<void> {
     try {
+      this.clientService = await KafkaClientService.getInstance();
       this.producer = await this.clientService.getProducer();
-      console.log("📤 Kafka producer service initialized");
     } catch (error) {
-      console.error("❌ Failed to initialize Kafka producer service:", error);
+      logger.error({ error }, "Failed to initialize Kafka producer service");
       throw error;
     }
   }
@@ -53,9 +46,6 @@ export class KafkaProducerService {
     try {
       const shopIdentifier =
         eventData.shop_id || eventData.shop_domain || "unknown";
-      console.log(
-        `🚀 Publishing Shopify event: ${eventData.event_type} for shop ${shopIdentifier}`,
-      );
 
       // Add metadata
       const messageWithMetadata = {
@@ -65,20 +55,13 @@ export class KafkaProducerService {
         source: "shopify_webhook",
       };
 
-      console.log("📋 Message metadata:", messageWithMetadata);
-
       // Determine key for partitioning (use shop_id or shop_domain for consistent partitioning)
       const key = eventData.shop_id || eventData.shop_domain || "unknown";
 
       if (!this.producer) {
-        console.error("❌ Producer not initialized");
+        logger.error("Producer not initialized");
         throw new Error("Producer not initialized");
       }
-
-      console.log(
-        "📤 Sending message to Kafka topic 'shopify-events' with key:",
-        key,
-      );
 
       const result: RecordMetadata = await this.producer.send({
         topic: "shopify-events",
@@ -99,19 +82,11 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      console.log(`✅ Shopify event published: ${messageId}`);
-      console.log("📊 Producer metrics:", this.getMetrics());
+      logger.info({ messageId }, "Shopify event published");
       return messageId;
     } catch (error) {
       this.errorCount++;
-      console.error(`❌ Failed to publish Shopify event:`, error);
-      console.error("Error details:", {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        producerInitialized: !!this.producer,
-        messageCount: this.messageCount,
-        errorCount: this.errorCount,
-      });
+      logger.error({ error }, "Failed to publish Shopify event");
       throw error;
     }
   }
@@ -121,10 +96,6 @@ export class KafkaProducerService {
    */
   public async publishDataJobEvent(jobData: any): Promise<string> {
     try {
-      console.log(
-        `🚀 Publishing data job: ${jobData.job_type} for shop ${jobData.shop_id}`,
-      );
-
       const messageWithMetadata = {
         ...jobData,
         timestamp: new Date().toISOString(),
@@ -156,11 +127,11 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      console.log(`✅ Data job published: ${messageId}`);
+      logger.info({ messageId }, "Data job published");
       return messageId;
     } catch (error) {
       this.errorCount++;
-      console.error(`❌ Failed to publish data job:`, error);
+      logger.error({ error }, "Failed to publish data job");
       throw error;
     }
   }
@@ -170,10 +141,6 @@ export class KafkaProducerService {
    */
   public async publishAccessControlEvent(accessData: any): Promise<string> {
     try {
-      console.log(
-        `🚀 Publishing access control event: ${accessData.event_type} for shop ${accessData.shop_id}`,
-      );
-
       const messageWithMetadata = {
         ...accessData,
         timestamp: new Date().toISOString(),
@@ -205,11 +172,11 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      console.log(`✅ Access control event published: ${messageId}`);
+      logger.info({ messageId }, "Access control event published");
       return messageId;
     } catch (error) {
       this.errorCount++;
-      console.error(`❌ Failed to publish access control event:`, error);
+      logger.error({ error }, "Failed to publish access control event");
       throw error;
     }
   }
@@ -221,8 +188,6 @@ export class KafkaProducerService {
     events: Array<{ topic: string; data: any; key?: string }>,
   ): Promise<string[]> {
     try {
-      console.log(`🚀 Publishing batch of ${events.length} events`);
-
       if (!this.producer) {
         throw new Error("Producer not initialized");
       }
@@ -252,11 +217,11 @@ export class KafkaProducerService {
         (r) => `${r.topicName}:${r.partition}:${r.offset}`,
       );
 
-      console.log(`✅ Batch published: ${messageIds.length} events`);
+      logger.info({ messageIds }, "Batch published");
       return messageIds;
     } catch (error) {
       this.errorCount += events.length;
-      console.error(`❌ Failed to publish batch:`, error);
+      logger.error({ error }, "Failed to publish batch");
       throw error;
     }
   }
@@ -286,7 +251,7 @@ export class KafkaProducerService {
     if (this.producer) {
       await this.producer.disconnect();
       this.producer = null;
-      console.log("🔌 Kafka producer service closed");
+      logger.info("Kafka producer service closed");
     }
   }
 }

@@ -14,6 +14,7 @@ import { SettingsIcon } from "@shopify/polaris-icons";
 import { ExtensionManager } from "../components/Extensions/ExtensionManager";
 import prisma from "../db.server";
 import { TitleBar } from "@shopify/app-bridge-react";
+import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -94,7 +95,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       extensions,
     });
   } catch (error) {
-    console.error("Failed to fetch extension activity:", error);
+    logger.error(
+      { error, shop: session.shop },
+      "Failed to fetch extension activity",
+    );
     return json({
       shopDomain: session.shop,
       extensions: {},

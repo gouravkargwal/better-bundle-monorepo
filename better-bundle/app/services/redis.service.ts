@@ -1,4 +1,5 @@
 import { createClient, type RedisClientType } from "redis";
+import logger from "../utils/logger";
 
 // Redis client singleton
 let redisClient: RedisClientType | null = null;
@@ -16,9 +17,9 @@ export async function getRedisClient(): Promise<RedisClientType> {
     const redisConfig: any = {
       socket: {
         reconnectStrategy: (retries: number) => {
-          console.log(`🔄 Redis reconnection attempt ${retries}`);
+          logger.info({ retries }, "Redis reconnection attempt");
           if (retries > 10) {
-            console.error("Redis connection failed after 10 retries");
+            logger.error("Redis connection failed after 10 retries");
             return new Error("Redis connection failed");
           }
           return Math.min(retries * 100, 3000);
@@ -44,24 +45,10 @@ export async function getRedisClient(): Promise<RedisClientType> {
     redisClient = createClient(redisConfig);
 
     redisClient.on("error", (err) => {
-      console.error("❌ Redis Client Error:", err);
+      logger.error({ error: err }, "Redis Client Error");
     });
 
-    redisClient.on("connect", () => {
-      console.log("✅ Redis Client Connected");
-    });
-
-    redisClient.on("ready", () => {
-      console.log("✅ Redis Client Ready");
-    });
-
-    redisClient.on("end", () => {
-      console.log("🔌 Redis Client Disconnected");
-    });
-
-    console.log(`🔌 Attempting to connect to Redis...`);
     await redisClient.connect();
-    console.log(`✅ Redis connection established`);
   }
 
   return redisClient;
@@ -80,7 +67,7 @@ export class CacheService {
       const value = await this.client.get(key);
       return value ? JSON.parse(value) : null;
     } catch (error) {
-      console.error(`Cache get error for key ${key}:`, error);
+      logger.error({ error, key }, "Cache get error");
       return null;
     }
   }
@@ -89,7 +76,7 @@ export class CacheService {
     try {
       await this.client.setEx(key, ttlSeconds, JSON.stringify(value));
     } catch (error) {
-      console.error(`Cache set error for key ${key}:`, error);
+      logger.error({ error, key }, "Cache set error");
     }
   }
 
@@ -97,7 +84,7 @@ export class CacheService {
     try {
       await this.client.del(key);
     } catch (error) {
-      console.error(`Cache delete error for key ${key}:`, error);
+      logger.error({ error, key }, "Cache delete error");
     }
   }
 
@@ -108,7 +95,7 @@ export class CacheService {
         await this.client.del(keys);
       }
     } catch (error) {
-      console.error(`Cache delete pattern error for ${pattern}:`, error);
+      logger.error({ error, pattern }, "Cache delete pattern error");
     }
   }
 
@@ -117,7 +104,7 @@ export class CacheService {
       const result = await this.client.exists(key);
       return result === 1;
     } catch (error) {
-      console.error(`Cache exists error for key ${key}:`, error);
+      logger.error({ error, key }, "Cache exists error");
       return false;
     }
   }
@@ -143,7 +130,7 @@ export class CacheService {
 
       return result;
     } catch (error) {
-      console.error(`Cache getOrSet error for key ${key}:`, error);
+      logger.error({ error, key }, "Cache getOrSet error");
       // If cache fails, still execute fallback function
       return await fallbackFn();
     }
