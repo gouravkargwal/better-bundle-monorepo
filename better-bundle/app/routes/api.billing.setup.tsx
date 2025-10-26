@@ -144,19 +144,16 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
-    // Build return URL:
-    // - Preferred: embedded admin path with your app handle
-    // - Fallback: your app URL (Remix) which will re-embed automatically
-    const storeSlug = shop.replace(".myshopify.com", "");
-    const appHandle = process.env.SHOPIFY_APP_HANDLE;
-    const embeddedReturnUrl = appHandle
-      ? `https://admin.shopify.com/store/${storeSlug}/apps/${appHandle}/app/billing`
-      : `${process.env.SHOPIFY_APP_URL}/app/billing?shop=${shop}`;
+    // Build return URL for GraphQL App Subscriptions
+    // For GraphQL, use the app URL with proper shop parameter
+    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing?shop=${shop}`;
+
+    console.log("🔗 Return URL:", returnUrl);
 
     const variables = {
       name: "Better Bundle - Usage Based",
-      // Redirect back to embedded app route after approval (inside Admin)
-      returnUrl: embeddedReturnUrl,
+      // Redirect back to app after approval
+      returnUrl: returnUrl,
       lineItems: [
         {
           plan: {
@@ -202,6 +199,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     console.log(`✅ Subscription created: ${subscription.id}`);
+    console.log(`🔗 Confirmation URL: ${confirmationUrl}`);
+    console.log(`🔗 Return URL used: ${returnUrl}`);
 
     // ✅ UPDATE: Change status from TRIAL_COMPLETED to PENDING_APPROVAL
     await prisma.shop_subscriptions.update({
