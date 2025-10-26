@@ -73,24 +73,49 @@ export interface RecommendationResponse {
 export class RecommendationApiClient {
   private baseUrl: string;
   private logger: Logger;
+  private makeAuthenticatedRequest:
+    | ((url: string, options?: RequestInit) => Promise<Response>)
+    | null = null;
+
   constructor() {
     this.baseUrl = BACKEND_URL;
     this.logger = logger;
+  }
+
+  /**
+   * Set JWT authentication function
+   */
+  setJWT(
+    makeAuthenticatedRequest: (
+      url: string,
+      options?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    this.makeAuthenticatedRequest = makeAuthenticatedRequest;
   }
 
   async getRecommendations(
     request: RecommendationRequest,
   ): Promise<RecommendationResponse> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/v1/recommendations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      // Check if JWT authentication is available
+      if (!this.makeAuthenticatedRequest) {
+        throw new Error("JWT authentication not initialized");
+      }
+
+      // Use JWT authentication for the request
+      const response = await this.makeAuthenticatedRequest(
+        `${this.baseUrl}/api/v1/recommendations`,
+        {
+          method: "POST",
+          body: JSON.stringify(request),
         },
-        body: JSON.stringify(request),
-      });
+      );
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         this.logger.error(
           {
             error: new Error(`HTTP error! status: ${response.status}`),

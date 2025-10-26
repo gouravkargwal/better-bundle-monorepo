@@ -90,9 +90,25 @@ export interface UnifiedResponse {
 class AnalyticsApiClient {
   private baseUrl: string;
   private logger: Logger;
+  private makeAuthenticatedRequest:
+    | ((url: string, options?: RequestInit) => Promise<Response>)
+    | null = null;
+
   constructor() {
     this.baseUrl = BACKEND_URL;
     this.logger = logger;
+  }
+
+  /**
+   * Set JWT authentication function
+   */
+  setJWT(
+    makeAuthenticatedRequest: (
+      url: string,
+      options?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    this.makeAuthenticatedRequest = makeAuthenticatedRequest;
   }
 
   /**
@@ -109,6 +125,10 @@ class AnalyticsApiClient {
     customerId: string,
   ): Promise<string> {
     try {
+      if (!this.makeAuthenticatedRequest) {
+        throw new Error("JWT authentication not initialized");
+      }
+
       const url = `${this.baseUrl}/api/venus/get-or-create-session`;
       const payload: UnifiedSessionRequest = {
         shop_domain: shopDomain,
@@ -118,16 +138,17 @@ class AnalyticsApiClient {
         referrer: undefined,
       };
 
-      const response = await fetch(url, {
+      // Use JWT authentication for the request
+      const response = await this.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(payload),
         keepalive: true,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         throw new Error(`Session creation failed: ${response.status}`);
       }
 
@@ -165,12 +186,13 @@ class AnalyticsApiClient {
     request: UnifiedInteractionRequest,
   ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
+      if (!this.makeAuthenticatedRequest) {
+        return { success: false };
+      }
+
       const url = `${this.baseUrl}/api/venus/track-interaction`;
-      const response = await fetch(url, {
+      const response = await this.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(request),
         keepalive: true,
       });

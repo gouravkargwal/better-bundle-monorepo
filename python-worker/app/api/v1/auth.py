@@ -21,7 +21,8 @@ router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 class ShopTokenRequest(BaseModel):
     """Request model for shop token generation"""
 
-    shop_domain: str
+    shop_domain: Optional[str] = None
+    customer_id: Optional[str] = None
     force_refresh: bool = False
 
 
@@ -71,6 +72,36 @@ class TokenRefreshResponse(BaseModel):
 
 
 # Helper Functions
+async def get_shop_domain_from_customer(customer_id: str) -> Optional[str]:
+    """
+    Get shop domain from customer ID by looking up the customer's shop
+
+    Args:
+        customer_id: Customer ID to look up
+
+    Returns:
+        Shop domain if found, None otherwise
+    """
+    try:
+        from app.recommandations.shop_lookup_service import ShopLookupService
+
+        shop_lookup_service = ShopLookupService()
+        shop_domain = await shop_lookup_service.get_shop_domain_from_customer_id(
+            customer_id
+        )
+
+        if shop_domain:
+            logger.info(f"Found shop domain {shop_domain} for customer {customer_id}")
+        else:
+            logger.warning(f"No shop domain found for customer {customer_id}")
+
+        return shop_domain
+
+    except Exception as e:
+        logger.error(f"Error looking up shop domain for customer {customer_id}: {e}")
+        return None
+
+
 async def get_shop_status_for_token(shop_domain: str) -> Dict[str, Any]:
     """
     Get shop status information for token generation
@@ -117,12 +148,35 @@ async def generate_shop_token(request: ShopTokenRequest):
 
     This endpoint creates a JWT token with embedded shop status and permissions.
     The token is stateless and contains all necessary information for authorization.
+
+    Can be called with either:
+    - shop_domain: Direct shop domain
+    - customer_id: Look up shop domain from customer's session history
     """
     try:
-        logger.info(f"🔑 Generating shop token for {request.shop_domain}")
+        # Determine shop domain
+        shop_domain = request.shop_domain
+
+        if not shop_domain and request.customer_id:
+            logger.info(f"🔍 Looking up shop domain for customer {request.customer_id}")
+            shop_domain = await get_shop_domain_from_customer(request.customer_id)
+
+            if not shop_domain:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No shop domain found for customer {request.customer_id}",
+                )
+
+        if not shop_domain:
+            raise HTTPException(
+                status_code=400,
+                detail="Either shop_domain or customer_id must be provided",
+            )
+
+        logger.info(f"🔑 Generating shop token for {shop_domain}")
 
         # Get shop status information
-        shop_info = await get_shop_status_for_token(request.shop_domain)
+        shop_info = await get_shop_status_for_token(shop_domain)
 
         # Create JWT token
         token = jwt_service.create_shop_token(
@@ -137,7 +191,7 @@ async def generate_shop_token(request: ShopTokenRequest):
         expires_in = jwt_service.shop_token_expire.total_seconds()
 
         logger.info(
-            f"✅ Generated shop token for {request.shop_domain} (status: {shop_info['shop_status']})"
+            f"✅ Generated shop token for {shop_domain} (status: {shop_info['shop_status']})"
         )
 
         return ShopTokenResponse(
@@ -150,8 +204,10 @@ async def generate_shop_token(request: ShopTokenRequest):
             permissions=shop_info["permissions"],
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Failed to generate shop token for {request.shop_domain}: {e}")
+        logger.error(f"❌ Failed to generate shop token: {e}")
         raise HTTPException(
             status_code=500, detail=f"Token generation failed: {str(e)}"
         )

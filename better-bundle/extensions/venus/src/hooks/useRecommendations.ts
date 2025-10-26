@@ -7,6 +7,7 @@ import {
 import { analyticsApi } from "../api/analytics";
 import { useApi } from "@shopify/ui-extensions-react/customer-account";
 import { logger } from "../utils/logger";
+import { useJWT } from "./useJWT";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount: string, currencyCode: string): string => {
@@ -84,10 +85,19 @@ export function useRecommendations({
   columnConfig,
 }: UseRecommendationsProps) {
   const { storage } = useApi();
+  const { makeAuthenticatedRequest, isReady } = useJWT(shopDomain, customerId);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Set up JWT authentication for APIs
+  useEffect(() => {
+    if (isReady && makeAuthenticatedRequest) {
+      recommendationApi.setJWT(makeAuthenticatedRequest);
+      analyticsApi.setJWT(makeAuthenticatedRequest);
+    }
+  }, [isReady, makeAuthenticatedRequest]);
 
   useEffect(() => {
     const initializeSession = async () => {
@@ -119,8 +129,11 @@ export function useRecommendations({
       }
     };
 
-    initializeSession();
-  }, [storage, shopDomain, customerId]);
+    // Only initialize session if JWT is ready
+    if (isReady) {
+      initializeSession();
+    }
+  }, [storage, shopDomain, customerId, isReady]);
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
@@ -200,12 +213,12 @@ export function useRecommendations({
 
   // Fetch recommendations
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || !isReady) {
       logger.error(
         {
           shop_domain: shopDomain,
         },
-        "Waiting for session initialization",
+        "Waiting for session and JWT initialization",
       );
       return;
     }
@@ -261,7 +274,7 @@ export function useRecommendations({
     };
 
     fetchRecommendations();
-  }, [customerId, context, limit, sessionId, shopDomain]);
+  }, [customerId, context, limit, sessionId, shopDomain, isReady]);
 
   return {
     loading,

@@ -30,7 +30,7 @@ function ProfileBlockWithRecommendations() {
     context: "profile",
     limit: 6,
     customerId,
-    shopDomain: "",
+    shopDomain: undefined, // Will use customer_id to look up shop domain
     columnConfig: {
       extraSmall: 1, // 1 column on very small screens
       small: 2, // 2 columns on small screens
