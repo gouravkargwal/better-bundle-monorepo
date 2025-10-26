@@ -1,3 +1,5 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
 client_id = "67ed7387b7e177679b747bf339bf739e"
 name = "Better-Bundle-Dev"
 application_url = "https://7ba064320ace.ngrok-free.app"
@@ -9,69 +11,69 @@ automatically_update_urls_on_dev = false
 [webhooks]
 api_version = "2024-07"
 
-[[webhooks.subscriptions]]
-topics = ["app_subscriptions/approaching_capped_amount"]
-uri = "/webhooks/billing/approaching_cap"
+  [[webhooks.subscriptions]]
+  topics = [ "collections/update" ]
+  uri = "/webhooks/collections/update"
 
-[[webhooks.subscriptions]]
-topics = ["inventory_levels/update"]
-uri = "/webhooks/inventory_levels/update"
+  [[webhooks.subscriptions]]
+  topics = [ "inventory_levels/update" ]
+  uri = "/webhooks/inventory_levels/update"
 
-[[webhooks.subscriptions]]
-topics = ["products/create"]
-uri = "/webhooks/products/create"
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
 
-[[webhooks.subscriptions]]
-topics = ["orders/paid"]
-uri = "/webhooks/orders/paid"
+  [[webhooks.subscriptions]]
+  topics = [ "customers/update" ]
+  uri = "/webhooks/customers/update"
 
-[[webhooks.subscriptions]]
-topics = ["collections/create"]
-uri = "/webhooks/collections/create"
+  [[webhooks.subscriptions]]
+  topics = [ "products/delete" ]
+  uri = "/webhooks/products/delete"
 
-[[webhooks.subscriptions]]
-topics = ["orders/updated"]
-uri = "/webhooks/orders/updated"
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/update" ]
+  uri = "/webhooks/billing/subscription_update"
 
-[[webhooks.subscriptions]]
-topics = ["products/update"]
-uri = "/webhooks/products/update"
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
 
-[[webhooks.subscriptions]]
-topics = ["customers/create"]
-uri = "/webhooks/customers/create"
+  [[webhooks.subscriptions]]
+  topics = [ "products/create" ]
+  uri = "/webhooks/products/create"
 
-[[webhooks.subscriptions]]
-topics = ["refunds/create"]
-uri = "/webhooks/refunds/create"
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
-[[webhooks.subscriptions]]
-topics = ["collections/update"]
-uri = "/webhooks/collections/update"
+  [[webhooks.subscriptions]]
+  topics = [ "orders/updated" ]
+  uri = "/webhooks/orders/updated"
 
-[[webhooks.subscriptions]]
-topics = ["customers/update"]
-uri = "/webhooks/customers/update"
+  [[webhooks.subscriptions]]
+  topics = [ "products/update" ]
+  uri = "/webhooks/products/update"
 
-[[webhooks.subscriptions]]
-topics = ["products/delete"]
-uri = "/webhooks/products/delete"
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/approaching_capped_amount" ]
+  uri = "/webhooks/billing/approaching_cap"
 
-[[webhooks.subscriptions]]
-topics = ["app_subscriptions/update"]
-uri = "/webhooks/billing/subscription_update"
+  [[webhooks.subscriptions]]
+  topics = [ "collections/delete" ]
+  uri = "/webhooks/collections/delete"
 
-[[webhooks.subscriptions]]
-topics = ["collections/delete"]
-uri = "/webhooks/collections/delete"
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "/webhooks/customers/create"
 
-[[webhooks.subscriptions]]
-topics = ["app/uninstalled"]
-uri = "/webhooks/app/uninstalled"
+  [[webhooks.subscriptions]]
+  topics = [ "collections/create" ]
+  uri = "/webhooks/collections/create"
 
-[[webhooks.subscriptions]]
-topics = ["app/scopes_update"]
-uri = "/webhooks/app/scopes_update"
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -80,7 +82,7 @@ scopes = "read_custom_pixels,read_customer_data_erasure,read_customer_events,rea
 [auth]
 redirect_urls = [
   "https://7ba064320ace.ngrok-free.app/auth/callback",
-  "https://7ba064320ace.ngrok-free.app/auth/shopify/callback",
+  "https://7ba064320ace.ngrok-free.app/auth/shopify/callback"
 ]
 
 [pos]
