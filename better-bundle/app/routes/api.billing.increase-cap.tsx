@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
+import logger from "app/utils/logger";
 
 async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
   try {
@@ -23,15 +24,8 @@ async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
       });
 
       if (rejectedCommissions.length === 0) {
-        console.log(
-          `ℹ️ No rejected commissions to reprocess for shop ${shopId}`,
-        );
         return;
       }
-
-      console.log(
-        `🔄 Reprocessing ${rejectedCommissions.length} rejected commissions for shop ${shopId}`,
-      );
 
       // Get current cycle with row-level locking
       const currentCycle = await tx.billing_cycles.findUnique({
@@ -43,7 +37,7 @@ async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
       });
 
       if (!currentCycle) {
-        console.error(`❌ Billing cycle ${cycleId} not found`);
+        logger.error({ cycleId }, "Billing cycle not found");
         return;
       }
 
@@ -77,9 +71,6 @@ async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
           if (updateResult.count > 0) {
             totalCharged += commissionOverflow;
             remainingCap -= commissionOverflow;
-            console.log(
-              `✅ Reprocessed commission ${commission.id}: $${commissionOverflow} charged`,
-            );
           }
         } else if (remainingCap > 0) {
           // Partial charge only
@@ -104,9 +95,6 @@ async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
           if (updateResult.count > 0) {
             totalCharged += partialCharge;
             remainingCap = 0;
-            console.log(
-              `⚠️ Partial reprocess commission ${commission.id}: $${partialCharge} charged, $${newOverflow} still overflow`,
-            );
           }
         } else {
           // No remaining cap
@@ -124,18 +112,10 @@ async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
             },
           },
         });
-
-        console.log(
-          `✅ Updated cycle usage by $${totalCharged} for shop ${shopId}`,
-        );
       }
-
-      console.log(
-        `✅ Completed reprocessing rejected commissions for shop ${shopId}`,
-      );
     });
   } catch (error) {
-    console.error(`❌ Error reprocessing rejected commissions: ${error}`);
+    logger.error({ error }, "Error reprocessing rejected commissions");
   }
 }
 
@@ -147,8 +127,6 @@ export async function action({ request }: ActionFunctionArgs) {
     // Parse request body to get new spending limit
     const body = await request.json();
     const newSpendingLimit = body.spendingLimit || 1000.0;
-
-    console.log(`🔄 Increasing cap for shop ${shop} to: $${newSpendingLimit}`);
 
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
@@ -255,9 +233,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const data = await response.json();
 
     if (data.data?.appSubscriptionLineItemUpdate?.userErrors?.length > 0) {
-      console.error(
-        "Shopify GraphQL errors:",
-        data.data.appSubscriptionLineItemUpdate.userErrors,
+      logger.error(
+        {
+          errors: data.data.appSubscriptionLineItemUpdate.userErrors,
+          subscriptionId,
+        },
+        "Shopify GraphQL errors while updating subscription",
       );
       return json(
         { success: false, error: "Failed to update subscription in Shopify" },
@@ -304,19 +285,12 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      console.log(`✅ Shop ${shop} services reactivated after cap increase`);
-
       // Invalidate suspension cache so fresh data is fetched
       await invalidateSuspensionCache(shopRecord.id);
-      console.log(`✅ Suspension cache invalidated for shop ${shop}`);
 
       // ✅ REPROCESS REJECTED COMMISSIONS
       await reprocessRejectedCommissions(shopRecord.id, currentCycle.id);
     }
-
-    console.log(
-      `✅ Cap increased for shop ${shop} from $${currentCap} to $${newSpendingLimit}`,
-    );
 
     return json({
       success: true,
@@ -325,7 +299,7 @@ export async function action({ request }: ActionFunctionArgs) {
       previousCap: currentCap,
     });
   } catch (error) {
-    console.error("❌ Error increasing cap:", error);
+    logger.error({ error }, "Error increasing cap");
     return json(
       {
         success: false,

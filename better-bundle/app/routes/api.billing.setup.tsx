@@ -1,7 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-// Removed unused imports
+import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
@@ -148,8 +148,6 @@ export async function action({ request }: ActionFunctionArgs) {
     // For GraphQL, use the app URL with proper shop parameter
     const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing?shop=${shop}`;
 
-    console.log("🔗 Return URL:", returnUrl);
-
     const variables = {
       name: "Better Bundle - Usage Based",
       // Redirect back to app after approval
@@ -169,16 +167,12 @@ export async function action({ request }: ActionFunctionArgs) {
       ],
     };
 
-    console.log("📤 Creating Shopify subscription...");
-
     const response = await admin.graphql(mutation, { variables });
     const result = await response.json();
 
-    console.log("📥 Shopify response:", JSON.stringify(result, null, 2));
-
     if (result.data?.appSubscriptionCreate?.userErrors?.length > 0) {
       const errors = result.data.appSubscriptionCreate.userErrors;
-      console.error("❌ Shopify errors:", errors);
+      logger.error({ errors }, "Shopify errors while creating subscription");
       return json(
         {
           success: false,
@@ -198,11 +192,6 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    console.log(`✅ Subscription created: ${subscription.id}`);
-    console.log(`🔗 Confirmation URL: ${confirmationUrl}`);
-    console.log(`🔗 Return URL used: ${returnUrl}`);
-
-    // ✅ UPDATE: Change status from TRIAL_COMPLETED to PENDING_APPROVAL
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
@@ -225,10 +214,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    console.log(`✅ Shop subscription updated: ${shopSubscription.id}`);
-
-    console.log(`✅ Billing setup complete for shop ${shop}`);
-
     return json({
       success: true,
       subscription_id: subscription.id,
@@ -236,7 +221,7 @@ export async function action({ request }: ActionFunctionArgs) {
       message: "Please approve the subscription in Shopify",
     });
   } catch (error) {
-    console.error("❌ Error in billing setup:", error);
+    logger.error({ error }, "Error in billing setup");
     return json(
       {
         success: false,

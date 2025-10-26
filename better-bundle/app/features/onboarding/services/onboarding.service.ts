@@ -1,7 +1,7 @@
-// features/onboarding/services/onboarding.service.ts
 import prisma from "../../../db.server";
 import { getCurrencySymbol } from "../../../utils/currency";
 import { KafkaProducerService } from "../../../services/kafka/kafka-producer.service";
+import logger from "app/utils/logger";
 
 export class OnboardingService {
   async getOnboardingData(shopDomain: string, admin: any) {
@@ -63,7 +63,7 @@ export class OnboardingService {
 
       return shop;
     } catch (error) {
-      console.error("Error getting shop info from Shopify:", error);
+      logger.error({ error }, "Error getting shop info from Shopify");
       throw new Error("Failed to fetch shop data from Shopify API");
     }
   }
@@ -123,12 +123,6 @@ export class OnboardingService {
     });
 
     const isReinstall = existingShop && !existingShop.is_active;
-
-    if (isReinstall) {
-      console.log(`🔄 Reactivating shop: ${shopData.myshopifyDomain}`);
-    } else {
-      console.log(`🆕 Creating new shop: ${shopData.myshopifyDomain}`);
-    }
 
     return await tx.shops.upsert({
       where: { shop_domain: shopData.myshopifyDomain },
@@ -214,15 +208,9 @@ export class OnboardingService {
         threshold_amount: pricingTier.trial_threshold_amount,
         status: "ACTIVE",
         started_at: new Date(),
-        // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
         commission_saved: 0.0,
       },
     });
-
-    console.log(`✅ Trial activated for ${shopDomain}:`);
-    console.log(`   - Plan: ${defaultPlan.name}`);
-    console.log(`   - Currency: ${shopRecord.currency_code}`);
-    console.log(`   - Threshold: ${pricingTier.trial_threshold_amount}`);
 
     return {
       shop_subscription: shopSubscription,
@@ -275,7 +263,6 @@ export class OnboardingService {
         createResponseJson.data?.webPixelCreate?.userErrors?.length === 0 &&
         createResponseJson.data?.webPixelCreate?.webPixel
       ) {
-        console.log("✅ Atlas web pixel created successfully");
         return createResponseJson.data.webPixelCreate.webPixel;
       }
 
@@ -286,20 +273,18 @@ export class OnboardingService {
         );
 
       if (hasTakenError) {
-        console.log("✅ Web pixel already exists and is active");
         return { id: "existing", settings: webPixelSettings };
       }
 
       // Log other creation errors but don't fail the entire flow
       const errors = createResponseJson.data?.webPixelCreate?.userErrors || [];
       if (errors.length > 0) {
-        console.warn("⚠️ Web pixel creation had issues:", errors);
+        logger.warn({ errors }, "Web pixel creation had issues");
       }
 
-      console.log("ℹ️ Web pixel activation completed with warnings");
       return null;
     } catch (error) {
-      console.error("❌ Failed to activate Atlas web pixel:", error);
+      logger.error({ error }, "Failed to activate Atlas web pixel");
       // Don't throw the error to prevent breaking the entire afterAuth flow
       return null;
     }
@@ -342,10 +327,9 @@ export class OnboardingService {
 
       const producer = await KafkaProducerService.getInstance();
       const messageId = await producer.publishDataJobEvent(jobData);
-      console.log(`✅ Data collection job published to Kafka: ${messageId}`);
       return { success: true, messageId };
     } catch (error: any) {
-      console.error("❌ Failed to publish data collection job:", error);
+      logger.error({ error }, "Failed to publish data collection job");
       throw new Error(`Failed to trigger analysis: ${error.message}`);
     }
   }

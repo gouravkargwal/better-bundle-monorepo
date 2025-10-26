@@ -1,5 +1,6 @@
 import { getCacheService } from "../services/redis.service";
 import { default as getCurrencySymbol } from "currency-symbol-map";
+import logger from "./logger";
 
 const CACHE_DURATION = 60 * 60; // 1 hour in seconds
 const EXCHANGE_RATE_CACHE_PREFIX = "exchange_rate";
@@ -35,7 +36,7 @@ async function getExchangeRate(targetCurrency: string): Promise<number> {
     const rate = data.rates[targetCurrency.toUpperCase()];
 
     if (!rate) {
-      console.warn(`Exchange rate not found for ${targetCurrency}, using 1.0`);
+      logger.warn({ targetCurrency }, "Exchange rate not found, using 1.0");
       return 1.0;
     }
 
@@ -49,17 +50,12 @@ async function getExchangeRate(targetCurrency: string): Promise<number> {
       CACHE_DURATION,
     );
 
-    console.log(`✅ Fetched exchange rate for ${targetCurrency}: ${rate}`);
     return rate;
   } catch (error) {
-    console.error(
-      `Failed to fetch exchange rate for ${targetCurrency}:`,
-      error,
-    );
-
+    logger.error({ error, targetCurrency }, "Failed to fetch exchange rate");
     // Fallback to cached rate if available
     if (cached) {
-      console.warn(`Using cached exchange rate for ${targetCurrency}`);
+      logger.warn({ targetCurrency }, "Using cached exchange rate");
       return cached.rate;
     }
 
@@ -191,13 +187,14 @@ async function getExchangeRate(targetCurrency: string): Promise<number> {
 
     const fallbackRate = fallbackRates[targetCurrency.toUpperCase()];
     if (fallbackRate) {
-      console.warn(
-        `Using fallback exchange rate for ${targetCurrency}: ${fallbackRate}`,
+      logger.warn(
+        { targetCurrency, fallbackRate },
+        "Using fallback exchange rate",
       );
       return fallbackRate;
     }
 
-    console.warn(`No exchange rate available for ${targetCurrency}, using 1.0`);
+    logger.warn({ targetCurrency }, "No exchange rate available, using 1.0");
     return 1.0;
   }
 }
@@ -212,20 +209,14 @@ export async function convertUsdToCurrency(
   usdAmount: number,
   targetCurrency: string,
 ): Promise<number> {
-  console.log(
-    "🔄 convertUsdToCurrency called with:",
-    usdAmount,
-    targetCurrency,
-  );
-
   if (targetCurrency.toUpperCase() === "USD") {
-    console.log("💰 USD currency, returning original amount:", usdAmount);
+    logger.debug({ usdAmount }, "USD currency, returning original amount");
     return usdAmount;
   }
 
   const rate = await getExchangeRate(targetCurrency);
   const result = usdAmount * rate;
-  console.log("💰 Conversion result:", usdAmount, "*", rate, "=", result);
+  logger.debug({ usdAmount, rate, result }, "Conversion result");
   return result;
 }
 
@@ -257,13 +248,11 @@ export async function getTrialThresholdInShopCurrency(
   shopCurrency: string,
   usdThreshold: number,
 ): Promise<number> {
-  console.log(
-    "🔄 getTrialThresholdInShopCurrency called with:",
-    shopCurrency,
-    usdThreshold,
-  );
   const result = await convertUsdToCurrency(usdThreshold, shopCurrency);
-  console.log("💰 getTrialThresholdInShopCurrency result:", result);
+  logger.debug(
+    { shopCurrency, usdThreshold, result },
+    "Trial threshold result",
+  );
   return result;
 }
 

@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 
 import prisma from "../db.server";
 import { getCacheService } from "../services/redis.service";
+import logger from "app/utils/logger";
 
 /**
  * Middleware to check service suspension status
@@ -190,7 +191,7 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
       300, // 5 minutes TTL
     );
   } catch (error) {
-    console.error("Error checking service suspension:", error);
+    logger.error({ error }, "Error checking service suspension");
     return {
       isSuspended: true,
       reason: "error_checking_status",
@@ -224,7 +225,7 @@ export async function checkServiceSuspensionByDomain(
 
     return await checkServiceSuspension(shop.id);
   } catch (error) {
-    console.error(
+    logger.error(
       { error, shopDomain },
       "Error checking suspension status by domain",
     );
@@ -245,11 +246,7 @@ export async function invalidateSuspensionCache(shopId: string): Promise<void> {
     const cacheService = await getCacheService();
     const cacheKey = `suspension:${shopId}`;
     await cacheService.del(cacheKey);
-    console.log(`✅ Suspension cache invalidated for shop ${shopId}`);
   } catch (error) {
-    console.error(
-      `❌ Error invalidating suspension cache for shop ${shopId}:`,
-      error,
-    );
+    logger.error({ error }, "Error invalidating suspension cache for shop");
   }
 }

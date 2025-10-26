@@ -21,23 +21,7 @@ export const loader = async ({ request }: { request: Request }) => {
 export const action = async ({ request }: { request: Request }) => {
   const body = await request.json();
 
-  // ✅ VALIDATE AND LOG METAFIELD CHANGES
-  console.log("🔧 Processing changeset with changes:", body.changes);
-
   // Check if changeset includes metafield changes for session ID (following Phoenix pattern)
-  const hasSessionIdMetafield = body.changes?.some(
-    (change: any) =>
-      change.type === "set_metafield" &&
-      change.namespace === "bb_recommendation" &&
-      change.key === "session_id",
-  );
-
-  if (hasSessionIdMetafield) {
-    console.log(
-      "✅ Session ID metafield detected in changeset - attribution will be enabled",
-    );
-  }
-
   // Create JWT using jose library
   const secret = new TextEncoder().encode(process.env.SHOPIFY_API_SECRET!);
 
