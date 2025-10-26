@@ -6,7 +6,7 @@ Apollo can show recommendations and track interactions after purchase completion
 """
 
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.analytics_tracking_service import (
@@ -105,7 +105,9 @@ class ApolloCombinedResponse(BaseModel):
 
 
 @router.post("/get-session-and-recommendations", response_model=ApolloCombinedResponse)
-async def get_session_and_recommendations(request: ApolloCombinedRequest):
+async def get_session_and_recommendations(
+    request: ApolloCombinedRequest, authorization: str = Header(None)
+):
     """
     Get or create session and fetch recommendations in a single API call
 
@@ -125,9 +127,22 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -221,6 +236,9 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
             recommendation_count=recommendation_count,
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error in Apollo combined request: {str(e)}")
         raise HTTPException(
@@ -230,7 +248,9 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
 
 
 @router.post("/track-interaction", response_model=ApolloResponse)
-async def track_apollo_interaction(request: ApolloInteractionRequest):
+async def track_apollo_interaction(
+    request: ApolloInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Apollo Post-Purchase extension
 
@@ -359,6 +379,9 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
             session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error tracking Apollo interaction: {str(e)}", exc_info=True)
         raise HTTPException(

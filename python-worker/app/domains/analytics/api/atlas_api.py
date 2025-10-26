@@ -6,7 +6,7 @@ Atlas tracks user behavior across the entire store (except checkout).
 """
 
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.analytics_tracking_service import (
@@ -73,7 +73,9 @@ class AtlasResponse(BaseModel):
 
 
 @router.post("/track-interaction", response_model=AtlasResponse)
-async def track_atlas_interaction(request: AtlasInteractionRequest):
+async def track_atlas_interaction(
+    request: AtlasInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Atlas Web Pixels extension
 
@@ -88,9 +90,22 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for domain")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -199,6 +214,9 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
             session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         # Log full traceback and payload for better diagnostics
         try:
@@ -215,7 +233,9 @@ async def track_atlas_interaction(request: AtlasInteractionRequest):
 
 
 @router.post("/get-or-create-session", response_model=AtlasResponse)
-async def get_or_create_atlas_session(request: AtlasSessionRequest):
+async def get_or_create_atlas_session(
+    request: AtlasSessionRequest, authorization: str = Header(None)
+):
     """
     Get or create session for Atlas tracking
 
@@ -232,9 +252,22 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -273,6 +306,9 @@ async def get_or_create_atlas_session(request: AtlasSessionRequest):
             },
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         # Log full traceback and request context
         try:

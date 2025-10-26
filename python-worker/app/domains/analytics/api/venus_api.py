@@ -7,7 +7,7 @@ Venus runs on customer profile pages, order status pages, and order index pages.
 
 from typing import Optional, Dict, Any
 import time
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.models.extension import ExtensionType, ExtensionContext
@@ -68,7 +68,9 @@ class VenusResponse(BaseModel):
 
 
 @router.post("/get-or-create-session", response_model=VenusResponse)
-async def get_or_create_venus_session(request: VenusSessionRequest):
+async def get_or_create_venus_session(
+    request: VenusSessionRequest, authorization: str = Header(None)
+):
     """
     Get or create unified session for Venus extension
 
@@ -80,9 +82,22 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for customer")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -130,6 +145,9 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
             },
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error starting Venus session: {str(e)}")
         raise HTTPException(
@@ -138,7 +156,9 @@ async def get_or_create_venus_session(request: VenusSessionRequest):
 
 
 @router.post("/track-interaction", response_model=VenusResponse)
-async def track_venus_interaction(request: VenusInteractionRequest):
+async def track_venus_interaction(
+    request: VenusInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Venus extension with automatic session recovery
 
@@ -163,9 +183,22 @@ async def track_venus_interaction(request: VenusInteractionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found for customer")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -269,6 +302,7 @@ async def track_venus_interaction(request: VenusInteractionRequest):
         )
 
     except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
         raise
     except Exception as e:
         logger.error(f"Error tracking Venus interaction: {str(e)}")

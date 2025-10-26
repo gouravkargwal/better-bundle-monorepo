@@ -7,7 +7,7 @@ Mercury runs on checkout pages and requires Shopify Plus plan.
 
 from typing import Optional, Dict, Any
 import time
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.models.extension import ExtensionType, ExtensionContext
@@ -124,7 +124,9 @@ async def validate_shopify_plus_store(shop_domain: str) -> bool:
 
 
 @router.post("/get-or-create-session", response_model=MercuryResponse)
-async def get_or_create_mercury_session(request: MercurySessionRequest):
+async def get_or_create_mercury_session(
+    request: MercurySessionRequest, authorization: str = Header(None)
+):
     """
     Get or create unified session for Mercury extension
 
@@ -153,9 +155,22 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -208,6 +223,9 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
             },
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error starting Mercury session: {str(e)}")
         raise HTTPException(
@@ -216,7 +234,9 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
 
 
 @router.post("/track-interaction", response_model=MercuryResponse)
-async def track_mercury_interaction(request: MercuryInteractionRequest):
+async def track_mercury_interaction(
+    request: MercuryInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Mercury extension
 
@@ -243,9 +263,22 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -350,6 +383,9 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
             session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error tracking Mercury interaction: {str(e)}")
         raise HTTPException(

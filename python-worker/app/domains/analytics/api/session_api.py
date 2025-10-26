@@ -5,7 +5,7 @@ Lightweight endpoints for session updates
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
@@ -37,7 +37,9 @@ class SessionResponse(BaseModel):
 
 
 @router.post("/update-client-id", response_model=SessionResponse)
-async def update_client_id(request: UpdateClientIdRequest):
+async def update_client_id(
+    request: UpdateClientIdRequest, authorization: str = Header(None)
+):
     """
     Update client_id for an existing session (background update)
 
@@ -49,9 +51,22 @@ async def update_client_id(request: UpdateClientIdRequest):
         if not shop_id:
             raise HTTPException(status_code=400, detail="Invalid shop domain")
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -80,6 +95,7 @@ async def update_client_id(request: UpdateClientIdRequest):
         return SessionResponse(success=True, message="Client ID updated successfully")
 
     except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
         raise
     except Exception as e:
         logger.error(f"Error updating client_id: {str(e)}")

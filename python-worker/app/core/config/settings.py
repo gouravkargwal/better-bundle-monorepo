@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     PORT: int = Field(default=DEFAULT_PORT, env="PORT")
     ENVIRONMENT: str = Field(default=ENVIRONMENT_DEVELOPMENT, env="ENVIRONMENT")
 
+    # Security Configuration
+    SECRET_KEY: str = Field(
+        default="your-secret-key-change-in-production", env="SECRET_KEY"
+    )
+
     # Sub-settings
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()

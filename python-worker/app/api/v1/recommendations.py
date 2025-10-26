@@ -5,7 +5,7 @@ Handles all recommendation requests from Shopify extension with context-based ro
 
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from dataclasses import dataclass
 
 from app.shared.helpers import now_utc
@@ -442,18 +442,33 @@ async def fetch_recommendations_logic(
 
 # --- FastAPI Endpoint (Thin Wrapper) ---
 @router.post("/", response_model=RecommendationResponse)
-async def get_recommendations(request: RecommendationRequest):
+async def get_recommendations(
+    request: RecommendationRequest, authorization: str = Header(None)
+):
     """
     Get recommendations based on context with intelligent fallback system.
 
-    This endpoint provides context-aware recommendations using a reusable core logic
-    function, handling HTTP-specific concerns like error translation and response modeling.
+    This endpoint provides context-aware recommendations using JWT-based authorization.
+    It uses stateless JWT validation instead of Redis/database checks for better performance.
     """
     try:
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(request.shop_domain):
-            message = await suspension_middleware.get_suspension_message(
-                request.shop_domain
+        # Extract JWT token from Authorization header
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+
+        # Check shop status using JWT (stateless - no Redis needed!)
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
             )
             raise HTTPException(
                 status_code=403,
@@ -469,6 +484,9 @@ async def get_recommendations(request: RecommendationRequest):
 
         return RecommendationResponse(success=True, **result_data)
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except InvalidInputError as e:
         # Handle validation errors with a 400 Bad Request
         raise HTTPException(status_code=400, detail=str(e))

@@ -6,7 +6,7 @@ Phoenix can show recommendations and track interactions in the checkout flow.
 """
 
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.analytics_tracking_service import (
@@ -95,7 +95,9 @@ class PhoenixResponse(BaseModel):
 
 
 @router.post("/get-or-create-session", response_model=PhoenixResponse)
-async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
+async def get_or_create_phoenix_session(
+    request: PhoenixSessionRequest, authorization: str = Header(None)
+):
     """
     Get or create unified session for Phoenix extension
 
@@ -111,9 +113,22 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -156,6 +171,9 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
             },
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error starting Phoenix session: {str(e)}")
         raise HTTPException(
@@ -164,7 +182,9 @@ async def get_or_create_phoenix_session(request: PhoenixSessionRequest):
 
 
 @router.post("/track-interaction", response_model=PhoenixResponse)
-async def track_phoenix_interaction(request: PhoenixInteractionRequest):
+async def track_phoenix_interaction(
+    request: PhoenixInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Phoenix theme extension
 
@@ -181,9 +201,22 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
-        # Check if shop is suspended (with caching)
-        if not await suspension_middleware.should_process_shop(shop_id):
-            message = await suspension_middleware.get_suspension_message(shop_id)
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -292,6 +325,9 @@ async def track_phoenix_interaction(request: PhoenixInteractionRequest):
             session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error tracking Phoenix interaction: {str(e)}", exc_info=True)
         logger.error(f"Request data: {request.model_dump()}")
