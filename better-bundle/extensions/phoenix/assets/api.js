@@ -3,6 +3,15 @@ class RecommendationAPI {
     // Use config for base URL
     this.baseUrl = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
     this.logger = window.phoenixLogger || console; // Use the global logger with fallback
+    this.phoenixJWT = null; // Will be set by PhoenixJWT manager
+    this.isLoading = false; // Prevent duplicate API calls
+  }
+
+  /**
+   * Set Phoenix JWT manager reference
+   */
+  setPhoenixJWT(phoenixJWT) {
+    this.phoenixJWT = phoenixJWT;
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
@@ -14,6 +23,19 @@ class RecommendationAPI {
         this.logger.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');
       }
+
+      // Check if Phoenix JWT is available and initialized
+      if (!this.phoenixJWT || !this.phoenixJWT.isReady()) {
+        this.logger.error('❌ API: Phoenix JWT not initialized');
+        throw new Error('Phoenix JWT not initialized');
+      }
+
+      // Prevent duplicate API calls
+      if (this.isLoading) {
+        this.logger.warn('⚠️ API: Request already in progress, skipping');
+        return [];
+      }
+      this.isLoading = true;
 
       // Build request body for unified recommendation API
       const requestBody = {
@@ -63,7 +85,8 @@ class RecommendationAPI {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-      const response = await fetch(apiUrl, {
+      // Use JWT authentication for the request
+      const response = await this.phoenixJWT.makeAuthenticatedRequest(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -76,6 +99,10 @@ class RecommendationAPI {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 403) {
+          this.logger.warn('⏸️ API: Services suspended - shop is not active');
+          return [];
+        }
         this.logger.error(`❌ API: Request failed with status ${response.status}`);
         throw new Error(`API error: ${response.status}`);
       }
@@ -89,11 +116,13 @@ class RecommendationAPI {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        this.logger.error('⏰ API: Request timed out after 8 seconds');
+        this.logger.error('⏰ API: Request timed out after 10 seconds');
       } else {
         this.logger.error('❌ API: Error fetching recommendations from unified API:', error);
       }
       return [];
+    } finally {
+      this.isLoading = false;
     }
   }
 

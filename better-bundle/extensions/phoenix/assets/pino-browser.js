@@ -79,11 +79,6 @@ function createApiTransport(options = {}) {
     const baseUrl = window.getBaseUrl ? window.getBaseUrl() : 'https://nonconscientious-annette-saddeningly.ngrok-free.dev';
     const apiUrl = `${baseUrl}/logs`;
 
-    console.log('🚀 Sending logs to API:', {
-      url: apiUrl,
-      logCount: logBuffer.length
-    });
-
     fetch(apiUrl, {
       method: 'POST',
       mode: 'cors',
@@ -98,19 +93,16 @@ function createApiTransport(options = {}) {
       })
     })
       .then(response => {
-        console.log('📊 API response status:', response.status, response.statusText);
         if (!response.ok) {
           return response.text().then(text => {
-            console.error('❌ API error response:', text);
+
           });
         }
         return response.text();
       })
       .then(responseText => {
-        console.log('✅ API success response:', responseText);
       })
       .catch(error => {
-        console.error('❌ Failed to send logs to API:', error);
       });
 
     logBuffer = [];
@@ -118,16 +110,12 @@ function createApiTransport(options = {}) {
 
   return {
     send: (logEntry) => {
-      console.log('📝 API transport received log:', logEntry);
       logBuffer.push(logEntry);
 
       if (logBuffer.length >= batchSize) {
-        console.log('📦 Batch size reached, sending immediately');
         sendLogs();
       } else if (!batchTimeout) {
-        console.log('⏰ Setting batch timeout for', interval, 'ms');
         batchTimeout = setTimeout(() => {
-          console.log('⏰ Batch timeout reached, sending logs');
           sendLogs();
           batchTimeout = null;
         }, interval);

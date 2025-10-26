@@ -8,6 +8,14 @@ class AnalyticsApiClient {
     this.trackedEvents = new Map();
     this.deduplicationWindow = 5000; // 5 seconds
     this.logger = window.phoenixLogger || console; // Use the global logger with fallback
+    this.phoenixJWT = null; // Will be set by PhoenixJWT manager
+  }
+
+  /**
+   * Set Phoenix JWT manager reference
+   */
+  setPhoenixJWT(phoenixJWT) {
+    this.phoenixJWT = phoenixJWT;
   }
 
   async getBrowserSessionId() {
@@ -37,6 +45,11 @@ class AnalyticsApiClient {
 
   async getOrCreateSession(shopDomain, customerId) {
     try {
+      // Check if Phoenix JWT is available and initialized
+      if (!this.phoenixJWT || !this.phoenixJWT.isReady()) {
+        return null;
+      }
+
       // Always try to get client_id from storage first
       if (!this.clientId) {
         this.clientId = this.getClientIdFromStorage();
@@ -81,7 +94,8 @@ class AnalyticsApiClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
-      const response = await fetch(url, {
+      // Use JWT authentication for the request
+      const response = await this.phoenixJWT.makeAuthenticatedRequest(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -92,10 +106,10 @@ class AnalyticsApiClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        this.logger.error(
-          `❌ Analytics: Session creation failed with status ${response.status}`,
-        );
-        throw new Error(`Session creation failed: ${response.status}`);
+        if (response.status === 403) {
+          return null;
+        }
+        return null;
       }
 
       const result = await response.json();
@@ -127,17 +141,11 @@ class AnalyticsApiClient {
         );
         return sessionId;
       } else {
-        throw new Error(result.message || "Failed to create session");
+        return null;
       }
     } catch (error) {
-      if (error.name === "AbortError") {
-        this.logger.error(
-          "⏰ Analytics: Session creation timed out after 5 seconds",
-        );
-      } else {
-        this.logger.error("💥 Phoenix: Session creation error:", error);
-      }
-      throw error;
+      this.logger.error("Phoenix: Failed to get or create session:", error);
+      return null;
     }
   }
 
@@ -155,6 +163,11 @@ class AnalyticsApiClient {
 
   async trackUnifiedInteraction(request) {
     try {
+      // Check if Phoenix JWT is available and initialized
+      if (!this.phoenixJWT || !this.phoenixJWT.isReady()) {
+        return false;
+      }
+
       const eventKey = `${request.interaction_type}_${request.context}_${request.shop_domain}_${request.customer_id || "anon"}`;
 
       if (this.shouldDeduplicateEvent(eventKey)) {
@@ -173,7 +186,8 @@ class AnalyticsApiClient {
 
       const url = `${this.baseUrl}/api/phoenix/track-interaction`;
 
-      const response = await fetch(url, {
+      // Use JWT authentication for the request
+      const response = await this.phoenixJWT.makeAuthenticatedRequest(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -183,7 +197,10 @@ class AnalyticsApiClient {
       });
 
       if (!response.ok) {
-        throw new Error(`Interaction tracking failed: ${response.status}`);
+        if (response.status === 403) {
+          return false;
+        }
+        return false;
       }
 
       const result = await response.json();
@@ -245,7 +262,7 @@ class AnalyticsApiClient {
       const result = await this.trackUnifiedInteraction(request);
       return result;
     } catch (error) {
-      this.logger.error("Failed to track recommendation view:", error);
+      this.logger.error("Phoenix: Failed to track recommendation view:", error);
       return false;
     }
   }
@@ -290,7 +307,7 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      this.logger.error("Failed to track recommendation click:", error);
+      this.logger.error("Phoenix: Failed to track recommendation click:", error);
       return false;
     }
   }
@@ -344,7 +361,7 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      this.logger.error("Failed to track add to cart:", error);
+      this.logger.error("Phoenix: Failed to track add to cart:", error);
       return false;
     }
   }
@@ -379,7 +396,7 @@ class AnalyticsApiClient {
 
       return response.ok;
     } catch (error) {
-      this.logger.error("Failed to store cart attribution:", error);
+      this.logger.error("Phoenix: Failed to store cart attribution:", error);
       return false;
     }
   }

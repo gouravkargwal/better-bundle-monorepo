@@ -68,6 +68,9 @@
 <!-- Load our custom JavaScript files in correct order -->
 <script src="{{ 'config.js' | asset_url }}" defer></script>
 <script src="{{ 'analytics.js' | asset_url }}" defer></script>
+<!-- JWT Authentication (load synchronously before others) -->
+<script src="{{ 'jwtTokenManager.js' | asset_url }}"></script>
+<script src="{{ 'phoenixJWT.js' | asset_url }}" defer></script>
 <script src="{{ 'api.js' | asset_url }}" defer></script>
 <!-- Core modules (load in order) -->
 <script src="{{ 'variant-manager.js' | asset_url }}" defer></script>

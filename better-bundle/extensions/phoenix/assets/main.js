@@ -9,13 +9,12 @@
 
 class RecommendationCarousel {
   constructor() {
-    this.api = window.RecommendationAPI ? new window.RecommendationAPI() : null;
+    this.api = null; // Will be set by main.js with JWT authentication
     this.cardManager = window.productCardManager; // Use global instance
     this.analyticsApi = window.analyticsApi;
     this.config = this.getConfig();
     this.sessionId = window.sessionId; // Use session ID from Liquid template
     this.logger = window.phoenixLogger || console; // Use the global logger with fallback
-
   }
 
 
@@ -60,6 +59,12 @@ class RecommendationCarousel {
   // Initialize the recommendation carousel
   async init() {
     try {
+      // Check if API is available and JWT is initialized
+      if (!this.api) {
+        this.logger.error('❌ Phoenix: API not available or JWT not initialized');
+        this.hideCarousel();
+        return;
+      }
 
       // Set global swiper config for product card manager
       window.swiperConfig = {
@@ -71,7 +76,6 @@ class RecommendationCarousel {
 
       // Set up timeout to prevent infinite loading
       const loadingTimeout = setTimeout(() => {
-        this.logger.warn('⏰ Phoenix: Loading timeout reached, hiding carousel');
         this.hideCarousel();
       }, 15000); // 15 second timeout
 
@@ -158,19 +162,29 @@ class RecommendationCarousel {
 }
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
   try {
+    // Prevent double initialization
+    if (window.phoenixInitialized) {
+      // Already initialized, skipping
+      return;
+    }
+
+    // Initialize Phoenix JWT authentication first
+    const phoenixJWT = new window.PhoenixJWT();
+    await phoenixJWT.initialize();
+
+    // Store Phoenix JWT instance globally
+    window.phoenixJWT = phoenixJWT;
+    window.phoenixInitialized = true;
 
     // Global fallback timeout to prevent infinite skeleton loading
     const globalFallbackTimeout = setTimeout(() => {
-      const logger = window.phoenixLogger || console;
-      logger.warn('⏰ Phoenix: Global fallback timeout - hiding carousel after 15 seconds');
       const carouselContainer = document.querySelector('.shopify-app-block');
       if (carouselContainer) {
         // Only hide if carousel is still in skeleton loading state
         const skeletonElements = carouselContainer.querySelectorAll('.loading-skeleton');
         if (skeletonElements.length > 0) {
-          logger.warn('⚠️ Phoenix: Hiding carousel due to timeout - skeleton still visible');
           carouselContainer.style.display = 'none';
         }
       }
@@ -283,6 +297,18 @@ document.addEventListener('DOMContentLoaded', function () {
       // Initialize the carousel for live mode
       const carousel = new RecommendationCarousel();
       window.recommendationCarousel = carousel;
+
+      // Set up API with JWT authentication
+      if (window.RecommendationAPI && window.phoenixJWT) {
+        const api = new window.RecommendationAPI();
+        api.setPhoenixJWT(window.phoenixJWT);
+        carousel.api = api;
+      }
+
+      // Set up Analytics API with JWT authentication
+      if (window.analyticsApi && window.phoenixJWT) {
+        window.analyticsApi.setPhoenixJWT(window.phoenixJWT);
+      }
 
       // Initialize when page loads
       carousel.init();
