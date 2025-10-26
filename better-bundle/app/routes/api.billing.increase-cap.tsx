@@ -6,7 +6,6 @@ import logger from "app/utils/logger";
 
 async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
   try {
-    // ✅ TRANSACTION: Wrap all reprocessing in a single transaction
     await prisma.$transaction(async (tx) => {
       // Find all rejected commissions for this cycle with row-level locking
       const rejectedCommissions = await tx.commission_records.findMany({
