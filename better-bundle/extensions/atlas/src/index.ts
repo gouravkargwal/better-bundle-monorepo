@@ -1,6 +1,7 @@
 import { register } from "@shopify/web-pixels-extension";
 import { SUBSCRIBABLE_EVENTS } from "./config/constants";
 import { trackInteraction } from "./utils/api-client";
+import { logger } from "./utils/logger";
 
 register(({ analytics, init, browser }) => {
   // Add error handling wrapper
@@ -8,13 +9,13 @@ register(({ analytics, init, browser }) => {
     try {
       await fn();
     } catch (error) {
-      console.error(`Atlas pixel error in ${context}:`, error);
+      logger.error({ error }, `Atlas pixel error in ${context}`);
     }
   };
 
   // Validate required data
   if (!init?.data?.shop?.myshopifyDomain) {
-    console.error("Atlas pixel: Missing shop domain");
+    logger.error({ init }, "Atlas pixel: Missing shop domain");
     return;
   }
 
@@ -31,8 +32,7 @@ register(({ analytics, init, browser }) => {
     clientId: null as string | null,
   };
 
-  console.log("Atlas pixel initialized for shop:", shopDomain);
-  console.log("Initial customer ID:", state.customerId || "anonymous");
+  logger.info({ shopDomain, state }, "Atlas pixel initialized");
 
   // ✅ Helper to extract customer ID from event
   const getCustomerIdFromEvent = (event: any): string | null => {
@@ -52,7 +52,7 @@ register(({ analytics, init, browser }) => {
       // Extract clientId from the event if available
       if (event?.clientId && !state.clientId) {
         state.clientId = event.clientId;
-        console.log("Client ID detected:", state.clientId);
+        logger.info({ state }, "Client ID detected");
       }
 
       // Extract customer ID from event (not just init)
@@ -61,16 +61,12 @@ register(({ analytics, init, browser }) => {
       // Update global customerId if we found one in the event
       if (eventCustomerId && !state.customerId) {
         state.customerId = eventCustomerId;
-        console.log("Customer ID identified from event:", state.customerId);
+        logger.info({ state }, "Customer ID identified from event");
       }
 
       // Fire customer_linked event when we have BOTH clientId and customerId
       if (state.clientId && state.customerId) {
-        console.log("Firing customer_linked event:", {
-          clientId: state.clientId,
-          customerId: state.customerId,
-        });
-
+        logger.info({ state }, "Firing customer_linked event");
         await trackInteraction(
           {
             name: "customer_linked",
@@ -99,7 +95,7 @@ register(({ analytics, init, browser }) => {
       const url = event?.context?.document?.location?.href;
 
       if (!url) {
-        console.warn("Atlas pixel: No URL found in event context");
+        logger.warn({ event }, "Atlas pixel: No URL found in event context");
         return;
       }
 
@@ -153,7 +149,7 @@ register(({ analytics, init, browser }) => {
         }
       }
     } catch (error) {
-      console.warn("Atlas pixel: Failed to get stored attribution:", error);
+      logger.error({ error }, "Atlas pixel: Failed to get stored attribution");
     }
     return null;
   };
@@ -173,7 +169,7 @@ register(({ analytics, init, browser }) => {
         }),
       };
     } catch (error) {
-      console.warn("Atlas pixel: Failed to enhance event:", error);
+      logger.error({ error, event }, "Atlas pixel: Failed to enhance event");
       return event; // Return original event if enhancement fails
     }
   };
