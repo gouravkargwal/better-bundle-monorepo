@@ -8,8 +8,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { shop } = session;
 
   try {
-    logger.info({ shop }, "Getting billing status");
-
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },

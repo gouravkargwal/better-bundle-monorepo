@@ -227,11 +227,6 @@ export class OnboardingService {
 
   private async activateWebPixel(admin: any, shopDomain: string) {
     try {
-      const backendUrl = process.env.BACKEND_URL;
-      const webPixelSettings = {
-        backend_url: backendUrl,
-      };
-
       const createMutation = `
         mutation webPixelCreate($webPixel: WebPixelInput!) {
           webPixelCreate(webPixel: $webPixel) {
@@ -251,7 +246,7 @@ export class OnboardingService {
       const createResponse = await admin.graphql(createMutation, {
         variables: {
           webPixel: {
-            settings: JSON.stringify(webPixelSettings),
+            settings: "{}", // Must be a JSON string, even if empty
           },
         },
       });
@@ -273,7 +268,7 @@ export class OnboardingService {
         );
 
       if (hasTakenError) {
-        return { id: "existing", settings: webPixelSettings };
+        return { id: "existing" };
       }
 
       // Log other creation errors but don't fail the entire flow

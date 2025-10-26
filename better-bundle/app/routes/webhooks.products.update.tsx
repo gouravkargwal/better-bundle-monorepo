@@ -6,10 +6,7 @@ import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension"
 import logger from "app/utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const startTime = Date.now();
-
   try {
-    logger.info("Products update webhook received");
     const { payload, session } = await authenticate.webhook(request);
 
     if (!session) {
@@ -17,18 +14,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Authentication failed" }, { status: 401 });
     }
 
-    logger.info(
-      { shop: session.shop },
-      "Products update webhook authentication successful",
-    );
-
     // Check if shop services are suspended
     const suspensionStatus = await checkServiceSuspensionByDomain(session.shop);
     if (suspensionStatus.isSuspended) {
-      logger.info(
-        { shop: session.shop, reason: suspensionStatus.reason },
-        "Skipping product update - shop services suspended",
-      );
       return json({
         success: true,
         message: "Product update skipped - services suspended",
@@ -46,8 +34,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No product ID found" }, { status: 400 });
     }
 
-    logger.info({ productId }, "Product ID found in payload");
-
     // Publish Kafka event with shop_domain - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {
@@ -57,20 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
-    logger.info({ event }, "Publishing Kafka event");
-
     await producer.publishShopifyEvent(event);
-
-    logger.info(
-      { productId, shopDomain: session.shop },
-      "Kafka event published successfully",
-    );
-
-    const duration = Date.now() - startTime;
-    logger.info(
-      { productId, shopDomain: session.shop, duration },
-      "Product update webhook processed successfully",
-    );
 
     return json({
       success: true,

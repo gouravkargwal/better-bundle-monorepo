@@ -18,7 +18,6 @@ class RecommendationAPI {
     try {
       const context = window.context || 'homepage';
       const shopDomain = window.shopDomain || '';
-      this.logger.info('API: Fetching recommendations for shop domain:', shopDomain);
       if (!shopDomain) {
         this.logger.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');

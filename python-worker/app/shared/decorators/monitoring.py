@@ -9,13 +9,14 @@ from datetime import datetime
 
 from app.core.logging import get_logger
 
+logger = get_logger(__name__)
+
 
 def monitor(func_name: Optional[str] = None):
     """Monitor function execution with timing and logging"""
 
     def decorator(func: Callable) -> Callable:
         name = func_name or func.__name__
-        logger = get_logger(__name__)
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -23,27 +24,10 @@ def monitor(func_name: Optional[str] = None):
             start_datetime = datetime.now()
 
             try:
-                logger.info(
-                    f"Starting {name}",
-                    extra={
-                        "function": name,
-                        "start_time": start_datetime.isoformat(),
-                        "args_count": len(args),
-                        "kwargs_count": len(kwargs),
-                    },
-                )
 
                 result = func(*args, **kwargs)
 
                 execution_time = time.time() - start_time
-                logger.info(
-                    f"Completed {name}",
-                    extra={
-                        "function": name,
-                        "execution_time": execution_time,
-                        "status": "success",
-                    },
-                )
 
                 return result
 
@@ -70,7 +54,6 @@ def async_monitor(func_name: Optional[str] = None):
 
     def decorator(func: Callable) -> Callable:
         name = func_name or func.__name__
-        logger = logging.getLogger(__name__)
 
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
@@ -78,27 +61,10 @@ def async_monitor(func_name: Optional[str] = None):
             start_datetime = datetime.now()
 
             try:
-                logger.info(
-                    f"Starting {name}",
-                    extra={
-                        "function": name,
-                        "start_time": start_datetime.isoformat(),
-                        "args_count": len(args),
-                        "kwargs_count": len(kwargs),
-                    },
-                )
 
                 result = await func(*args, **kwargs)
 
                 execution_time = time.time() - start_time
-                logger.info(
-                    f"Completed {name}",
-                    extra={
-                        "function": name,
-                        "execution_time": execution_time,
-                        "status": "success",
-                    },
-                )
 
                 return result
 

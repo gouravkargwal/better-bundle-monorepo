@@ -27,8 +27,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  logger.info("Onboarding action triggered");
-
   const {
     session,
     admin,
@@ -36,10 +34,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } = await authenticate.admin(request);
 
   try {
-    logger.info({ shop: session.shop }, "Starting onboarding completion");
     const onboardingService = new OnboardingService();
     await onboardingService.completeOnboarding(session, admin);
-    logger.info({ shop: session.shop }, "Onboarding completed successfully");
     return authRedirect("/app");
   } catch (error) {
     logger.error(

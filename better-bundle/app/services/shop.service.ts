@@ -94,12 +94,6 @@ const createShopAndSetOnboardingCompleted = async (
 
   const isReinstall = existingShop && !existingShop.is_active;
 
-  if (isReinstall) {
-    logger.info({ shopDomain: shopData.myshopifyDomain }, "Reactivating shop");
-  } else {
-    logger.info({ shopDomain: shopData.myshopifyDomain }, "Creating new shop");
-  }
-
   const shop = await db.shops.upsert({
     where: { shop_domain: shopData.myshopifyDomain },
     update: {
@@ -146,13 +140,6 @@ const markOnboardingCompleted = async (shopDomain: string, tx?: any) => {
 
 const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
   try {
-    // Get the backend URL from environment or use a default
-    const backendUrl = process.env.BACKEND_URL;
-
-    const webPixelSettings = {
-      backend_url: backendUrl,
-    };
-
     // Try to create the web pixel
     const createMutation = `
       mutation webPixelCreate($webPixel: WebPixelInput!) {
@@ -173,7 +160,7 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
     const createResponse = await admin.graphql(createMutation, {
       variables: {
         webPixel: {
-          settings: JSON.stringify(webPixelSettings),
+          settings: "{}", // Must be a JSON string, even if empty
         },
       },
     });
@@ -185,10 +172,6 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
       createResponseJson.data?.webPixelCreate?.userErrors?.length === 0 &&
       createResponseJson.data?.webPixelCreate?.webPixel
     ) {
-      logger.info(
-        { pixelId: createResponseJson.data.webPixelCreate.webPixel.id },
-        "Atlas web pixel created successfully",
-      );
       return createResponseJson.data.webPixelCreate.webPixel;
     }
 
@@ -199,10 +182,9 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
       );
 
     if (hasTakenError) {
-      logger.info("Web pixel already exists and is active");
       // Since we can't query existing pixels due to API limitations,
       // we'll assume it's working if we get a TAKEN error
-      return { id: "existing", settings: webPixelSettings };
+      return { id: "existing" };
     }
 
     // Log other creation errors but don't fail the entire flow
@@ -216,8 +198,6 @@ const activateAtlasWebPixel = async (admin: any, shopDomain: string) => {
       );
     }
 
-    // Don't throw error - the app can function without the web pixel
-    logger.info("Web pixel activation completed with warnings");
     return null;
   } catch (error) {
     logger.error({ error }, "Failed to activate Atlas web pixel");
@@ -256,8 +236,6 @@ const deactivateShopBilling = async (
       where: { shop_id: updatedShops.id, status: "ACTIVE" },
       select: { id: true, shop_id: true },
     });
-
-    logger.info({ shopDomain }, "Successfully deactivated billing for shop");
 
     return {
       success: true,

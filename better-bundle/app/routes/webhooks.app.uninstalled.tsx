@@ -6,8 +6,6 @@ import logger from "../utils/logger";
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
 
-  logger.info({ shop, topic }, "Received app uninstalled webhook");
-
   try {
     // Webhook requests can trigger multiple times and after an app has already been uninstalled.
     // If this webhook already ran, the session may have been deleted previously.
@@ -44,14 +42,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             updated_at: new Date(),
           },
         });
-
-        logger.info({ shop }, "Successfully processed app uninstall");
       }
 
       // 4. Delete sessions (original functionality)
       await prisma.sessions.deleteMany({ where: { shop } });
-
-      logger.info({ shop }, "Deleted sessions");
     } else {
       logger.warn(
         { shop },

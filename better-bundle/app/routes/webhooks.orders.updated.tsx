@@ -8,15 +8,12 @@ import logger from "../utils/logger";
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, topic, shop;
 
-  logger.info("Order updated webhook triggered");
-
   try {
     const authResult = await authenticate.webhook(request);
     payload = authResult.payload;
     session = authResult.session;
     topic = authResult.topic;
     shop = authResult.shop;
-    logger.info({ shop, topic }, "Webhook authentication successful");
   } catch (authError) {
     logger.error(
       {
@@ -37,10 +34,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const suspensionStatus = await checkServiceSuspensionByDomain(shop);
     if (suspensionStatus.isSuspended) {
-      logger.info(
-        { shop, reason: suspensionStatus.reason },
-        "Skipping order update - shop services suspended"
-      );
       return json({
         success: true,
         message: "Order update skipped - services suspended",
@@ -49,10 +42,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
   } catch (suspensionError) {
-    logger.warn(
+    logger.error(
       { error: suspensionError, shop },
-      "Error checking suspension status, proceeding with order update"
+      "Error checking suspension status",
     );
+    throw suspensionError;
   }
 
   try {
@@ -63,9 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No order ID found in payload" }, { status: 400 });
     }
 
-    logger.info("Initializing Kafka producer");
     const kafkaProducer = await KafkaProducerService.getInstance();
-    logger.info("Kafka producer initialized");
 
     const streamData = {
       event_type: "order_updated",
@@ -74,9 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
-    logger.info({ streamData }, "Publishing event to Kafka");
     const messageId = await kafkaProducer.publishShopifyEvent(streamData);
-    logger.info({ messageId }, "Event published successfully");
 
     return json({
       success: true,

@@ -81,8 +81,6 @@ class JWTService:
         # Token refresh threshold (refresh 5 minutes before expiry)
         self.refresh_threshold = timedelta(minutes=5)
 
-        logger.info("✅ JWT Service initialized successfully")
-
     def create_shop_token(
         self,
         shop_id: str,

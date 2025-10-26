@@ -6,10 +6,7 @@ import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension"
 import logger from "app/utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const startTime = Date.now();
   let payload, session, topic, shop;
-
-  logger.info("Order paid webhook triggered");
 
   try {
     const authResult = await authenticate.webhook(request);
@@ -17,7 +14,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     session = authResult.session;
     topic = authResult.topic;
     shop = authResult.shop;
-    logger.info({ shop, topic }, "Webhook authentication successful");
   } catch (authError) {
     logger.error(
       {
@@ -38,10 +34,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const suspensionStatus = await checkServiceSuspensionByDomain(shop);
     if (suspensionStatus.isSuspended) {
-      logger.info(
-        { shop, reason: suspensionStatus.reason },
-        "Skipping order paid processing - shop services suspended",
-      );
       return json({
         success: true,
         message: "Order paid processing skipped - services suspended",
@@ -50,10 +42,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
   } catch (suspensionError) {
-    logger.warn(
+    logger.error(
       { error: suspensionError, shop },
-      "Error checking suspension status, proceeding with order paid processing",
+      "Error checking suspension status",
     );
+    throw suspensionError;
   }
 
   try {
@@ -61,19 +54,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const order = payload;
     const orderId = order.id?.toString();
 
-    logger.info(
-      { orderId, shop, orderKeys: Object.keys(order) },
-      "Order data received",
-    );
-
     if (!orderId) {
       logger.error({ payload }, "No order ID found in payload");
       return json({ error: "No order ID found" }, { status: 400 });
     }
 
-    logger.info("Initializing Kafka producer");
     const kafkaProducer = await KafkaProducerService.getInstance();
-    logger.info("Kafka producer initialized");
 
     const streamData = {
       event_type: "order_paid",
@@ -82,15 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
-    logger.info({ event: streamData }, "Publishing event to Kafka");
     const messageId = await kafkaProducer.publishShopifyEvent(streamData);
-    logger.info({ messageId }, "Event published successfully");
-
-    const duration = Date.now() - startTime;
-    logger.info(
-      { orderId, shopDomain: shop, duration },
-      "Order paid webhook processed successfully",
-    );
 
     return json({
       success: true,

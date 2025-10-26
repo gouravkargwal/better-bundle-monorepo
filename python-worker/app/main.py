@@ -44,7 +44,6 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("🚀 Starting BetterBundle Python Worker...")
 
     # Initialize services
     await initialize_services()
@@ -54,12 +53,9 @@ async def lifespan(app: FastAPI):
     if kafka_consumer_manager:
         await kafka_consumer_manager.start_all_consumers()
 
-    logger.info("✅ BetterBundle Python Worker started successfully")
-
     yield
 
     # Shutdown
-    logger.info("🛑 Shutting down BetterBundle Python Worker...")
 
     # Stop Kafka consumers first
     if kafka_consumer_manager:
@@ -71,8 +67,6 @@ async def lifespan(app: FastAPI):
     await topic_manager.close()
 
     await cleanup_services()
-
-    logger.info("✅ BetterBundle Python Worker shutdown completed")
 
 
 # Create FastAPI app
@@ -170,7 +164,6 @@ async def initialize_services():
 async def cleanup_services():
     """Cleanup all services"""
     try:
-        logger.info("🧹 Starting service cleanup...")
 
         # Kafka consumers are stopped by kafka_consumer_manager in lifespan
 
@@ -182,8 +175,6 @@ async def cleanup_services():
 
         # Clear services dictionary
         services.clear()
-
-        logger.info("✅ Service cleanup completed")
 
     except Exception as e:
         logger.error(f"Failed to cleanup services: {e}")

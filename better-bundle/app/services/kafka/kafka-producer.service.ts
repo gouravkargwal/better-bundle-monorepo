@@ -82,7 +82,6 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      logger.info({ messageId }, "Shopify event published");
       return messageId;
     } catch (error) {
       this.errorCount++;
@@ -127,7 +126,6 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      logger.info({ messageId }, "Data job published");
       return messageId;
     } catch (error) {
       this.errorCount++;
@@ -172,7 +170,6 @@ export class KafkaProducerService {
       this.messageCount++;
       const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
 
-      logger.info({ messageId }, "Access control event published");
       return messageId;
     } catch (error) {
       this.errorCount++;
@@ -217,7 +214,6 @@ export class KafkaProducerService {
         (r) => `${r.topicName}:${r.partition}:${r.offset}`,
       );
 
-      logger.info({ messageIds }, "Batch published");
       return messageIds;
     } catch (error) {
       this.errorCount += events.length;
@@ -251,7 +247,6 @@ export class KafkaProducerService {
     if (this.producer) {
       await this.producer.disconnect();
       this.producer = null;
-      logger.info("Kafka producer service closed");
     }
   }
 }

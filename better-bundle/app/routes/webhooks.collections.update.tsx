@@ -6,10 +6,7 @@ import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension"
 import logger from "app/utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const startTime = Date.now();
-
   try {
-    logger.info("Collections update webhook received");
     const { payload, session } = await authenticate.webhook(request);
 
     if (!session) {
@@ -17,18 +14,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Authentication failed" }, { status: 401 });
     }
 
-    logger.info(
-      { shop: session.shop },
-      "Collections update webhook authentication successful",
-    );
-
     // Check if shop services are suspended
     const suspensionStatus = await checkServiceSuspensionByDomain(session.shop);
     if (suspensionStatus.isSuspended) {
-      logger.info(
-        { shop: session.shop, reason: suspensionStatus.reason },
-        "Skipping collection update - shop services suspended",
-      );
       return json({
         success: true,
         message: "Collection update skipped - services suspended",
@@ -46,8 +34,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No collection ID found" }, { status: 400 });
     }
 
-    logger.info({ collectionId }, "Collection ID found in payload");
-
     // Publish Kafka event - backend will resolve shop_id
     const producer = await KafkaProducerService.getInstance();
     const event = {
@@ -57,20 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     } as const;
 
-    logger.info({ event }, "Publishing Kafka event");
-
     await producer.publishShopifyEvent(event);
-
-    logger.info(
-      { collectionId, shopDomain: session.shop },
-      "Kafka event published successfully",
-    );
-
-    const duration = Date.now() - startTime;
-    logger.info(
-      { collectionId, shopDomain: session.shop, duration },
-      "Collection update webhook processed successfully",
-    );
 
     return json({
       success: true,

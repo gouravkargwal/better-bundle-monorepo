@@ -6,10 +6,7 @@ import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension"
 import logger from "app/utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const startTime = Date.now();
-
   try {
-    logger.info("Customers create webhook received");
     const { payload, session, shop } = await authenticate.webhook(request);
 
     if (!session || !shop) {
@@ -17,15 +14,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Authentication failed" }, { status: 401 });
     }
 
-    logger.info({ shop }, "Customers create webhook authentication successful");
-
     // Check if shop services are suspended
     const suspensionStatus = await checkServiceSuspensionByDomain(shop);
     if (suspensionStatus.isSuspended) {
-      logger.info(
-        { shop, reason: suspensionStatus.reason },
-        "Skipping customer create - shop services suspended",
-      );
       return json({
         success: true,
         message: "Customer create skipped - services suspended",
@@ -43,8 +34,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "No customer ID found" }, { status: 400 });
     }
 
-    logger.info({ customerId }, "Customer ID found in payload");
-
     const kafkaProducer = await KafkaProducerService.getInstance();
 
     const streamData = {
@@ -54,20 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       timestamp: new Date().toISOString(),
     };
 
-    logger.info({ event: streamData }, "Publishing Kafka event");
-
     await kafkaProducer.publishShopifyEvent(streamData);
-
-    logger.info(
-      { customerId, shopDomain: shop },
-      "Kafka event published successfully",
-    );
-
-    const duration = Date.now() - startTime;
-    logger.info(
-      { customerId, shopDomain: shop, duration },
-      "Customer create webhook processed successfully",
-    );
 
     return json({
       success: true,

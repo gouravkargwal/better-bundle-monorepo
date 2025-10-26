@@ -61,7 +61,6 @@ class ShopCacheService:
             await self._warm_cache()
 
             self._initialized = True
-            logger.info("✅ Shop cache service initialized successfully")
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize shop cache service: {e}")
@@ -133,7 +132,6 @@ class ShopCacheService:
         try:
             await self.cache_service.delete("active_shop", shop_domain=shop_domain)
             await self.cache_service.delete("negative_shop", shop_domain=shop_domain)
-            logger.info(f"🗑️ Invalidated cache for shop domain: {shop_domain}")
 
         except Exception as e:
             logger.error(f"❌ Failed to invalidate cache for shop {shop_domain}: {e}")
@@ -154,13 +152,9 @@ class ShopCacheService:
             if shop:
                 # Update cache with fresh data
                 await self._set_in_cache(shop_domain, shop)
-                logger.info(f"🔄 Refreshed cache for shop domain: {shop_domain}")
             else:
                 # Shop no longer exists, cache negative result
                 await self._cache_negative_result(shop_domain)
-                logger.info(
-                    f"🗑️ Shop no longer exists, cached negative result for: {shop_domain}"
-                )
 
         except Exception as e:
             logger.error(f"❌ Failed to refresh cache for shop {shop_domain}: {e}")
@@ -189,13 +183,9 @@ class ShopCacheService:
     async def _get_from_cache(self, shop_domain: str) -> Optional[Dict[str, Any]]:
         """Get shop data from cache"""
         try:
-            logger.debug(f"🔍 Checking cache for shop domain: {shop_domain}")
-
             # Try positive cache first
             shop = await self.cache_service.get("active_shop", shop_domain=shop_domain)
             if shop:
-                logger.debug(f"✅ Cache hit for shop domain: {shop_domain}")
-                logger.debug(f"Cached data: {shop}")
                 return shop
 
             # Check negative cache
@@ -203,19 +193,12 @@ class ShopCacheService:
                 "negative_shop", shop_domain=shop_domain
             )
             if negative_result:
-                logger.debug(
-                    f"❌ Negative result cached for shop domain: {shop_domain}"
-                )
                 return None  # Explicitly cached as not found
 
-            logger.debug(f"❌ Cache miss for shop domain: {shop_domain}")
             return None  # Not in cache
 
         except Exception as e:
             logger.error(f"❌ Cache get error for shop {shop_domain}: {e}")
-            import traceback
-
-            logger.error(f"❌ Cache get traceback: {traceback.format_exc()}")
             return None
 
     async def _get_from_database(self, shop_domain: str) -> Optional[Dict[str, Any]]:
@@ -251,8 +234,6 @@ class ShopCacheService:
     async def _set_in_cache(self, shop_domain: str, shop_data: Dict[str, Any]):
         """Cache shop data"""
         try:
-            logger.info(f"🔄 Caching shop data for domain: {shop_domain}")
-            logger.debug(f"Shop data to cache: {shop_data}")
 
             result = await self.cache_service.set(
                 "active_shop",
@@ -261,18 +242,8 @@ class ShopCacheService:
                 shop_domain=shop_domain,
             )
 
-            if result:
-                logger.info(
-                    f"✅ Successfully cached shop data for domain: {shop_domain}"
-                )
-            else:
-                logger.warning(f"⚠️ Cache set returned False for domain: {shop_domain}")
-
         except Exception as e:
             logger.error(f"❌ Cache set error for shop {shop_domain}: {e}")
-            import traceback
-
-            logger.error(f"❌ Cache set traceback: {traceback.format_exc()}")
 
     async def _cache_negative_result(self, shop_domain: str):
         """Cache negative result to avoid repeated DB queries"""
@@ -322,7 +293,6 @@ class ShopCacheService:
         if self.cache_service:
             await self.cache_service.close()
         self._initialized = False
-        logger.info("🔒 Shop cache service closed")
 
 
 # Global shop cache service instance

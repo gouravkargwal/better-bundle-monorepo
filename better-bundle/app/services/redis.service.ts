@@ -17,7 +17,6 @@ export async function getRedisClient(): Promise<RedisClientType> {
     const redisConfig: any = {
       socket: {
         reconnectStrategy: (retries: number) => {
-          logger.info({ retries }, "Redis reconnection attempt");
           if (retries > 10) {
             logger.error("Redis connection failed after 10 retries");
             return new Error("Redis connection failed");

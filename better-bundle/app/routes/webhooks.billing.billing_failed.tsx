@@ -6,8 +6,6 @@ import logger from "../utils/logger";
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
 
-  logger.info({ shop, topic }, "Billing failed");
-
   try {
     const billingAttempt = payload.subscription_billing_attempt;
     const subscriptionId = billingAttempt?.subscription_id;
@@ -84,17 +82,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       create: invoiceData,
     });
-
-    logger.info(
-      {
-        shop,
-        invoiceId: invoiceData.shopify_invoice_id,
-        amount,
-        currency,
-        failureReason,
-      },
-      "Billing failed",
-    );
 
     return json({ success: true });
   } catch (error) {

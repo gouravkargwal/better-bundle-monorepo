@@ -32,8 +32,6 @@ register(({ analytics, init, browser }) => {
     clientId: null as string | null,
   };
 
-  logger.info({ shopDomain, state }, "Atlas pixel initialized");
-
   // ✅ Helper to extract customer ID from event
   const getCustomerIdFromEvent = (event: any): string | null => {
     // Try multiple sources for customer ID
@@ -52,7 +50,6 @@ register(({ analytics, init, browser }) => {
       // Extract clientId from the event if available
       if (event?.clientId && !state.clientId) {
         state.clientId = event.clientId;
-        logger.info({ state }, "Client ID detected");
       }
 
       // Extract customer ID from event (not just init)
@@ -61,12 +58,10 @@ register(({ analytics, init, browser }) => {
       // Update global customerId if we found one in the event
       if (eventCustomerId && !state.customerId) {
         state.customerId = eventCustomerId;
-        logger.info({ state }, "Customer ID identified from event");
       }
 
       // Fire customer_linked event when we have BOTH clientId and customerId
       if (state.clientId && state.customerId) {
-        logger.info({ state }, "Firing customer_linked event");
         await trackInteraction(
           {
             name: "customer_linked",

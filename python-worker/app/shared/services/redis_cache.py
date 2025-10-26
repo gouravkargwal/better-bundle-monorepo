@@ -53,7 +53,7 @@ class CacheSerializer:
         try:
             return json.dumps(value, default=str)
         except (TypeError, ValueError) as e:
-            logger.warning(f"JSON serialization failed, falling back to pickle: {e}")
+            logger.error(f"JSON serialization failed, falling back to pickle: {e}")
             return pickle.dumps(value).hex()
 
     @staticmethod
@@ -64,7 +64,7 @@ class CacheSerializer:
                 return pickle.loads(bytes.fromhex(value))
             return json.loads(value)
         except (json.JSONDecodeError, ValueError, pickle.PickleError) as e:
-            logger.warning(f"Deserialization failed: {e}")
+            logger.error(f"Deserialization failed: {e}")
             return None
 
 
@@ -150,7 +150,7 @@ class RedisCacheService(Generic[T]):
             try:
                 metadata = CacheMetadata.from_dict(json.loads(metadata_data))
             except (json.JSONDecodeError, KeyError):
-                logger.warning(
+                logger.error(
                     f"Invalid metadata for key {cache_key}, treating as cache miss"
                 )
                 self._stats["misses"] += 1
@@ -158,7 +158,6 @@ class RedisCacheService(Generic[T]):
 
             # Check if expired
             if datetime.now() > metadata.created_at + timedelta(seconds=metadata.ttl):
-                logger.debug(f"Cache key {cache_key} expired, removing")
                 await self.delete(key, *args, **kwargs)
                 self._stats["misses"] += 1
                 return None
@@ -174,7 +173,6 @@ class RedisCacheService(Generic[T]):
             value = self.serializer.deserialize(value_data)
             self._stats["hits"] += 1
 
-            logger.debug(f"Cache hit for key {cache_key}")
             return value
 
         except Exception as e:
@@ -218,7 +216,6 @@ class RedisCacheService(Generic[T]):
                 await pipe.execute()
 
             self._stats["sets"] += 1
-            logger.debug(f"Cache set for key {cache_key} with TTL {ttl}s")
             return True
 
         except Exception as e:
@@ -249,7 +246,6 @@ class RedisCacheService(Generic[T]):
                 await pipe.execute()
 
             self._stats["deletes"] += 1
-            logger.debug(f"Cache delete for key {cache_key}")
             return True
 
         except Exception as e:
@@ -283,9 +279,6 @@ class RedisCacheService(Generic[T]):
             if keys_to_delete:
                 await redis_client.delete(*keys_to_delete)
 
-            logger.info(
-                f"Cleared {len(keys_to_delete)} cache keys from namespace {self.namespace}"
-            )
             return True
 
         except Exception as e:
@@ -397,7 +390,6 @@ class RedisCacheService(Generic[T]):
                 await pipe.expire(f"{cache_key}:metadata", new_ttl)
                 await pipe.execute()
 
-            logger.debug(f"Extended TTL for key {cache_key} to {new_ttl}s")
             return True
 
         except Exception as e:
@@ -424,7 +416,6 @@ class RedisCacheService(Generic[T]):
     def reset_stats(self) -> None:
         """Reset cache statistics"""
         self._stats = {"hits": 0, "misses": 0, "sets": 0, "deletes": 0, "errors": 0}
-        logger.info(f"Cache statistics reset for namespace {self.namespace}")
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on cache service"""
@@ -465,7 +456,6 @@ async def get_shared_redis_client() -> RedisClient:
     if _shared_redis_client is None:
         _shared_redis_client = get_redis_client_instance()
         await _shared_redis_client.connect()
-        logger.info("Shared Redis client initialized for all cache services")
 
     return _shared_redis_client
 
@@ -489,7 +479,7 @@ async def create_cache_service(
     # Test connection using shared client
     health = await cache_service.health_check()
     if health["status"] != "healthy":
-        logger.warning(f"Cache service health check failed for namespace {namespace}")
+        logger.error(f"Cache service health check failed for namespace {namespace}")
 
     return cache_service
 
@@ -501,4 +491,3 @@ async def close_all_cache_services() -> None:
     if _shared_redis_client:
         await _shared_redis_client.disconnect()
         _shared_redis_client = None
-        logger.info("All cache services and shared Redis connection closed")
