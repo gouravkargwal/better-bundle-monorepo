@@ -28,7 +28,6 @@ class EventPublisher:
             )
             await self._producer.initialize()
             self._initialized = True
-            logger.info("Event publisher initialized")
         except Exception as e:
             logger.error(f"Failed to initialize event publisher: {e}")
             raise
@@ -54,9 +53,6 @@ class EventPublisher:
                 "shopify-events", event_with_metadata, key
             )
 
-            logger.info(
-                f"Shopify event published: {event_data.get('event_type')} for shop {event_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -80,7 +76,7 @@ class EventPublisher:
 
         try:
             # Pre-publish diagnostic logging
-            logger.info(
+            logger.debug(
                 "Publishing data collection job",
                 extra={
                     "topic": "data-collection-jobs",
@@ -102,16 +98,6 @@ class EventPublisher:
             )
 
             # Post-publish confirmation logging
-            logger.info(
-                "Data collection job published",
-                extra={
-                    "topic": "data-collection-jobs",
-                    "message_id": message_id,
-                    "job_type": job_data.get("job_type"),
-                    "shop_id": job_data.get("shop_id"),
-                    "data_types": job_data.get("data_types"),
-                },
-            )
             return message_id
 
         except Exception as e:
@@ -146,9 +132,6 @@ class EventPublisher:
                 "ml-training", training_with_metadata, key
             )
 
-            logger.info(
-                f"ML training event published for shop {training_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -175,9 +158,6 @@ class EventPublisher:
                 "billing-events", billing_with_metadata, key
             )
 
-            logger.info(
-                f"Billing event published: {billing_data.get('event_type')} for shop {billing_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -204,9 +184,6 @@ class EventPublisher:
                 "access-control", access_with_metadata, key
             )
 
-            logger.info(
-                f"Access control event published: {access_data.get('event_type')} for shop {access_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -235,9 +212,6 @@ class EventPublisher:
                 "normalization-jobs", norm_with_metadata, key
             )
 
-            logger.info(
-                f"Normalization job published: {normalization_data.get('event_type')} for shop {normalization_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -264,9 +238,6 @@ class EventPublisher:
                 "behavioral-events", behavioral_with_metadata, key
             )
 
-            logger.info(
-                f"Behavioral event published: {behavioral_data.get('event_type')} for shop {behavioral_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -293,9 +264,6 @@ class EventPublisher:
                 "analytics-events", analytics_with_metadata, key
             )
 
-            logger.info(
-                f"Analytics event published: {analytics_data.get('event_type')} for shop {analytics_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -324,9 +292,6 @@ class EventPublisher:
                 "notification-events", notification_with_metadata, key
             )
 
-            logger.info(
-                f"Notification event published: {notification_data.get('event_type')} for shop {notification_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -353,9 +318,6 @@ class EventPublisher:
                 "integration-events", integration_with_metadata, key
             )
 
-            logger.info(
-                f"Integration event published: {integration_data.get('event_type')} for shop {integration_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -382,9 +344,6 @@ class EventPublisher:
                 "audit-events", audit_with_metadata, key
             )
 
-            logger.info(
-                f"Audit event published: {audit_data.get('event_type')} for shop {audit_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -413,9 +372,6 @@ class EventPublisher:
                 "feature-computation-jobs", feature_with_metadata, key
             )
 
-            logger.info(
-                f"Feature computation event published: {feature_data.get('event_type')} for shop {feature_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -442,9 +398,6 @@ class EventPublisher:
                 "customer-linking-jobs", linking_with_metadata, key
             )
 
-            logger.info(
-                f"Customer linking event published: {linking_data.get('event_type')} for shop {linking_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -473,9 +426,6 @@ class EventPublisher:
                 "purchase-attribution-jobs", attribution_with_metadata, key
             )
 
-            logger.info(
-                f"Purchase attribution event published: {attribution_data.get('event_type')} for shop {attribution_data.get('shop_id')}"
-            )
             return message_id
 
         except Exception as e:
@@ -499,8 +449,12 @@ class EventPublisher:
 
         try:
             results = await self._producer.send_batch(batch_messages)
-            logger.info(
-                f"Batch published: {len([r for r in results if r is not None])}/{len(events)} events"
+            logger.debug(
+                "Batch published",
+                extra={
+                    "results": results,
+                    "events": events,
+                },
             )
             return results
 
@@ -513,4 +467,3 @@ class EventPublisher:
         if self._producer:
             await self._producer.close()
         self._initialized = False
-        logger.info("Event publisher closed")
