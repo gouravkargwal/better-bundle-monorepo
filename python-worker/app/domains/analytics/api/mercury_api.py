@@ -134,28 +134,7 @@ async def get_or_create_mercury_session(
     but also supports anonymous sessions. Requires Shopify Plus plan.
     """
     try:
-        # Validate Shopify Plus status first
-        is_shopify_plus = await validate_shopify_plus_store(request.shop_domain)
-
-        if not is_shopify_plus:
-            logger.warning(
-                f"⚠️ Mercury: Store {request.shop_domain} is not Shopify Plus - Mercury disabled"
-            )
-            return MercuryResponse(
-                success=False,
-                message="Mercury requires Shopify Plus plan",
-                data={
-                    "reason": "Shopify Plus required",
-                    "shop_domain": request.shop_domain,
-                    "mercury_enabled": False,
-                },
-            )
-
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        if not shop_id:
-            raise HTTPException(status_code=404, detail="Shop not found")
-
-        # JWT-based suspension check (stateless - no Redis needed!)
+        # JWT-based suspension check first (stateless - no Redis needed!)
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(
                 status_code=401,
@@ -179,6 +158,27 @@ async def get_or_create_mercury_session(
                     "shop_domain": request.shop_domain,
                 },
             )
+
+        # Validate Shopify Plus status after JWT validation
+        is_shopify_plus = await validate_shopify_plus_store(request.shop_domain)
+
+        if not is_shopify_plus:
+            logger.warning(
+                f"⚠️ Mercury: Store {request.shop_domain} is not Shopify Plus - Mercury disabled"
+            )
+            return MercuryResponse(
+                success=False,
+                message="Mercury requires Shopify Plus plan",
+                data={
+                    "reason": "Shopify Plus required",
+                    "shop_domain": request.shop_domain,
+                    "mercury_enabled": False,
+                },
+            )
+
+        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
+        if not shop_id:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
         # Generate a browser session ID for Mercury if not provided
         browser_session_id = (
@@ -248,22 +248,7 @@ async def track_mercury_interaction(
     - Cart value changes
     """
     try:
-        # Add extension type to metadata
-        enhanced_metadata = {
-            **request.metadata,
-            "extension_type": "mercury",
-            "checkout_step": request.checkout_step,
-            "cart_value": request.cart_value,
-            "product_id": request.product_id,
-        }
-
-        # Resolve shop_id from domain
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-
-        if not shop_id:
-            raise HTTPException(status_code=404, detail="Shop not found")
-
-        # JWT-based suspension check (stateless - no Redis needed!)
+        # JWT-based suspension check first (stateless - no Redis needed!)
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(
                 status_code=401,
@@ -287,6 +272,21 @@ async def track_mercury_interaction(
                     "shop_domain": request.shop_domain,
                 },
             )
+
+        # Add extension type to metadata
+        enhanced_metadata = {
+            **request.metadata,
+            "extension_type": "mercury",
+            "checkout_step": request.checkout_step,
+            "cart_value": request.cart_value,
+            "product_id": request.product_id,
+        }
+
+        # Resolve shop_id from domain
+        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
+
+        if not shop_id:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
         # Try to track interaction with the original session
         interaction = await analytics_service.track_interaction(

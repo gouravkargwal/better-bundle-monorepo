@@ -1,4 +1,5 @@
 import { BACKEND_URL } from "../constant";
+import { logger } from "../utils/logger";
 
 export function buildMercuryMetadata(
   checkoutStep,
@@ -18,10 +19,20 @@ export function buildMercuryMetadata(
 export class RecommendationApiClient {
   constructor() {
     this.baseUrl = BACKEND_URL;
+    this.jwtManager = null;
+    this.logger = logger;
+  }
+
+  setJWTManager(jwtManager) {
+    this.jwtManager = jwtManager;
   }
 
   async getRecommendations(request) {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       // Ensure Mercury uses single checkout context
       const mercuryRequest = {
         ...request,
@@ -36,22 +47,27 @@ export class RecommendationApiClient {
         },
       };
 
-      const response = await fetch(`${this.baseUrl}/api/v1/recommendations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(mercuryRequest),
-      });
+      const response = await this.jwtManager.makeAuthenticatedRequest(
+        `${this.baseUrl}/api/v1/recommendations`,
+        {
+          method: "POST",
+          body: JSON.stringify(mercuryRequest),
+          shopDomain: request.shop_domain,
+          customerId: request.user_id,
+        }
+      );
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error("Failed to fetch Mercury recommendations:", error);
+      this.logger.error("Failed to fetch Mercury recommendations:", error);
       throw error;
     }
   }

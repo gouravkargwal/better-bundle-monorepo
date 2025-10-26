@@ -1,7 +1,13 @@
 import { extend, render } from "@shopify/post-purchase-ui-extensions-react";
 
 import { apolloRecommendationApi } from "./api/recommendations";
+import { JWTManager } from "./utils/jwtManager";
 import App from "./App";
+
+// Create JWT manager with storage for persistence
+function createJWTManager(storage: any): JWTManager {
+  return new JWTManager(storage);
+}
 
 extend(
   "Checkout::PostPurchase::ShouldRender",
@@ -25,6 +31,11 @@ extend(
       console.log(
         `Apollo ShouldRender - Shop: ${shopDomain}, Order: ${orderId}`,
       );
+
+      // Create JWT Manager with storage for API calls
+      console.log("🚀 Apollo: Creating JWT Manager in ShouldRender");
+      const jwtManager = createJWTManager(storage);
+      apolloRecommendationApi.setJWTManager(jwtManager);
 
       // Call your API that returns the exact structure from your example
       const result = await apolloRecommendationApi.getSessionAndRecommendations(

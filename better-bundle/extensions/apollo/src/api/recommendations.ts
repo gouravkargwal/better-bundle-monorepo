@@ -1,14 +1,20 @@
 import { BACKEND_URL } from "../constant";
 import type { ProductRecommendation, CombinedAPIResponse } from "../types";
 import { type Logger, logger } from "../utils/logger";
+import type { JWTManager } from "../utils/jwtManager";
 
 class ApolloRecommendationClient {
   private baseUrl: string;
   private logger: Logger;
+  private jwtManager: JWTManager | null = null;
 
   constructor() {
     this.baseUrl = BACKEND_URL as string;
     this.logger = logger;
+  }
+
+  setJWTManager(jwtManager: JWTManager) {
+    this.jwtManager = jwtManager;
   }
 
   async getSessionAndRecommendations(
@@ -25,6 +31,10 @@ class ApolloRecommendationClient {
     error?: string;
   }> {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       const url = `${this.baseUrl}/api/apollo/get-session-and-recommendations`;
 
       const payload = {
@@ -53,16 +63,18 @@ class ApolloRecommendationClient {
         },
       };
 
-      const response = await fetch(url, {
+      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(payload),
         keepalive: true,
+        shopDomain: shopDomain,
+        customerId: customerId,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         const errorText = await response.text();
         this.logger.error(
           {

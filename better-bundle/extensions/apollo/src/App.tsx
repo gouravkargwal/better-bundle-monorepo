@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect } from "react";
 import type { StorageData, ProductRecommendationAPI } from "./types";
 import { isProductEligible, getShopifyErrorMessage } from "./utils/utils";
 import { apolloAnalytics } from "./api/analytics";
+import { apolloRecommendationApi } from "./api/recommendations";
 import { ImageCarousel } from "./components/ImageCarousel";
+import { JWTManager } from "./utils/jwtManager";
 import {
   BlockStack,
   Button,
@@ -33,6 +35,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [calculatedPurchase, setCalculatedPurchase] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [jwtManager, setJwtManager] = useState<JWTManager | null>(null);
 
   // Extract storage data
   const initialState: StorageData = storage.initialData || {};
@@ -44,6 +47,19 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     shopDomain,
     purchasedProducts = [],
   } = initialState;
+
+  // Initialize JWT Manager with storage
+  useEffect(() => {
+    if (shopDomain && storage) {
+      console.log("🚀 Apollo: Creating JWT Manager in App component");
+      const jwt = new JWTManager(storage);
+      setJwtManager(jwt);
+
+      // Set JWT manager on API clients
+      apolloRecommendationApi.setJWTManager(jwt);
+      apolloAnalytics.setJWTManager(jwt);
+    }
+  }, [shopDomain, storage]);
 
   // Maximum consecutive offers per Shopify guidelines
   const MAX_OFFERS = 3;
@@ -192,7 +208,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   // Handle declining an offer - show next product or complete
   const handleDecline = useCallback(async () => {
     // Track decline
-    if (shopDomain && sessionId && currentProduct) {
+    if (shopDomain && sessionId && currentProduct && jwtManager) {
       await apolloAnalytics.trackRecommendationDecline(
         shopDomain,
         sessionId,
@@ -231,6 +247,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     sessionId,
     customerId,
     orderId,
+    jwtManager,
     done,
   ]);
 
@@ -369,7 +386,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         }
 
         // Track recommendation click
-        if (shopDomain && sessionId) {
+        if (shopDomain && sessionId && jwtManager) {
           await apolloAnalytics.trackRecommendationClick(
             shopDomain,
             sessionId,
@@ -514,7 +531,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         }
 
         // Track successful add to order
-        if (shopDomain && sessionId) {
+        if (shopDomain && sessionId && jwtManager) {
           await apolloAnalytics.trackAddToOrder(
             shopDomain,
             sessionId,
@@ -559,6 +576,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
       getCurrentVariant,
       getCurrentQuantity,
       isVariantAvailable,
+      jwtManager,
       calculateChangeset,
       applyChangeset,
       done,

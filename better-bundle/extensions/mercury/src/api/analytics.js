@@ -1,12 +1,23 @@
 import { BACKEND_URL } from "../constant";
+import { logger } from "../utils/logger";
 
 class AnalyticsApiClient {
   constructor() {
     this.baseUrl = BACKEND_URL;
+    this.jwtManager = null;
+    this.logger = logger;
+  }
+
+  setJWTManager(jwtManager) {
+    this.jwtManager = jwtManager;
   }
 
   async getOrCreateSession(shopDomain, customerId) {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       const url = `${this.baseUrl}/api/mercury/get-or-create-session`;
       const payload = {
         shop_domain: shopDomain,
@@ -16,21 +27,18 @@ class AnalyticsApiClient {
         referrer: undefined,
       };
 
-      console.log("🌐 Mercury: Creating session with:", {
-        shop_domain: shopDomain,
-        customer_id: customerId,
-      });
-
-      const response = await fetch(url, {
+      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(payload),
         keepalive: true,
+        shopDomain: shopDomain,
+        customerId: customerId,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         throw new Error(`Session creation failed: ${response.status}`);
       }
 
@@ -38,13 +46,12 @@ class AnalyticsApiClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        console.log("✅ Mercury: Session created/retrieved:", sessionId);
         return sessionId;
       } else {
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Mercury: Session creation error:", error);
+      this.logger.error("Session creation error:", error);
       throw error;
     }
   }
@@ -54,31 +61,31 @@ class AnalyticsApiClient {
    */
   async trackUnifiedInteraction(request) {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       const url = `${this.baseUrl}/api/mercury/track-interaction`;
-      const response = await fetch(url, {
+      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(request),
         keepalive: true,
+        shopDomain: request.shop_domain,
+        customerId: request.customer_id,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         throw new Error(`Interaction tracking failed: ${response.status}`);
       }
 
       const result = await response.json();
 
       if (result.success) {
-        console.log(
-          "✅ Mercury interaction tracked:",
-          result.data?.interaction_id,
-        );
-
         // Handle session recovery if it occurred
         if (result.session_recovery) {
-          console.log("🔄 Session recovered:", result.session_recovery);
           // Update stored session ID with the new one (unified with other extensions)
           sessionStorage.setItem(
             "unified_session_id",
@@ -91,7 +98,7 @@ class AnalyticsApiClient {
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Mercury interaction tracking error:", error);
+      this.logger.error("Interaction tracking error:", error);
       return false;
     }
   }
@@ -164,7 +171,7 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation view:", error);
+      this.logger.error("Failed to track recommendation view:", error);
       return false;
     }
   }
@@ -211,7 +218,7 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation click:", error);
+      this.logger.error("Failed to track recommendation click:", error);
       return false;
     }
   }
@@ -257,7 +264,7 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track add to cart:", error);
+      this.logger.error("Failed to track add to cart:", error);
       return false;
     }
   }

@@ -5,13 +5,20 @@ import type {
   UnifiedResponse,
 } from "../types";
 import { type Logger, logger } from "../utils/logger";
+import type { JWTManager } from "../utils/jwtManager";
 
 class ApolloAnalyticsClient {
   private baseUrl: string;
   private logger: Logger;
+  private jwtManager: JWTManager | null = null;
+
   constructor() {
     this.baseUrl = BACKEND_URL as string;
     this.logger = logger;
+  }
+
+  setJWTManager(jwtManager: JWTManager) {
+    this.jwtManager = jwtManager;
   }
 
   private async trackInteraction(
@@ -22,6 +29,10 @@ class ApolloAnalyticsClient {
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       const url = `${this.baseUrl}/api/apollo/track-interaction`;
 
       const request: UnifiedInteractionRequest = {
@@ -33,16 +44,18 @@ class ApolloAnalyticsClient {
         metadata: metadata || {},
       };
 
-      const response = await fetch(url, {
+      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(request),
         keepalive: true,
+        shopDomain: shopDomain,
+        customerId: metadata?.customer_id,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         this.logger.error(
           {
             error: new Error(`Interaction tracking failed: ${response.status}`),
