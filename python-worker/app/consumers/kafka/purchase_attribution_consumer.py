@@ -253,6 +253,9 @@ class PurchaseAttributionKafkaConsumer:
                     currency=currency,
                     products=products,
                     created_at=getattr(order, "order_date", None) or now_utc(),
+                    updated_at=getattr(
+                        order, "updated_at", None
+                    ),  # For post-purchase additions
                     metadata={
                         "source": "normalization",
                         "line_item_count": len(products),
