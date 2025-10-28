@@ -26,6 +26,7 @@ class ApolloAnalyticsClient {
     shopDomain: string,
     interactionType: InteractionType,
     productId?: string,
+    customerId?: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
@@ -41,6 +42,7 @@ class ApolloAnalyticsClient {
         context: "post_purchase",
         interaction_type: interactionType,
         product_id: productId ? String(productId) : undefined,
+        customer_id: customerId ? String(customerId) : undefined,
         metadata: metadata || {},
       };
 
@@ -49,7 +51,7 @@ class ApolloAnalyticsClient {
         body: JSON.stringify(request),
         keepalive: true,
         shopDomain: shopDomain,
-        customerId: metadata?.customer_id,
+        customerId: customerId,
       });
 
       if (!response.ok) {
@@ -62,6 +64,7 @@ class ApolloAnalyticsClient {
             shop_domain: shopDomain,
             interactionType,
             productId,
+            customerId,
             metadata,
           },
           "Interaction tracking failed",
@@ -86,6 +89,7 @@ class ApolloAnalyticsClient {
             shop_domain: shopDomain,
             interactionType,
             productId,
+            customerId,
             metadata,
           },
           "Failed to track interaction",
@@ -99,6 +103,7 @@ class ApolloAnalyticsClient {
           shop_domain: shopDomain,
           interactionType,
           productId,
+          customerId,
           metadata,
         },
         "Interaction tracking error",
@@ -112,6 +117,7 @@ class ApolloAnalyticsClient {
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -119,6 +125,7 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_viewed",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
@@ -148,6 +155,7 @@ class ApolloAnalyticsClient {
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -155,6 +163,7 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_clicked",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
@@ -185,6 +194,7 @@ class ApolloAnalyticsClient {
     productId: string,
     variantId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -192,6 +202,7 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_add_to_cart",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
@@ -222,6 +233,7 @@ class ApolloAnalyticsClient {
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     productData?: any,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
@@ -230,6 +242,7 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_declined",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",

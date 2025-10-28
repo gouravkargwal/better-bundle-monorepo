@@ -47,11 +47,24 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     shopDomain,
     purchasedProducts = [],
   } = initialState;
-
+  console.log(initialState, "initialState");
+  console.log(shopDomain, "shopDomain");
+  console.log(storage, "storage");
+  console.log(customerId, "customerId");
+  console.log(orderId, "orderId");
+  console.log(sessionId, "sessionId");
+  console.log(recommendations, "recommendations");
+  console.log(purchasedProducts, "purchasedProducts");
+  console.log(jwtManager, "jwtManager");
+  console.log(selectedOptions, "selectedOptions");
+  console.log(quantities, "quantities");
+  console.log(calculatedPurchase, "calculatedPurchase");
+  console.log(isCalculating, "isCalculating");
+  console.log(isLoading, "isLoading");
+  console.log(error, "error");
   // Initialize JWT Manager with storage
   useEffect(() => {
     if (shopDomain && storage) {
-      console.log("🚀 Apollo: Creating JWT Manager in App component");
       const jwt = new JWTManager(storage);
       setJwtManager(jwt);
 
@@ -214,6 +227,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         sessionId,
         currentProduct.id,
         currentOfferIndex + 1,
+        customerId,
         currentProduct, // Pass full product data
         {
           source: "apollo_post_purchase",
@@ -392,6 +406,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
             sessionId,
             product.id,
             position,
+            customerId,
             {
               source: "apollo_post_purchase",
               customer_id: customerId,
@@ -538,6 +553,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
             product.id,
             selectedVariant.variant_id,
             position,
+            customerId,
             {
               source: "apollo_post_purchase",
               customer_id: customerId,

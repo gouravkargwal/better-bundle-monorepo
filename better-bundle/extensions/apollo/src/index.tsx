@@ -19,6 +19,7 @@ extend(
         ? String(initialPurchase.customerId)
         : undefined; // ✅ Ensure string
       const orderId = String(initialPurchase.referenceId); // ✅ Ensure string
+      console.log(initialPurchase, "initialPurchase");
 
       const purchasedProducts = initialPurchase.lineItems.map((item: any) => ({
         id: item.product.id.toString(),
@@ -28,12 +29,7 @@ extend(
         totalPrice: item.totalPriceSet,
       }));
 
-      console.log(
-        `Apollo ShouldRender - Shop: ${shopDomain}, Order: ${orderId}`,
-      );
-
       // Create JWT Manager with storage for API calls
-      console.log("🚀 Apollo: Creating JWT Manager in ShouldRender");
       const jwtManager = createJWTManager(storage);
       apolloRecommendationApi.setJWTManager(jwtManager);
 
@@ -54,10 +50,6 @@ extend(
       );
 
       const shouldRender = result.success && result.recommendations?.length > 0;
-
-      console.log(
-        `Apollo ShouldRender: ${shouldRender}, Recommendations: ${result.recommendations?.length || 0}`,
-      );
 
       if (shouldRender) {
         // Validate session data exists

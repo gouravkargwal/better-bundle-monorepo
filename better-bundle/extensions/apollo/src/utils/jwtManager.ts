@@ -23,8 +23,6 @@ export class JWTManager {
     shopDomain: string,
     customerId?: string | null,
   ): Promise<string | null> {
-    console.log("🔍 Apollo: Getting valid token for shop:", shopDomain);
-
     // Check in-memory cache first (for current session only)
     if (this.memoryCache.token && this.memoryCache.shopDomain === shopDomain) {
       const isValid = this.isTokenNotExpired({
@@ -32,10 +30,7 @@ export class JWTManager {
       });
 
       if (isValid) {
-        console.log("✅ Apollo: Using cached token from memory");
         return this.memoryCache.token;
-      } else {
-        console.log("❌ Apollo: Cached token expired, fetching new one");
       }
     }
 
@@ -64,7 +59,6 @@ export class JWTManager {
 
     try {
       const tokenInfo = await this.refreshPromise;
-      console.log("🔄 Apollo: About to store token in memory:", tokenInfo);
 
       // Store in memory cache only (not persistent)
       this.memoryCache = {
@@ -73,7 +67,6 @@ export class JWTManager {
         shopDomain: tokenInfo.shopDomain,
       };
 
-      console.log("✅ Apollo: Token stored in memory cache");
       return tokenInfo.token;
     } catch (error) {
       console.log("❌ Apollo: Error in refreshToken:", error);
@@ -84,15 +77,11 @@ export class JWTManager {
   }
 
   private async fetchNewToken(shopDomain: string, customerId?: string | null) {
-    console.log("🌐 Apollo: Fetching new token from API for shop:", shopDomain);
-
     const requestBody: any = { shop_domain: shopDomain };
 
     if (customerId) {
       requestBody.customer_id = customerId;
     }
-
-    console.log("📤 Apollo: Token request body:", requestBody);
 
     const response = await fetch(`${BACKEND_URL}/api/v1/auth/shop-token`, {
       method: "POST",
@@ -101,16 +90,10 @@ export class JWTManager {
     });
 
     if (!response.ok) {
-      console.log("❌ Apollo: Token generation failed:", response.status);
       throw new Error(`Token generation failed: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log("✅ Apollo: New token received from API:", {
-      hasToken: !!data.token,
-      expiresIn: data.expires_in,
-      shopDomain: data.shop_domain,
-    });
 
     return {
       token: data.token,
@@ -126,12 +109,6 @@ export class JWTManager {
     const now = Date.now() / 1000;
     const expiry = tokenInfo.expiresIn;
     const isValid = expiry - now > 60; // Valid if expires in more than 1 minute
-    console.log("🕐 Apollo: Token expiry check:", {
-      now,
-      expiry,
-      isValid,
-      timeLeft: expiry - now,
-    });
     return isValid;
   }
 
