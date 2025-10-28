@@ -1,6 +1,6 @@
-import { Page, Tabs, BlockStack } from "@shopify/polaris";
+import { Page, Tabs, BlockStack, Banner } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Outlet, useNavigate, useLocation } from "@remix-run/react";
 import type { BillingState } from "../types/billing.types";
 import { BillingPlan } from "./BillingPlan";
@@ -10,12 +10,14 @@ interface TabbedBillingPageProps {
   shopId: string;
   shopCurrency: string;
   billingState: BillingState;
+  subscriptionStatus?: string | null;
 }
 
 export function TabbedBillingPage({
   shopId,
   shopCurrency,
   billingState,
+  subscriptionStatus,
 }: TabbedBillingPageProps) {
   const navigate = useNavigate();
   const location = useLocation();

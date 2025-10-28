@@ -7,7 +7,7 @@ import { TabbedBillingPage } from "../features/billing/components/TabbedBillingP
 import logger from "../utils/logger";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
@@ -21,13 +21,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       throw new Error("Shop not found");
     }
 
-    // Get billing state using the service
-    const billingState = await BillingService.getBillingState(shopRecord.id);
+    // ✅ Get billing state with admin context for Shopify API calls
+    const billingState = await BillingService.getBillingState(
+      shopRecord.id,
+      admin,
+    );
+
+    // Check URL parameters for callback status
+    const url = new URL(request.url);
+    const subscriptionStatus = url.searchParams.get("subscription");
 
     return json({
       shopId: shopRecord.id,
       shopCurrency: shopRecord.currency_code || "USD",
       billingState,
+      subscriptionStatus, // Pass the status to the component
     });
   } catch (error) {
     logger.error({ error, shop }, "Billing loader error");
@@ -48,13 +56,14 @@ export default function BillingPage() {
     );
   }
 
-  const { shopId, shopCurrency, billingState } = loaderData;
+  const { shopId, shopCurrency, billingState, subscriptionStatus } = loaderData;
 
   return (
     <TabbedBillingPage
       shopId={shopId}
       shopCurrency={shopCurrency}
       billingState={billingState}
+      subscriptionStatus={subscriptionStatus}
     />
   );
 }

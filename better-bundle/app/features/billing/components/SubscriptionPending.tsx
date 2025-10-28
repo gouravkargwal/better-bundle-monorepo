@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Card,
   BlockStack,
@@ -10,6 +11,7 @@ import {
 } from "@shopify/polaris";
 import { ClockIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
 import type { SubscriptionData } from "../types/billing.types";
+import { useNavigate } from "@remix-run/react";
 
 interface SubscriptionPendingProps {
   subscriptionData: SubscriptionData;
@@ -20,6 +22,10 @@ export function SubscriptionPending({
   subscriptionData,
   shopCurrency,
 }: SubscriptionPendingProps) {
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState<string | null>(null);
+  const navigation = useNavigate();
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -33,8 +39,52 @@ export function SubscriptionPending({
     }
   };
 
+  // ✅ NEW: Cancel subscription handler
+  const handleCancelSubscription = async () => {
+    if (
+      !confirm(
+        "Are you sure you want to cancel this subscription? You'll need to set it up again.",
+      )
+    ) {
+      return;
+    }
+
+    setCancelling(true);
+    setCancelMessage(null);
+
+    try {
+      const response = await fetch("/api/billing/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setCancelMessage("Subscription cancelled. Refreshing...");
+        navigation("/app/billing");
+      } else {
+        setCancelMessage(result.error || "Failed to cancel subscription");
+        setCancelling(false);
+      }
+    } catch (error) {
+      setCancelMessage("Error cancelling subscription. Please try again.");
+      setCancelling(false);
+      console.error("Cancel error:", error);
+    }
+  };
+
   return (
     <BlockStack gap="500">
+      {/* ✅ Cancel Message Banner */}
+      {cancelMessage && (
+        <Banner
+          tone={cancelMessage.includes("cancelled") ? "success" : "critical"}
+        >
+          {cancelMessage}
+        </Banner>
+      )}
+
       {/* Status Header */}
       <Card>
         <BlockStack gap="300">
@@ -187,8 +237,20 @@ export function SubscriptionPending({
                   size="large"
                   onClick={handleApproveSubscription}
                   fullWidth
+                  disabled={cancelling}
                 >
                   Open Shopify Approval Page
+                </Button>
+
+                {/* ✅ NEW: Cancel Button */}
+                <Button
+                  size="large"
+                  onClick={handleCancelSubscription}
+                  loading={cancelling}
+                  tone="critical"
+                  fullWidth
+                >
+                  Cancel This Subscription
                 </Button>
               </BlockStack>
             ) : (
@@ -289,9 +351,9 @@ export function SubscriptionPending({
                   automatically once approved.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Wrong spending cap?</strong> Cancel this subscription
-                  and start the setup process again with your desired monthly
-                  cap amount.
+                  <strong>Wrong spending cap?</strong> Use the "Cancel This
+                  Subscription" button above and start the setup process again
+                  with your desired monthly cap amount.
                 </Text>
               </BlockStack>
             </BlockStack>

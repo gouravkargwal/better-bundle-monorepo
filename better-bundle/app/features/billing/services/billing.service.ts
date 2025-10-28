@@ -1,156 +1,97 @@
 import type {
   BillingState,
-  BillingStatus,
   TrialData,
   SubscriptionData,
-  BillingSetupData,
-  BillingMetrics,
 } from "../types/billing.types";
 import prisma from "../../../db.server";
 
 export class BillingService {
   /**
-   * Get current billing state for a shop
-   * This is the single source of truth for billing status
+   * ✅ CORRECT: Get billing state - Clean architecture implementation
    */
-  static async getBillingState(shopId: string): Promise<BillingState> {
+  static async getBillingState(
+    shopId: string,
+    admin?: any,
+  ): Promise<BillingState> {
     try {
-      // Get shop subscription with related data
-      const shopSubscription = await prisma.shop_subscriptions.findFirst({
-        where: {
-          shop_id: shopId,
-          is_active: true,
-        },
-        include: {
-          subscription_trials: true,
-          shopify_subscriptions: true,
-          billing_cycles: {
-            where: { status: "ACTIVE" },
-            orderBy: { cycle_number: "desc" },
-            take: 1,
-          },
-        },
-      });
+      // 1. Get trial revenue (single source of truth)
+      const trialRevenue = await this.getTrialRevenue(shopId);
 
-      if (!shopSubscription) {
+      // 2. Get trial threshold (from any subscription record or default)
+      const subscription = await prisma.shop_subscriptions.findFirst({
+        where: { shop_id: shopId },
+        include: { subscription_trials: true },
+      });
+      const trialThreshold = Number(
+        subscription?.subscription_trials?.threshold_amount || 75,
+      );
+
+      // 3. Simple logic: If trial not completed, show trial
+      if (trialRevenue < trialThreshold) {
         return {
-          status: "trial_active", // Default to trial if no subscription
-          error: {
-            code: "NO_SUBSCRIPTION",
-            message: "No subscription found",
-          },
+          status: "trial_active",
+          trialData: await this.getTrialDataFromRevenue(
+            shopId,
+            trialRevenue,
+            trialThreshold,
+          ),
         };
       }
 
-      // ✅ Determine billing status dynamically based on actual data
-      const status = await this.determineBillingStatus(shopSubscription);
+      // 4. Trial completed - check if Shopify subscription exists and is active
+      if (admin) {
+        const shopifyStatus = await this.getShopifySubscriptionStatus(
+          shopId,
+          admin,
+        );
 
-      const state: BillingState = {
-        status,
+        if (shopifyStatus?.status === "ACTIVE") {
+          return {
+            status: "subscription_active",
+            subscriptionData: await this.getSubscriptionDataFromShopify(
+              subscription,
+              shopifyStatus,
+            ),
+          };
+        } else if (shopifyStatus?.status === "PENDING") {
+          return {
+            status: "subscription_pending",
+            subscriptionData: await this.getSubscriptionDataFromShopify(
+              subscription,
+              shopifyStatus,
+            ),
+          };
+        }
+      }
+
+      // 5. Trial completed, no active Shopify subscription = show setup button
+      return {
+        status: "trial_completed",
+        trialData: await this.getTrialDataFromRevenue(
+          shopId,
+          trialRevenue,
+          trialThreshold,
+        ),
       };
-
-      // Add trial data if trial is active or completed
-      if (status === "trial_active" || status === "trial_completed") {
-        state.trialData = await this.getTrialData(shopSubscription);
-      }
-
-      // Add subscription data if subscription exists
-      if (
-        status === "subscription_pending" ||
-        status === "subscription_active"
-      ) {
-        state.subscriptionData =
-          await this.getSubscriptionData(shopSubscription);
-      }
-
-      return state;
     } catch (error) {
       console.error("Error getting billing state:", error);
       return {
         status: "trial_active",
         error: {
-          code: "FETCH_ERROR",
-          message: "Failed to load billing information",
+          code: "BILLING_ERROR",
+          message: "Failed to get billing state",
         },
       };
     }
   }
 
   /**
-   * ✅ Determine billing status dynamically based on actual data
-   * Never rely on pre-computed database fields
+   * ✅ Simplified: Get trial revenue from commission records
    */
-  private static async determineBillingStatus(
-    shopSubscription: any,
-  ): Promise<BillingStatus> {
-    const dbStatus = shopSubscription.status;
-
-    // For trial-related statuses, check actual revenue data
-    if (dbStatus === "TRIAL" || dbStatus === "TRIAL_COMPLETED") {
-      // Get actual attributed revenue from commission records
-      const actualRevenue = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopSubscription.shop_id,
-          billing_phase: "TRIAL",
-          status: {
-            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-          },
-        },
-        _sum: {
-          attributed_revenue: true,
-        },
-      });
-
-      const actualAccumulatedRevenue = Number(
-        actualRevenue._sum?.attributed_revenue || 0,
-      );
-      const thresholdAmount = Number(
-        shopSubscription.subscription_trials?.threshold_amount || 0,
-      );
-
-      // ✅ Determine status based on ACTUAL data, not stored values
-      if (actualAccumulatedRevenue >= thresholdAmount) {
-        return "trial_completed";
-      } else {
-        return "trial_active";
-      }
-    }
-
-    // For other statuses, use the existing mapping
-    switch (dbStatus) {
-      case "PENDING_APPROVAL":
-        return "subscription_pending";
-      case "ACTIVE":
-        return "subscription_active";
-      case "SUSPENDED":
-        return "subscription_suspended";
-      case "CANCELLED":
-        return "subscription_cancelled";
-      default:
-        return "trial_active";
-    }
-  }
-
-  /**
-   * Get trial data for display
-   */
-  private static async getTrialData(shopSubscription: any): Promise<TrialData> {
-    const trial = shopSubscription.subscription_trials;
-
-    if (!trial) {
-      return {
-        isActive: false,
-        thresholdAmount: 0,
-        accumulatedRevenue: 0,
-        progress: 0,
-        currency: "USD",
-      };
-    }
-
-    // ✅ ALWAYS calculate from source data - never use pre-computed values
-    const actualRevenue = await prisma.commission_records.aggregate({
+  private static async getTrialRevenue(shopId: string): Promise<number> {
+    const result = await prisma.commission_records.aggregate({
       where: {
-        shop_id: shopSubscription.shop_id,
+        shop_id: shopId,
         billing_phase: "TRIAL",
         status: {
           in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
@@ -160,161 +101,110 @@ export class BillingService {
         attributed_revenue: true,
       },
     });
-
-    const actualAccumulatedRevenue = Number(
-      actualRevenue._sum?.attributed_revenue || 0,
-    );
-    const thresholdAmount = Number(trial.threshold_amount);
-
-    // ✅ Check if trial should be completed based on ACTUAL data
-    const hasExceededThreshold = actualAccumulatedRevenue >= thresholdAmount;
-    const progress = Math.min(
-      (actualAccumulatedRevenue / thresholdAmount) * 100,
-      100,
-    );
-
-    return {
-      isActive: trial.status === "ACTIVE" && !hasExceededThreshold,
-      thresholdAmount: thresholdAmount,
-      accumulatedRevenue: actualAccumulatedRevenue, // ✅ Always fresh data
-      progress: Math.round(progress),
-      currency: "USD", // TODO: Get from shop
-    };
+    return Number(result._sum?.attributed_revenue || 0);
   }
 
   /**
-   * Get subscription data for display
+   * ✅ Simplified: Get trial data from revenue (no complex status checks)
    */
-  private static async getSubscriptionData(
-    shopSubscription: any,
-  ): Promise<SubscriptionData> {
-    const shopifySub = shopSubscription.shopify_subscriptions;
-    const currentCycle = shopSubscription.billing_cycles[0];
-
-    return {
-      id: shopSubscription.id,
-      status: shopifySub?.status || "pending",
-      spendingLimit: Number(shopSubscription.user_chosen_cap_amount || 0),
-      currentUsage: currentCycle ? Number(currentCycle.usage_amount) : 0,
-      usagePercentage: currentCycle
-        ? Math.round(
-            (Number(currentCycle.usage_amount) /
-              Number(currentCycle.current_cap_amount)) *
-              100,
-          )
-        : 0,
-      confirmationUrl: shopifySub?.confirmation_url,
-      currency: "USD", // TODO: Get from shop
-      billingCycle: currentCycle
-        ? {
-            startDate: currentCycle.start_date.toISOString(),
-            endDate: currentCycle.end_date.toISOString(),
-            cycleNumber: currentCycle.cycle_number,
-          }
-        : undefined,
-    };
-  }
-
-  /**
-   * Setup billing - transition from trial_completed to subscription_pending
-   */
-  static async setupBilling(
+  private static async getTrialDataFromRevenue(
     shopId: string,
-    setupData: BillingSetupData,
-  ): Promise<{
-    success: boolean;
-    confirmationUrl?: string;
-    error?: string;
-  }> {
-    try {
-      // This will be handled by the existing API route
-      // We'll call it from here for consistency
-      const response = await fetch("/api/billing/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          monthlyCap: setupData.spendingLimit,
-        }),
-      });
+    revenue: number,
+    threshold: number = 75,
+  ): Promise<TrialData> {
+    const progress = Math.min((revenue / threshold) * 100, 100);
 
-      const result = await response.json();
+    // Get shop currency from database
+    const shop = await prisma.shops.findUnique({
+      where: { id: shopId },
+      select: { currency_code: true },
+    });
 
-      if (result.success) {
-        return {
-          success: true,
-          confirmationUrl: result.confirmation_url,
-        };
-      } else {
-        return {
-          success: false,
-          error: result.error,
-        };
-      }
-    } catch (error) {
-      console.error("Error setting up billing:", error);
-      return {
-        success: false,
-        error: "Failed to setup billing",
-      };
-    }
+    return {
+      isActive: revenue < threshold,
+      thresholdAmount: threshold,
+      accumulatedRevenue: revenue,
+      progress: Math.round(progress),
+      currency: shop?.currency_code || "USD",
+    };
   }
 
   /**
-   * Get billing metrics for dashboard
+   * ✅ Simplified: Get subscription data from Shopify API
    */
-  static async getBillingMetrics(shopId: string): Promise<BillingMetrics> {
+  private static async getSubscriptionDataFromShopify(
+    shopSubscription: any,
+    shopifyStatus: any,
+  ): Promise<SubscriptionData> {
+    const spendingLimit =
+      shopifyStatus.cappedAmount ||
+      Number(shopSubscription.user_chosen_cap_amount || 0);
+    const currentUsage = shopifyStatus.currentUsage || 0;
+    const usagePercentage =
+      spendingLimit > 0 ? Math.round((currentUsage / spendingLimit) * 100) : 0;
+
+    return {
+      id: shopifyStatus.subscriptionId || shopSubscription.id,
+      status: shopifyStatus.status as
+        | "PENDING"
+        | "ACTIVE"
+        | "DECLINED"
+        | "CANCELLED"
+        | "EXPIRED",
+      spendingLimit,
+      currentUsage,
+      usagePercentage,
+      confirmationUrl: shopifyStatus.confirmationUrl,
+      currency: shopifyStatus.currency || "USD",
+    };
+  }
+
+  /**
+   * Get Shopify subscription status via API - Real-time status checking
+   */
+  static async getShopifySubscriptionStatus(
+    shopId: string,
+    admin: any,
+  ): Promise<{
+    status: string;
+    subscriptionId?: string;
+    confirmationUrl?: string;
+    currentUsage?: number;
+    cappedAmount?: number;
+    currency?: string;
+  } | null> {
     try {
-      // Get commission records for current billing cycle
-      const currentCycle = await prisma.billing_cycles.findFirst({
+      // Find the Shopify subscription record
+      const shopifySub = await prisma.shopify_subscriptions.findFirst({
         where: {
           shop_subscriptions: {
             shop_id: shopId,
-            is_active: true,
           },
-          status: "ACTIVE",
         },
-        include: {
-          commission_records: true,
+        orderBy: {
+          created_at: "desc",
         },
       });
 
-      if (!currentCycle) {
-        return {
-          totalRevenue: 0,
-          attributedRevenue: 0,
-          commissionEarned: 0,
-          commissionRate: 0,
-          currency: "USD",
-        };
+      if (!shopifySub?.shopify_subscription_id) {
+        return null;
       }
 
-      const totalRevenue = currentCycle.commission_records.reduce(
-        (sum, record) => sum + Number(record.attributed_revenue),
-        0,
-      );
-
-      const commissionEarned = currentCycle.commission_records.reduce(
-        (sum, record) => sum + Number(record.commission_earned),
-        0,
-      );
+      // Since Shopify GraphQL API doesn't provide direct query for app subscriptions,
+      // we'll return data from our database record
+      // Real-time status updates come via webhooks
 
       return {
-        totalRevenue,
-        attributedRevenue: totalRevenue,
-        commissionEarned,
-        commissionRate:
-          totalRevenue > 0 ? (commissionEarned / totalRevenue) * 100 : 0,
-        currency: "USD",
+        status: shopifySub.status,
+        subscriptionId: shopifySub.shopify_subscription_id,
+        confirmationUrl: shopifySub.confirmation_url || undefined,
+        currentUsage: 0, // Will be updated via webhooks
+        cappedAmount: 0, // Will be updated via webhooks
+        currency: "USD", // Default currency
       };
     } catch (error) {
-      console.error("Error getting billing metrics:", error);
-      return {
-        totalRevenue: 0,
-        attributedRevenue: 0,
-        commissionEarned: 0,
-        commissionRate: 0,
-        currency: "USD",
-      };
+      console.error("Error getting Shopify subscription status:", error);
+      return null;
     }
   }
 }

@@ -33,44 +33,57 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // ✅ Get shop subscription - only allow if trial is completed
+    // ✅ Get shop subscription - allow if trial is completed OR pending approval
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopRecord.id,
-        is_active: true,
-        // ✅ Only allow if trial is completed
-        status: "TRIAL_COMPLETED" as any,
-      },
+      where: { shop_id: shopRecord.id },
+      include: { subscription_trials: true },
     });
-
-    // Check if there's already a subscription that's not in TRIAL_COMPLETED status
-    const otherActiveSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopRecord.id,
-        is_active: true,
-        status: {
-          not: "TRIAL_COMPLETED" as any,
-        },
-      },
-    });
-
-    if (otherActiveSubscription) {
-      return json({
-        success: false,
-        error: "Active subscription already exists",
-        existingSubscription: otherActiveSubscription,
-      });
-    }
 
     if (!shopSubscription) {
       return json(
         {
           success: false,
-          error: "No completed trial found. Please complete your trial first.",
+          error: "No subscription found",
         },
         { status: 400 },
       );
     }
+
+    // ✅ Additional validation: Check if trial threshold was actually reached
+    if (shopSubscription.status === "PENDING_APPROVAL") {
+      const actualRevenue = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopRecord.id,
+          billing_phase: "TRIAL",
+          status: {
+            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+          },
+        },
+        _sum: {
+          attributed_revenue: true,
+        },
+      });
+
+      const actualAccumulatedRevenue = Number(
+        actualRevenue._sum?.attributed_revenue || 0,
+      );
+      const thresholdAmount = Number(
+        shopSubscription.subscription_trials?.threshold_amount || 0,
+      );
+
+      if (actualAccumulatedRevenue < thresholdAmount) {
+        return json(
+          {
+            success: false,
+            error:
+              "Trial threshold not reached. Please complete your trial first.",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    // ✅ No need to check existing Shopify subscriptions - we fetch status from Shopify API in real-time
 
     // Get default subscription plan and pricing tier
     const defaultPlan = await prisma.subscription_plans.findFirst({
@@ -144,9 +157,14 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
-    // Build return URL for GraphQL App Subscriptions
-    // For GraphQL, use the app URL with proper shop parameter
-    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing?shop=${shop}`;
+    // For embedded apps, we don't need a callback URL
+    // The approval status will be handled via webhooks
+    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing`;
+
+    logger.info(
+      { returnUrl, shop, appUrl: process.env.SHOPIFY_APP_URL },
+      "Creating subscription with return URL",
+    );
 
     const variables = {
       name: "Better Bundle - Usage Based",
@@ -192,25 +210,36 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
+    // ✅ Mark subscription as SUSPENDED - Backend role ends here, Shopify takes over
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "PENDING_APPROVAL" as any, // ✅ NOW we set PENDING_APPROVAL
+        status: "SUSPENDED" as any, // Backend no longer tracks status
         user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
+        is_active: false,
         updated_at: new Date(),
       },
     });
 
-    // Create Shopify subscription record
-    await prisma.shopify_subscriptions.create({
-      data: {
+    // Create or update Shopify subscription record
+    await prisma.shopify_subscriptions.upsert({
+      where: { shop_subscription_id: shopSubscription.id },
+      update: {
+        shopify_subscription_id: subscription.id,
+        shopify_line_item_id: subscription.lineItems[0].id,
+        confirmation_url: confirmationUrl,
+        status: "PENDING" as any,
+        updated_at: new Date(),
+        error_count: "0",
+      },
+      create: {
         shop_subscription_id: shopSubscription.id,
         shopify_subscription_id: subscription.id,
         shopify_line_item_id: subscription.lineItems[0].id,
         confirmation_url: confirmationUrl,
         status: "PENDING" as any,
         created_at: new Date(),
-        error_count: "0", // Required field
+        error_count: "0",
       },
     });
 
