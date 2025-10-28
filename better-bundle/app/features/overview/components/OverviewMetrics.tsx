@@ -79,7 +79,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
           cursor: "pointer",
           borderRadius: "16px",
           overflow: "hidden",
-          height: "180px",
+          height: "200px",
           display: "flex",
           flexDirection: "column",
         }}
@@ -165,7 +165,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
           cursor: "pointer",
           borderRadius: "16px",
           overflow: "hidden",
-          height: "180px",
+          height: "200px",
           display: "flex",
           flexDirection: "column",
         }}
