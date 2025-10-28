@@ -70,13 +70,50 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-// ✅ Business logic handlers - No status syncing
+// ✅ Business logic handlers - Handle subscription activation
 async function handleActiveSubscription(
   shopRecord: any,
   subscriptionId: string,
   currentCappedAmount?: number,
 ) {
   try {
+    // Find the shop subscription record
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: shopRecord.id },
+      include: { shopify_subscriptions: true },
+    });
+
+    if (!shopSubscription) {
+      logger.error(
+        { shop: shopRecord.shop_domain, subscriptionId },
+        "No shop subscription found for active subscription",
+      );
+      return;
+    }
+
+    // Update shopify_subscriptions table
+    if (shopSubscription.shopify_subscriptions) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscriptions.id },
+        data: {
+          status: "ACTIVE",
+          activated_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // Update shop_subscriptions table
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        status: "ACTIVE",
+        is_active: true,
+        activated_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
     // Reactivate shop if suspended
     await prisma.shops.update({
       where: { id: shopRecord.id },
@@ -93,11 +130,16 @@ async function handleActiveSubscription(
     await invalidateSuspensionCache(shopRecord.id);
 
     logger.info(
-      { shop: shopRecord.shop_domain, subscriptionId },
-      "Shop reactivated",
+      {
+        shop: shopRecord.shop_domain,
+        subscriptionId,
+        currentCappedAmount,
+        shopSubscriptionId: shopSubscription.id,
+      },
+      "Subscription activated and shop reactivated",
     );
   } catch (error) {
-    logger.error({ error }, "Error reactivating shop");
+    logger.error({ error }, "Error activating subscription");
     throw error;
   }
 }
@@ -107,6 +149,43 @@ async function handleCancelledSubscription(
   subscriptionId: string,
 ) {
   try {
+    // Find the shop subscription record
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: shopRecord.id },
+      include: { shopify_subscriptions: true },
+    });
+
+    if (!shopSubscription) {
+      logger.error(
+        { shop: shopRecord.shop_domain, subscriptionId },
+        "No shop subscription found for cancelled subscription",
+      );
+      return;
+    }
+
+    // Update shopify_subscriptions table
+    if (shopSubscription.shopify_subscriptions) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscriptions.id },
+        data: {
+          status: "CANCELLED",
+          cancelled_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // Update shop_subscriptions table
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        status: "CANCELLED",
+        is_active: false,
+        cancelled_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
     // Suspend shop services
     await prisma.shops.update({
       where: { id: shopRecord.id },
@@ -120,11 +199,15 @@ async function handleCancelledSubscription(
     });
 
     logger.info(
-      { shop: shopRecord.shop_domain, subscriptionId },
-      "Shop suspended due to cancellation",
+      {
+        shop: shopRecord.shop_domain,
+        subscriptionId,
+        shopSubscriptionId: shopSubscription.id,
+      },
+      "Subscription cancelled and shop suspended",
     );
   } catch (error) {
-    logger.error({ error }, "Error suspending shop");
+    logger.error({ error }, "Error handling cancelled subscription");
     throw error;
   }
 }

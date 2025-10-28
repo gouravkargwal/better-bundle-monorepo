@@ -121,12 +121,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const cappedAmount = monthlyCap; // User-selected monthly cap
 
     const mutation = `
-      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!) {
+      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!, $test: Boolean!) {
         appSubscriptionCreate(
           name: $name
           returnUrl: $returnUrl
           lineItems: $lineItems
-          test: ${process.env.NODE_ENV === "development" ? "true" : "false"}
+          test: $test
         ) {
           userErrors {
             field
@@ -157,19 +157,16 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
-    // For embedded apps, we don't need a callback URL
-    // The approval status will be handled via webhooks
-    const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/billing`;
-
-    logger.info(
-      { returnUrl, shop, appUrl: process.env.SHOPIFY_APP_URL },
-      "Creating subscription with return URL",
-    );
+    // For embedded apps, use the Shopify admin URL format
+    // This ensures proper authentication and embedded app context
+    const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
+    const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
 
     const variables = {
       name: "Better Bundle - Usage Based",
       // Redirect back to app after approval
       returnUrl: returnUrl,
+      test: process.env.NODE_ENV === "development",
       lineItems: [
         {
           plan: {
