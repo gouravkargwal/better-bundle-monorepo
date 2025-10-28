@@ -5,6 +5,7 @@ This API handles interactions from the Phoenix Checkout UI extension.
 Phoenix can show recommendations and track interactions in the checkout flow.
 """
 
+import time
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
@@ -138,11 +139,17 @@ async def get_or_create_phoenix_session(
                 },
             )
 
+        # Generate a browser session ID for Phoenix if not provided
+        browser_session_id = (
+            request.browser_session_id
+            or f"phoenix_{request.customer_id}_{int(time.time())}"
+        )
+
         # Get or create unified session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=request.browser_session_id,
+            browser_session_id=browser_session_id,
             user_agent=request.user_agent,
             client_id=request.client_id,  # ✅ NEW
             ip_address=request.ip_address,

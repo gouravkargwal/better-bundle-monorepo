@@ -5,6 +5,7 @@ This API handles interactions from the Apollo Post-Purchase extension.
 Apollo can show recommendations and track interactions after purchase completion.
 """
 
+import time
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
@@ -152,11 +153,17 @@ async def get_session_and_recommendations(
                 },
             )
 
+        # Generate a browser session ID for Apollo if not provided
+        browser_session_id = (
+            request.browser_session_id
+            or f"apollo_{request.customer_id}_{int(time.time())}"
+        )
+
         # Step 2: Get or create unified session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=request.browser_session_id,
+            browser_session_id=browser_session_id,
             user_agent=request.user_agent,
             client_id=request.client_id,
             ip_address=request.ip_address,

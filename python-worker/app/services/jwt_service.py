@@ -42,6 +42,7 @@ class ShopTokenPayload:
     shop_domain: str
     shop_status: str
     subscription_status: str
+    shopify_plus: bool
     permissions: List[str]
     exp: datetime
     iat: datetime
@@ -87,6 +88,7 @@ class JWTService:
         shop_domain: str,
         shop_status: str,
         subscription_status: str,
+        shopify_plus: bool = False,
         permissions: Optional[List[str]] = None,
     ) -> str:
         """
@@ -109,6 +111,7 @@ class JWTService:
                 "shop_domain": shop_domain,
                 "shop_status": shop_status,
                 "subscription_status": subscription_status,
+                "shopify_plus": shopify_plus,
                 "permissions": permissions or ["read", "write"],
                 "exp": now + self.shop_token_expire,
                 "iat": now,
@@ -144,6 +147,7 @@ class JWTService:
                 token,
                 self.secret_key,
                 algorithms=[self.algorithm],
+                audience="shopify-extensions",
                 options={
                     "verify_exp": True,
                     "verify_iat": True,
@@ -169,6 +173,7 @@ class JWTService:
                 shop_domain=payload["shop_domain"],
                 shop_status=payload["shop_status"],
                 subscription_status=payload.get("subscription_status", "unknown"),
+                shopify_plus=payload.get("shopify_plus", False),
                 permissions=payload.get("permissions", []),
                 exp=datetime.fromtimestamp(payload["exp"]),
                 iat=datetime.fromtimestamp(payload["iat"]),

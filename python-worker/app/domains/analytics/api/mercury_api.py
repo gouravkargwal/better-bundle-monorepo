@@ -75,54 +75,6 @@ class MercuryResponse(BaseModel):
     )
 
 
-async def validate_shopify_plus_store(shop_domain: str) -> bool:
-    """
-    Validate if the store is on Shopify Plus plan.
-    This is a critical requirement for Mercury checkout extensions.
-    Uses database check for optimal performance.
-    """
-    try:
-        from app.core.database.session import get_session_context
-
-        logger.info(f"🔍 Mercury: Validating Shopify Plus for {shop_domain}")
-
-        # Check database for Shopify Plus status (fastest approach)
-        async with get_session_context() as session:
-            from sqlalchemy import select
-            from app.core.database.models import Shop
-
-            result = await session.execute(
-                select(Shop.shopify_plus, Shop.plan_type)
-                .where(Shop.shop_domain == shop_domain)
-                .where(Shop.is_active == True)
-            )
-            shop_data = result.fetchone()
-
-            if not shop_data:
-                logger.warning(f"⚠️ Mercury: Shop {shop_domain} not found or inactive")
-                return False
-
-            is_plus = shop_data.shopify_plus or False
-            plan_type = shop_data.plan_type or ""
-
-            if not is_plus:
-                logger.warning(
-                    f"⚠️ Mercury: Store {shop_domain} is not on Shopify Plus plan (plan: {plan_type})"
-                )
-                return False
-
-            logger.info(
-                f"✅ Mercury: Store {shop_domain} validated as Shopify Plus (plan: {plan_type})"
-            )
-            return True
-
-    except Exception as e:
-        logger.error(
-            f"❌ Mercury: Failed to validate Shopify Plus for {shop_domain}: {e}"
-        )
-        return False
-
-
 @router.post("/get-or-create-session", response_model=MercuryResponse)
 async def get_or_create_mercury_session(
     request: MercurySessionRequest, authorization: str = Header(None)
@@ -159,10 +111,9 @@ async def get_or_create_mercury_session(
                 },
             )
 
-        # Validate Shopify Plus status after JWT validation
-        is_shopify_plus = await validate_shopify_plus_store(request.shop_domain)
-
-        if not is_shopify_plus:
+        # Check Shopify Plus status from JWT token (no database query needed!)
+        shop_info = await suspension_middleware.get_shop_info_from_jwt(jwt_token)
+        if not shop_info or not shop_info.get("shopify_plus", False):
             logger.warning(
                 f"⚠️ Mercury: Store {request.shop_domain} is not Shopify Plus - Mercury disabled"
             )

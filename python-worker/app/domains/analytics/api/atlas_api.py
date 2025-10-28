@@ -5,6 +5,7 @@ This API handles behavioral tracking from the Atlas Web Pixels extension.
 Atlas tracks user behavior across the entire store (except checkout).
 """
 
+import time
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
@@ -277,11 +278,17 @@ async def get_or_create_atlas_session(
                 },
             )
 
+        # Generate a browser session ID for Atlas if not provided
+        browser_session_id = (
+            request.browser_session_id
+            or f"atlas_{request.customer_id}_{int(time.time())}"
+        )
+
         # Get or create session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=request.browser_session_id,
+            browser_session_id=browser_session_id,
             client_id=request.client_id,  # ✅ NEW
             user_agent=request.user_agent,
             ip_address=request.ip_address,

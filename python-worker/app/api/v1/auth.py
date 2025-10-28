@@ -116,13 +116,36 @@ async def get_shop_status_for_token(shop_domain: str) -> Dict[str, Any]:
         # Get shop status from suspension middleware
         status = await suspension_middleware.check_shop_suspension(shop_domain)
 
+        # Get additional shop info from database
+        from app.core.database.session import get_session_context
+        from app.core.database.models.shop import Shop
+        from sqlalchemy import select
+
+        shopify_plus = False
+        shop_id = "unknown"
+
+        try:
+            async with get_session_context() as session:
+                result = await session.execute(
+                    select(Shop).where(Shop.shop_domain == shop_domain)
+                )
+                shop = result.scalar_one_or_none()
+                if shop:
+                    shopify_plus = shop.shopify_plus
+                    shop_id = shop.id
+        except Exception as db_error:
+            logger.warning(
+                f"Could not fetch shop details for {shop_domain}: {db_error}"
+            )
+
         return {
-            "shop_id": status.get("shop_id", "unknown"),
+            "shop_id": shop_id,
             "shop_domain": shop_domain,
             "shop_status": (
                 "active" if not status.get("isSuspended", True) else "suspended"
             ),
             "subscription_status": status.get("subscription_status", "unknown"),
+            "shopify_plus": shopify_plus,
             "permissions": (
                 ["read", "write"] if not status.get("isSuspended", True) else ["read"]
             ),
@@ -136,6 +159,7 @@ async def get_shop_status_for_token(shop_domain: str) -> Dict[str, Any]:
             "shop_domain": shop_domain,
             "shop_status": "suspended",
             "subscription_status": "unknown",
+            "shopify_plus": False,
             "permissions": ["read"],
         }
 
@@ -184,6 +208,7 @@ async def generate_shop_token(request: ShopTokenRequest):
             shop_domain=shop_info["shop_domain"],
             shop_status=shop_info["shop_status"],
             subscription_status=shop_info["subscription_status"],
+            shopify_plus=shop_info["shopify_plus"],
             permissions=shop_info["permissions"],
         )
 

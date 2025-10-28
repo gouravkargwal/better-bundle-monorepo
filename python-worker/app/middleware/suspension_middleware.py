@@ -1,6 +1,6 @@
 """
 Suspension middleware for Python worker
-Checks shop suspension status before processing data
+JWT-based shop suspension checking (stateless approach)
 """
 
 import json
@@ -18,7 +18,12 @@ logger = get_logger(__name__)
 
 
 class SuspensionMiddleware:
-    """Middleware to check shop suspension status before processing"""
+    """
+    Suspension middleware for shop status checking.
+
+    Uses both database-based checking for token generation and JWT-based checking
+    for API requests to provide both accuracy and performance.
+    """
 
     def __init__(self):
         self.cache_ttl = 300  # 5 minutes cache TTL
@@ -37,7 +42,6 @@ class SuspensionMiddleware:
             # If not cached, check database
             async with get_session_context() as session:
                 # Determine if shop_identifier is a shop_id or shop_domain
-                # Try shop_id first (UUID format), then shop_domain
                 if len(shop_identifier) == 36 and "-" in shop_identifier:
                     # Looks like a UUID (shop_id)
                     where_clause = Shop.id == shop_identifier
@@ -45,46 +49,28 @@ class SuspensionMiddleware:
                     # Looks like a domain
                     where_clause = Shop.shop_domain == shop_identifier
 
-                # Get shop and subscription data in single query
-                result = await session.execute(
-                    select(Shop, ShopSubscription)
-                    .join(ShopSubscription, Shop.id == ShopSubscription.shop_id)
-                    .where(where_clause)
-                    .where(ShopSubscription.is_active == True)
-                )
-
-                shop, subscription = result.first() or (None, None)
+                # Simple query - just get the shop
+                result = await session.execute(select(Shop).where(where_clause))
+                shop = result.scalar_one_or_none()
 
                 if not shop:
                     status = {
                         "isSuspended": True,
                         "reason": "shop_not_found",
-                        "subscriptionActive": False,
+                        "subscription_status": "unknown",
                     }
                 elif not shop.is_active:
                     status = {
                         "isSuspended": True,
                         "reason": shop.suspension_reason or "service_suspended",
-                        "requiresBillingSetup": shop.suspension_reason
-                        == "trial_completed_subscription_required",
-                        "requiresCapIncrease": shop.suspension_reason
-                        == "monthly_cap_reached",
-                        "subscriptionActive": False,
-                    }
-                elif subscription and subscription.status == "TRIAL_COMPLETED":
-                    status = {
-                        "isSuspended": True,
-                        "reason": "trial_completed_awaiting_setup",
-                        "requiresBillingSetup": True,
-                        "subscriptionActive": False,
+                        "subscription_status": "suspended",
                     }
                 else:
+                    # Shop exists and is active
                     status = {
                         "isSuspended": False,
                         "reason": "active",
-                        "subscriptionActive": (
-                            subscription.status == "ACTIVE" if subscription else False
-                        ),
+                        "subscription_status": "trial",  # Default for active shops
                     }
 
                 # Cache the result
@@ -97,43 +83,8 @@ class SuspensionMiddleware:
             return {
                 "isSuspended": True,
                 "reason": "suspension_check_error",
-                "subscriptionActive": False,
+                "subscription_status": "unknown",
             }
-
-    async def should_process_shop(self, shop_identifier: str) -> bool:
-        """Check if shop should be processed (not suspended)"""
-        status = await self.check_shop_suspension(shop_identifier)
-        return not status.get("isSuspended", True)
-
-    async def get_suspension_message(self, shop_identifier: str) -> str:
-        """Get suspension message for logging"""
-        status = await self.check_shop_suspension(shop_identifier)
-        if not status.get("isSuspended", True):
-            return ""
-
-        reason = status.get("reason", "service_suspended")
-        if reason == "trial_completed_subscription_required":
-            return "Trial completed. Please set up billing to continue using services."
-        elif reason == "monthly_cap_reached":
-            return (
-                "Monthly spending limit reached. Please increase your cap to continue."
-            )
-        elif reason == "subscription_suspended":
-            return "Subscription suspended. Please contact support."
-        else:
-            return "Services are currently suspended. Please contact support."
-
-    async def invalidate_cache(self, shop_identifier: str) -> None:
-        """Invalidate suspension cache for a shop"""
-        try:
-            redis = await get_redis_client()
-            cache_key = f"suspension:{shop_identifier}"
-            await redis.delete(cache_key)
-            logger.info(f"✅ Suspension cache invalidated for shop {shop_identifier}")
-        except Exception as e:
-            logger.error(
-                f"❌ Error invalidating suspension cache for shop {shop_identifier}: {e}"
-            )
 
     # JWT-based methods (Industry Standard Approach)
     async def should_process_shop_from_jwt(self, jwt_token: str) -> bool:
