@@ -1580,8 +1580,22 @@ class AttributionEngine:
 
         if existing_attribution:
             logger.info(
-                f"Attribution already exists for order {result.order_id}, skipping storage"
+                f"🔄 Updating existing attribution for order {result.order_id} with new line items"
             )
+
+            # Update existing attribution with new data
+            existing_attribution.contributing_extensions = contributing_extensions
+            existing_attribution.attribution_weights = attribution_weights
+            existing_attribution.total_revenue = float(result.total_attributed_revenue)
+            existing_attribution.attributed_revenue = attributed_revenue
+            existing_attribution.total_interactions = len(result.attribution_breakdown)
+            existing_attribution.interactions_by_extension = interactions_by_extension
+            existing_attribution.purchase_at = result.calculated_at
+            existing_attribution.attribution_algorithm = result.attribution_type.value
+            existing_attribution.attribution_metadata = result.metadata
+
+            await session.commit()
+            logger.info(f"✅ Updated attribution for order {result.order_id}")
             return str(existing_attribution.id)
 
         # Skip attribution if no session_id (we didn't influence this purchase)

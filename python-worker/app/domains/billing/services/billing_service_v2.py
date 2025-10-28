@@ -276,21 +276,50 @@ class BillingServiceV2:
     async def _is_purchase_already_processed(
         self, purchase_event: PurchaseEvent
     ) -> bool:
-        """Check if purchase has already been processed to prevent duplicate processing."""
+        """Check if purchase has already been processed to prevent duplicate processing.
+
+        Returns True if the order has been processed AND no new line items were added
+        since the last attribution calculation.
+        """
         try:
-            from sqlalchemy import select
+            from sqlalchemy import select, func
             from app.core.database.models.purchase_attribution import (
                 PurchaseAttribution,
             )
+            from app.core.database.models.order_data import LineItemData
 
+            # Check if attribution record exists
             query = select(PurchaseAttribution).where(
                 PurchaseAttribution.order_id == str(purchase_event.order_id),
                 PurchaseAttribution.shop_id == purchase_event.shop_id,
             )
             result = await self.session.execute(query)
-            existing = result.scalar_one_or_none()
+            existing_attribution = result.scalar_one_or_none()
 
-            return existing is not None
+            if not existing_attribution:
+                return False  # No attribution record, need to process
+
+            # Check if new line items were added since last attribution
+            # Get the count of line items that were created after the attribution
+            line_items_query = select(func.count(LineItemData.id)).where(
+                LineItemData.order_id == existing_attribution.order_id,
+                LineItemData.created_at > existing_attribution.created_at,
+            )
+            line_items_result = await self.session.execute(line_items_query)
+            new_line_items_count = line_items_result.scalar() or 0
+
+            if new_line_items_count > 0:
+                logger.info(
+                    f"🔄 Order {purchase_event.order_id} has {new_line_items_count} new line items "
+                    f"since last attribution, re-processing"
+                )
+                return False  # New line items added, need to re-process
+
+            logger.info(
+                f"⏭️ Order {purchase_event.order_id} already processed with no new line items, skipping"
+            )
+            return True  # No new line items, skip processing
+
         except Exception as e:
             logger.error(f"Error checking if purchase already processed: {e}")
             return False

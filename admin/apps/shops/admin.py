@@ -41,6 +41,7 @@ class ShopAdmin(admin.ModelAdmin):
         "recalculate_all_attribution",
         "trigger_data_collection",
         "export_shop_data",
+        "backfill_customer_links",
         "mark_as_active",
         "mark_as_inactive",
         "check_and_suspend_trial_completed_shops",
@@ -281,6 +282,61 @@ class ShopAdmin(admin.ModelAdmin):
         )
 
     trigger_data_collection.short_description = "📥 Trigger Data Collection"
+
+    def backfill_customer_links(self, request, queryset):
+        """Backfill customer links for selected shops"""
+        python_worker_url = getattr(
+            settings, "PYTHON_WORKER_API_URL", "http://localhost:8001"
+        )
+        success_count = 0
+        total_shops = queryset.count()
+
+        for shop in queryset:
+            try:
+                response = requests.post(
+                    f"{python_worker_url}/api/v1/customer-linking/shops/{shop.id}/backfill",
+                    json={
+                        "shop_id": str(shop.id),
+                        "batch_size": 100,
+                        "force": True,
+                    },
+                    timeout=300,  # 5 minutes timeout for customer linking
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    success_count += 1
+                    self.message_user(
+                        request,
+                        f"✅ Customer linking backfill completed for {shop.shop_domain}: "
+                        f"{result.get('processed_links', 0)} links processed, "
+                        f"{result.get('duration_seconds', 0):.1f}s",
+                        level=messages.SUCCESS,
+                    )
+                else:
+                    self.message_user(
+                        request,
+                        f"❌ Failed to backfill customer links for {shop.shop_domain}: "
+                        f"{response.status_code} - {response.text}",
+                        level=messages.ERROR,
+                    )
+
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"❌ Error backfilling customer links for {shop.shop_domain}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        self.message_user(
+            request,
+            f"🔗 Customer linking backfill completed for {success_count}/{total_shops} shops",
+            level=(
+                messages.SUCCESS if success_count == total_shops else messages.WARNING
+            ),
+        )
+
+    backfill_customer_links.short_description = "🔗 Backfill Customer Links"
 
     def export_shop_data(self, request, queryset):
         """Export shop data to CSV"""

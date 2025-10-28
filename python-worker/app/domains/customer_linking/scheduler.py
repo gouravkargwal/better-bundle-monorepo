@@ -9,7 +9,11 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from app.core.logging import get_logger
-from app.core.database import get_database
+from app.core.database.session import get_session_context
+from app.core.database.models.identity import UserIdentityLink
+from app.core.database.models.user_interaction import UserInteraction
+from app.core.database.models.user_session import UserSession
+from sqlalchemy import select, func, and_, or_
 from app.shared.helpers.datetime_utils import now_utc
 
 logger = get_logger(__name__)
@@ -26,13 +30,7 @@ class CustomerLinkingScheduler:
     """
 
     def __init__(self):
-        self.db = None
-
-    async def _get_database(self):
-        """Get database connection"""
-        if not self.db:
-            self.db = await get_database()
-        return self.db
+        pass
 
     async def find_unprocessed_links(
         self, batch_size: int = 100
@@ -47,44 +45,77 @@ class CustomerLinkingScheduler:
             List of unprocessed link records
         """
         try:
-            db = await self._get_database()
+            async with get_session_context() as session:
+                # Find links that haven't been backfilled
+                # We'll use a simple approach: check if there are any events with this clientId
+                # that still have customerId = None
+                unprocessed_links = []
 
-            # Find links that haven't been backfilled
-            # We'll use a simple approach: check if there are any events with this clientId
-            # that still have customerId = None
-            unprocessed_links = []
-
-            # Get all UserIdentityLink records
-            all_links = await db.useridentitylink.find_many(
-                take=batch_size, order={"linkedAt": "desc"}
-            )
-
-            for link in all_links:
-                # Check if there are any events with this clientId that still need backfilling
-                # We need to find sessions with this clientId first, then check their interactions
-                sessions_with_client_id = await db.usersession.find_many(
-                    where={
-                        "shopId": link.shopId,
-                        "browserSessionId": link.clientId,  # clientId maps to browserSessionId
-                    }
+                # Get all UserIdentityLink records
+                all_links_result = await session.execute(
+                    select(UserIdentityLink)
+                    .order_by(UserIdentityLink.linked_at.desc())
+                    .limit(batch_size)
                 )
+                all_links = all_links_result.scalars().all()
 
-                if sessions_with_client_id:
-                    # Check if any interactions for these sessions need backfilling
-                    session_ids = [s.id for s in sessions_with_client_id]
-                    events_needing_backfill = await db.userinteraction.find_first(
-                        where={
-                            "shopId": link.shopId,
-                            "sessionId": {"in": session_ids},
-                            "customerId": None,
-                        }
+                for link in all_links:
+                    # Check if there are any events with this identifier that still need backfilling
+                    # We need to find sessions with this identifier first, then check their interactions
+                    # Try both client_id and browser_session_id matching
+                    sessions_result = await session.execute(
+                        select(UserSession).where(
+                            and_(
+                                UserSession.shop_id == link.shop_id,
+                                or_(
+                                    UserSession.client_id
+                                    == link.identifier,  # Try client_id first
+                                    UserSession.browser_session_id
+                                    == link.identifier,  # Fallback to browser_session_id
+                                ),
+                            )
+                        )
                     )
+                    sessions_with_identifier = sessions_result.scalars().all()
 
-                    if events_needing_backfill:
-                        unprocessed_links.append(link)
+                    # If no sessions found by identifier, try to find sessions by customer_id
+                    # This handles cases where Apollo sessions are separate from unified sessions
+                    if not sessions_with_identifier:
+                        sessions_result = await session.execute(
+                            select(UserSession).where(
+                                and_(
+                                    UserSession.shop_id == link.shop_id,
+                                    UserSession.customer_id == link.customer_id,
+                                )
+                            )
+                        )
+                        sessions_with_identifier = sessions_result.scalars().all()
 
-            logger.info(f"Found {len(unprocessed_links)} unprocessed customer links")
-            return unprocessed_links
+                    if sessions_with_identifier:
+                        # Check if any interactions for these sessions need backfilling
+                        session_ids = [s.id for s in sessions_with_identifier]
+                        events_needing_backfill_result = await session.execute(
+                            select(UserInteraction)
+                            .where(
+                                and_(
+                                    UserInteraction.shop_id == link.shop_id,
+                                    UserInteraction.session_id.in_(session_ids),
+                                    UserInteraction.customer_id.is_(None),
+                                )
+                            )
+                            .limit(1)
+                        )
+                        events_needing_backfill = (
+                            events_needing_backfill_result.scalar_one_or_none()
+                        )
+
+                        if events_needing_backfill:
+                            unprocessed_links.append(link)
+
+                logger.info(
+                    f"Found {len(unprocessed_links)} unprocessed customer links"
+                )
+                return unprocessed_links
 
         except Exception as e:
             logger.error(f"Failed to find unprocessed links: {e}")
@@ -105,58 +136,82 @@ class CustomerLinkingScheduler:
         stats = {"processed_links": 0, "total_events_backfilled": 0, "errors": 0}
 
         try:
-            db = await self._get_database()
-
-            for link in links:
-                try:
-                    # Find sessions with this clientId (browserSessionId)
-                    sessions_with_client_id = await db.usersession.find_many(
-                        where={
-                            "shopId": link.shopId,
-                            "browserSessionId": link.clientId,
-                        }
-                    )
-
-                    if not sessions_with_client_id:
-                        logger.warning(
-                            f"No sessions found for clientId: {link.clientId}"
+            async with get_session_context() as session:
+                for link in links:
+                    try:
+                        # Find sessions with this identifier (try both client_id and browser_session_id)
+                        sessions_result = await session.execute(
+                            select(UserSession).where(
+                                and_(
+                                    UserSession.shop_id == link.shop_id,
+                                    or_(
+                                        UserSession.client_id == link.identifier,
+                                        UserSession.browser_session_id
+                                        == link.identifier,
+                                    ),
+                                )
+                            )
                         )
-                        continue
+                        sessions_with_identifier = sessions_result.scalars().all()
 
-                    # Get session IDs
-                    session_ids = [s.id for s in sessions_with_client_id]
+                        # If no sessions found by identifier, try to find sessions by customer_id
+                        # This handles cases where Apollo sessions are separate from unified sessions
+                        if not sessions_with_identifier:
+                            sessions_result = await session.execute(
+                                select(UserSession).where(
+                                    and_(
+                                        UserSession.shop_id == link.shop_id,
+                                        UserSession.customer_id == link.customer_id,
+                                    )
+                                )
+                            )
+                            sessions_with_identifier = sessions_result.scalars().all()
 
-                    # Update all events for these sessions that don't have a customerId
-                    from datetime import datetime
+                        if not sessions_with_identifier:
+                            logger.warning(
+                                f"No sessions found for identifier: {link.identifier}"
+                            )
+                            continue
 
-                    now_utc = lambda: now_utc()
+                        # Get session IDs
+                        session_ids = [s.id for s in sessions_with_identifier]
 
-                    updated_count = await db.userinteraction.update_many(
-                        where={
-                            "shopId": link.shopId,
-                            "sessionId": {"in": session_ids},
-                            "customerId": None,
-                        },
-                        data={
-                            "customerId": link.customerId,
-                            "updatedAt": now_utc(),  # Update timestamp to trigger feature computation
-                        },
-                    )
+                        # Update all events for these sessions that don't have a customerId
+                        from sqlalchemy import update
 
-                    stats["processed_links"] += 1
-                    stats["total_events_backfilled"] += updated_count
+                        update_stmt = (
+                            update(UserInteraction)
+                            .where(
+                                and_(
+                                    UserInteraction.shop_id == link.shop_id,
+                                    UserInteraction.session_id.in_(session_ids),
+                                    UserInteraction.customer_id.is_(None),
+                                )
+                            )
+                            .values(
+                                customer_id=link.customer_id,
+                                updated_at=now_utc(),
+                            )
+                        )
 
-                    logger.info(
-                        f"Backfilled {updated_count} events for link: {link.clientId} → {link.customerId}"
-                    )
+                        result = await session.execute(update_stmt)
+                        updated_count = result.rowcount
+                        await session.commit()
 
-                except Exception as e:
-                    logger.error(
-                        f"Failed to backfill link {link.clientId} → {link.customerId}: {e}"
-                    )
-                    stats["errors"] += 1
+                        stats["processed_links"] += 1
+                        stats["total_events_backfilled"] += updated_count
 
-            return stats
+                        logger.info(
+                            f"Backfilled {updated_count} events for link: {link.identifier} → {link.customer_id}"
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to backfill link {link.identifier} → {link.customer_id}: {e}"
+                        )
+                        stats["errors"] += 1
+
+                return stats
 
         except Exception as e:
             logger.error(f"Failed to backfill customer links: {e}")
