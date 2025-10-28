@@ -321,6 +321,7 @@ class BillingRepositoryV2:
             if trial.is_threshold_reached(actual_revenue):
                 # ✅ ATOMIC: Use database-level update to prevent race conditions
                 from sqlalchemy import update
+                from app.core.database.models.shop import Shop
 
                 # Update trial status atomically
                 trial_update = (
@@ -348,10 +349,34 @@ class BillingRepositoryV2:
                 )
                 if shop_subscription:
                     shop_subscription.status = SubscriptionStatus.TRIAL_COMPLETED
-                    logger.info(
-                        f"✅ Trial completed for shop {shop_subscription.shop_id}. "
-                        f"Awaiting user to setup billing with cap."
+
+                    # ✅ SUSPEND SHOP: When trial is completed, suspend the shop
+                    shop_update = (
+                        update(Shop)
+                        .where(
+                            Shop.id == shop_subscription.shop_id,
+                            Shop.is_active == True,  # Only suspend if currently active
+                        )
+                        .values(
+                            is_active=False,
+                            suspended_at=now_utc(),
+                            suspension_reason="trial_completed",
+                            service_impact="suspended",
+                            updated_at=now_utc(),
+                        )
                     )
+
+                    shop_result = await self.session.execute(shop_update)
+
+                    if shop_result.rowcount > 0:
+                        logger.info(
+                            f"✅ Trial completed for shop {shop_subscription.shop_id}. "
+                            f"Shop suspended - awaiting user to setup billing with cap."
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ Trial completed but shop {shop_subscription.shop_id} was already suspended"
+                        )
 
             await self.session.flush()
             return True
