@@ -1,4 +1,3 @@
-// features/overview/components/OverviewMetrics.tsx
 import {
   Card,
   Text,
@@ -7,11 +6,7 @@ import {
   Icon,
   Badge,
 } from "@shopify/polaris";
-import {
-  CashDollarIcon,
-  EyeCheckMarkIcon,
-  ArrowUpIcon,
-} from "@shopify/polaris-icons";
+import { CashDollarIcon, ArrowUpIcon } from "@shopify/polaris-icons";
 import { getCurrencySymbol } from "../../../utils/currency";
 
 interface OverviewMetricsProps {
