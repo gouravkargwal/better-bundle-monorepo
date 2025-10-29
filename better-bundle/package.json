@@ -6,7 +6,7 @@
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "dev": "dotenv -e .env.dev -- shopify app dev",
-    "dev:tunnel": "dotenv -e .env.dev -- shopify app dev --tunnel-url https://7ba064320ace.ngrok-free.app:3000",
+    "dev:tunnel": "dotenv -e .env.dev -- shopify app dev --tunnel-url https://4edae356409a.ngrok-free.app:3000",
     "prod": "dotenv -e .env.prod -- shopify app dev",
     "deploy:dev": "dotenv -e .env.dev -- shopify app deploy --config shopify.app.dev.toml",
     "deploy:prod": "dotenv -e .env.prod -- shopify app deploy --config shopify.app.prod.toml",
