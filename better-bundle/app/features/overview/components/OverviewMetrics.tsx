@@ -219,7 +219,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                 <Text as="p" variant="heading2xl" fontWeight="bold">
                   {overviewData.totalRevenue > 0
                     ? `${roiPercentage.toFixed(0)}% ROI`
-                    : "0% Cost"}
+                    : "Commission-Based"}
                 </Text>
               </div>
               <Text as="p" variant="bodySm" tone="subdued">
@@ -234,14 +234,16 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     {formatCurrencyValue(commissionPaid, overviewData.currency)}
                   </>
                 ) : (
-                  "No commission charged until revenue is generated"
+                  "No charges until revenue is generated"
                 )}
               </Text>
-              <div style={{ marginTop: "8px" }}>
-                <Badge tone="success" size="small">
-                  {(commissionRate * 100).toFixed(1)}% commission rate
-                </Badge>
-              </div>
+              {overviewData.totalRevenue > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  <Badge tone="success" size="small">
+                    {(commissionRate * 100).toFixed(1)}% commission rate
+                  </Badge>
+                </div>
+              )}
             </BlockStack>
           </div>
         </Card>
